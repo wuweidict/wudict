@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gonow-dict</title>
+<style>
+/* provisional UI — replaced by the Phase 6 design */
+*{font-family:-apple-system,Helvetica,Arial,sans-serif;line-height:1.6}
+body{margin:0;padding-top:4em}
+.container{margin:0 auto;width:83%;max-width:650px;padding:0 10px 20px}
+.bar{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(255,255,255,.97);padding:.5em;text-align:center;border-bottom:1px solid #eee}
+.bar form{display:inline-flex;align-items:center;gap:.382em;flex-wrap:wrap;justify-content:center}
+input[type=text]{font-size:16px;border-radius:4px;border:1px solid #ddd;padding:.2em .5em;min-width:180px}
+select,button{font-size:14px}
+details{margin-top:.618em;background:#faf8f5;border:1px solid #eee8e0;border-radius:8px;overflow:hidden}
+details summary{cursor:pointer;padding:.382em .618em;font-weight:bold;color:#587a73}
+details .count{float:right;font-weight:normal;color:#aaa}
+dt{font-size:130%;font-weight:bold;color:#ff9001}
+dd{margin:0 0 1em 0;overflow-x:auto}
+.upgrade{font-size:12px;color:#9eb0bb;cursor:pointer;text-decoration:underline}
+#status{color:#999;font-size:13px;padding:.5em}
+</style>
+</head>
+<body>
+<div class="bar">
+<form id="frm">
+<input type="text" id="q" placeholder="Search…" autofocus>
+<select id="mode">
+<option value="prefix">prefix</option>
+<option value="exact">exact</option>
+<option value="fuzzy">fuzzy</option>
+<option value="fts">full-text</option>
+</select>
+<select id="dict"><option value="all">All dictionaries</option></select>
+<button type="submit">🔍</button>
+</form>
+</div>
+<div class="container"><div id="status"></div><div id="out"></div></div>
+<script>
+const $=id=>document.getElementById(id);
+let dicts=[];
+async function loadDicts(){
+  dicts=await (await fetch('/api/dicts')).json();
+  const sel=$('dict');
+  sel.innerHTML='<option value="all">All dictionaries</option>';
+  for(const d of dicts){
+    const o=document.createElement('option');
+    o.value=d.id;o.textContent=d.name||d.path;
+    sel.appendChild(o);
+  }
+}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')}
+// rewrite relative src/href in article HTML to /res/{dict}/…
+function fixRes(html,dictID){
+  return html.replace(/(src|href|data)=("|')(?![a-zA-Z][\w+.-]*:|\/|#|\?)([^"']+)\2/g,
+    (m,attr,q,ref)=>attr+'='+q+'/res/'+dictID+'/'+ref+q);
+}
+async function doSearch(ev){
+  if(ev)ev.preventDefault();
+  const q=$('q').value.trim();
+  if(!q)return;
+  $('status').textContent='Searching…';
+  const url='/api/search?q='+encodeURIComponent(q)+'&mode='+$('mode').value+'&dict='+$('dict').value;
+  const hits=await (await fetch(url)).json();
+  $('status').textContent='';
+  const out=$('out');out.innerHTML='';
+  let first=true;
+  for(const h of hits){
+    if(h.skipped){
+      const d=dicts.find(x=>x.id===h.dict);
+      if(d&&($('mode').value==='fuzzy'||$('mode').value==='fts')){
+        const div=document.createElement('div');
+        div.innerHTML='<details><summary>'+esc(h.name||'')+' — <span class="upgrade" data-id="'+h.dict+'">enable fuzzy &amp; full-text search</span></summary></details>';
+        out.appendChild(div);
+      }
+      continue;
+    }
+    if(!h.results||!h.results.length)continue;
+    const det=document.createElement('details');
+    if(first){det.open=true;first=false}
+    det.innerHTML='<summary>'+esc(h.name)+'<span class="count">'+h.results.length+'</span></summary>';
+    const dl=document.createElement('dl');
+    for(const r of h.results){
+      const dt=document.createElement('dt');dt.textContent=r.Headword;
+      const dd=document.createElement('dd');dd.innerHTML=fixRes(r.Body,h.dict);
+      dl.appendChild(dt);dl.appendChild(dd);
+    }
+    det.appendChild(dl);out.appendChild(det);
+  }
+  if(!out.children.length)$('status').textContent='No results';
+}
+document.addEventListener('click',e=>{
+  const up=e.target.closest('.upgrade');
+  if(!up)return;
+  e.preventDefault();
+  const id=up.dataset.id;
+  up.textContent='preparing search index…';
+  const es=new EventSource('/api/ingest?dict='+id);
+  es.addEventListener('progress',ev=>{
+    const p=JSON.parse(ev.data);
+    up.textContent='preparing search index… '+p.done+(p.total?'/'+p.total:'');
+  });
+  es.addEventListener('done',()=>{es.close();loadDicts().then(doSearch)});
+  es.addEventListener('error',ev=>{es.close();up.textContent='index failed'});
+});
+document.addEventListener('click',e=>{
+  const a=e.target.closest('a');
+  if(!a)return;
+  const href=a.getAttribute('href')||'';
+  if(href.startsWith('bword://')){
+    e.preventDefault();
+    $('q').value=decodeURIComponent(href.slice(8));
+    doSearch();
+  }else if(/\.(mp3|ogg|wav|spx)(\?|$)/i.test(href)){
+    e.preventDefault();
+    new Audio(href).play();
+  }
+});
+$('frm').addEventListener('submit',doSearch);
+loadDicts();
+</script>
+</body>
+</html>

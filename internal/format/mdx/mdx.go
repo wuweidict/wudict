@@ -17,6 +17,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"unicode"
@@ -268,6 +269,17 @@ func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
 		return nil, "", fmt.Errorf("mdx: locate resource %q: %w", name, err)
 	}
 	return io.NopCloser(bytes.NewReader(data)), mime.TypeByExtension(path.Ext(norm)), nil
+}
+
+// Resources lists all .mdd resource names (lowercased, forward-slash).
+func (d *Dict) Resources() []string {
+	idx := d.resourceIndex()
+	out := make([]string, 0, len(idx))
+	for name := range idx {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // resourceIndex maps lowercased forward-slash resource paths to their mdd

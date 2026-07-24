@@ -49,9 +49,10 @@ type container struct {
 	storePos     []uint64 // store item positions
 	storeDataOff int64
 
-	mu       sync.Mutex
-	binCache map[uint32][]byte
-	binOrder []uint32
+	mu        sync.Mutex
+	binCache  map[uint32][]byte
+	binOrder  []uint32
+	ctidCache map[uint32][]byte // bin -> content-type ids (headers only)
 }
 
 const binCacheSize = 4
@@ -342,6 +343,39 @@ func (c *container) getItem(bin uint32, item uint16) (string, []byte, error) {
 		return "", nil, io.ErrUnexpectedEOF
 	}
 	return ctype, content[dataOff+4 : dataOff+4+int64(n)], nil
+}
+
+// itemContentType returns just the content type of one blob, reading
+// only the bin header (no decompression); headers are cached per bin.
+func (c *container) itemContentType(bin uint32, item uint16) (string, error) {
+	c.mu.Lock()
+	ctids, ok := c.ctidCache[bin]
+	c.mu.Unlock()
+	if !ok {
+		if int(bin) >= len(c.storePos) {
+			return "", fmt.Errorf("bin %d out of range", bin)
+		}
+		base := c.storeDataOff + int64(c.storePos[bin])
+		var hdr [4]byte
+		if _, err := c.f.ReadAt(hdr[:], base); err != nil {
+			return "", err
+		}
+		n := binary.BigEndian.Uint32(hdr[:])
+		ctids = make([]byte, n)
+		if _, err := c.f.ReadAt(ctids, base+4); err != nil {
+			return "", err
+		}
+		c.mu.Lock()
+		if c.ctidCache == nil {
+			c.ctidCache = map[uint32][]byte{}
+		}
+		c.ctidCache[bin] = ctids
+		c.mu.Unlock()
+	}
+	if int(item) >= len(ctids) || int(ctids[item]) >= len(c.contentTypes) {
+		return "", nil
+	}
+	return c.contentTypes[ctids[item]], nil
 }
 
 // binContent returns the decompressed bin, via a small LRU cache.

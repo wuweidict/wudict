@@ -65,6 +65,12 @@ type Dictionary interface {
 	Close() error
 }
 
+// ResourceLister is implemented by backends that can enumerate their
+// binary resources (used by full ingest to pack a media.db).
+type ResourceLister interface {
+	Resources() []string
+}
+
 // FuzzySearcher is implemented by backends with Caps.Fuzzy.
 type FuzzySearcher interface {
 	Fuzzy(word string, limit int) ([]Result, error)

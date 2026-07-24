@@ -232,6 +232,20 @@ func sourceHash(path string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// CacheBase returns `<dbdir>/<slug>-<hash8>` for a source file: the
+// shared base path for its cached text.db / media.db. The hash keys the
+// cache to the exact source content, so a changed source re-ingests and
+// same-named dictionaries in different formats never collide.
+func CacheBase(srcPath, name string) string {
+	h := sha256.New()
+	if f, err := os.Open(srcPath); err == nil {
+		_, _ = io.CopyN(h, f, 1<<20)
+		f.Close()
+	}
+	hash8 := hex.EncodeToString(h.Sum(nil))[:8]
+	return filepath.Join(DefaultDBDir(), Slug(name)+"-"+hash8)
+}
+
 // Slug converts a dictionary display name into a filesystem-safe base
 // name for `<slug>.text.db` (D9).
 func Slug(name string) string {

@@ -2,14 +2,13 @@ package dsl
 
 import (
 	"archive/zip"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"mime"
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -56,7 +55,7 @@ func Open(path string) (*Dict, error) {
 	}
 	name := r.Meta().Name
 
-	dbPath := cacheDBPath(path, name)
+	dbPath := store.CacheBase(path, name) + ".text.db"
 	if _, statErr := os.Stat(dbPath); statErr != nil {
 		fmt.Fprintf(os.Stderr, "dsl: preparing search index for %q (first open)…\n", name)
 		err = store.Ingest(r, dbPath, func(done, total int) {
@@ -76,19 +75,6 @@ func Open(path string) (*Dict, error) {
 		return nil, err
 	}
 	return &Dict{Store: s, srcPath: path}, nil
-}
-
-// cacheDBPath builds `<cache>/<slug>-<hash8>.text.db`; the hash keys the
-// cache to this exact source content (and disambiguates same-named
-// dictionaries in other formats).
-func cacheDBPath(srcPath, name string) string {
-	h := sha256.New()
-	if f, err := os.Open(srcPath); err == nil {
-		io.CopyN(h, f, 1<<20)
-		f.Close()
-	}
-	hash8 := hex.EncodeToString(h.Sum(nil))[:8]
-	return filepath.Join(store.DefaultDBDir(), store.Slug(name)+"-"+hash8+".text.db")
 }
 
 func (d *Dict) Meta() dict.Meta {
@@ -123,6 +109,17 @@ func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
 		return f, mime.TypeByExtension(path.Ext(norm)), nil
 	}
 	return nil, "", dict.ErrNotFound
+}
+
+// Resources lists the .files.zip entries.
+func (d *Dict) Resources() []string {
+	d.zipOnce.Do(d.loadZip)
+	out := make([]string, 0, len(d.zipFiles))
+	for name := range d.zipFiles {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (d *Dict) loadZip() {

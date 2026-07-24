@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -361,6 +362,38 @@ func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
 		}
 	}
 	return nil, "", dict.ErrNotFound
+}
+
+// Resources lists res/ dir files (relative, forward-slash) and res.zip
+// entries.
+func (d *Dict) Resources() []string {
+	seen := map[string]bool{}
+	var out []string
+	dir := filepath.Join(filepath.Dir(d.basePath), "res")
+	filepath.WalkDir(dir, func(p string, de os.DirEntry, err error) error {
+		if err != nil || de.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return nil
+		}
+		name := filepath.ToSlash(rel)
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+		return nil
+	})
+	d.resOnce.Do(d.loadResZip)
+	for name := range d.resFiles {
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (d *Dict) loadResZip() {

@@ -53,6 +53,10 @@ ingest: build ## Ingest DICT=<path> into a text.db (OUT=<path> optional), e.g. m
 	@test -n "$(DICT)" || { echo "usage: make ingest DICT=<dictfile> [OUT=<out.db>]"; exit 2; }
 	./$(BINARY) ingest $(if $(OUT),-o "$(OUT)") "$(DICT)"
 
+.PHONY: serve
+serve: build ## Run the HTTP server (DICT_DIR/PORT/ARGS overridable), e.g. make serve DICT_DIR=~/Dicts
+	./$(BINARY) serve $(if $(DICT_DIR),-dict-dir "$(DICT_DIR)") $(if $(PORT),-port $(PORT)) $(ARGS)
+
 .PHONY: cross
 cross: ## Cross-compile for darwin/linux/windows (amd64+arm64) into dist/
 	@mkdir -p $(BUILD_DIR)

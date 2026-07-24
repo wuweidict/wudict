@@ -184,6 +184,24 @@ func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
 	return io.NopCloser(bytes.NewReader(data)), ctype, nil
 }
 
+// Resources lists ref keys whose content type is not article-like
+// (images, audio, css, …), reading only bin headers.
+func (d *Dict) Resources() []string {
+	var out []string
+	for _, r := range d.c.refs {
+		ctype, err := d.c.itemContentType(r.bin, r.item)
+		if err != nil {
+			continue
+		}
+		if strings.HasPrefix(ctype, "text/html") || strings.HasPrefix(ctype, "text/plain") {
+			continue
+		}
+		out = append(out, r.key)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // ---- ingest --------------------------------------------------------------
 
 // Reader scans blobs bin-by-bin (sequential decompression — refs order
