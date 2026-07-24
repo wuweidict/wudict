@@ -154,6 +154,71 @@ func TestIngestSSEAndMedia(t *testing.T) {
 	}
 }
 
+// TestSetupFlow: empty dict dir → "/" serves the setup page; /api/setup
+// validates, rejects empty folders, then switches live and persists.
+func TestSetupFlow(t *testing.T) {
+	emptyDir := t.TempDir()
+	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	reg, err := NewRegistry(filepath.Join(emptyDir, "does-not-exist"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(reg)
+	s.ConfigPath = filepath.Join(t.TempDir(), "config.toml")
+
+	// missing folder → setup page, not the app
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "choose your dictionary folder") {
+		t.Fatalf("expected setup page, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "does not exist") {
+		t.Errorf("missing-folder reason not shown")
+	}
+
+	// validate a folder without dictionaries
+	var v map[string]any
+	getJSON(t, s, "/api/setup?path="+emptyDir, &v)
+	if v["error"] != nil || v["found"].(float64) != 0 {
+		t.Fatalf("empty validate: %v", v)
+	}
+	// saving an empty folder must be refused
+	getJSON(t, s, "/api/setup?path="+emptyDir+"&save=1", &v)
+	if v["error"] == nil || v["saved"] != nil {
+		t.Fatalf("empty save not refused: %v", v)
+	}
+
+	// a real dictionary folder
+	dictDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dictDir, "mini.dsl"), []byte(sampleDSL), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	getJSON(t, s, "/api/setup?path="+dictDir+"&save=1", &v)
+	if v["saved"] != true || v["found"].(float64) != 1 {
+		t.Fatalf("save failed: %v", v)
+	}
+	// registry switched live
+	if reg.Dir() != dictDir || reg.Count() != 1 {
+		t.Errorf("registry not switched: %q %d", reg.Dir(), reg.Count())
+	}
+	// persisted to config
+	data, err := os.ReadFile(s.ConfigPath)
+	if err != nil || !strings.Contains(string(data), "DICT_DIR = "+`"`+dictDir+`"`) {
+		t.Errorf("config not persisted: %v %q", err, data)
+	}
+	// "/" now serves the app
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if !strings.Contains(rec.Body.String(), "design tokens") {
+		t.Errorf("app page not served after setup")
+	}
+	// nonexistent path errors cleanly
+	getJSON(t, s, "/api/setup?path=/no/such/dir/xyz", &v)
+	if v["error"] != "folder not found" {
+		t.Errorf("bad path: %v", v)
+	}
+}
+
 func TestUnknownDict(t *testing.T) {
 	s := newTestServer(t)
 	if rec := getJSON(t, s, "/api/search?q=x&dict=deadbeef", nil); rec.Code != 404 {

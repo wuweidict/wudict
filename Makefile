@@ -9,7 +9,7 @@ BUILD_DIR  := dist
 # the tag is harmless before that and must never be dropped (D4).
 GO_TAGS    := sqlite_fts5
 GOFLAGS    := -tags $(GO_TAGS) -trimpath
-LDFLAGS    := -s -w
+LDFLAGS    := -s -w -X main.version=$(VERSION)
 VERSION    := $(shell git -C . describe --tags --always --dirty 2>/dev/null || echo dev)
 
 # Integration tests need real dictionaries; point these at files you have

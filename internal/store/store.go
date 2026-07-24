@@ -30,8 +30,9 @@ const schemaVersion = 1
 
 // Store is one opened .text.db. Safe for concurrent readers.
 type Store struct {
-	db   *sql.DB
-	meta dict.Meta
+	db    *sql.DB
+	meta  dict.Meta
+	ftsOK bool // article text indexed (ingest_level != "headwords")
 }
 
 // Open opens and validates a gonow-dict text database.
@@ -61,6 +62,7 @@ func Open(path string) (*Store, error) {
 		Path:        path,
 		Description: m["description"],
 	}
+	s.ftsOK = m["ingest_level"] != string(LevelHeadwords)
 	fmt.Sscanf(m["entry_count"], "%d", &s.meta.EntryCount)
 	return s, nil
 }
@@ -84,7 +86,9 @@ func readMeta(db *sql.DB) (map[string]string, error) {
 
 func (s *Store) Meta() dict.Meta { return s.meta }
 
-func (s *Store) Caps() dict.Caps { return dict.Caps{Exact: true, Prefix: true, Fuzzy: true, FTS: true} }
+func (s *Store) Caps() dict.Caps {
+	return dict.Caps{Exact: true, Prefix: true, Fuzzy: true, FTS: s.ftsOK}
+}
 
 func (s *Store) Close() error { return s.db.Close() }
 
@@ -211,6 +215,9 @@ func (s *Store) Fuzzy(word string, limit int) ([]dict.Result, error) {
 
 // FullText searches headwords and article text, ordered by BM25 rank.
 func (s *Store) FullText(query string, limit int) ([]dict.Result, error) {
+	if !s.ftsOK {
+		return nil, dict.ErrUnsupported
+	}
 	match := buildMatch(query, "")
 	if match == "" {
 		return nil, nil

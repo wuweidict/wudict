@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -53,12 +54,42 @@ func TestDefaultsAndMissingFile(t *testing.T) {
 	}
 }
 
+func TestSaveKey(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(p, []byte("# header\n# DICT_DIR    = \"~/Dictionaries\"      # comment\n# SERVER_PORT = \"8808\"\n"), 0o644)
+	if err := SaveKey(p, "DICT_DIR", "/data/dicts"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveKey(p, "NEW_KEY", "v"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p)
+	s := string(data)
+	if !strings.Contains(s, "DICT_DIR = \"/data/dicts\"") {
+		t.Errorf("commented key not uncommented: %q", s)
+	}
+	if strings.Contains(s, "# DICT_DIR") {
+		t.Errorf("old commented line kept: %q", s)
+	}
+	if !strings.Contains(s, "# header") || !strings.Contains(s, "# SERVER_PORT") {
+		t.Errorf("unrelated lines lost: %q", s)
+	}
+	if !strings.Contains(s, "NEW_KEY = \"v\"") {
+		t.Errorf("append failed: %q", s)
+	}
+	// round-trip: parse sees the saved value
+	vals, src, err := loadFile(p)
+	if err != nil || src != p || vals["DICT_DIR"] != "/data/dicts" {
+		t.Errorf("round-trip: %v %q %v", vals, src, err)
+	}
+}
+
 func TestExpandHome(t *testing.T) {
 	home, _ := os.UserHomeDir()
-	if got := expandHome("~/x"); got != filepath.Join(home, "x") {
-		t.Errorf("expandHome: %q", got)
+	if got := ExpandHome("~/x"); got != filepath.Join(home, "x") {
+		t.Errorf("ExpandHome: %q", got)
 	}
-	if got := expandHome("/abs"); got != "/abs" {
+	if got := ExpandHome("/abs"); got != "/abs" {
 		t.Errorf("abs untouched: %q", got)
 	}
 }

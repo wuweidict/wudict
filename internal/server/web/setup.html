@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gonow-dict — setup</title>
+<style>
+:root{--bg:#fbfaf8;--card:#fff;--fg:#2b2a28;--soft:#6d6a64;--faint:#a5a19a;
+  --accent:#e08600;--line:#e8e4dd;--ok:#4a7a4f;--err:#c0564f;--focus:#7aa7d1}
+@media (prefers-color-scheme: dark){:root{--bg:#191a1c;--card:#212327;--fg:#d8d5d0;
+  --soft:#96938d;--faint:#5f5c57;--accent:#e69a33;--line:#33363b;--ok:#7fae84;--err:#d98880}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  line-height:1.618;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:1em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  box-shadow:0 4px 20px rgba(0,0,0,.08);max-width:560px;width:100%;padding:1.618em}
+h1{margin:0 0 .382em;font-size:22px}h1 b{color:var(--accent)}
+p{margin:.382em 0;color:var(--soft);font-size:14px}
+code{background:var(--bg);border:1px solid var(--line);border-radius:4px;
+  padding:0 .3em;font-size:12.5px;word-break:break-all}
+input{width:100%;font-size:15px;color:var(--fg);background:var(--bg);
+  border:1px solid var(--line);border-radius:8px;padding:.5em .7em;margin:.618em 0 .382em;outline:none}
+input:focus{border-color:var(--focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 25%,transparent)}
+#msg{min-height:1.5em;font-size:13.5px}
+#msg.ok{color:var(--ok)}#msg.err{color:var(--err)}
+button{font-size:15px;background:var(--accent);color:#fff;border:none;border-radius:8px;
+  padding:.5em 1.2em;cursor:pointer;margin-top:.618em}
+button:disabled{opacity:.45;cursor:default}
+.formats{color:var(--faint);font-size:12px;margin-top:1em}
+</style>
+</head>
+<body>
+<div class="card">
+<h1><b>gonow</b>·dict — choose your dictionary folder</h1>
+<p>The configured folder <code>{{DIR}}</code> {{REASON}}.</p>
+<p>Paste the full path of the folder that contains your dictionaries (subfolders are scanned too):</p>
+<input id="path" placeholder="/path/to/your/dictionaries" autofocus spellcheck="false">
+<div id="msg"></div>
+<button id="save" disabled>Use this folder</button>
+<p class="formats">Supported: MDict (.mdx + .mdd) · StarDict (.ifo) · Aard2 (.slob) · Lingvo DSL (.dsl, .dsl.dz) · gonow (.text.db)</p>
+</div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+let timer=null,lastOK=false;
+async function validate(save){
+  const p=$("path").value.trim();
+  if(!p){$("msg").textContent="";$("save").disabled=true;return}
+  const r=await fetch("/api/setup?path="+encodeURIComponent(p)+(save?"&save=1":""));
+  const j=await r.json();
+  const msg=$("msg");
+  if(j.error){msg.className="err";msg.textContent="✕ "+j.error;$("save").disabled=true;lastOK=false;return}
+  lastOK=j.found>0;
+  msg.className=lastOK?"ok":"err";
+  msg.textContent=lastOK?("✓ Found "+j.found+" dictionar"+(j.found===1?"y":"ies")+" in "+j.path)
+                        :"✕ No dictionaries found in this folder";
+  $("save").disabled=!lastOK;
+  if(save&&j.saved)location.href="/";
+}
+$("path").addEventListener("input",()=>{clearTimeout(timer);timer=setTimeout(()=>validate(false),350)});
+$("path").addEventListener("keydown",e=>{if(e.key==="Enter"&&lastOK)validate(true)});
+$("save").addEventListener("click",()=>validate(true));
+</script>
+</body>
+</html>

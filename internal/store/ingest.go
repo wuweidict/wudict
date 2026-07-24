@@ -22,10 +22,28 @@ type Progress func(done, total int)
 
 const batchSize = 5000
 
-// Ingest scans r into a new text database at dbPath (atomically: written
-// to a temp file, renamed on success). The FTS index is built inside the
-// same transaction as the data (FTS-audit #3).
-func Ingest(r dict.Reader, dbPath string, progress Progress) (err error) {
+// Level selects how much gets indexed for search.
+type Level string
+
+const (
+	// LevelText indexes headwords AND stripped article text: fuzzy +
+	// full-text search.
+	LevelText Level = "text"
+	// LevelHeadwords indexes headwords only: fuzzy search with a much
+	// smaller database, no full-text search.
+	LevelHeadwords Level = "headwords"
+)
+
+// Ingest scans r into a new text database at dbPath with full text
+// indexing (see IngestLevel).
+func Ingest(r dict.Reader, dbPath string, progress Progress) error {
+	return IngestLevel(r, dbPath, LevelText, progress)
+}
+
+// IngestLevel scans r into a new text database at dbPath (atomically:
+// written to a temp file, renamed on success). The FTS index is built
+// inside the same transaction as the data (FTS-audit #3).
+func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (err error) {
 	srcMeta := r.Meta()
 	tmp := dbPath + ".ingest"
 	_ = os.Remove(tmp)
@@ -113,7 +131,11 @@ func Ingest(r dict.Reader, dbPath string, progress Progress) (err error) {
 		if _, err = insEntry.Exec(id, hw, body); err != nil {
 			return err
 		}
-		if _, err = insFts.Exec(id, hw, StripHTML(body)); err != nil {
+		txt := ""
+		if level == LevelText {
+			txt = StripHTML(body)
+		}
+		if _, err = insFts.Exec(id, hw, txt); err != nil {
 			return err
 		}
 		if _, ok := idByWord[hw]; !ok {
@@ -163,7 +185,7 @@ func Ingest(r dict.Reader, dbPath string, progress Progress) (err error) {
 		"source_path":      srcMeta.Path,
 		"description":      srcMeta.Description,
 		"entry_count":      fmt.Sprint(id),
-		"ingest_level":     "text",
+		"ingest_level":     string(level),
 		"created":          time.Now().UTC().Format(time.RFC3339),
 		"source_sha256_1M": sourceHash(srcMeta.Path),
 	}

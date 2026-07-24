@@ -221,6 +221,41 @@ func TestBuildMatch(t *testing.T) {
 	}
 }
 
+func TestHeadwordsOnlyLevel(t *testing.T) {
+	r := &fakeReader{
+		meta: dict.Meta{Name: "hw", Format: "test", Path: "/x"},
+		entries: []dict.Entry{
+			h("corazón", `<p>órgano muscular</p>`),
+		},
+	}
+	dbPath := filepath.Join(t.TempDir(), "hw.text.db")
+	if err := IngestLevel(r, dbPath, LevelHeadwords, nil); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c := s.Caps()
+	if !c.Fuzzy || c.FTS {
+		t.Errorf("caps: want fuzzy=true fts=false, got %+v", c)
+	}
+	// fuzzy over headwords still works, accent-insensitive
+	res, err := s.Fuzzy("corazon", 5)
+	if err != nil || len(res) != 1 {
+		t.Fatalf("fuzzy: %v %v", res, err)
+	}
+	// full-text is honestly unsupported
+	if _, err := s.FullText("muscular", 5); err != dict.ErrUnsupported {
+		t.Errorf("fulltext: want ErrUnsupported, got %v", err)
+	}
+	// article body must NOT be indexed even via fuzzy w: prefix trickery
+	if res, _ := s.Fuzzy("muscular", 5); len(res) != 0 {
+		t.Errorf("body leaked into headwords index: %v", res)
+	}
+}
+
 func TestBodyTextNormalization(t *testing.T) {
 	r := &fakeReader{
 		meta: dict.Meta{Name: "plain", Format: "test", Path: "/x"},

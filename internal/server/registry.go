@@ -12,8 +12,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/glowinthedark/gonow-dict/internal/logx"
 	"github.com/glowinthedark/gonow-dict/internal/store"
 )
 
@@ -67,10 +69,18 @@ type entry struct {
 // media.db) exists for it, wraps it into the upgraded view.
 func (e *entry) open() (dict.Dictionary, error) {
 	e.once.Do(func() {
+		start := time.Now()
 		d, err := openUpgradedOrDirect(e.Path)
 		e.dMu.Lock()
 		e.d, e.err = d, err
 		e.dMu.Unlock()
+		if err != nil {
+			logx.V("open %s: FAILED: %v", e.Path, err)
+		} else {
+			m := d.Meta()
+			logx.V("open %s [%s] %d entries fuzzy=%v (%s)",
+				m.Name, m.Format, m.EntryCount, d.Caps().Fuzzy, time.Since(start).Round(time.Millisecond))
+		}
 	})
 	e.dMu.RLock()
 	defer e.dMu.RUnlock()
@@ -111,9 +121,35 @@ func NewRegistry(dictDir string) (*Registry, error) {
 	return r, r.Rescan()
 }
 
+// Dir returns the current dictionary directory.
+func (r *Registry) Dir() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.dictDir
+}
+
+// Count returns the number of discovered dictionaries.
+func (r *Registry) Count() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.entries)
+}
+
+// SetDir re-points the registry at a new dictionary directory and
+// rescans (used by the first-run setup flow — no restart needed).
+func (r *Registry) SetDir(dir string) error {
+	r.mu.Lock()
+	r.dictDir = dir
+	r.mu.Unlock()
+	return r.Rescan()
+}
+
 // Rescan re-discovers dictionaries, keeping already-open entries.
 func (r *Registry) Rescan() error {
-	paths, err := dict.Discover(r.dictDir)
+	r.mu.RLock()
+	dir := r.dictDir
+	r.mu.RUnlock()
+	paths, err := dict.Discover(dir)
 	if err != nil {
 		return err
 	}
@@ -165,8 +201,9 @@ func (r *Registry) get(id string) (*entry, error) {
 }
 
 // ingest builds the text.db (and media.db when full) for one entry and
-// swaps its open view to the upgraded backend.
-func (e *entry) ingest(full bool, progress store.Progress) error {
+// swaps its open view to the upgraded backend. A headwords-only db is
+// deleted and rebuilt when full-text level is requested later.
+func (e *entry) ingest(full bool, level store.Level, progress store.Progress) error {
 	e.ingestMu.Lock()
 	defer e.ingestMu.Unlock()
 
@@ -178,12 +215,18 @@ func (e *entry) ingest(full bool, progress store.Progress) error {
 	base := store.CacheBase(e.Path, name)
 	textDB := base + ".text.db"
 
+	if _, err := os.Stat(textDB); err == nil && level == store.LevelText {
+		if cl, _ := store.ReadMetaValue(textDB, "ingest_level"); cl == string(store.LevelHeadwords) {
+			logx.V("ingest %s: upgrading headwords-only db to full text", name)
+			_ = os.Remove(textDB)
+		}
+	}
 	if _, err := os.Stat(textDB); err != nil {
 		rd, err := dict.OpenReader(e.Path)
 		if err != nil {
 			return err
 		}
-		err = store.Ingest(rd, textDB, progress)
+		err = store.IngestLevel(rd, textDB, level, progress)
 		rd.Close()
 		if err != nil {
 			return err

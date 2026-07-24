@@ -1,3 +1,4 @@
 gonow-dict
 dist/
 coverage.out
+config.toml
