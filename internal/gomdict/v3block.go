@@ -29,12 +29,13 @@ import (
 // decodeBlockV3 decodes a single v3 key/record block.
 //
 // v3 block layout (after the [4-byte type][8-byte size] directory header):
-//   [4 bytes LE]  info word:
-//                   bits [0:4]   = compression method (0=none, 1=lzo, 2=zlib)
-//                   bits [4:8]   = encryption method (0=none, 1=fast, 2=salsa20/8)
-//                   bits [8:16]  = encryption size (bytes encrypted from the front)
-//   [4 bytes BE]  adler32 checksum (over decrypted data for v3)
-//   [N bytes]     block payload
+//
+//	[4 bytes LE]  info word:
+//	                bits [0:4]   = compression method (0=none, 1=lzo, 2=zlib)
+//	                bits [4:8]   = encryption method (0=none, 1=fast, 2=salsa20/8)
+//	                bits [8:16]  = encryption size (bytes encrypted from the front)
+//	[4 bytes BE]  adler32 checksum (over decrypted data for v3)
+//	[N bytes]     block payload
 //
 // The adler32 is checked over the decrypted-but-not-decompressed data for v3
 // (the opposite of v1/v2, which checks over decompressed data).

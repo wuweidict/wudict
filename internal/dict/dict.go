@@ -76,11 +76,14 @@ type FullTextSearcher interface {
 }
 
 // Entry is one dictionary article as produced by a format Reader during
-// an ingest scan.
+// an ingest scan. When LinkTo is non-empty the entry is a pure redirect
+// (e.g. MDX @@@LINK): Body is ignored and Headwords become aliases of the
+// entry whose headword is LinkTo.
 type Entry struct {
 	Headwords []string // first = display headword, rest = aliases
 	Body      string
 	Kind      BodyKind
+	LinkTo    string
 }
 
 // BodyKind tells the ingester how to normalize Entry.Body to HTML.

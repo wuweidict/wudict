@@ -19,6 +19,25 @@ func RegisterFormat(ext string, fn opener) {
 	openers[strings.ToLower(ext)] = fn
 }
 
+// readerOpener opens the sequential ingest scan for one source file.
+type readerOpener func(path string) (Reader, error)
+
+var readerOpeners = map[string]readerOpener{}
+
+// RegisterReader wires a file extension to a format's ingest Reader.
+func RegisterReader(ext string, fn readerOpener) {
+	readerOpeners[strings.ToLower(ext)] = fn
+}
+
+// OpenReader opens the ingest scan for path, dispatching on extension.
+func OpenReader(path string) (Reader, error) {
+	fn, ok := readerOpeners[strings.ToLower(filepath.Ext(path))]
+	if !ok {
+		return nil, fmt.Errorf("no ingest reader for format: %s", filepath.Ext(path))
+	}
+	return fn(path)
+}
+
 // Open opens the dictionary whose main file is path, dispatching on
 // extension.
 func Open(path string) (Dictionary, error) {

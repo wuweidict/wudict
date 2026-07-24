@@ -26,8 +26,9 @@ import (
 // MDict v3 encrypted blocks from the dictionary's UUID attribute.
 //
 // Matches the Python reference:
-//   mid = (len(uuid) + 1) // 2
-//   encrypted_key = xxh64_digest(uuid[:mid]) + xxh64_digest(uuid[mid:])
+//
+//	mid = (len(uuid) + 1) // 2
+//	encrypted_key = xxh64_digest(uuid[:mid]) + xxh64_digest(uuid[mid:])
 //
 // xxh64_digest returns the 8-byte big-endian digest of xxhash64 (standard
 // hash-digest convention). The resulting 16-byte key is used directly as a

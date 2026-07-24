@@ -8,3 +8,5 @@ require (
 	github.com/rasky/go-lzo v0.0.0-20200203143853-96a758eda86e
 	golang.org/x/text v0.40.0
 )
+
+require github.com/mattn/go-sqlite3 v1.14.48

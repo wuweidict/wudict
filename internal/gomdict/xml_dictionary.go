@@ -34,22 +34,22 @@ type Dictionary struct {
 	// NOTE: the real text encoding lives in the "Encoding" attribute; the
 	// upstream code mapped this field to "IsUTF16" by mistake, which silently
 	// misdetected every non-UTF16 dictionary (e.g. GBK) as UTF-8.
-	Encoding          string
-	IsUTF16           string
-	Format            string
-	Stripkey          string
-	CreationDate      string
-	Compact           string
-	Compat            string
-	KeyCaseSensitive  string
-	Description       string
-	Title             string
-	DataSourceFormat  string
-	StyleSheet        string
-	Left2Right        string
-	RegisterBy        string
-	UUID              string
-	ContentType       string
+	Encoding             string
+	IsUTF16              string
+	Format               string
+	Stripkey             string
+	CreationDate         string
+	Compact              string
+	Compat               string
+	KeyCaseSensitive     string
+	Description          string
+	Title                string
+	DataSourceFormat     string
+	StyleSheet           string
+	Left2Right           string
+	RegisterBy           string
+	UUID                 string
+	ContentType          string
 	DefaultSortingLocale string
 }
 

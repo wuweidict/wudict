@@ -43,6 +43,11 @@ install: ## go install into GOBIN
 run: build ## Build then run with ARGS, e.g. make run ARGS="lookup dict.mdx word"
 	./$(BINARY) $(ARGS)
 
+.PHONY: ingest
+ingest: build ## Ingest DICT=<path> into a text.db (OUT=<path> optional), e.g. make ingest DICT=~/Dicts/x.mdx
+	@test -n "$(DICT)" || { echo "usage: make ingest DICT=<dictfile> [OUT=<out.db>]"; exit 2; }
+	./$(BINARY) ingest $(if $(OUT),-o "$(OUT)") "$(DICT)"
+
 .PHONY: cross
 cross: ## Cross-compile for darwin/linux/windows (amd64+arm64) into dist/
 	@mkdir -p $(BUILD_DIR)

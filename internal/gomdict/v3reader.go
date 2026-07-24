@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-
 )
 
 // v3 block type tags (big-endian uint32 in the block directory).
@@ -44,7 +43,9 @@ type v3BlockOffsets struct {
 
 // scanV3Blocks reads the block directory that follows the header and records
 // the file offset of each block section. The directory is a sequence of
-//   [4-byte BE type] [8-byte BE size] [size bytes of data]
+//
+//	[4-byte BE type] [8-byte BE size] [size bytes of data]
+//
 // terminated by EOF.
 func (mdict *MdictBase) scanV3Blocks() error {
 	f, err := os.Open(mdict.filePath)
@@ -109,12 +110,13 @@ func (mdict *MdictBase) scanV3Blocks() error {
 // readKeyEntriesV3 reads all key entries from the v3 key-data block.
 //
 // Key data block layout:
-//   [4-byte BE] number of key blocks
-//   [8-byte BE] total decompressed size (unused — we read block-by-block)
-//   For each block:
-//     [4-byte BE] decompressed size
-//     [4-byte BE] compressed size
-//     [compressed_size bytes] block data (decoded via decodeBlockV3)
+//
+//	[4-byte BE] number of key blocks
+//	[8-byte BE] total decompressed size (unused — we read block-by-block)
+//	For each block:
+//	  [4-byte BE] decompressed size
+//	  [4-byte BE] compressed size
+//	  [compressed_size bytes] block data (decoded via decodeBlockV3)
 //
 // Each decompressed key block is split into entries using splitKeyBlock (the
 // same function used for v1/v2), which handles both UTF-8 and UTF-16
@@ -193,12 +195,13 @@ func (mdict *MdictBase) readKeyEntriesV3() error {
 // by scanning the v3 record-data blocks.
 //
 // Record data block layout (same per-block structure as key data):
-//   [4-byte BE] number of record blocks
-//   [8-byte BE] total decompressed size (unused)
-//   For each block:
-//     [4-byte BE] decompressed size
-//     [4-byte BE] compressed size
-//     [compressed_size bytes] block data (decoded via decodeBlockV3)
+//
+//	[4-byte BE] number of record blocks
+//	[8-byte BE] total decompressed size (unused)
+//	For each block:
+//	  [4-byte BE] decompressed size
+//	  [4-byte BE] compressed size
+//	  [compressed_size bytes] block data (decoded via decodeBlockV3)
 //
 // We walk the blocks tracking the cumulative decompressed offset until we
 // find the block containing the entry's RecordStartOffset, then slice the
