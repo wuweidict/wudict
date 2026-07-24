@@ -134,7 +134,46 @@ func (s *Store) Exact(word string, limit int) ([]dict.Result, error) {
 	if err != nil || len(res) > 0 {
 		return res, err
 	}
-	return s.collect(s.db.Query(fmt.Sprintf(q, "COLLATE NOCASE"), word, n))
+	res, err = s.collect(s.db.Query(fmt.Sprintf(q, "COLLATE NOCASE"), word, n))
+	if err != nil || len(res) > 0 {
+		return res, err
+	}
+	// accent-fold fallback (parity with the direct backends): exact
+	// phrase over the diacritic-stripping tokenizer, then keep only
+	// whole-headword folded matches.
+	match := buildExactMatch(word, "w")
+	if match == "" {
+		return nil, nil
+	}
+	res, err = s.collect(s.db.Query(`
+		SELECT e.w, e.m FROM entry_fts f JOIN entry e ON e.id = f.rowid
+		WHERE entry_fts MATCH ?1 ORDER BY e.w LIMIT ?2`, match, n))
+	if err != nil {
+		return nil, err
+	}
+	key := dict.Fold(word)
+	var out []dict.Result
+	for _, r := range res {
+		if dict.Fold(r.Headword) == key {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// buildExactMatch is buildMatch without the prefix star: whole-token
+// phrase matching.
+func buildExactMatch(input, column string) string {
+	var parts []string
+	for _, tok := range strings.Fields(strings.TrimSpace(input)) {
+		tok = strings.ReplaceAll(tok, `"`, `""`)
+		p := `"` + tok + `"`
+		if column != "" {
+			p = column + ":" + p
+		}
+		parts = append(parts, p)
+	}
+	return strings.Join(parts, " ")
 }
 
 // Prefix returns exact matches if any, else prefix matches ordered by

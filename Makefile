@@ -17,7 +17,8 @@ VERSION    := $(shell git -C . describe --tags --always --dirty 2>/dev/null || e
 GONOW_TEST_MDX      ?= $(HOME)/Downloads/Language/mdict/es-es-Espasa-Calpe-2016.mdx
 GONOW_TEST_STARDICT ?= $(HOME)/Downloads/Language/stardict/eng-eng-stanford-ep.ifo
 GONOW_TEST_SLOB     ?= $(HOME)/Downloads/Language/aard/es-es-Espasa-Calpe-2016.slob
-TEST_ENV = GONOW_TEST_MDX="$(GONOW_TEST_MDX)" GONOW_TEST_STARDICT="$(GONOW_TEST_STARDICT)" GONOW_TEST_SLOB="$(GONOW_TEST_SLOB)"
+GONOW_TEST_DSL      ?= $(HOME)/Downloads/Language/DSL/es-es-Espasa-Calpe-2016/es-es-Espasa-Calpe-2016.dsl
+TEST_ENV = GONOW_TEST_MDX="$(GONOW_TEST_MDX)" GONOW_TEST_STARDICT="$(GONOW_TEST_STARDICT)" GONOW_TEST_SLOB="$(GONOW_TEST_SLOB)" GONOW_TEST_DSL="$(GONOW_TEST_DSL)"
 
 # Args for `make run-*` targets, e.g.: make run ARGS="list ~/Dictionaries"
 ARGS ?=
@@ -31,7 +32,7 @@ help: ## Show this help
 	@echo "gonow-dict make targets:"; echo
 	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z0-9_.-]+:.*##/{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo
-	@echo "Vars: ARGS=<cli args>  GONOW_TEST_MDX|_STARDICT|_SLOB=<integration fixtures>"
+	@echo "Vars: ARGS=<cli args>  GONOW_TEST_MDX|_STARDICT|_SLOB|_DSL=<integration fixtures>"
 
 # ---- build & run --------------------------------------------------------
 

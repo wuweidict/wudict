@@ -260,7 +260,11 @@ func Slug(name string) string {
 }
 
 // DefaultDBDir is the cache directory for generated databases (D7).
+// GONOW_DB_DIR overrides it.
 func DefaultDBDir() string {
+	if dir := os.Getenv("GONOW_DB_DIR"); dir != "" {
+		return dir
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ".gonow-dict/db"
