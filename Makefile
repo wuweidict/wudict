@@ -12,8 +12,12 @@ GOFLAGS    := -tags $(GO_TAGS) -trimpath
 LDFLAGS    := -s -w
 VERSION    := $(shell git -C . describe --tags --always --dirty 2>/dev/null || echo dev)
 
-# Integration tests need a real dictionary; point this at any .mdx you have.
-GONOW_TEST_MDX ?= $(HOME)/Downloads/Language/mdict/es-es-Espasa-Calpe-2016.mdx
+# Integration tests need real dictionaries; point these at files you have
+# (tests skip silently when a path is unset/missing).
+GONOW_TEST_MDX      ?= $(HOME)/Downloads/Language/mdict/es-es-Espasa-Calpe-2016.mdx
+GONOW_TEST_STARDICT ?= $(HOME)/Downloads/Language/stardict/eng-eng-stanford-ep.ifo
+GONOW_TEST_SLOB     ?= $(HOME)/Downloads/Language/aard/es-es-Espasa-Calpe-2016.slob
+TEST_ENV = GONOW_TEST_MDX="$(GONOW_TEST_MDX)" GONOW_TEST_STARDICT="$(GONOW_TEST_STARDICT)" GONOW_TEST_SLOB="$(GONOW_TEST_SLOB)"
 
 # Args for `make run-*` targets, e.g.: make run ARGS="list ~/Dictionaries"
 ARGS ?=
@@ -27,7 +31,7 @@ help: ## Show this help
 	@echo "gonow-dict make targets:"; echo
 	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z0-9_.-]+:.*##/{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo
-	@echo "Vars: ARGS=<cli args>  GONOW_TEST_MDX=<path to .mdx for integration tests>"
+	@echo "Vars: ARGS=<cli args>  GONOW_TEST_MDX|_STARDICT|_SLOB=<integration fixtures>"
 
 # ---- build & run --------------------------------------------------------
 
@@ -63,20 +67,20 @@ cross: ## Cross-compile for darwin/linux/windows (amd64+arm64) into dist/
 
 .PHONY: test
 test: ## Unit tests (integration tests skip unless GONOW_TEST_MDX exists)
-	GONOW_TEST_MDX="$(GONOW_TEST_MDX)" go test $(GOFLAGS) ./...
+	$(TEST_ENV) go test $(GOFLAGS) ./...
 
 .PHONY: test-v
 test-v: ## Tests, verbose
-	GONOW_TEST_MDX="$(GONOW_TEST_MDX)" go test $(GOFLAGS) -v ./...
+	$(TEST_ENV) go test $(GOFLAGS) -v ./...
 
 .PHONY: cover
 cover: ## Tests with coverage report
-	GONOW_TEST_MDX="$(GONOW_TEST_MDX)" go test $(GOFLAGS) -coverprofile=coverage.out ./...
+	$(TEST_ENV) go test $(GOFLAGS) -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
 
 .PHONY: bench
 bench: ## Run benchmarks
-	GONOW_TEST_MDX="$(GONOW_TEST_MDX)" go test $(GOFLAGS) -bench=. -benchmem -run=^$$ ./...
+	$(TEST_ENV) go test $(GOFLAGS) -bench=. -benchmem -run=^$$ ./...
 
 .PHONY: vet
 vet: ## go vet

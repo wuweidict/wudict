@@ -24,7 +24,6 @@ import (
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/encoding/traditionalchinese"
 	"golang.org/x/text/transform"
-	"golang.org/x/text/unicode/norm"
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
 	gomdict "github.com/glowinthedark/gonow-dict/internal/gomdict"
@@ -316,20 +315,8 @@ func decodeEnc(raw []byte, enc int) string {
 	}
 }
 
-// fold lowercases and strips combining marks for accent/case-insensitive
-// matching.
-func fold(s string) string {
-	s = strings.ToLower(s)
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, ru := range norm.NFD.String(s) {
-		if unicode.Is(unicode.Mn, ru) {
-			continue
-		}
-		b.WriteRune(ru)
-	}
-	return b.String()
-}
+// fold delegates to the shared accent/case folding.
+func fold(s string) string { return dict.Fold(s) }
 
 // parseStylesheet parses the MDX StyleSheet header attribute: groups of
 // three lines (number, begin-tag, end-tag).
