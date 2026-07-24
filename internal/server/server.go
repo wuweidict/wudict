@@ -19,6 +19,9 @@ import (
 //go:embed web/index.html
 var indexHTML []byte
 
+//go:embed web/mark.min.js
+var markJS []byte // vendored mark.js v8.11.1 (draego pulled it from a CDN)
+
 // Server exposes the registry over HTTP.
 type Server struct {
 	reg *Registry
@@ -33,6 +36,11 @@ func New(reg *Registry) *Server {
 	s.mux.HandleFunc("GET /api/rescan", s.handleRescan)
 	s.mux.HandleFunc("GET /api/ingest", s.handleIngest)
 	s.mux.HandleFunc("GET /res/", s.handleResource)
+	s.mux.HandleFunc("GET /assets/mark.min.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=604800")
+		_, _ = w.Write(markJS)
+	})
 	return s
 }
 
