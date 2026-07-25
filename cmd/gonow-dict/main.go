@@ -30,6 +30,7 @@ import (
 	"github.com/glowinthedark/gonow-dict/internal/server"
 	"github.com/glowinthedark/gonow-dict/internal/store"
 
+	_ "github.com/glowinthedark/gonow-dict/internal/format/bgl"      // register .bgl
 	_ "github.com/glowinthedark/gonow-dict/internal/format/dsl"      // register .dsl(.dz)
 	_ "github.com/glowinthedark/gonow-dict/internal/format/mdx"      // register .mdx
 	_ "github.com/glowinthedark/gonow-dict/internal/format/slob"     // register .slob

@@ -1,0 +1,107 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package bgl
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"mime"
+	"os"
+	"path"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/glowinthedark/gonow-dict/internal/store"
+)
+
+func init() {
+	dict.RegisterFormat(".bgl", func(path string) (dict.Dictionary, error) { return Open(path) })
+	dict.RegisterReader(".bgl", func(path string) (dict.Reader, error) { return NewReader(path) })
+}
+
+// Dict is the BGL "direct" backend. BGL has no native index, so Open ingests
+// into a cached text.db on first use (SPEC §1); the cache name embeds a
+// source-content hash, so a changed source re-ingests automatically. Embedded
+// resources are scanned from the source lazily on first request.
+type Dict struct {
+	*store.Store
+	srcPath string
+
+	resOnce sync.Once
+	res     map[string][]byte
+	resList []string
+	resErr  error
+}
+
+func Open(path string) (*Dict, error) {
+	r, err := NewReader(path)
+	if err != nil {
+		return nil, err
+	}
+	name := r.Meta().Name
+
+	dbPath := store.CacheBase(path, name) + ".text.db"
+	if _, statErr := os.Stat(dbPath); statErr != nil {
+		fmt.Fprintf(os.Stderr, "bgl: preparing search index for %q (first open)…\n", name)
+		err = store.Ingest(r, dbPath, func(done, _ int) {
+			fmt.Fprintf(os.Stderr, "\r%d entries", done)
+		})
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			r.Close()
+			return nil, fmt.Errorf("bgl auto-ingest: %w", err)
+		}
+	}
+	r.Close()
+
+	s, err := store.Open(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return &Dict{Store: s, srcPath: path}, nil
+}
+
+func (d *Dict) Meta() dict.Meta {
+	m := d.Store.Meta()
+	m.Format = "bgl"
+	m.Path = d.srcPath
+	return m
+}
+
+func (d *Dict) Close() error { return d.Store.Close() }
+
+// loadRes scans the source BGL for its embedded resource blocks. Kept lazy so
+// a dictionary that never serves an image never pays the decompression.
+func (d *Dict) loadRes() {
+	d.res, d.resList, d.resErr = scanResources(d.srcPath)
+}
+
+// Resource streams one embedded resource (image/HTML) by name,
+// case-insensitively.
+func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
+	norm := strings.ToLower(strings.TrimLeft(path.Clean(name), "/"))
+	if norm == "" || norm == "." || strings.HasPrefix(norm, "..") {
+		return nil, "", dict.ErrNotFound
+	}
+	d.resOnce.Do(d.loadRes)
+	if d.resErr != nil {
+		return nil, "", d.resErr
+	}
+	if b, ok := d.res[norm]; ok {
+		return io.NopCloser(bytes.NewReader(b)), mime.TypeByExtension(path.Ext(norm)), nil
+	}
+	return nil, "", dict.ErrNotFound
+}
+
+// Resources lists the embedded resource names (for full-ingest media packing).
+func (d *Dict) Resources() []string {
+	d.resOnce.Do(d.loadRes)
+	out := append([]string(nil), d.resList...)
+	sort.Strings(out)
+	return out
+}
