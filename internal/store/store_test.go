@@ -225,6 +225,41 @@ func TestBuildMatch(t *testing.T) {
 	}
 }
 
+// A text.db+media.db pair must work standalone (sources deleted).
+func TestStandaloneMediaPairing(t *testing.T) {
+	r := &fakeReader{meta: dict.Meta{Name: "m", Format: "test", Path: "/gone"},
+		entries: []dict.Entry{h("w", "<p>x</p>")}}
+	base := filepath.Join(t.TempDir(), "m")
+	if err := Ingest(r, base+".text.db", nil); err != nil {
+		t.Fatal(err)
+	}
+	uuid, _ := ReadMetaValue(base+".text.db", "dict_uuid")
+	src := &mediaSrc{}
+	if err := IngestMedia(src, []string{"a.png"}, base+".media.db", uuid, nil); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(base + ".text.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	rc, mime, err := s.Resource("a.png")
+	if err != nil || mime != "image/png" {
+		t.Fatalf("standalone media: %v %q", err, mime)
+	}
+	rc.Close()
+	if _, _, err := s.Resource("nope"); err != dict.ErrNotFound {
+		t.Errorf("missing: %v", err)
+	}
+}
+
+type mediaSrc struct{ dict.Dictionary }
+
+func (mediaSrc) Meta() dict.Meta { return dict.Meta{Name: "m", Format: "test"} }
+func (mediaSrc) Resource(string) (io.ReadCloser, string, error) {
+	return io.NopCloser(strings.NewReader("PNG")), "image/png", nil
+}
+
 func TestHeadwordsOnlyLevel(t *testing.T) {
 	r := &fakeReader{
 		meta: dict.Meta{Name: "hw", Format: "test", Path: "/x"},

@@ -10,7 +10,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>gonow-dict</title>
-<script src="/assets/mark.min.js"></script>
+<script src="assets/mark.min.js"></script>
 <style>
 /* ── design tokens ─────────────────────────────────────────────────── */
 :root{
@@ -80,7 +80,9 @@ select{font-size:13px;color:var(--fg-soft);background:var(--bg-card);
 .btn:focus-visible,select:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
 
 /* ── results ───────────────────────────────────────────────────────── */
-#status{color:var(--fg-soft);font-size:13px;padding:var(--sp-2) 0;min-height:1.4em}
+#status{color:var(--fg-soft);font-size:13px;padding:var(--sp-2) 0;min-height:1.4em;
+  opacity:0;transition:opacity .35s ease}
+#status.show{opacity:1}
 #status .spin{display:inline-block;width:1em;height:1em;border:2px solid var(--line);
   border-top-color:var(--accent);border-radius:50%;vertical-align:-.15em;
   animation:spin .7s linear infinite;margin-right:.4em}
@@ -235,7 +237,7 @@ function dictLabel(d){return d.name||d.path.split("/").pop()}
 async function loadDicts(rescan){
   setStatus('<span class="spin"></span>Loading dictionaries…');
   try{
-    dicts=await (await fetch(rescan?"/api/rescan":"/api/dicts")).json();
+    dicts=await (await fetch(rescan?"api/rescan":"api/dicts")).json();
   }finally{
     if(!lastQuery)setStatus("");
   }
@@ -288,9 +290,11 @@ $("ingestAllBtn").onclick=async()=>{
   for(const d of todo){
     n++;btn.textContent=`⚡ ${n}/${todo.length}…`;
     const label=document.querySelector(`.pd[data-id="${d.id}"] .act`)||btn;
-    await runIngest(d.id,{},label);
+    await runIngest(d.id,{quiet:true,statusPrefix:`${n}/${todo.length} · `},label);
   }
   btn.disabled=false;btn.textContent="⚡ enable all";
+  setStatus("✓ all dictionaries indexed");
+  await loadDicts();if(lastQuery)doSearch();
 };
 $("panelList").addEventListener("click",e=>{
   const path=e.target.closest(".path");
@@ -310,17 +314,28 @@ document.addEventListener("click",e=>{
 function runIngest(id,opts,label){
   if(label.dataset.busy)return Promise.resolve(); // ignore repeat clicks
   label.dataset.busy="1";
-  label.textContent="preparing search index…";label.classList.remove("act");
+  const name=dictLabel(dicts.find(d=>d.id===id)||{path:""});
+  const show=t=>{
+    label.textContent=t;
+    setStatus('<span class="spin"></span>'+(opts.statusPrefix||"")+esc(name)+" — "+esc(t));
+  };
+  show("preparing search index…");
+  label.classList.remove("act");
   label.style.textDecoration="none";label.style.cursor="default";
   const params=(opts.full?"&full=1":"")+(opts.level==="headwords"?"&level=headwords":"");
   return new Promise(resolve=>{
-    const es=new EventSource("/api/ingest?dict="+id+params);
+    const es=new EventSource("api/ingest?dict="+id+params);
     es.addEventListener("progress",ev=>{
       const p=JSON.parse(ev.data);
-      label.textContent="preparing… "+p.done.toLocaleString()+(p.total?"/"+p.total.toLocaleString():"");
+      show("preparing… "+p.done.toLocaleString()+(p.total?"/"+p.total.toLocaleString():""));
     });
-    es.addEventListener("done",async()=>{es.close();await loadDicts();if(lastQuery)doSearch();resolve(true)});
-    es.addEventListener("error",()=>{es.close();label.textContent="failed";label.classList.add("err");resolve(false)});
+    es.addEventListener("done",async()=>{
+      es.close();
+      setStatus("✓ "+esc(name)+" — search index ready");
+      if(!opts.quiet){await loadDicts();if(lastQuery)doSearch()}
+      resolve(true);
+    });
+    es.addEventListener("error",()=>{es.close();show("failed");label.classList.add("err");resolve(false)});
   });
 }
 
@@ -333,7 +348,7 @@ const noResultsSVG=`<svg width="90" height="90" viewBox="0 0 1000 1000" aria-hid
    cannot see (e.g. unquoted attributes in malformed dictionary HTML). */
 function resURL(dictID,ref){
   ref=ref.replace(/^sound:\/\//i,"").replace(/^file:\/\//i,"").replace(/^\.?\//,"");
-  return "/res/"+dictID+"/"+ref;
+  return "res/"+dictID+"/"+ref;
 }
 
 /* shadow-root base style: sane defaults inside the sandbox; media flip
@@ -384,7 +399,7 @@ function frameDoc(content,fid,dark){
     'body{margin:8px;word-break:break-word}img,video,svg{max-width:100%;height:auto}'+
     'html.dark{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.92)}'+
     'html.dark :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){filter:invert(1) hue-rotate(180deg)}'+
-    '</style><script src="/assets/frame.js" data-fid="'+fid+'"><\/script></head><body>'+content+'</body></html>';
+    '</style><script src="assets/frame.js" data-fid="'+fid+'"><\/script></head><body>'+content+'</body></html>';
 }
 /* bridge messages from article iframes */
 addEventListener("message",e=>{
@@ -397,7 +412,25 @@ addEventListener("message",e=>{
   }
 });
 
-function setStatus(html){$("status").innerHTML=html}
+/* status with fade + minimum display time: new messages replace the
+   current one immediately, but clearing waits until the message has been
+   readable for STATUS_MIN ms */
+const STATUS_MIN=1200;
+let statusTs=0,statusTimer=null,statusPending;
+function setStatus(html){
+  statusPending=html;
+  clearTimeout(statusTimer);
+  const el=$("status");
+  const apply=()=>{
+    if(statusPending){el.innerHTML=statusPending;el.classList.add("show");statusTs=Date.now()}
+    else{el.classList.remove("show");statusTs=0}
+  };
+  // every displayed message stays readable for STATUS_MIN; bursts of
+  // updates coalesce to the latest one
+  const left=STATUS_MIN-(Date.now()-statusTs);
+  if(el.classList.contains("show")&&left>0){statusTimer=setTimeout(apply,left);return}
+  apply();
+}
 
 async function doSearch(ev){
   if(ev)ev.preventDefault();
@@ -408,7 +441,7 @@ async function doSearch(ev){
   setStatus('<span class="spin"></span>Searching…');
   let hits;
   try{
-    const resp=await fetch("/api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+dictSel+"&n=20");
+    const resp=await fetch("api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+dictSel+"&n=20");
     hits=await resp.json();
     if(!resp.ok)throw new Error(hits.error||resp.statusText);
   }catch(err){
@@ -490,10 +523,10 @@ document.addEventListener("click",e=>{
   if(/^(bword|entry):\/\//i.test(href)||/^[dx]:/i.test(href)){
     e.preventDefault();lookupWord(decodeURIComponent(href.replace(/^(bword|entry):\/\//i,"").replace(/^[dx]:/i,"")));
   }else if(/\.(mp3|ogg|wav|spx|m4a)(\?|#|$)/i.test(href)){
-    e.preventDefault();new Audio(href.startsWith("/res/")||/^https?:/i.test(href)?href:resURL(dictID,href)).play();
-  }else if(a.querySelector("img")&&href.startsWith("/res/")){
+    e.preventDefault();new Audio(href.startsWith("res/")||/^https?:/i.test(href)?href:resURL(dictID,href)).play();
+  }else if(a.querySelector("img")&&href.startsWith("res/")){
     e.preventDefault();new Audio(href).play();
-  }else if(href&&!/^([a-z][\w+.-]*:|\/|#)/i.test(href)){
+  }else if(href&&!/^([a-z][\w+.-]*:|\/|#|res\/|assets\/)/i.test(href)){
     e.preventDefault();lookupWord(decodeURIComponent(href)); // bare-word link (slob)
   }
 });

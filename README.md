@@ -46,6 +46,19 @@ look it up; click links inside articles to follow cross-references;
 audio plays on click; ⇔ toggles a wide layout; ◐ cycles auto/light/dark
 theme. Searches produce shareable URLs.
 
+## Run as a service (macOS)
+
+With a `KeepAlive` LaunchAgent at
+`~/Library/LaunchAgents/com.glowinthedark.gonow-dict.plist`
+(modern `launchctl` syntax, wrapped as Makefile targets):
+
+```sh
+make agent-start     # launchctl bootstrap gui/$UID <plist>
+make agent-stop      # launchctl bootout   gui/$UID/com.glowinthedark.gonow-dict
+make agent-restart   # rebuild, then launchctl kickstart -k gui/$UID/<label>
+make agent-status    # launchctl print    gui/$UID/<label>
+```
+
 ## Configuration
 
 Priority: **CLI flag > environment variable > config.toml > default**.

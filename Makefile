@@ -111,6 +111,29 @@ tidy: ## go mod tidy
 .PHONY: check
 check: tidy vet test ## Pre-commit gate: tidy + vet + test
 
+# ---- launchd agent (macOS) ----------------------------------------------
+# Modern launchctl syntax (bootstrap/bootout/kickstart), GUI domain.
+
+LABEL := com.glowinthedark.gonow-dict
+PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
+GUI   := gui/$(shell id -u)
+
+.PHONY: agent-start
+agent-start: ## Load and start the launchd agent
+	launchctl bootstrap $(GUI) $(PLIST)
+
+.PHONY: agent-stop
+agent-stop: ## Stop and unload the launchd agent
+	launchctl bootout $(GUI)/$(LABEL)
+
+.PHONY: agent-restart
+agent-restart: build ## Rebuild the binary, then restart the running agent
+	launchctl kickstart -k $(GUI)/$(LABEL)
+
+.PHONY: agent-status
+agent-status: ## Show the agent's launchd state (pid, exit status, ...)
+	launchctl print $(GUI)/$(LABEL)
+
 # ---- housekeeping -------------------------------------------------------
 
 .PHONY: clean
@@ -120,3 +143,9 @@ clean: ## Remove binary, dist/, coverage artifacts
 .PHONY: version
 version: ## Print the version stamp used for builds
 	@echo $(VERSION)
+
+push:  ## sync remotes
+	git push origin
+	git push hz
+	git push iq
+	git push od

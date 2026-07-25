@@ -53,7 +53,7 @@ let timer=null,lastOK=false;
 async function validate(save){
   const p=$("path").value.trim();
   if(!p){$("msg").textContent="";$("save").disabled=true;return}
-  const r=await fetch("/api/setup?path="+encodeURIComponent(p)+(save?"&save=1":""));
+  const r=await fetch("api/setup?path="+encodeURIComponent(p)+(save?"&save=1":""));
   const j=await r.json();
   const msg=$("msg");
   if(j.error){msg.className="err";msg.textContent="✕ "+j.error;$("save").disabled=true;lastOK=false;return}
@@ -62,7 +62,7 @@ async function validate(save){
   msg.textContent=lastOK?("✓ Found "+j.found+" dictionar"+(j.found===1?"y":"ies")+" in "+j.path)
                         :"✕ No dictionaries found in this folder";
   $("save").disabled=!lastOK;
-  if(save&&j.saved)location.href="/";
+  if(save&&j.saved)location.href="./";
 }
 $("path").addEventListener("input",()=>{clearTimeout(timer);timer=setTimeout(()=>validate(false),350)});
 $("path").addEventListener("keydown",e=>{if(e.key==="Enter"&&lastOK)validate(true)});

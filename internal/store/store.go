@@ -34,7 +34,8 @@ const schemaVersion = 1
 type Store struct {
 	db    *sql.DB
 	meta  dict.Meta
-	ftsOK bool // article text indexed (ingest_level != "headwords")
+	ftsOK bool   // article text indexed (ingest_level != "headwords")
+	media *Media // sibling .media.db, when present and uuid-paired
 }
 
 // Open opens and validates a gonow-dict text database.
@@ -66,6 +67,17 @@ func Open(path string) (*Store, error) {
 	}
 	s.ftsOK = m["ingest_level"] != string(LevelHeadwords)
 	fmt.Sscanf(m["entry_count"], "%d", &s.meta.EntryCount)
+	// standalone use: attach the sibling media.db so a copied pair works
+	// without the original source (D2/D9); uuid mismatch = not our pair
+	if base, ok := strings.CutSuffix(path, ".text.db"); ok {
+		if md, err := OpenMedia(base + ".media.db"); err == nil {
+			if md.UUID == m["dict_uuid"] {
+				s.media = md
+			} else {
+				md.Close()
+			}
+		}
+	}
 	return s, nil
 }
 
@@ -92,11 +104,20 @@ func (s *Store) Caps() dict.Caps {
 	return dict.Caps{Exact: true, Prefix: true, Fuzzy: true, FTS: s.ftsOK}
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if s.media != nil {
+		s.media.Close()
+	}
+	return s.db.Close()
+}
 
-// Resource: text databases carry no binary resources; media lives in the
-// companion .media.db (Phase 5) or the original source file.
+// Resource serves from the attached sibling .media.db when present;
+// otherwise text databases carry no binary resources (the upgraded
+// server backend falls back to the original source file).
 func (s *Store) Resource(name string) (io.ReadCloser, string, error) {
+	if s.media != nil {
+		return s.media.Resource(name)
+	}
 	return nil, "", dict.ErrNotFound
 }
 
