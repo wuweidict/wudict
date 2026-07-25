@@ -38,7 +38,7 @@ jobs:
           - { runner: macos-14,         goos: darwin,  goarch: amd64, cc: "clang -arch x86_64" }
           # ── Windows (amd64 native mingw gcc; arm64 via clang) ─
           - { runner: windows-2022,     goos: windows, goarch: amd64, ext: ".exe" }
-          - { runner: windows-11-arm,   goos: windows, goarch: arm64, ext: ".exe", cc: "clang", experimental: true }
+          # - { runner: windows-11-arm,   goos: windows, goarch: arm64, ext: ".exe", cc: "clang", experimental: true }
 
     steps:
       - name: Checkout
