@@ -21,21 +21,15 @@ import (
 )
 
 func init() {
-	dict.RegisterFormat(".dsl", func(path string) (dict.Dictionary, error) { return Open(path) })
-	dict.RegisterReader(".dsl", func(path string) (dict.Reader, error) { return NewReader(path) })
-	// .dsl.dz surfaces as extension ".dz"
-	dict.RegisterFormat(".dz", func(p string) (dict.Dictionary, error) {
-		if !strings.HasSuffix(strings.ToLower(p), ".dsl.dz") {
-			return nil, fmt.Errorf("unsupported .dz file (only .dsl.dz): %s", p)
-		}
-		return Open(p)
-	})
-	dict.RegisterReader(".dz", func(p string) (dict.Reader, error) {
-		if !strings.HasSuffix(strings.ToLower(p), ".dsl.dz") {
-			return nil, fmt.Errorf("unsupported .dz file (only .dsl.dz): %s", p)
-		}
-		return NewReader(p)
-	})
+	openFn := func(path string) (dict.Dictionary, error) { return Open(path) }
+	readFn := func(path string) (dict.Reader, error) { return NewReader(path) }
+	dict.RegisterFormat(".dsl", openFn)
+	dict.RegisterReader(".dsl", readFn)
+	// Compressed DSL. Registered as the full ".dsl.dz" suffix (not bare ".dz")
+	// so a StarDict ".dict.dz" companion is never matched here; Open/NewReader
+	// handle the gunzip. matchKey prefers this longest suffix.
+	dict.RegisterFormat(".dsl.dz", openFn)
+	dict.RegisterReader(".dsl.dz", readFn)
 }
 
 // Dict is the DSL "direct" backend. DSL has no native index, so Open

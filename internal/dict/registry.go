@@ -20,9 +20,30 @@ type opener func(path string) (Dictionary, error)
 var openers = map[string]opener{} // key: lowercase extension incl. dot, e.g. ".mdx"
 
 // RegisterFormat wires a file extension to a format package. Called from
-// format package init(); the cmd package blank-imports each format.
+// format package init(); the cmd package blank-imports each format. The key
+// may be a multi-part suffix (e.g. ".dsl.dz") — matchKey prefers the longest
+// match, so a StarDict companion ".dict.dz" is not mistaken for a ".dz" dict.
 func RegisterFormat(ext string, fn opener) {
 	openers[strings.ToLower(ext)] = fn
+}
+
+// matchKey returns the registered map key that path ends with, preferring the
+// LONGEST so ".dsl.dz" beats ".dz" and an unregistered suffix (".dict.dz",
+// a StarDict companion found via its own .ifo) matches nothing.
+func matchKey[T any](m map[string]T, path string) (T, bool) {
+	lower := strings.ToLower(path)
+	var best string
+	var val T
+	for k, v := range m {
+		if len(k) > len(best) && strings.HasSuffix(lower, k) {
+			best, val = k, v
+		}
+	}
+	if best == "" {
+		var zero T
+		return zero, false
+	}
+	return val, true
 }
 
 // prober reads lightweight metadata (name, format, entry count) without
@@ -40,7 +61,7 @@ func RegisterProber(ext string, fn prober) {
 // HasProber reports whether path's format has a cheap metadata prober
 // (so a Probe miss on a cache means "not ingested" rather than "unknown").
 func HasProber(path string) bool {
-	_, ok := probers[strings.ToLower(filepath.Ext(path))]
+	_, ok := matchKey(probers, path)
 	return ok
 }
 
@@ -51,7 +72,7 @@ func HasProber(path string) bool {
 // no registered prober fall back to a full Open.
 func Probe(path string) (m Meta, err error) {
 	defer recoverOpen(path, &err)
-	if fn, ok := probers[strings.ToLower(filepath.Ext(path))]; ok {
+	if fn, ok := matchKey(probers, path); ok {
 		return fn(path)
 	}
 	d, err := Open(path)
@@ -74,7 +95,7 @@ func RegisterReader(ext string, fn readerOpener) {
 
 // OpenReader opens the ingest scan for path, dispatching on extension.
 func OpenReader(path string) (r Reader, err error) {
-	fn, ok := readerOpeners[strings.ToLower(filepath.Ext(path))]
+	fn, ok := matchKey(readerOpeners, path)
 	if !ok {
 		return nil, fmt.Errorf("no ingest reader for format: %s", filepath.Ext(path))
 	}
@@ -87,7 +108,7 @@ func OpenReader(path string) (r Reader, err error) {
 // panics: a slice-bounds panic deep in a format parser is converted here
 // so one bad file cannot take down the server or a batch ingest.
 func Open(path string) (d Dictionary, err error) {
-	fn, ok := openers[strings.ToLower(filepath.Ext(path))]
+	fn, ok := matchKey(openers, path)
 	if !ok {
 		return nil, fmt.Errorf("unsupported dictionary format: %s", filepath.Ext(path))
 	}
@@ -116,7 +137,7 @@ func Discover(root string) ([]string, error) {
 			return nil // unreadable subtree: skip, keep walking
 		}
 		if !d.IsDir() {
-			if _, ok := openers[strings.ToLower(filepath.Ext(p))]; ok {
+			if _, ok := matchKey(openers, p); ok {
 				out = append(out, p)
 			}
 		}
