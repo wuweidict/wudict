@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -462,7 +463,9 @@ func cmdServe(args []string) error {
 	}
 	srv := server.New(reg)
 	srv.ConfigPath = cfgFile
-	srv.Speexdec = cfg.Speexdec
+	sxPath, sxSource := resolveSpeexdec(cfg.Speexdec)
+	srv.Speexdec = sxPath
+	announceSpeexdec(sxPath, sxSource)
 	srv.AutoIndex = cfg.AutoIndex != "off"
 
 	url := "http://" + cfg.Addr() + "/"
@@ -519,6 +522,61 @@ func nextPort(p string) string {
 func dirExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
+}
+
+// resolveSpeexdec locates the speexdec binary ONCE at startup (never at .spx
+// playback time). Precedence: an explicit SPEEXDEC override, then a binary
+// sitting next to the gonow-dict executable, then $PATH. Returns the resolved
+// path ("" if none found) and a short human-readable source label.
+func resolveSpeexdec(override string) (path, source string) {
+	name := "speexdec"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if override != "" {
+		if isExecFile(override) {
+			return override, "SPEEXDEC override"
+		}
+		if p, err := exec.LookPath(override); err == nil {
+			return p, "SPEEXDEC override"
+		}
+		fmt.Fprintf(os.Stderr, "gonow-dict: SPEEXDEC=%q not found — falling back to auto-detection\n", override)
+	}
+	if exe, err := os.Executable(); err == nil {
+		if cand := filepath.Join(filepath.Dir(exe), name); isExecFile(cand) {
+			return cand, "next to executable"
+		}
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p, "PATH"
+	}
+	return "", ""
+}
+
+// isExecFile reports whether p is an existing, executable regular file.
+func isExecFile(p string) bool {
+	fi, err := os.Stat(p)
+	if err != nil || fi.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return fi.Mode()&0o111 != 0
+}
+
+// announceSpeexdec reports the speexdec resolution at startup: the resolved
+// path when found, or a warning with install pointers when not.
+func announceSpeexdec(path, source string) {
+	if path != "" {
+		fmt.Fprintf(os.Stderr, "speexdec: %s (%s) — .spx audio enabled\n", path, source)
+		return
+	}
+	fmt.Fprint(os.Stderr, "speexdec: not found — .spx audio will not play.\n"+
+		"  Install it and restart, drop the binary next to gonow-dict, or set SPEEXDEC=/path/to/speexdec:\n"+
+		"    macOS:    brew install speex\n"+
+		"    Linux:    sudo apt install speex   (or your distro's speex package)\n"+
+		"    Windows:  https://www.speex.org/downloads/\n")
 }
 
 func openBrowser(url string) {

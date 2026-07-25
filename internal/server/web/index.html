@@ -10,7 +10,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>gonow-dict</title>
-<script src="assets/mark.min.js"></script>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+<script src="/assets/mark.min.js"></script>
 <style>
 /* ── design tokens ─────────────────────────────────────────────────── */
 :root{
@@ -275,7 +276,7 @@ function dictLabel(d){return d.name||d.path.split("/").pop()}
 async function loadDicts(rescan){
   setStatus('<span class="spin"></span>Loading dictionaries…');
   try{
-    dicts=await (await fetch(rescan?"api/rescan":"api/dicts")).json();
+    dicts=await (await fetch(rescan?"/api/rescan":"/api/dicts")).json();
   }finally{
     if(!lastQuery)setStatus("");
   }
@@ -421,7 +422,7 @@ function runIngest(id,opts,label){
   label.style.textDecoration="none";label.style.cursor="default";
   const params=(opts.full?"&full=1":"")+(opts.level==="headwords"?"&level=headwords":"");
   return new Promise(resolve=>{
-    const es=new EventSource("api/ingest?dict="+id+params);
+    const es=new EventSource("/api/ingest?dict="+id+params);
     es.addEventListener("progress",ev=>{
       const p=JSON.parse(ev.data);
       show("preparing… "+p.done.toLocaleString()+(p.total?"/"+p.total.toLocaleString():""));
@@ -439,15 +440,17 @@ function runIngest(id,opts,label){
 /* ── search ────────────────────────────────────────────────────────── */
 const noResultsSVG=`<svg width="90" height="90" viewBox="0 0 1000 1000" aria-hidden="true"><path d="M979.7,929.8L782.3,732.4c-1.3-1.3-2.9-1.8-4.2-2.8c65-76.2,104.4-174.8,104.4-282.8c0-240.9-195.3-436.3-436.3-436.3S10,205.9,10,446.8c0,38.5,5.5,75.6,14.8,111.1C36.1,540.7,65.4,500,83,492.4c-1.9-15-3.1-30.1-3.1-45.6c0-202.4,164.1-366.5,366.5-366.5c202.4,0,366.5,164.1,366.5,366.5c0,159-101.5,294.1-243.1,344.8c-6.7,28.7-17.6,56.1-32.5,81.6c72.6-15.5,138.6-48.8,193-95.5c1,1.3,1.6,2.9,2.8,4.2l197.4,197.3c13.6,13.7,35.7,13.7,49.3,0C993.4,965.6,993.4,943.5,979.7,929.8L979.7,929.8z"/></svg>`;
 
-/* Article HTML arrives with resource refs already rewritten to the relative
-   res/{dict}/… form by the server (RewriteEntryHTML, unit-tested in Go), so
-   the click handlers below use those hrefs as-is. resURL is only the
-   fallback for refs the server-side attribute regex cannot see (e.g.
-   unquoted attributes in malformed dictionary HTML); it emits the same
-   relative form, so it never double-prefixes an already-rewritten ref. */
+/* Article HTML arrives with resource refs already rewritten to the
+   root-absolute /res/{dict}/… form by the server (RewriteEntryHTML,
+   unit-tested in Go), so the click handlers below use those hrefs as-is.
+   resURL is only the fallback for refs the server-side attribute regex
+   cannot see (e.g. unquoted attributes in malformed dictionary HTML); it
+   emits the same absolute form, so it never double-prefixes. Absolute
+   (not relative) because articles also render inside srcdoc iframes whose
+   base URL differs — /res/ resolves to the same origin URL everywhere. */
 function resURL(dictID,ref){
   ref=ref.replace(/^sound:\/\//i,"").replace(/^file:\/\//i,"").replace(/^\.?\//,"");
-  return "res/"+dictID+"/"+ref;
+  return "/res/"+dictID+"/"+ref;
 }
 
 /* shadow-root base style: sane defaults inside the sandbox; media flip
@@ -498,7 +501,7 @@ function frameDoc(content,fid,dark){
     'body{margin:8px;word-break:break-word}img,video,svg{max-width:100%;height:auto}'+
     'html.dark{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.92)}'+
     'html.dark :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){filter:invert(1) hue-rotate(180deg)}'+
-    '</style><script src="assets/frame.js" data-fid="'+fid+'"><\/script></head><body>'+content+'</body></html>';
+    '</style><script src="/assets/frame.js" data-fid="'+fid+'"><\/script></head><body>'+content+'</body></html>';
 }
 /* bridge messages from article iframes */
 addEventListener("message",e=>{
@@ -611,7 +614,7 @@ async function doSearch(ev){
   const out=$("out");
   let boxes=[],openedIdx=null,anyShown=false;
   try{
-    await fetchStream("api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+encodeURIComponent(dictParam)+"&n="+perDict,msg=>{
+    await fetchStream("/api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+encodeURIComponent(dictParam)+"&n="+perDict,msg=>{
       if(seq!==searchSeq)return; // superseded by a newer search
       if(msg.t==="begin"){
         out.innerHTML="";
@@ -644,7 +647,7 @@ document.addEventListener("click",e=>{
   e.preventDefault();
   const det=more.closest("details.dict"),box=det.parentElement,id=more.dataset.id,mode=$("mode").value;
   more.textContent="…";
-  fetchStream("api/search?q="+encodeURIComponent(lastQuery)+"&mode="+mode+"&dict="+id+"&n=100",msg=>{
+  fetchStream("/api/search?q="+encodeURIComponent(lastQuery)+"&mode="+mode+"&dict="+id+"&n=100",msg=>{
     if(msg.t==="hit"){renderSlot(box,msg,mode,lastQuery,1e9);const nd=box.querySelector("details.dict");if(nd)nd.open=true}
   }).catch(()=>{more.textContent="more…"});
 });
@@ -670,6 +673,19 @@ function lookupWord(w){
   if($("mode").value==="fts")$("mode").value="prefix";
   doSearch();
 }
+/* One reused <audio>, kept referenced so the browser can't garbage-collect
+   it mid-load. .spx audio is transcoded server-side (speexdec), so the first
+   response can lag enough that an unreferenced `new Audio(url)` would be
+   collected before it plays. Playback decodes by Content-Type, not the URL
+   extension, so a .spx URL served as audio/wav plays fine. */
+let audioEl=null;
+function playAudio(url){
+  if(!url)return;
+  if(!audioEl)audioEl=new Audio();
+  audioEl.src=url;
+  const p=audioEl.play();
+  if(p&&p.catch)p.catch(err=>{console.warn("audio play failed:",url,err);setStatus("⚠ could not play audio")});
+}
 document.addEventListener("click",e=>{
   const path=e.composedPath();
   const a=path.find(el=>el.tagName==="A");
@@ -680,9 +696,9 @@ document.addEventListener("click",e=>{
   if(/^(bword|entry):\/\//i.test(href)||/^[dx]:/i.test(href)){
     e.preventDefault();lookupWord(decodeURIComponent(href.replace(/^(bword|entry):\/\//i,"").replace(/^[dx]:/i,"")));
   }else if(/\.(mp3|ogg|wav|spx|m4a)(\?|#|$)/i.test(href)){
-    e.preventDefault();new Audio(href.startsWith("res/")||/^https?:/i.test(href)?href:resURL(dictID,href)).play();
-  }else if(a.querySelector("img")&&href.startsWith("res/")){
-    e.preventDefault();new Audio(href).play();
+    e.preventDefault();playAudio(href.startsWith("/res/")||/^https?:/i.test(href)?href:resURL(dictID,href));
+  }else if(a.querySelector("img")&&href.startsWith("/res/")){
+    e.preventDefault();playAudio(href);
   }else if(href&&!/^([a-z][\w+.-]*:|\/|#|res\/|assets\/)/i.test(href)){
     e.preventDefault();lookupWord(decodeURIComponent(href)); // bare-word link (slob)
   }
@@ -699,7 +715,7 @@ document.addEventListener("dblclick",e=>{
 /* audio inside <object type="audio/…"> (DSL) → click to play */
 document.addEventListener("click",e=>{
   const o=e.composedPath().find(el=>el.tagName==="OBJECT"&&/^audio\//.test(el.getAttribute("type")||""));
-  if(o){e.preventDefault();new Audio(o.getAttribute("data")).play()}
+  if(o){e.preventDefault();playAudio(o.getAttribute("data"))}
 });
 
 /* auto-hide bar on scroll down */

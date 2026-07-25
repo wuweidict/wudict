@@ -10,7 +10,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -31,16 +30,14 @@ type Config struct {
 
 func defaults() Config {
 	home, _ := os.UserHomeDir()
-	speexdec := "/usr/bin/speexdec"
-	if p, err := exec.LookPath("speexdec"); err == nil {
-		speexdec = p
-	}
 	return Config{
-		DictDir:   filepath.Join(home, "Dictionaries"),
-		DBDir:     "", // empty = store.DefaultDBDir()
-		IP:        "127.0.0.1",
-		Port:      "8808",
-		Speexdec:  speexdec,
+		DictDir: filepath.Join(home, "Dictionaries"),
+		DBDir:   "", // empty = store.DefaultDBDir()
+		IP:      "127.0.0.1",
+		Port:    "8808",
+		// Speexdec "" = auto-detect at launch (next to the executable, then
+		// $PATH); SPEEXDEC overrides. See resolveSpeexdec in the CLI.
+		Speexdec:  "",
 		AutoIndex: "fuzzy", // opt-out: build fuzzy indexes on first use
 	}
 }
@@ -136,7 +133,7 @@ const configTemplate = `# gonow-dict configuration
 # SERVER_PORT = "8808"
 # NO_BROWSER  = "0"                   # "1" = do not open a browser tab on startup
 # VERBOSE     = "0"                   # "1" = verbose logging for debugging
-# SPEEXDEC    = "/usr/bin/speexdec"   # speexdec binary for .spx audio transcoding
+# SPEEXDEC    = "/usr/bin/speexdec"   # override; blank = auto-detect (next to the executable, then $PATH)
 # AUTO_INDEX  = "fuzzy"               # "off" = do not auto-build fuzzy indexes on first search
 `
 

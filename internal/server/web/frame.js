@@ -11,6 +11,7 @@
 (function () {
 	"use strict";
 	var fid = document.currentScript.dataset.fid;
+	var audioEl = null; // reused across clicks so playback isn't GC'd mid-load
 
 	function post() {
 		var d = document;
@@ -46,7 +47,13 @@
 			parent.postMessage({ t: "lookup", w: decodeURIComponent(w) }, "*");
 		} else if (/\.(mp3|ogg|wav|spx|m4a)([?#]|$)/i.test(href)) {
 			e.preventDefault();
-			new Audio(href).play();
+			// reuse one referenced element so it can't be GC'd during the
+			// (possibly slow, speexdec-transcoded) load; decode is by
+			// Content-Type, not the .spx URL extension.
+			if (!audioEl) audioEl = new Audio();
+			audioEl.src = href;
+			var p = audioEl.play();
+			if (p && p.catch) p.catch(function (err) { console.warn("audio play failed:", href, err); });
 		}
 	});
 	document.addEventListener("dblclick", function () {

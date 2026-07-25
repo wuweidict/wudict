@@ -40,6 +40,9 @@ var setupHTML string
 //go:embed web/frame.js
 var frameJS []byte // bridge script for sandboxed article iframes
 
+//go:embed web/favicon.svg
+var faviconSVG []byte // "Lookup" mark: magnifier over headword lines
+
 // Server exposes the registry over HTTP.
 type Server struct {
 	reg *Registry
@@ -81,6 +84,15 @@ func New(reg *Registry) *Server {
 		w.Header().Set("Cache-Control", "public, max-age=604800")
 		_, _ = w.Write(frameJS)
 	})
+	// SVG favicon, plus a /favicon.ico route so browsers that fetch the
+	// well-known path by default get the same mark instead of a 404.
+	serveFavicon := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=604800")
+		_, _ = w.Write(faviconSVG)
+	}
+	s.mux.HandleFunc("GET /assets/favicon.svg", serveFavicon)
+	s.mux.HandleFunc("GET /favicon.ico", serveFavicon)
 	return s
 }
 
@@ -422,6 +434,58 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	writeLine(streamMsg{T: "end"})
 }
 
+// webMIME is the authoritative Content-Type for web-critical extensions.
+// It overrides whatever the backend reports because Go's
+// mime.TypeByExtension returns text/plain for .css/.js on some platforms
+// (OS mime DB / Windows registry), and ingested media.db rows carry
+// whatever the ingest host happened to report — either makes browsers
+// refuse stylesheets/scripts under strict MIME checking.
+//
+// Values follow MDN's Common MIME types and IANA registrations: the modern
+// registered font types (font/woff, font/ttf, … — RFC 8081), text/javascript
+// (RFC 9239, not the obsolete application/javascript), and
+// image/vnd.microsoft.icon — not the legacy application/x-font-* variants.
+// Exception: .spx is mapped to audio/wav because gonow-dict transcodes Speex
+// to WAV on the way out (see handleResource), so that is what the client
+// actually receives.
+var webMIME = map[string]string{
+	// images
+	".bmp": "image/bmp", ".gif": "image/gif", ".ico": "image/vnd.microsoft.icon",
+	".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+	".svg": "image/svg+xml", ".tif": "image/tiff", ".tiff": "image/tiff",
+	".webp": "image/webp",
+	// text / markup / scripts
+	".css": "text/css", ".ini": "text/plain",
+	".js": "text/javascript", ".mjs": "text/javascript",
+	".json": "application/json", ".html": "text/html", ".htm": "text/html",
+	".xhtml": "application/xhtml+xml", ".wasm": "application/wasm",
+	// fonts (RFC 8081 registered types)
+	".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf",
+	".otf": "font/otf", ".eot": "application/vnd.ms-fontobject",
+	// documents
+	".pdf": "application/pdf",
+	// audio. .spx is served as WAV: the server transcodes Speex→WAV via
+	// speexdec before it ever reaches the client, so the byte stream at a
+	// .spx URL is audio/wav, NOT audio/ogg. .webm can be audio or video —
+	// dictionaries ship audio, so default to that.
+	".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg",
+	".oga": "audio/ogg", ".spx": "audio/wav", ".wav": "audio/wav",
+	".m4a": "audio/mp4", ".m4b": "audio/mp4", ".aac": "audio/aac",
+	".webm": "audio/webm", ".weba": "audio/webm",
+	// video
+	".mp4": "video/mp4",
+}
+
+// resolveMIME prefers the web-critical override, else the backend's value.
+func resolveMIME(name, backend string) string {
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		if m, ok := webMIME[strings.ToLower(name[i:])]; ok {
+			return m
+		}
+	}
+	return backend
+}
+
 // handleResource serves /res/{dictID}/{name...}.
 func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/res/")
@@ -450,8 +514,11 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { rc.Close() }() // closure: rc may be swapped below
-	// browsers cannot play Speex: transcode .spx to WAV via speexdec
-	if strings.HasSuffix(strings.ToLower(name), ".spx") && s.Speexdec != "" {
+	isSpx := strings.HasSuffix(strings.ToLower(name), ".spx")
+	// browsers cannot play Speex: transcode .spx to WAV via speexdec. The
+	// bytes we send are WAV, so the Content-Type is audio/wav (never the
+	// audio/ogg of the raw container).
+	if isSpx && s.Speexdec != "" {
 		if wav, err := s.spxToWav(id, name, rc); err == nil {
 			w.Header().Set("Content-Type", "audio/wav")
 			w.Header().Set("Cache-Control", "public, max-age=86400")
@@ -469,10 +536,17 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 			rc = rc2
 		}
 	}
-	if mime != "" {
-		w.Header().Set("Content-Type", mime)
+	if m := resolveMIME(name, mime); m != "" {
+		w.Header().Set("Content-Type", m)
 	}
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	// A .spx that reached here could NOT be transcoded (no speexdec / failure)
+	// — it is unplayable raw Speex, so don't let a day-long cache entry mask
+	// the fix once speexdec is installed. Everything else caches normally.
+	if isSpx {
+		w.Header().Set("Cache-Control", "no-store")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+	}
 	_, _ = io.Copy(w, rc)
 }
 
