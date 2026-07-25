@@ -208,7 +208,7 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 "use strict";
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
-let dicts=[],lastQuery=null,searchSeq=0;
+let dicts=[],lastQuery=null,searchSeq=0,searchAC=null;
 
 /* preference order (ids) + disabled set, persisted. New dictionaries not
    yet in the saved order fall in alphabetically after the ordered ones. */
@@ -537,8 +537,8 @@ function setStatus(html){
 /* read a newline-delimited JSON response, invoking onMsg per record as it
    arrives — this is what lets each dictionary render the instant it is
    ready instead of waiting for the whole fan-out (progressive results). */
-async function fetchStream(url,onMsg){
-  const resp=await fetch(url);
+async function fetchStream(url,onMsg,signal){
+  const resp=await fetch(url,signal?{signal}:undefined);
   if(!resp.ok){let e;try{e=(await resp.json()).error}catch(_){}throw new Error(e||resp.statusText)}
   const reader=resp.body.getReader(),dec=new TextDecoder();let buf="";
   for(;;){
@@ -601,6 +601,11 @@ async function doSearch(ev){
   const q=$("q").value.trim();
   if(!q)return;
   const mode=$("mode").value,dictSel=$("dict").value,seq=++searchSeq;
+  // abort the previous in-flight search so the server stops streaming
+  // results nobody will render (superseded typing / mode change).
+  if(searchAC)searchAC.abort();
+  searchAC=new AbortController();
+  const signal=searchAC.signal;
   lastQuery=q;
   setStatus('<span class="spin"></span>Searching…');
   // "All" queries the enabled dictionaries in preference order (fewer
@@ -636,8 +641,8 @@ async function doSearch(ev){
       }else if(msg.t==="end"&&!anyShown){
         out.innerHTML=`<div class="empty">${noResultsSVG}<p>No results for “${esc(q)}”</p></div>`;
       }
-    });
-  }catch(err){if(seq===searchSeq)setStatus("⚠ "+esc(err.message))}
+    },signal);
+  }catch(err){if(err.name==="AbortError")return;if(seq===searchSeq)setStatus("⚠ "+esc(err.message))}
 }
 $("frm").addEventListener("submit",doSearch);
 /* "more…": re-query a single dictionary at a higher limit, in place */

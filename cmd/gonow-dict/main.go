@@ -484,7 +484,17 @@ func cmdServe(args []string) error {
 		go openBrowser(url)
 	}
 
-	httpSrv := &http.Server{Addr: cfg.Addr(), Handler: srv}
+	// No WriteTimeout: /api/search (NDJSON) and /api/ingest (SSE) stream for
+	// a long time — a write deadline would sever them. ReadHeaderTimeout +
+	// IdleTimeout + MaxHeaderBytes harden against slowloris without touching
+	// the streaming paths.
+	httpSrv := &http.Server{
+		Addr:              cfg.Addr(),
+		Handler:           srv,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
 	// graceful shutdown on Ctrl-C / SIGTERM: finish in-flight requests,
 	// close database handles cleanly
 	idle := make(chan struct{})

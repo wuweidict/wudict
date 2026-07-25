@@ -46,6 +46,10 @@ func TestRewriteEntryHTML(t *testing.T) {
 		{"style attr url quoted", `<div style='list-style:url("dot.gif")'>`, `<div style='list-style:url(/res/` + id + `/dot.gif)'>`},
 		{"style block url", `<style>.x{background:url('a/b.png')}</style>`, `<style>.x{background:url(/res/` + id + `/a/b.png)}</style>`},
 		{"style block data-uri untouched", `<style>.y{background:url(data:image/gif;base64,AA)}</style>`, `<style>.y{background:url(data:image/gif;base64,AA)}</style>`},
+		// fast-path gate: no rewritable markers → returned verbatim; a bare
+		// word that merely contains "data" must not be touched either.
+		{"plain text untouched", `<p>a plain <b>definition</b> with no refs</p>`, `<p>a plain <b>definition</b> with no refs</p>`},
+		{"prose data word untouched", `<p>consult the database of words</p>`, `<p>consult the database of words</p>`},
 		{"mixed article", `<a href="sound://a.mp3"><img src="spkr_b.png"></a> <a href="bword://apple">apple</a>`,
 			`<a href="/res/` + id + `/a.mp3"><img src="/res/` + id + `/spkr_b.png"></a> <a href="bword://apple">apple</a>`},
 	}

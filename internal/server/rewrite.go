@@ -75,6 +75,17 @@ func RewriteEntryHTML(html, dictID string) string {
 	if html == "" || dictID == "" {
 		return html
 	}
+	// Fast path: skip all regex work when the article has nothing rewritable.
+	// These bare substrings are a strict superset of every pattern below
+	// (attrRef names, srcset⊃src, style⊃<style, and <base), so their absence
+	// guarantees no match — false positives only cost a no-op regex pass, the
+	// same as before. Plain-text definitions (common for StarDict/DSL) skip
+	// the whole pipeline.
+	if !strings.Contains(html, "src") && !strings.Contains(html, "href") &&
+		!strings.Contains(html, "data") && !strings.Contains(html, "poster") &&
+		!strings.Contains(html, "style") && !strings.Contains(html, "<base") {
+		return html
+	}
 	// Drop <base> first: everything below (and the browser) must resolve
 	// relative refs against the page, not a leftover scraped base URL.
 	html = baseTagRef.ReplaceAllString(html, "")

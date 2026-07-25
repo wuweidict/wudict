@@ -907,8 +907,7 @@ func (mdict *MdictBase) keywordEntryToIndex1(item *MDictKeywordEntry) (*MDictKey
 	}
 
 	if recordBlockInfo == nil {
-		fmt.Printf("record block info is nil, current keyBlockEntry: %+v, last recordBlockInfo: %+v\n", item, mdict.recordBlockInfo.recordInfoList[len(mdict.recordBlockInfo.recordInfoList)-1])
-		return nil, errors.New("key-item record info not found")
+		return nil, fmt.Errorf("key-item record info not found (recordStartOffset=%d)", item.RecordStartOffset)
 	}
 
 	recordBlockStartOffset := recordBlockInfo.compressAccumulatorOffset + mdict.recordBlockInfo.recordBlockDataStartOffset
@@ -1025,7 +1024,7 @@ func locateDefByKWIndex(index *MDictKeywordIndex, filePath string, isRecordEncry
 	data := recordBlock[start:end]
 
 	if isMdd {
-		log.Errorf("return mdd data")
+		log.Debugf("return mdd data")
 		return data, nil
 	}
 
@@ -1068,8 +1067,7 @@ func (mdict *MdictBase) locateByKeywordEntry(item *MDictKeywordEntry) ([]byte, e
 	}
 
 	if recordBlockInfo == nil {
-		fmt.Printf("record block info is nil, current keyBlockEntry: %+v, last recordBlockInfo: %+v\n", item, mdict.recordBlockInfo.recordInfoList[len(mdict.recordBlockInfo.recordInfoList)-1])
-		return nil, errors.New("key-item record info not found")
+		return nil, fmt.Errorf("key-item record info not found (recordStartOffset=%d)", item.RecordStartOffset)
 	}
 
 	recordBlockStartOffset := recordBlockInfo.compressAccumulatorOffset + mdict.recordBlockInfo.recordBlockDataStartOffset

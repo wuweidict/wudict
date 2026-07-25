@@ -58,6 +58,11 @@ type Server struct {
 	// browser can play Speex natively.
 	Speexdec string
 
+	// spxLocks single-flights .spx→WAV transcodes per cache key so two
+	// concurrent plays of the same word don't spawn two speexdec processes
+	// racing the same output file. Keyed by wav cache path → *sync.Mutex.
+	spxLocks sync.Map
+
 	// AutoIndex, when true (config auto_index != "off"), builds a fuzzy
 	// headword index for a dictionary the first time it is searched —
 	// silently, in the background — so fuzzy search becomes available on
@@ -556,6 +561,18 @@ func (s *Server) spxToWav(dictID, name string, rc io.Reader) ([]byte, error) {
 	sum := sha256.Sum256([]byte(dictID + "\x00" + name))
 	cacheDir := filepath.Join(store.DefaultDBDir(), "spxcache")
 	wavPath := filepath.Join(cacheDir, hex.EncodeToString(sum[:])[:24]+".wav")
+	if data, err := os.ReadFile(wavPath); err == nil && len(data) > 0 {
+		return data, nil
+	}
+	// single-flight per cache key: the loser waits on the mutex, then finds
+	// the winner's WAV in the re-check below — no duplicate transcode, no two
+	// writers racing wavPath. The guard is on the shared on-disk cache, so it
+	// stays correct if the exec.Command trip is later replaced by an in-process
+	// Speex decoder.
+	muRaw, _ := s.spxLocks.LoadOrStore(wavPath, &sync.Mutex{})
+	mu := muRaw.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
 	if data, err := os.ReadFile(wavPath); err == nil && len(data) > 0 {
 		return data, nil
 	}
