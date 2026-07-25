@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package slob implements the Aard2 .slob container (direct backend +
 // ingest reader). Binary layout ported from pyglossary/pyglossary/slob
 // (big-endian throughout):

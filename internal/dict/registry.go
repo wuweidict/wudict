@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package dict
 
 import (
@@ -30,22 +34,32 @@ func RegisterReader(ext string, fn readerOpener) {
 }
 
 // OpenReader opens the ingest scan for path, dispatching on extension.
-func OpenReader(path string) (Reader, error) {
+func OpenReader(path string) (r Reader, err error) {
 	fn, ok := readerOpeners[strings.ToLower(filepath.Ext(path))]
 	if !ok {
 		return nil, fmt.Errorf("no ingest reader for format: %s", filepath.Ext(path))
 	}
+	defer recoverOpen(path, &err)
 	return fn(path)
 }
 
 // Open opens the dictionary whose main file is path, dispatching on
-// extension.
-func Open(path string) (Dictionary, error) {
+// extension. Corrupt or truncated files must surface as errors, never
+// panics: a slice-bounds panic deep in a format parser is converted here
+// so one bad file cannot take down the server or a batch ingest.
+func Open(path string) (d Dictionary, err error) {
 	fn, ok := openers[strings.ToLower(filepath.Ext(path))]
 	if !ok {
 		return nil, fmt.Errorf("unsupported dictionary format: %s", filepath.Ext(path))
 	}
+	defer recoverOpen(path, &err)
 	return fn(path)
+}
+
+func recoverOpen(path string, err *error) {
+	if r := recover(); r != nil {
+		*err = fmt.Errorf("%s: corrupt or unsupported file (parser panic: %v)", filepath.Base(path), r)
+	}
 }
 
 // Discover walks root recursively and returns the main files of all

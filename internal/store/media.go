@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package store
 
 import (
@@ -18,7 +22,7 @@ type Media struct {
 }
 
 func OpenMedia(path string) (*Media, error) {
-	db, err := sql.Open("sqlite3", "file:"+path+"?mode=ro&_query_only=1")
+	db, err := sql.Open(driverName, dsnRO(path))
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +69,7 @@ func IngestMedia(d dict.Dictionary, names []string, dbPath, dictUUID string, pro
 		}
 	}()
 
-	db, err := sql.Open("sqlite3", "file:"+tmp+"?_journal_mode=OFF&_synchronous=OFF")
+	db, err := sql.Open(driverName, dsnIngest(tmp))
 	if err != nil {
 		return err
 	}
@@ -132,7 +136,7 @@ func IngestMedia(d dict.Dictionary, names []string, dbPath, dictUUID string, pro
 
 // ReadMetaValue reads one meta value from a gonow database file.
 func ReadMetaValue(dbPath, key string) (string, error) {
-	db, err := sql.Open("sqlite3", "file:"+dbPath+"?mode=ro")
+	db, err := sql.Open(driverName, dsnRO(dbPath))
 	if err != nil {
 		return "", err
 	}

@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package dsl implements ABBYY Lingvo DSL dictionaries: plain-text
 // markup with no native index, so the direct backend transparently
 // ingests into a text.db on first open (SPEC §1). Markup semantics are

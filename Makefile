@@ -58,15 +58,20 @@ serve: build ## Run the HTTP server (DICT_DIR/PORT/ARGS overridable), e.g. make 
 	./$(BINARY) serve $(if $(DICT_DIR),-dict-dir "$(DICT_DIR)") $(if $(PORT),-port $(PORT)) $(ARGS)
 
 .PHONY: cross
-cross: ## Cross-compile for darwin/linux/windows (amd64+arm64) into dist/
+cross: ## Cross-compile all release targets into dist/ (pure-Go sqlite via -tags purego, no C toolchain needed)
 	@mkdir -p $(BUILD_DIR)
-	@for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do \
-	  os=$${target%/*}; arch=$${target#*/}; ext=""; [ "$$os" = windows ] && ext=".exe"; \
-	  echo "building $$os/$$arch"; \
-	  GOOS=$$os GOARCH=$$arch go build $(GOFLAGS) -ldflags "$(LDFLAGS)" \
-	    -o $(BUILD_DIR)/$(BINARY)-$$os-$$arch$$ext $(CMD) || exit 1; \
+	@for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 linux/arm/7 linux/arm/6 windows/amd64 windows/arm64; do \
+	  os=$$(echo $$target | cut -d/ -f1); arch=$$(echo $$target | cut -d/ -f2); arm=$$(echo $$target | cut -d/ -f3); \
+	  ext=""; [ "$$os" = windows ] && ext=".exe"; \
+	  suffix="$$os-$$arch"; [ -n "$$arm" ] && suffix="$$suffix-v$$arm"; \
+	  echo "building $$suffix"; \
+	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch GOARM=$$arm go build -trimpath -tags purego -ldflags "$(LDFLAGS)" \
+	    -o $(BUILD_DIR)/$(BINARY)-$$suffix$$ext $(CMD) || exit 1; \
 	done
-	@echo "NOTE: once the sqlite ingest tier lands (P2, cgo), cross targets need a C toolchain (see docs/DECISIONS.md D4)."
+
+.PHONY: test-purego
+test-purego: ## Run store tests against the pure-Go sqlite driver (release parity)
+	CGO_ENABLED=0 go test -tags purego ./internal/store/ ./internal/server/
 
 # ---- quality ------------------------------------------------------------
 

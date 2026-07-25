@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package store
 
 import (
@@ -56,7 +60,7 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 		return err
 	}
 
-	db, err := sql.Open("sqlite3", "file:"+tmp+"?_journal_mode=OFF&_synchronous=OFF")
+	db, err := sql.Open(driverName, dsnIngest(tmp))
 	if err != nil {
 		return err
 	}

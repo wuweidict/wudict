@@ -1,0 +1,110 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag for the release (e.g., v0.1)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('-v{0}', matrix.goarm) || '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── macOS ──────────────────────────────────────────────
+          - { goos: darwin,  goarch: arm64  }
+          - { goos: darwin,  goarch: amd64  }
+          # ── Linux ──────────────────────────────────────────────
+          - { goos: linux,   goarch: amd64  }
+          - { goos: linux,   goarch: arm64  }
+          - { goos: linux,   goarch: arm,    goarm: "7" }
+          - { goos: linux,   goarch: arm,    goarm: "6" }
+          # ── Windows ────────────────────────────────────────────
+          - { goos: windows, goarch: amd64,  ext: ".exe" }
+          - { goos: windows, goarch: arm64,  ext: ".exe" }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          # pure-Go sqlite driver (modernc, FTS5 included) so every
+          # target cross-compiles from one ubuntu runner — no C
+          # toolchains; native/dev builds use the cgo driver instead
+          CGO_ENABLED: "0"
+        run: |
+          SUFFIX="${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('-v{0}', matrix.goarm) || '' }}"
+          BINARY="gonow-dict-${SUFFIX}${{ matrix.ext }}"
+          VERSION="${{ inputs.tag }}"
+          [ -z "$VERSION" ] && VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
+          go build -trimpath -tags purego -ldflags="-s -w -X main.version=${VERSION}" -o "${BINARY}" ./cmd/gonow-dict
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('-v{0}', matrix.goarm) || '' }}
+          path: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('-v{0}', matrix.goarm) || '' }}${{ matrix.ext }}
+
+  release:
+    needs: build
+    if: ${{ inputs.tag != '' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Create git tag if missing
+        run: |
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
+            echo "Tag ${TAG} already exists — skipping."
+          else
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "${TAG}" -m "Release ${TAG}"
+            git push origin "${TAG}"
+            echo "Tag ${TAG} pushed."
+          fi
+
+      - name: Create or update GitHub release
+        run: |
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            echo "Release ${TAG} exists — replacing assets."
+            gh release upload "${TAG}" artifacts/* --clobber
+          else
+            echo "Creating release ${TAG}."
+            gh release create "${TAG}" artifacts/* \
+              --title "${{ github.event.repository.name }} ${TAG}" \
+              --generate-notes
+          fi

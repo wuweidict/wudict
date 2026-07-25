@@ -1,3 +1,9 @@
+/**
+ * Copyright (C) 2026 glowinthedark
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 // gonow-dict iframe bridge: runs inside sandboxed article iframes
 // (script-bearing dictionaries). Reports content height, forwards
 // bword:// lookups and double-click word lookups to the app, follows

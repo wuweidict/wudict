@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package server is the persistent HTTP server (D3): dictionary
 // registry, JSON API, resource streaming, and the "Enable fuzzy &
 // full-text search" ingest flow with SSE progress (SPEC §6).

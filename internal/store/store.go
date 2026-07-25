@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package store is the ingested backend: the gonow-dict canonical SQLite
 // format (docs/SPEC.md §2). One `<slug>.text.db` per dictionary holds
 // headwords, aliases, article HTML, and a contentless FTS5 index that
@@ -13,8 +17,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-
-	_ "github.com/mattn/go-sqlite3" // requires build tag sqlite_fts5 (D4)
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
 )
@@ -37,7 +39,7 @@ type Store struct {
 
 // Open opens and validates a gonow-dict text database.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite3", "file:"+path+"?mode=ro&_query_only=1")
+	db, err := sql.Open(driverName, dsnRO(path))
 	if err != nil {
 		return nil, err
 	}

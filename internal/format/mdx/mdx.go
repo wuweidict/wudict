@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package mdx is the direct backend for Octopus MDict dictionaries: one
 // .mdx plus its companion .mdd resource files (NAME.mdd, NAME.1.mdd, …).
 //

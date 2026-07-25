@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package dict defines the format-agnostic core of gonow-dict: the
 // Dictionary interface every backend (direct native readers, ingested
 // SQLite) implements, plus the ingest-side Reader contract shared by all

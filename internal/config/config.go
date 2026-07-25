@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package config implements gonow-dict's configuration with the layering
 // borrowed from mdict-go-web: CLI flag > environment variable >
 // config.toml > built-in default.

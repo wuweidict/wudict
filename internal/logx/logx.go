@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package logx is the app-wide verbose logger: silent by default,
 // enabled with --verbose / VERBOSE=1 / GONOW_VERBOSE=1.
 package logx

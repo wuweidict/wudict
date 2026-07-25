@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package server
 
 import (
@@ -76,6 +80,13 @@ func New(reg *Registry) *Server {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	defer func() {
+		if rec := recover(); rec != nil {
+			logx.V("PANIC %s %s: %v", r.Method, r.URL.RequestURI(), rec)
+			fmt.Fprintf(os.Stderr, "panic serving %s: %v\n", r.URL.RequestURI(), rec)
+			httpErr(w, 500, "internal error: %v", rec)
+		}
+	}()
 	s.mux.ServeHTTP(w, r)
 	logx.V("%s %s (%s)", r.Method, r.URL.RequestURI(), time.Since(start).Round(time.Microsecond))
 }

@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package search fans one query out over many dictionaries concurrently
 // (draego's "all" mode, minus its sequential per-request DB opens —
 // FTS-audit #6: dictionaries stay open, queries run in parallel).

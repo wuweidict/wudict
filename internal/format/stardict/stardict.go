@@ -1,3 +1,7 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package stardict is the direct backend + ingest reader for StarDict
 // dictionaries: NAME.ifo (metadata), NAME.idx[.gz] (sorted headword
 // index), NAME.dict[.dz] (article data), optional NAME.syn (synonyms)
