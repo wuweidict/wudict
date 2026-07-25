@@ -1,4 +1,4 @@
-gonow-dict
+/gonow-dict
 dist/
 coverage.out
-config.toml
+/config.toml
