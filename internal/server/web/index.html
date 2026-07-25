@@ -97,6 +97,8 @@ details.dict>summary::before{content:"›";color:var(--fg-faint);
 details.dict[open]>summary::before{transform:rotate(90deg)}
 details.dict[open]>summary{border-bottom:1px solid var(--line-soft)}
 summary .count{margin-left:auto;font-weight:400;color:var(--fg-faint);font-size:12px}
+summary .more{font-weight:400;font-size:12px;color:var(--link);cursor:pointer;
+  text-decoration:underline;text-underline-offset:2px;margin-left:var(--sp-2)}
 summary .upgrade{font-weight:400;font-size:12px;color:var(--link);cursor:pointer;
   text-decoration:underline;text-underline-offset:2px;margin-left:auto}
 dl{margin:0;padding:var(--sp-1) var(--sp-2) var(--sp-2)}
@@ -130,7 +132,25 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 .panel-card h2 .btn{margin-left:auto}
 .pd{border:1px solid var(--line);border-radius:8px;background:var(--bg-card);
   padding:var(--sp-1) var(--sp-2);margin-bottom:var(--sp-1);font-size:13px}
-.pd b{display:block;color:var(--fg);font-size:14px;word-break:break-word}
+.pd.dragging{opacity:.45}
+.pd.drop-before{box-shadow:0 -2px 0 var(--accent)}
+.pd.drop-after{box-shadow:0 2px 0 var(--accent)}
+.pd.off{opacity:.5}
+.pd .hd{display:flex;align-items:center;gap:.35em}
+.pd .grip{cursor:grab;color:var(--fg-faint);user-select:none;font-size:14px;
+  line-height:1;letter-spacing:-.15em;padding-right:.15em}
+.pd .grip:active{cursor:grabbing}
+.pd b{color:var(--fg);font-size:14px;word-break:break-word;flex:1}
+.pd .ord{display:flex;gap:.1em;margin-left:auto}
+.pd .ord button{background:none;border:0;color:var(--fg-faint);cursor:pointer;
+  font-size:12px;line-height:1;padding:.15em .2em;border-radius:4px}
+.pd .ord button:hover{color:var(--fg);background:var(--line-soft)}
+.pd .en{appearance:none;width:32px;height:18px;border-radius:9px;background:var(--line);
+  position:relative;cursor:pointer;flex:none;transition:background .15s}
+.pd .en:checked{background:var(--accent)}
+.pd .en::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;
+  border-radius:50%;background:#fff;transition:transform .15s}
+.pd .en:checked::after{transform:translateX(14px)}
 .pd .meta{color:var(--fg-faint);font-size:11.5px;margin:.15em 0 .3em}
 .pd .tag{display:inline-block;border:1px solid var(--line);border-radius:5px;
   padding:0 .4em;font-size:10.5px;color:var(--fg-soft);margin-right:.25em}
@@ -176,7 +196,7 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 
 <div id="panel" role="dialog" aria-label="Dictionaries">
 <div class="panel-card">
-<h2>Dictionaries <button class="btn" id="ingestAllBtn" title="Enable fuzzy &amp; full-text search for every dictionary">⚡ enable all</button>
+<h2>Dictionaries <button class="btn" id="ingestAllBtn" title="Enable full-text search for every dictionary">⚡ enable all</button>
 <button class="btn" id="rescanBtn" title="Rescan folder">⟳ rescan</button>
 <button class="btn" id="closePanel" aria-label="Close">✕</button></h2>
 <div id="panelList"></div>
@@ -188,6 +208,24 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
 let dicts=[],lastQuery=null,searchSeq=0;
+
+/* preference order (ids) + disabled set, persisted. New dictionaries not
+   yet in the saved order fall in alphabetically after the ordered ones. */
+function loadJSON(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}}
+let prefOrder=loadJSON("gonow_order",[]);
+let disabled=new Set(loadJSON("gonow_disabled",[]));
+function saveOrder(){localStorage.setItem("gonow_order",JSON.stringify(prefOrder))}
+function saveDisabled(){localStorage.setItem("gonow_disabled",JSON.stringify([...disabled]))}
+/* dictionaries in preference order: saved ones first, then unseen ones A→Z */
+function orderedDicts(){
+  const byId=new Map(dicts.map(d=>[d.id,d]));
+  const out=[];
+  for(const id of prefOrder){if(byId.has(id)){out.push(byId.get(id));byId.delete(id)}}
+  const rest=[...byId.values()].sort((a,b)=>dictLabel(a).localeCompare(dictLabel(b),undefined,{sensitivity:"base"}));
+  return out.concat(rest);
+}
+function orderedIds(){return orderedDicts().map(d=>d.id)}
+function enabledOrderedIds(){return orderedDicts().filter(d=>!disabled.has(d.id)).map(d=>d.id)}
 
 /* ── theme: auto → light → dark, persisted ─────────────────────────── */
 const THEMES=["auto","light","dark"];
@@ -242,9 +280,12 @@ async function loadDicts(rescan){
     if(!lastQuery)setStatus("");
   }
   dicts.sort((a,b)=>dictLabel(a).localeCompare(dictLabel(b),undefined,{sensitivity:"base"}));
+  // normalize the saved preference order to the current dictionary set
+  // (appends newly-added dicts A→Z, drops removed ones)
+  prefOrder=orderedIds();saveOrder();
   const sel=$("dict"),prev=sel.value||localStorage.getItem("gonow_dict")||"all";
   sel.innerHTML='<option value="all">All dictionaries</option>';
-  for(const d of dicts){
+  for(const d of dicts){ // dropdown stays alphabetical for quick name lookup
     const o=document.createElement("option");
     o.value=d.id;o.textContent=dictLabel(d);
     sel.appendChild(o);
@@ -252,30 +293,81 @@ async function loadDicts(rescan){
   if([...sel.options].some(o=>o.value===prev))sel.value=prev;
   renderPanel();
 }
+/* reorder helpers operate on the preference-ordered id list */
+function moveDict(id,where){
+  const ids=orderedIds(),i=ids.indexOf(id);
+  if(i<0)return;
+  ids.splice(i,1);
+  if(where==="up")ids.splice(Math.max(0,i-1),0,id);
+  else if(where==="down")ids.splice(Math.min(ids.length,i+1),0,id);
+  else if(where==="top")ids.unshift(id);
+  else ids.push(id); // bottom
+  prefOrder=ids;saveOrder();renderPanel();
+}
+function toggleDict(id){
+  disabled.has(id)?disabled.delete(id):disabled.add(id);
+  saveDisabled();renderPanel();
+}
 $("dict").onchange=e=>{localStorage.setItem("gonow_dict",e.target.value);if($("q").value.trim())doSearch()};
 
 function renderPanel(){
   const el=$("panelList");el.innerHTML="";
-  for(const d of dicts){
-    const div=document.createElement("div");div.className="pd";div.dataset.id=d.id;
+  const ord=orderedDicts();
+  for(const d of ord){
+    const off=disabled.has(d.id);
+    const div=document.createElement("div");div.className="pd"+(off?" off":"");div.dataset.id=d.id;
     let caps="";
     for(const[k,on]of[["exact",d.caps?.Exact],["prefix",d.caps?.Prefix],["fuzzy",d.caps?.Fuzzy],["full-text",d.caps?.FTS]])
       caps+=`<span class="tag${on?" on":""}">${k}</span>`;
+    // fuzzy search is built automatically on first use, so the only manual
+    // action offered is full-text (which also covers fuzzy).
     let acts="";
     if(d.error){acts=`<span class="err">${esc(d.error)}</span>`}
-    else if(!d.caps?.Fuzzy)acts=`<span class="act" data-act="ingest">Enable fuzzy &amp; full-text search</span>`+
-      `<span class="act" data-act="ingest-fuzzy" title="headwords only: smaller index, no article search">Fuzzy only</span>`+
-      `<span class="act" data-act="ingest-full">Full + pack media</span>`;
-    else if(!d.caps?.FTS)acts=`<span class="act" data-act="ingest">Add full-text search</span>`+
-      `<span class="act" data-act="ingest-full">…and pack media</span>`;
+    else if(!d.caps?.FTS)acts=`<span class="act" data-act="ingest">full-text search</span>`+
+      `<span class="act" data-act="ingest-full">FTS + pack media</span>`;
     else acts=`<span class="act" data-act="ingest-full">Pack media into .media.db</span>`;
-    div.innerHTML=`<b>${esc(dictLabel(d))}</b>
+    div.innerHTML=`<div class="hd">
+        <span class="grip" draggable="true" title="Drag to reorder">⠿</span>
+        <b>${esc(dictLabel(d))}</b>
+        <span class="ord">
+          <button data-mv="top" title="Move to top">⏫</button>
+          <button data-mv="up" title="Move up">▲</button>
+          <button data-mv="down" title="Move down">▼</button>
+          <button data-mv="bottom" title="Move to bottom">⏬</button>
+        </span>
+        <input type="checkbox" class="en" ${off?"":"checked"} title="${off?"Disabled — excluded from All dictionaries":"Enabled"}">
+      </div>
       <div class="meta">${esc(d.format||"?")} · ${d.entries?d.entries.toLocaleString()+" entries":""}</div>
       <div>${caps}</div><div class="acts">${acts}</div>
       ${d.dbPath?`<div class="path" title="Click to copy">db: ${esc(d.dbPath)}</div>`:""}`;
     el.appendChild(div);
   }
 }
+
+/* drag-to-reorder via the gripper (chevrons cover keyboard/precise moves) */
+let dragId=null;
+function clearDrop(){document.querySelectorAll(".pd.drop-before,.pd.drop-after").forEach(p=>p.classList.remove("drop-before","drop-after"))}
+$("panelList").addEventListener("dragstart",e=>{
+  const pd=e.target.closest(".pd");if(!pd||!e.target.classList.contains("grip"))return;
+  dragId=pd.dataset.id;pd.classList.add("dragging");e.dataTransfer.effectAllowed="move";
+});
+$("panelList").addEventListener("dragend",()=>{
+  document.querySelectorAll(".pd.dragging").forEach(p=>p.classList.remove("dragging"));clearDrop();dragId=null;
+});
+$("panelList").addEventListener("dragover",e=>{
+  if(!dragId)return;e.preventDefault();
+  const pd=e.target.closest(".pd");if(!pd||pd.dataset.id===dragId)return;
+  const r=pd.getBoundingClientRect(),after=e.clientY>r.top+r.height/2;
+  clearDrop();pd.classList.add(after?"drop-after":"drop-before");
+});
+$("panelList").addEventListener("drop",e=>{
+  if(!dragId)return;e.preventDefault();
+  const pd=e.target.closest(".pd");if(!pd||pd.dataset.id===dragId){clearDrop();return}
+  const r=pd.getBoundingClientRect(),after=e.clientY>r.top+r.height/2;
+  const ids=orderedIds(),from=ids.indexOf(dragId);ids.splice(from,1);
+  let to=ids.indexOf(pd.dataset.id);if(after)to++;
+  ids.splice(to,0,dragId);prefOrder=ids;saveOrder();clearDrop();dragId=null;renderPanel();
+});
 $("panelBtn").onclick=()=>$("panel").classList.add("show");
 $("closePanel").onclick=()=>$("panel").classList.remove("show");
 $("panel").onclick=e=>{if(e.target.id==="panel")$("panel").classList.remove("show")};
@@ -297,11 +389,16 @@ $("ingestAllBtn").onclick=async()=>{
   await loadDicts();if(lastQuery)doSearch();
 };
 $("panelList").addEventListener("click",e=>{
+  const mv=e.target.closest("[data-mv]");
+  if(mv){moveDict(mv.closest(".pd").dataset.id,mv.dataset.mv);return}
   const path=e.target.closest(".path");
   if(path){navigator.clipboard?.writeText(path.textContent.replace(/^db: /,""));path.style.color="var(--accent)";return}
   const act=e.target.closest(".act");if(!act)return;
   runIngest(act.closest(".pd").dataset.id,
     {full:act.dataset.act==="ingest-full",level:act.dataset.act==="ingest-fuzzy"?"headwords":""},act);
+});
+$("panelList").addEventListener("change",e=>{
+  if(e.target.classList.contains("en"))toggleDict(e.target.closest(".pd").dataset.id);
 });
 /* the "enable fuzzy & full-text search" link inside result summaries */
 document.addEventListener("click",e=>{
@@ -342,10 +439,12 @@ function runIngest(id,opts,label){
 /* ── search ────────────────────────────────────────────────────────── */
 const noResultsSVG=`<svg width="90" height="90" viewBox="0 0 1000 1000" aria-hidden="true"><path d="M979.7,929.8L782.3,732.4c-1.3-1.3-2.9-1.8-4.2-2.8c65-76.2,104.4-174.8,104.4-282.8c0-240.9-195.3-436.3-436.3-436.3S10,205.9,10,446.8c0,38.5,5.5,75.6,14.8,111.1C36.1,540.7,65.4,500,83,492.4c-1.9-15-3.1-30.1-3.1-45.6c0-202.4,164.1-366.5,366.5-366.5c202.4,0,366.5,164.1,366.5,366.5c0,159-101.5,294.1-243.1,344.8c-6.7,28.7-17.6,56.1-32.5,81.6c72.6-15.5,138.6-48.8,193-95.5c1,1.3,1.6,2.9,2.8,4.2l197.4,197.3c13.6,13.7,35.7,13.7,49.3,0C993.4,965.6,993.4,943.5,979.7,929.8L979.7,929.8z"/></svg>`;
 
-/* Article HTML arrives with resource refs already rewritten to /res/{dict}/…
-   by the server (RewriteEntryHTML, unit-tested in Go). resURL remains only
-   as the click-handler fallback for refs the server-side attribute regex
-   cannot see (e.g. unquoted attributes in malformed dictionary HTML). */
+/* Article HTML arrives with resource refs already rewritten to the relative
+   res/{dict}/… form by the server (RewriteEntryHTML, unit-tested in Go), so
+   the click handlers below use those hrefs as-is. resURL is only the
+   fallback for refs the server-side attribute regex cannot see (e.g.
+   unquoted attributes in malformed dictionary HTML); it emits the same
+   relative form, so it never double-prefixes an already-rewritten ref. */
 function resURL(dictID,ref){
   ref=ref.replace(/^sound:\/\//i,"").replace(/^file:\/\//i,"").replace(/^\.?\//,"");
   return "res/"+dictID+"/"+ref;
@@ -432,6 +531,68 @@ function setStatus(html){
   apply();
 }
 
+/* read a newline-delimited JSON response, invoking onMsg per record as it
+   arrives — this is what lets each dictionary render the instant it is
+   ready instead of waiting for the whole fan-out (progressive results). */
+async function fetchStream(url,onMsg){
+  const resp=await fetch(url);
+  if(!resp.ok){let e;try{e=(await resp.json()).error}catch(_){}throw new Error(e||resp.statusText)}
+  const reader=resp.body.getReader(),dec=new TextDecoder();let buf="";
+  for(;;){
+    const{value,done}=await reader.read();
+    if(done)break;
+    buf+=dec.decode(value,{stream:true});
+    let nl;
+    while((nl=buf.indexOf("\n"))>=0){
+      const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+      if(line)onMsg(JSON.parse(line));
+    }
+  }
+  buf=buf.trim();if(buf)onMsg(JSON.parse(buf));
+}
+function highlight(roots,mode,q){
+  if(!((mode==="fuzzy"||mode==="fts")&&window.Mark))return;
+  const rx=new RegExp(q.trim().split(/\s+/).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|"),"gi");
+  for(const root of roots){if(root)try{new Mark(root).markRegExp(rx)}catch(e){}}
+}
+/* render one dictionary's results into its ordered slot box; returns
+   {shown,results}. shown = something visible (results/error/upgrade);
+   results = actual entries (drives auto-open + empty-state). */
+function renderSlot(box,h,mode,q,perDict){
+  box.innerHTML="";
+  if(h.error){
+    box.innerHTML=`<details class="dict"><summary>${esc(h.name||h.dict)}<span class="count">⚠ ${esc(h.error)}</span></summary></details>`;
+    return{shown:true};
+  }
+  if(h.skipped){
+    // full-text is opt-in → offer the upgrade link; fuzzy auto-builds on
+    // first search, so it is just "preparing" and will work on the next one.
+    if(mode==="fts"){
+      box.innerHTML=`<details class="dict"><summary>${esc(h.name)}<span class="upgrade" data-id="${h.dict}">enable full-text search</span></summary></details>`;
+      return{shown:true};
+    }
+    if(mode==="fuzzy"){
+      box.innerHTML=`<details class="dict"><summary>${esc(h.name)}<span class="count">preparing fuzzy index…</span></summary></details>`;
+      return{shown:true};
+    }
+    return{};
+  }
+  if(!h.results?.length)return{};
+  const det=document.createElement("details");det.className="dict";
+  const more=h.results.length>=perDict?`<span class="more" data-id="${h.dict}">more…</span>`:"";
+  det.innerHTML=`<summary>${esc(h.name)}<span class="count">${h.results.length}${more?"+":""} result${h.results.length===1?"":"s"}</span>${more}</summary>`;
+  const dl=document.createElement("dl"),roots=[];
+  for(const r of h.results){
+    const dt=document.createElement("dt");dt.textContent=r.Headword;
+    const dd=document.createElement("dd");dd.dataset.dict=h.dict;
+    roots.push(renderArticle(dd,r.Body,h.dict));
+    dl.appendChild(dt);dl.appendChild(dd);
+  }
+  det.appendChild(dl);box.appendChild(det);
+  highlight(roots,mode,q);
+  return{shown:true,results:true};
+}
+
 async function doSearch(ev){
   if(ev)ev.preventDefault();
   const q=$("q").value.trim();
@@ -439,58 +600,54 @@ async function doSearch(ev){
   const mode=$("mode").value,dictSel=$("dict").value,seq=++searchSeq;
   lastQuery=q;
   setStatus('<span class="spin"></span>Searching…');
-  let hits;
+  // "All" queries the enabled dictionaries in preference order (fewer
+  // results each); a specific pick queries just that one (more results).
+  let dictParam,perDict;
+  if(dictSel==="all"){
+    const ids=enabledOrderedIds();
+    if(!ids.length){setStatus("⚠ All dictionaries are disabled — enable some in the ☰ panel");return}
+    dictParam=ids.join(",");perDict=5;
+  }else{dictParam=dictSel;perDict=25}
+  const out=$("out");
+  let boxes=[],openedIdx=null,anyShown=false;
   try{
-    const resp=await fetch("api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+dictSel+"&n=20");
-    hits=await resp.json();
-    if(!resp.ok)throw new Error(hits.error||resp.statusText);
-  }catch(err){
-    if(seq===searchSeq)setStatus("⚠ "+esc(err.message));
-    return;
-  }
-  if(seq!==searchSeq)return; // a newer search superseded this one
-  setStatus("");
-  const out=$("out");out.innerHTML="";
-  let first=true,shadowRoots=[];
-  for(const h of hits){
-    if(h.error){
-      out.insertAdjacentHTML("beforeend",
-        `<details class="dict"><summary>${esc(h.name||h.dict)}<span class="count">⚠ ${esc(h.error)}</span></summary></details>`);
-      continue;
-    }
-    if(h.skipped){
-      if(mode==="fuzzy"||mode==="fts"){
-        const det=document.createElement("details");det.className="dict";
-        det.innerHTML=`<summary>${esc(h.name)}<span class="upgrade" data-id="${h.dict}">enable fuzzy &amp; full-text search</span></summary>`;
-        out.appendChild(det);
+    await fetchStream("api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+encodeURIComponent(dictParam)+"&n="+perDict,msg=>{
+      if(seq!==searchSeq)return; // superseded by a newer search
+      if(msg.t==="begin"){
+        out.innerHTML="";
+        boxes=(msg.slots||[]).map(()=>{const b=document.createElement("div");out.appendChild(b);return b});
+        setStatus("");
+      }else if(msg.t==="hit"){
+        const box=boxes[msg.i];if(!box)return;
+        const res=renderSlot(box,msg,mode,q,perDict);
+        if(res.shown)anyShown=true;
+        // auto-open the highest-preference (lowest index) dict with results,
+        // even if a later-preference dict finished first
+        if(res.results&&(openedIdx===null||msg.i<openedIdx)){
+          const det=box.querySelector("details.dict");
+          if(det){
+            if(openedIdx!==null){const p=boxes[openedIdx]?.querySelector("details.dict");if(p)p.open=false}
+            det.open=true;openedIdx=msg.i;
+          }
+        }
+      }else if(msg.t==="end"&&!anyShown){
+        out.innerHTML=`<div class="empty">${noResultsSVG}<p>No results for “${esc(q)}”</p></div>`;
       }
-      continue;
-    }
-    if(!h.results?.length)continue;
-    const det=document.createElement("details");det.className="dict";
-    if(first){det.open=true;first=false}
-    det.innerHTML=`<summary>${esc(h.name)}<span class="count">${h.results.length} result${h.results.length===1?"":"s"}</span></summary>`;
-    const dl=document.createElement("dl");
-    for(const r of h.results){
-      const dt=document.createElement("dt");dt.textContent=r.Headword;
-      const dd=document.createElement("dd");dd.dataset.dict=h.dict;
-      shadowRoots.push(renderArticle(dd,r.Body,h.dict));
-      dl.appendChild(dt);dl.appendChild(dd);
-    }
-    det.appendChild(dl);out.appendChild(det);
-  }
-  if(!out.children.length){
-    out.innerHTML=`<div class="empty">${noResultsSVG}<p>No results for “${esc(q)}”</p></div>`;
-    return;
-  }
-  if((mode==="fuzzy"||mode==="fts")&&window.Mark){
-    const rx=new RegExp(q.trim().split(/\s+/).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|"),"gi");
-    for(const root of shadowRoots){
-      try{new Mark(root).markRegExp(rx)}catch(e){}
-    }
-  }
+    });
+  }catch(err){if(seq===searchSeq)setStatus("⚠ "+esc(err.message))}
 }
 $("frm").addEventListener("submit",doSearch);
+/* "more…": re-query a single dictionary at a higher limit, in place */
+document.addEventListener("click",e=>{
+  const more=e.target.closest("summary .more");
+  if(!more)return;
+  e.preventDefault();
+  const det=more.closest("details.dict"),box=det.parentElement,id=more.dataset.id,mode=$("mode").value;
+  more.textContent="…";
+  fetchStream("api/search?q="+encodeURIComponent(lastQuery)+"&mode="+mode+"&dict="+id+"&n=100",msg=>{
+    if(msg.t==="hit"){renderSlot(box,msg,mode,lastQuery,1e9);const nd=box.querySelector("details.dict");if(nd)nd.open=true}
+  }).catch(()=>{more.textContent="more…"});
+});
 
 /* live search: debounce while typing */
 let debounce=null;

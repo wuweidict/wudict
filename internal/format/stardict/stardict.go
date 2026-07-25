@@ -31,6 +31,7 @@ import (
 func init() {
 	dict.RegisterFormat(".ifo", func(path string) (dict.Dictionary, error) { return Open(path) })
 	dict.RegisterReader(".ifo", func(path string) (dict.Reader, error) { return NewReader(path) })
+	dict.RegisterProber(".ifo", probe)
 }
 
 type idxEntry struct {
@@ -133,6 +134,28 @@ func Open(ifoPath string) (*Dict, error) {
 		EntryCount:  len(d.entries),
 	}
 	return d, nil
+}
+
+// probe reads bookname/wordcount from the tiny .ifo header only (no .idx
+// load, no fold-maps) for the cheap dictionary-list path. Name mirrors
+// Open's derivation so CacheBase resolves the same cached text.db.
+func probe(ifoPath string) (dict.Meta, error) {
+	ifo, err := parseIfo(ifoPath)
+	if err != nil {
+		return dict.Meta{}, err
+	}
+	name := strings.TrimSpace(ifo["bookname"])
+	if name == "" {
+		name = filepath.Base(strings.TrimSuffix(ifoPath, filepath.Ext(ifoPath)))
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(ifo["wordcount"]))
+	return dict.Meta{
+		Name:        name,
+		Format:      "stardict",
+		Path:        ifoPath,
+		Description: strings.TrimSpace(ifo["description"]),
+		EntryCount:  n,
+	}, nil
 }
 
 func (d *Dict) openDictData(base string) error {

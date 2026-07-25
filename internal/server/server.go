@@ -54,6 +54,12 @@ type Server struct {
 	// resources are transcoded to WAV on demand (cached) since no
 	// browser can play Speex natively.
 	Speexdec string
+
+	// AutoIndex, when true (config auto_index != "off"), builds a fuzzy
+	// headword index for a dictionary the first time it is searched —
+	// silently, in the background — so fuzzy search becomes available on
+	// the next query without the user ever asking. Full-text stays opt-in.
+	AutoIndex bool
 }
 
 func New(reg *Registry) *Server {
@@ -196,8 +202,10 @@ type dictInfo struct {
 func (s *Server) handleDicts(w http.ResponseWriter, r *http.Request) {
 	entries := s.reg.all()
 	out := make([]dictInfo, len(entries))
-	// open in parallel: first load after setup would otherwise block for
-	// seconds while dozens of dictionaries build their indexes serially
+	// resolve metadata in parallel. The cheap path (header-only probe +
+	// text.db meta read) avoids building the heavy in-memory index, so the
+	// list loads fast even for dozens of dictionaries; only non-probeable
+	// formats fall back to a full open.
 	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
 	for i, e := range entries {
@@ -206,23 +214,56 @@ func (s *Server) handleDicts(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			info := dictInfo{ID: e.ID, Path: e.Path}
-			d, err := e.open()
-			if err != nil {
-				info.Error = err.Error()
-				out[i] = info
-				return
-			}
-			m := d.Meta()
-			info.Name, info.Format, info.Entries, info.Caps = m.Name, m.Format, m.EntryCount, d.Caps()
-			if info.Caps.FTS {
-				info.DBPath = store.CacheBase(e.Path, m.Name) + ".text.db"
-			}
-			out[i] = info
+			out[i] = s.dictInfoFor(e)
 		}(i, e)
 	}
 	wg.Wait()
 	writeJSON(w, out)
+}
+
+// dictInfoFor resolves one dictionary's list row cheaply when possible:
+// a header-only Probe locates a content-matched text.db and reads its
+// meta (name/entry_count/ingest_level) without opening the direct
+// backend; a probeable format with no cache reports direct caps
+// (exact+prefix); everything else falls back to a full open for real caps.
+func (s *Server) dictInfoFor(e *entry) dictInfo {
+	// only probe formats with a real cheap prober — otherwise dict.Probe
+	// falls back to a full dict.Open outside the entry's memoization (and
+	// can trigger DSL auto-ingest), racing the background warm.
+	if dict.HasProber(e.Path) {
+		if m, err := dict.Probe(e.Path); err == nil {
+			base := store.CacheBase(e.Path, m.Name)
+			if meta, err := store.ReadMeta(base + ".text.db"); err == nil {
+				ec, _ := strconv.Atoi(meta["entry_count"])
+				name := meta["name"]
+				if name == "" {
+					name = m.Name
+				}
+				return dictInfo{
+					ID: e.ID, Path: e.Path, Name: name, Format: m.Format, Entries: ec,
+					Caps:   dict.Caps{Exact: true, Prefix: true, Fuzzy: true, FTS: meta["ingest_level"] != string(store.LevelHeadwords)},
+					DBPath: base + ".text.db",
+				}
+			}
+			return dictInfo{ // probeable, no cache → direct backend
+				ID: e.ID, Path: e.Path, Name: m.Name, Format: m.Format, Entries: m.EntryCount,
+				Caps: dict.Caps{Exact: true, Prefix: true},
+			}
+		}
+	}
+	// fall back to a full open (non-probeable formats, or probe errors).
+	info := dictInfo{ID: e.ID, Path: e.Path}
+	d, err := e.open()
+	if err != nil {
+		info.Error = err.Error()
+		return info
+	}
+	m := d.Meta()
+	info.Name, info.Format, info.Entries, info.Caps = m.Name, m.Format, m.EntryCount, d.Caps()
+	if info.Caps.FTS {
+		info.DBPath = store.CacheBase(e.Path, m.Name) + ".text.db"
+	}
+	return info
 }
 
 func (s *Server) handleRescan(w http.ResponseWriter, r *http.Request) {
@@ -230,6 +271,7 @@ func (s *Server) handleRescan(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, "rescan: %v", err)
 		return
 	}
+	s.reg.Warm()
 	s.handleDicts(w, r)
 }
 
@@ -247,15 +289,35 @@ func parseMode(s string) (search.Mode, error) {
 	return 0, fmt.Errorf("unknown mode %q", s)
 }
 
-// searchHit is one dictionary's results in /api/search.
-type searchHit struct {
-	Dict    string        `json:"dict"`
-	Name    string        `json:"name"`
-	Results []dict.Result `json:"results"`
+// streamSlot names one dictionary in the result layout (begin message).
+type streamSlot struct {
+	Dict string `json:"dict"`
+	Name string `json:"name"`
+}
+
+// streamMsg is one NDJSON line of /api/search:
+//
+//	{"t":"begin","slots":[{dict,name}…]}   ordered slot layout
+//	{"t":"hit","i":N,dict,name,results…}   one dictionary's results
+//	{"t":"end"}                            all dictionaries done
+type streamMsg struct {
+	T       string        `json:"t"`
+	Slots   []streamSlot  `json:"slots,omitempty"`
+	I       int           `json:"i"`
+	Dict    string        `json:"dict,omitempty"`
+	Name    string        `json:"name,omitempty"`
+	Results []dict.Result `json:"results,omitempty"`
 	Skipped bool          `json:"skipped,omitempty"`
 	Error   string        `json:"error,omitempty"`
 }
 
+// handleSearch streams results as newline-delimited JSON so the client can
+// render each dictionary's accordion the instant it completes, in the
+// caller's preference order (SPEC §6, progressive rendering). The `dict`
+// param is "all", one id, or a comma-separated ordered id list (enabled
+// subset from the panel); dictionaries are queried concurrently and each
+// result line carries its slot index `i` so the client fills the correct
+// preference-ordered position regardless of completion order.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
@@ -279,48 +341,85 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if dictParam == "" || dictParam == "all" {
 		entries = s.reg.all()
 	} else {
-		e, err := s.reg.get(dictParam)
-		if err != nil {
-			httpErr(w, 404, "%v", err)
+		for _, id := range strings.Split(dictParam, ",") {
+			if id = strings.TrimSpace(id); id == "" {
+				continue
+			}
+			if e, err := s.reg.get(id); err == nil {
+				entries = append(entries, e)
+			}
+		}
+		if len(entries) == 0 { // none of the requested ids resolved
+			httpErr(w, 404, "unknown dictionary id %q", dictParam)
 			return
 		}
-		entries = []*entry{e}
 	}
 
-	var dicts []dict.Dictionary
-	var hits []searchHit
-	idxOf := map[dict.Dictionary]int{}
-	for _, e := range entries {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		httpErr(w, 500, "streaming unsupported")
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering (Caddy/nginx)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	writeLine := func(m streamMsg) {
+		_ = enc.Encode(m) // Encode appends '\n' → one NDJSON record
+		fl.Flush()
+	}
+
+	// open all requested dictionaries in preference order (memoized).
+	type slot struct {
+		id, name string
+		d        dict.Dictionary
+		err      error
+	}
+	slots := make([]slot, len(entries))
+	begin := make([]streamSlot, len(entries))
+	for i, e := range entries {
 		d, err := e.open()
-		h := searchHit{Dict: e.ID}
-		if err != nil {
-			h.Error = err.Error()
-			hits = append(hits, h)
+		name := e.ID
+		if err == nil {
+			name = d.Meta().Name
+			if s.AutoIndex {
+				e.maybeAutoIndex() // first search of a direct dict → build fuzzy in background
+			}
+		}
+		slots[i] = slot{id: e.ID, name: name, d: d, err: err}
+		begin[i] = streamSlot{Dict: e.ID, Name: name}
+	}
+	writeLine(streamMsg{T: "begin", Slots: begin})
+
+	// emit open-errors immediately; collect the openable dictionaries.
+	var dicts []dict.Dictionary
+	var slotOf []int
+	for i, sl := range slots {
+		if sl.err != nil {
+			writeLine(streamMsg{T: "hit", I: i, Dict: sl.id, Name: sl.name, Error: sl.err.Error()})
 			continue
 		}
-		h.Name = d.Meta().Name
-		idxOf[d] = len(hits)
-		hits = append(hits, h)
-		dicts = append(dicts, d)
+		dicts = append(dicts, sl.d)
+		slotOf = append(slotOf, i)
 	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	for i, sh := range search.All(ctx, dicts, mode, q, n) {
-		_ = i
-		j := idxOf[dicts[i]]
-		hits[j].Results = sh.Results
-		hits[j].Skipped = sh.Skipped
-		if sh.Err != nil {
-			hits[j].Error = sh.Err.Error()
+	search.Stream(ctx, dicts, mode, q, n, func(k int, h search.Hit) {
+		i := slotOf[k]
+		// resolve dictionary-internal refs (sound://, relative, absolute)
+		// to /res/{dict}/… here, where it is unit-tested.
+		for j := range h.Results {
+			h.Results[j].Body = RewriteEntryHTML(h.Results[j].Body, slots[i].id)
 		}
-		// Resolve dictionary-internal refs (sound://, relative, absolute)
-		// to /res/{dict}/… here, where it is unit-tested — the client
-		// renders article HTML as-is.
-		for k := range hits[j].Results {
-			hits[j].Results[k].Body = RewriteEntryHTML(hits[j].Results[k].Body, hits[j].Dict)
+		m := streamMsg{T: "hit", I: i, Dict: slots[i].id, Name: slots[i].name, Results: h.Results, Skipped: h.Skipped}
+		if h.Err != nil {
+			m.Error = h.Err.Error()
 		}
-	}
-	writeJSON(w, hits)
+		writeLine(m)
+	})
+	writeLine(streamMsg{T: "end"})
 }
 
 // handleResource serves /res/{dictID}/{name...}.

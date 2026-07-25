@@ -8,12 +8,15 @@ import (
 	"archive/zip"
 	"bufio"
 	"encoding/json"
+	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/glowinthedark/gonow-dict/internal/dict"
 	_ "github.com/glowinthedark/gonow-dict/internal/format/dsl" // register .dsl
 )
 
@@ -61,6 +64,32 @@ func getJSON(t *testing.T, s *Server, path string, into any) *httptest.ResponseR
 	return rec
 }
 
+// searchStream parses the NDJSON /api/search response into per-slot hits
+// (only "hit" lines with results), ordered by slot index.
+func searchStream(t *testing.T, s *Server, path string) []streamMsg {
+	t.Helper()
+	req := httptest.NewRequest("GET", path, nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	var out []streamMsg
+	sc := bufio.NewScanner(strings.NewReader(rec.Body.String()))
+	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var m streamMsg
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("GET %s: bad NDJSON line (%v): %s", path, err, line)
+		}
+		if m.T == "hit" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 func TestDictsAndSearch(t *testing.T) {
 	s := newTestServer(t)
 
@@ -75,12 +104,11 @@ func TestDictsAndSearch(t *testing.T) {
 	}
 	id := dicts[0].ID
 
-	var hits []searchHit
-	getJSON(t, s, "/api/search?q=corazon&mode=fuzzy&dict="+id, &hits)
+	hits := searchStream(t, s, "/api/search?q=corazon&mode=fuzzy&dict="+id)
 	if len(hits) != 1 || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "corazón" {
 		t.Fatalf("fuzzy hits: %+v", hits)
 	}
-	getJSON(t, s, "/api/search?q=vivienda&mode=fts&dict=all", &hits)
+	hits = searchStream(t, s, "/api/search?q=vivienda&mode=fts&dict=all")
 	if len(hits) != 1 || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "casa" {
 		t.Fatalf("fts hits: %+v", hits)
 	}
@@ -90,6 +118,98 @@ func TestDictsAndSearch(t *testing.T) {
 	}
 	if rec := getJSON(t, s, "/api/search?q=x&mode=bogus", nil); rec.Code != 400 {
 		t.Errorf("bad mode: %d", rec.Code)
+	}
+}
+
+// --- fake direct-only format, for the auto-index test ------------------
+
+type fakeDict struct{ words []string }
+
+func (d *fakeDict) Meta() dict.Meta {
+	return dict.Meta{Name: "Fake Dict", Format: "fake", Path: "x.fake", EntryCount: len(d.words)}
+}
+func (d *fakeDict) Caps() dict.Caps { return dict.Caps{Exact: true, Prefix: true} }
+func (d *fakeDict) match(pred func(string) bool) []dict.Result {
+	var out []dict.Result
+	for _, w := range d.words {
+		if pred(w) {
+			out = append(out, dict.Result{Headword: w, Body: "<p>" + w + "</p>"})
+		}
+	}
+	return out
+}
+func (d *fakeDict) Exact(w string, n int) ([]dict.Result, error) {
+	return d.match(func(x string) bool { return x == w }), nil
+}
+func (d *fakeDict) Prefix(w string, n int) ([]dict.Result, error) {
+	return d.match(func(x string) bool { return strings.HasPrefix(x, w) }), nil
+}
+func (d *fakeDict) Keywords(offset, n int) []string { return d.words }
+func (d *fakeDict) Resource(string) (io.ReadCloser, string, error) {
+	return nil, "", dict.ErrNotFound
+}
+func (d *fakeDict) Close() error { return nil }
+
+type fakeReader struct {
+	words []string
+	i     int
+}
+
+func (r *fakeReader) Meta() dict.Meta { return (&fakeDict{words: r.words}).Meta() }
+func (r *fakeReader) Close() error    { return nil }
+func (r *fakeReader) Next() (dict.Entry, error) {
+	if r.i >= len(r.words) {
+		return dict.Entry{}, io.EOF
+	}
+	w := r.words[r.i]
+	r.i++
+	return dict.Entry{Headwords: []string{w}, Body: "<p>" + w + "</p>", Kind: dict.BodyHTML}, nil
+}
+
+func init() {
+	words := []string{"córazon", "beta", "gamma"}
+	dict.RegisterFormat(".fake", func(string) (dict.Dictionary, error) { return &fakeDict{words: words}, nil })
+	dict.RegisterReader(".fake", func(string) (dict.Reader, error) { return &fakeReader{words: words}, nil })
+}
+
+// TestAutoIndexOnFirstSearch: a direct-only dictionary (no fuzzy) must gain
+// a fuzzy index in the background the first time it is searched, so a
+// later fuzzy query — including accent-folded — succeeds without any
+// explicit "enable" step.
+func TestAutoIndexOnFirstSearch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.fake"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	reg, err := NewRegistry(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(reg)
+	s.AutoIndex = true
+
+	var dicts []dictInfo
+	getJSON(t, s, "/api/dicts", &dicts)
+	id := dicts[0].ID
+	if dicts[0].Caps.Fuzzy {
+		t.Fatalf("fake dict should start without fuzzy: %+v", dicts[0])
+	}
+
+	// first search (prefix) triggers the background fuzzy build
+	searchStream(t, s, "/api/search?q=beta&mode=prefix&dict="+id)
+
+	// poll until the accent-folded fuzzy query resolves via the new index
+	var hits []streamMsg
+	for i := 0; i < 100; i++ {
+		hits = searchStream(t, s, "/api/search?q=corazon&mode=fuzzy&dict="+id)
+		if len(hits) == 1 && !hits[0].Skipped && len(hits[0].Results) == 1 {
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if len(hits) != 1 || hits[0].Skipped || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "córazon" {
+		t.Fatalf("auto-index fuzzy did not become available: %+v", hits)
 	}
 }
 

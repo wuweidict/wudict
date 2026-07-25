@@ -63,6 +63,37 @@ func All(ctx context.Context, dicts []dict.Dictionary, mode Mode, term string, p
 	return hits
 }
 
+// Stream queries every dictionary concurrently (bounded) and invokes emit
+// once per dictionary as its query completes. emit calls are serialized
+// (safe to write to a shared response) but arrive in completion order, not
+// input order — i is the dictionary's index in dicts so the caller can
+// place each result in its preference-ordered slot. Blocks until done.
+func Stream(ctx context.Context, dicts []dict.Dictionary, mode Mode, term string, perDict int, emit func(i int, h Hit)) {
+	sem := make(chan struct{}, defaultWorkers)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	send := func(i int, h Hit) {
+		mu.Lock()
+		emit(i, h)
+		mu.Unlock()
+	}
+	for i, d := range dicts {
+		wg.Add(1)
+		go func(i int, d dict.Dictionary) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				send(i, Hit{Meta: d.Meta(), Err: ctx.Err()})
+				return
+			}
+			send(i, query(d, mode, term, perDict))
+		}(i, d)
+	}
+	wg.Wait()
+}
+
 func query(d dict.Dictionary, mode Mode, term string, perDict int) Hit {
 	h := Hit{Meta: d.Meta()}
 	caps := d.Caps()

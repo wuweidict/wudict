@@ -36,6 +36,25 @@ import (
 
 func init() {
 	dict.RegisterFormat(".mdx", func(path string) (dict.Dictionary, error) { return Open(path) })
+	dict.RegisterProber(".mdx", probe)
+}
+
+// probe reads name/description/entry-count from the MDX header only (no
+// BuildIndex, no fold-maps) for the cheap dictionary-list path. The name
+// matches Open's exactly (shared dictName), so CacheBase resolves to the
+// same cached text.db.
+func probe(filename string) (dict.Meta, error) {
+	md, err := gomdict.New(filename)
+	if err != nil {
+		return dict.Meta{}, err
+	}
+	return dict.Meta{
+		Name:        dictName(md, filename),
+		Format:      "mdx",
+		Path:        filename,
+		Description: strings.TrimSpace(md.Description()),
+		EntryCount:  int(md.EntryCount()),
+	}, nil
 }
 
 const linkPrefix = "@@@LINK="

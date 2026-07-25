@@ -23,6 +23,43 @@ func RegisterFormat(ext string, fn opener) {
 	openers[strings.ToLower(ext)] = fn
 }
 
+// prober reads lightweight metadata (name, format, entry count) without
+// building a format's full in-memory index.
+type prober func(path string) (Meta, error)
+
+var probers = map[string]prober{}
+
+// RegisterProber wires a file extension to a cheap metadata reader.
+// Optional: formats without one fall back to a full Open in Probe.
+func RegisterProber(ext string, fn prober) {
+	probers[strings.ToLower(ext)] = fn
+}
+
+// HasProber reports whether path's format has a cheap metadata prober
+// (so a Probe miss on a cache means "not ingested" rather than "unknown").
+func HasProber(path string) bool {
+	_, ok := probers[strings.ToLower(filepath.Ext(path))]
+	return ok
+}
+
+// Probe returns lightweight metadata for the dictionary at path without
+// the cost of a full Open (no key-block decompression, no fold-maps). It
+// is used to populate the dictionary list and to locate a cached text.db
+// (via its name) without opening the heavy direct backend. Formats with
+// no registered prober fall back to a full Open.
+func Probe(path string) (m Meta, err error) {
+	defer recoverOpen(path, &err)
+	if fn, ok := probers[strings.ToLower(filepath.Ext(path))]; ok {
+		return fn(path)
+	}
+	d, err := Open(path)
+	if err != nil {
+		return Meta{}, err
+	}
+	defer d.Close()
+	return d.Meta(), nil
+}
+
 // readerOpener opens the sequential ingest scan for one source file.
 type readerOpener func(path string) (Reader, error)
 

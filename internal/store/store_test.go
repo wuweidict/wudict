@@ -120,6 +120,26 @@ func TestPrefix(t *testing.T) {
 	}
 }
 
+// P-E: an accent/case-stripped prefix that the raw LIKE pass cannot match
+// must still resolve via the folded FTS fallback, matching the direct
+// backends (so "coraz" typed without the ó still finds corazón/corazonada).
+func TestPrefixFoldedFallback(t *testing.T) {
+	s := testStore(t)
+	// "córaz" (extra accent) does not LIKE-prefix any headword, but folds
+	// to the same key as corazón/corazonada.
+	res, err := s.Prefix("córaz", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("folded prefix córaz: %d results, want 2", len(res))
+	}
+	// a genuinely absent prefix still returns nothing.
+	if r, _ := s.Prefix("zzzq", 10); len(r) != 0 {
+		t.Errorf("absent prefix must match nothing, got %d", len(r))
+	}
+}
+
 func TestFuzzyAccentInsensitive(t *testing.T) {
 	s := testStore(t)
 	res, err := s.Fuzzy("corazon", 10) // no accent

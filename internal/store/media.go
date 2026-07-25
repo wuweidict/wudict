@@ -61,7 +61,7 @@ func (m *Media) Resource(name string) (io.ReadCloser, string, error) {
 // IngestMedia packs every resource of d into a media.db at dbPath,
 // stamped with dictUUID (must be the paired text.db's dict_uuid).
 func IngestMedia(d dict.Dictionary, names []string, dbPath, dictUUID string, progress Progress) (err error) {
-	tmp := dbPath + ".ingest"
+	tmp := tempDBName(dbPath)
 	_ = os.Remove(tmp)
 	defer func() {
 		if err != nil {

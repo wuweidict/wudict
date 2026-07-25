@@ -56,6 +56,29 @@ func (f *fake) Fuzzy(w string, n int) ([]dict.Result, error) {
 	return f.match(func(x string) bool { return strings.Contains(x, w) }, n)
 }
 
+func TestStreamCoversAllSlots(t *testing.T) {
+	dicts := []dict.Dictionary{
+		&fake{name: "A", words: []string{"casa", "casona"}},
+		&fake{name: "B", words: []string{"nada"}},
+		&fake{name: "C", err: errors.New("boom")},
+	}
+	seen := make([]*Hit, len(dicts))
+	Stream(context.Background(), dicts, Prefix, "cas", 10, func(i int, h Hit) {
+		hc := h
+		seen[i] = &hc
+	})
+	// every slot must be filled exactly once, indexed by input position
+	if seen[0] == nil || len(seen[0].Results) != 2 {
+		t.Fatalf("slot 0: %+v", seen[0])
+	}
+	if seen[1] == nil || len(seen[1].Results) != 0 {
+		t.Fatalf("slot 1 (no match): %+v", seen[1])
+	}
+	if seen[2] == nil || seen[2].Err == nil {
+		t.Fatalf("slot 2 (error) must propagate: %+v", seen[2])
+	}
+}
+
 func TestAllOrderAndModes(t *testing.T) {
 	dicts := []dict.Dictionary{
 		&fake{name: "A", words: []string{"casa", "casona"}},

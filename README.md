@@ -31,15 +31,23 @@ once.
 |---|---|---|
 | **prefix** | exact matches, else headwords starting with the term | no |
 | **exact** | exact headword (accent/case-fold fallback: `corazon` → `corazón`) | no |
-| **fuzzy** | accent/case-insensitive headword search via FTS5 | yes |
+| **fuzzy** | accent/case-insensitive headword search via FTS5 | automatic |
 | **full-text** | search inside article text, ranked by relevance | yes |
 
 Every dictionary works immediately for prefix/exact lookups using its
-native index. **Fuzzy and full-text search** need a one-time index:
-click *Enable fuzzy & full-text search* on a dictionary (or *⚡ enable
-all* in the ☰ panel), or run `gonow-dict ingest <file-or-folder>`.
-Choose *Fuzzy only* / `-fuzzy-only` for a much smaller index without
-article-text search.
+native index. **Fuzzy search is prepared automatically** the first time
+you search a dictionary — a small headword index builds quietly in the
+background, so fuzzy is ready on your next query (disable with
+`AUTO_INDEX=off`). **Full-text search** (searching inside article text)
+is the one deliberate step: click *full-text search* on a dictionary (or
+*⚡ enable all* in the ☰ panel), or run `gonow-dict ingest <file-or-folder>`.
+
+Results stream in as each dictionary responds — the top one opens
+automatically. In the ☰ panel you can **reorder** dictionaries (drag the
+⠿ handle or use the ▲▼⏫⏬ buttons) to set your preferred result order, and
+**enable/disable** each one (the switch) to include or exclude it from
+*All dictionaries* searches; both are remembered. Searching *All* shows a
+few hits per dictionary with a **more…** link to expand any one.
 
 Tips: `/` focuses the search box; double-click any word in an article to
 look it up; click links inside articles to follow cross-references;
@@ -75,6 +83,7 @@ A commented `config.toml` is generated next to the binary on first run
 | `--no-browser` | `NO_BROWSER=1` | open browser |
 | `--verbose` | `VERBOSE=1` | quiet |
 | `--speexdec` | `SPEEXDEC` | found on `PATH` |
+| — | `AUTO_INDEX` | `fuzzy` (`off` to disable) |
 
 Config file search order: `--config` / `CONFIG_PATH`, then
 `<exe-dir>/config.toml`, `~/.gonow-dict/config.toml`,

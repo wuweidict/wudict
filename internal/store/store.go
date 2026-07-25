@@ -98,6 +98,18 @@ func readMeta(db *sql.DB) (map[string]string, error) {
 	return m, rows.Err()
 }
 
+// ReadMeta opens a gonow database read-only and returns its whole meta
+// table. Used by the cheap dictionary-list path to read name/entry_count/
+// ingest_level without opening the heavy direct backend.
+func ReadMeta(dbPath string) (map[string]string, error) {
+	db, err := sql.Open(driverName, dsnRO(dbPath))
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	return readMeta(db)
+}
+
 func (s *Store) Meta() dict.Meta { return s.meta }
 
 func (s *Store) Caps() dict.Caps {
@@ -215,12 +227,20 @@ func (s *Store) Prefix(word string, limit int) ([]dict.Result, error) {
 	}
 	n := clamp(limit)
 	pat := escapeLike(word) + "%"
-	return s.collect(s.db.Query(`
+	res, err := s.collect(s.db.Query(`
 		SELECT w, m FROM (
 			SELECT e.w AS w, e.m AS m FROM entry e WHERE e.w LIKE ?1 ESCAPE '\'
 			UNION
 			SELECT e.w AS w, e.m AS m FROM alias a JOIN entry e ON e.id = a.entry_id WHERE a.w LIKE ?1 ESCAPE '\'
 		) ORDER BY w LIMIT ?2`, pat, n))
+	if err != nil || len(res) > 0 {
+		return res, err
+	}
+	// accent/case-fold parity with the direct backends: when the raw
+	// prefix finds nothing, retry as a diacritic-insensitive prefix over
+	// the FTS `w` column (so `corazon` still prefix-matches `corazón…`).
+	// entry_fts always indexes `w`, even at headwords level.
+	return s.Fuzzy(word, n)
 }
 
 // Fuzzy is the FTS5 headword mode: accent/case-insensitive prefix-phrase

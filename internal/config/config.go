@@ -25,6 +25,7 @@ type Config struct {
 	NoBrowser bool   // NO_BROWSER=1: do not open a browser tab
 	Verbose   bool   // VERBOSE=1: verbose logging
 	Speexdec  string // SPEEXDEC: path to the speexdec binary (.spx audio)
+	AutoIndex string // AUTO_INDEX: off|fuzzy — build a fuzzy headword index on first search of a dict
 	Source    string // path of the config.toml that was loaded ("" if none)
 }
 
@@ -35,11 +36,12 @@ func defaults() Config {
 		speexdec = p
 	}
 	return Config{
-		DictDir:  filepath.Join(home, "Dictionaries"),
-		DBDir:    "", // empty = store.DefaultDBDir()
-		IP:       "127.0.0.1",
-		Port:     "8808",
-		Speexdec: speexdec,
+		DictDir:   filepath.Join(home, "Dictionaries"),
+		DBDir:     "", // empty = store.DefaultDBDir()
+		IP:        "127.0.0.1",
+		Port:      "8808",
+		Speexdec:  speexdec,
+		AutoIndex: "fuzzy", // opt-out: build fuzzy indexes on first use
 	}
 }
 
@@ -83,6 +85,9 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	}
 	if v := get("SPEEXDEC"); v != "" {
 		cfg.Speexdec = ExpandHome(v)
+	}
+	if v := get("AUTO_INDEX"); v != "" {
+		cfg.AutoIndex = strings.ToLower(v)
 	}
 	return cfg, nil
 }
@@ -132,6 +137,7 @@ const configTemplate = `# gonow-dict configuration
 # NO_BROWSER  = "0"                   # "1" = do not open a browser tab on startup
 # VERBOSE     = "0"                   # "1" = verbose logging for debugging
 # SPEEXDEC    = "/usr/bin/speexdec"   # speexdec binary for .spx audio transcoding
+# AUTO_INDEX  = "fuzzy"               # "off" = do not auto-build fuzzy indexes on first search
 `
 
 // EnsureConfigFile makes sure a config.toml exists somewhere in the

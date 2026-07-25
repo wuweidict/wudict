@@ -49,7 +49,7 @@ func Ingest(r dict.Reader, dbPath string, progress Progress) error {
 // inside the same transaction as the data (FTS-audit #3).
 func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (err error) {
 	srcMeta := r.Meta()
-	tmp := dbPath + ".ingest"
+	tmp := tempDBName(dbPath)
 	_ = os.Remove(tmp)
 	defer func() {
 		if err != nil {
@@ -225,6 +225,16 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 		progress(int(id), total)
 	}
 	return os.Rename(tmp, dbPath)
+}
+
+// tempDBName returns a per-call unique scratch path for an ingest target
+// (renamed onto dbPath atomically on success). Uniqueness lets concurrent
+// ingests of the same dictionary — e.g. a background warm racing an
+// on-demand open — proceed without clobbering each other's temp file.
+func tempDBName(dbPath string) string {
+	b := make([]byte, 6)
+	_, _ = rand.Read(b)
+	return dbPath + ".ingest." + hex.EncodeToString(b)
 }
 
 // normalizeBody converts an ingest Entry body to HTML.

@@ -16,7 +16,7 @@ const driverName = "sqlite3"
 
 // dsnRO is a read-only, query-only connection string.
 func dsnRO(path string) string {
-	return "file:" + path + "?mode=ro&_query_only=1"
+	return "file:" + path + "?mode=ro&_query_only=1&_busy_timeout=5000"
 }
 
 // dsnIngest is a throwaway-safe bulk-write connection string (the ingest
