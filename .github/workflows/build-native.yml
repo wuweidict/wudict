@@ -1,0 +1,77 @@
+name: Build Native (cgo)
+
+# Performance-optimized builds using the cgo mattn/go-sqlite3 driver
+# (-tags sqlite_fts5, CGO_ENABLED=1). Unlike build-release.yml (pure-Go
+# modernc cross-compiled from one ubuntu box), each target is built on its
+# OWN native runner because cgo cannot cross the host arch/OS. Produces
+# workflow artifacts only — it does not create a GitHub Release, so it never
+# collides with the purego release assets.
+#
+# C toolchains are preinstalled on all these GitHub-hosted images
+# (actions/runner-images): Ubuntu → gcc, macOS → Xcode/clang, Windows → gcc.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version stamp for the binaries (e.g. v0.1); blank = short SHA"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    # windows/arm64 (experimental cgo path) may fail without sinking the run.
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Linux (native gcc) ────────────────────────────────
+          - { runner: ubuntu-24.04,     goos: linux,   goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux,   goarch: arm64 }
+          # ── macOS (Apple-Silicon runner; amd64 via arch flag) ─
+          - { runner: macos-14,         goos: darwin,  goarch: arm64 }
+          - { runner: macos-14,         goos: darwin,  goarch: amd64, cc: "clang -arch x86_64" }
+          # ── Windows (amd64 native mingw gcc; arm64 via clang) ─
+          - { runner: windows-2022,     goos: windows, goarch: amd64, ext: ".exe" }
+          - { runner: windows-11-arm,   goos: windows, goarch: arm64, ext: ".exe", cc: "clang", experimental: true }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "1"
+          CC: ${{ matrix.cc }} # empty ⇒ Go's default compiler for the host
+        run: |
+          BINARY="gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          VERSION="${{ inputs.tag }}"
+          [ -z "$VERSION" ] && VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
+          go build -trimpath -tags sqlite_fts5 \
+            -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "${BINARY}" ./cmd/gonow-dict
+
+      - name: Warn on experimental build failure
+        if: failure() && matrix.experimental
+        shell: bash
+        run: echo "::warning title=Experimental target failed::${{ matrix.goos }}/${{ matrix.goarch }} (cgo) failed to build — continuing. Use the purego build-release.yml binary for this target."
+
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
