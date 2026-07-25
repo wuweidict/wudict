@@ -160,6 +160,15 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
   text-underline-offset:2px;font-size:12px;margin-right:var(--sp-2)}
 .pd .path{color:var(--fg-faint);font-size:10.5px;word-break:break-all;cursor:pointer}
 .pd .err{color:#c0564f}
+.pd .prov,.pd .prov1{font-size:10.5px;color:var(--fg-faint);word-break:break-all;margin-top:.15em}
+.pd .prov>summary{cursor:pointer;list-style:none;color:var(--fg-faint)}
+.pd .prov>summary::-webkit-details-marker{display:none}
+.pd .prov>summary::before{content:"▸";color:var(--fg-soft);display:inline-block;width:1em;font-size:9px}
+.pd .prov[open]>summary::before{content:"▾"}
+.pd .fmt{color:var(--fg-soft);text-transform:uppercase;font-size:9px;letter-spacing:.04em}
+.pd .more{color:var(--fg-soft)}
+.pd .provbody{margin:.2em 0 0 1em;display:flex;flex-direction:column;gap:.1em}
+.pd .path.sub{opacity:.8}
 
 /* ── responsive ────────────────────────────────────────────────────── */
 @media (max-width:600px){
@@ -177,9 +186,9 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 <span class="brand">gonow<small>·dict</small></span>
 <input type="search" id="q" placeholder="Search…" autocomplete="off" autofocus aria-label="Search term">
 <select id="mode" aria-label="Search mode">
-<option value="prefix">prefix</option>
+<option value="prefix">starts with</option>
 <option value="exact">exact</option>
-<option value="fuzzy">fuzzy</option>
+<option value="contains">contains</option>
 <option value="fts">full-text</option>
 </select>
 <select id="dict" aria-label="Dictionary"><option value="all">All dictionaries</option></select>
@@ -197,7 +206,7 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 
 <div id="panel" role="dialog" aria-label="Dictionaries">
 <div class="panel-card">
-<h2>Dictionaries <button class="btn" id="ingestAllBtn" title="Enable full-text search for every dictionary">⚡ enable all</button>
+<h2>Dictionaries <button class="btn" id="ingestAllBtn" title="Build the full-text search index for every dictionary (does not pack media)">⚡ index all</button>
 <button class="btn" id="rescanBtn" title="Rescan folder">⟳ rescan</button>
 <button class="btn" id="closePanel" aria-label="Close">✕</button></h2>
 <div id="panelList"></div>
@@ -311,6 +320,33 @@ function toggleDict(id){
 }
 $("dict").onchange=e=>{localStorage.setItem("gonow_dict",e.target.value);if($("q").value.trim())doSearch()};
 
+/* provenance: the collapsed line says where the dictionary came from (its
+   foreign source + a media companion count); expanding reveals the cached
+   .text.db/.media.db and the full media source paths. A standalone native
+   dictionary (no source) shows its .text.db directly. Paths are click-to-copy
+   (reusing the .path handler). */
+function mediaKind(list){
+  const f=list[0].toLowerCase();
+  if(f.endsWith(".mdd"))return "mdd";
+  if(f.endsWith(".zip"))return "zip";
+  return "res";
+}
+function provenance(d){
+  const label=(p,cls)=>`<div class="path${cls?" "+cls:""}" title="Click to copy">${esc(p)}</div>`;
+  let head,rows=[];
+  if(d.source){
+    const ms=d.mediaSrc||[],n=ms.length;
+    head=`<span class="fmt">${esc(d.format||"?")}</span>: ${esc(d.source)}`+
+      (n?` <span class="more">+ ${n} ${mediaKind(ms)}</span>`:"");
+    if(d.textDB)rows.push(label("db: "+d.textDB+(d.mediaDB?" + media.db":"")));
+    for(const m of ms)rows.push(label(m,"sub"));
+  }else{
+    head=`<span class="fmt">native</span>: ${esc(d.textDB||d.path||"")}`;
+    if(d.mediaDB)rows.push(label("media: "+d.mediaDB));
+  }
+  if(!rows.length)return `<div class="prov1">${head}</div>`;
+  return `<details class="prov"><summary>${head}</summary><div class="provbody">${rows.join("")}</div></details>`;
+}
 function renderPanel(){
   const el=$("panelList");el.innerHTML="";
   const ord=orderedDicts();
@@ -318,15 +354,21 @@ function renderPanel(){
     const off=disabled.has(d.id);
     const div=document.createElement("div");div.className="pd"+(off?" off":"");div.dataset.id=d.id;
     let caps="";
-    for(const[k,on]of[["exact",d.caps?.Exact],["prefix",d.caps?.Prefix],["fuzzy",d.caps?.Fuzzy],["full-text",d.caps?.FTS]])
+    for(const[k,on]of[["exact",d.caps?.Exact],["prefix",d.caps?.Prefix],["contains",d.caps?.Contains],["full-text",d.caps?.FTS]])
       caps+=`<span class="tag${on?" on":""}">${k}</span>`;
-    // fuzzy search is built automatically on first use, so the only manual
-    // action offered is full-text (which also covers fuzzy).
+    // the contains index is built automatically on first use, so the only
+    // manual action offered is full-text (which also covers contains).
+    // "pack media" is offered only when the dictionary actually has packable
+    // media, a source to pack it from, and it isn't already packed.
+    const canPack=d.hasMedia&&d.source&&!d.mediaDB;
     let acts="";
     if(d.error){acts=`<span class="err">${esc(d.error)}</span>`}
-    else if(!d.caps?.FTS)acts=`<span class="act" data-act="ingest">full-text search</span>`+
-      `<span class="act" data-act="ingest-full">FTS + pack media</span>`;
-    else acts=`<span class="act" data-act="ingest-full">Pack media into .media.db</span>`;
+    else if(!d.caps?.FTS){
+      acts=`<span class="act" data-act="ingest">full-text search</span>`+
+        (canPack?`<span class="act" data-act="ingest-full">FTS + pack media</span>`:"");
+    }else if(canPack){
+      acts=`<span class="act" data-act="ingest-full">Pack media into .media.db</span>`;
+    }
     div.innerHTML=`<div class="hd">
         <span class="grip" draggable="true" title="Drag to reorder">⠿</span>
         <b>${esc(dictLabel(d))}</b>
@@ -340,7 +382,7 @@ function renderPanel(){
       </div>
       <div class="meta">${esc(d.format||"?")} · ${d.entries?d.entries.toLocaleString()+" entries":""}</div>
       <div>${caps}</div><div class="acts">${acts}</div>
-      ${d.dbPath?`<div class="path" title="Click to copy">db: ${esc(d.dbPath)}</div>`:""}`;
+      ${provenance(d)}`;
     el.appendChild(div);
   }
 }
@@ -377,7 +419,7 @@ $("ingestAllBtn").onclick=async()=>{
   const btn=$("ingestAllBtn");
   if(btn.disabled)return;
   const todo=dicts.filter(d=>!d.error&&!d.caps?.FTS);
-  if(!todo.length){btn.textContent="✓ all enabled";setTimeout(()=>btn.textContent="⚡ enable all",1500);return}
+  if(!todo.length){btn.textContent="✓ all indexed";setTimeout(()=>btn.textContent="⚡ index all",1500);return}
   btn.disabled=true;
   let n=0;
   for(const d of todo){
@@ -385,7 +427,7 @@ $("ingestAllBtn").onclick=async()=>{
     const label=document.querySelector(`.pd[data-id="${d.id}"] .act`)||btn;
     await runIngest(d.id,{quiet:true,statusPrefix:`${n}/${todo.length} · `},label);
   }
-  btn.disabled=false;btn.textContent="⚡ enable all";
+  btn.disabled=false;btn.textContent="⚡ index all";
   setStatus("✓ all dictionaries indexed");
   await loadDicts();if(lastQuery)doSearch();
 };
@@ -393,7 +435,7 @@ $("panelList").addEventListener("click",e=>{
   const mv=e.target.closest("[data-mv]");
   if(mv){moveDict(mv.closest(".pd").dataset.id,mv.dataset.mv);return}
   const path=e.target.closest(".path");
-  if(path){navigator.clipboard?.writeText(path.textContent.replace(/^db: /,""));path.style.color="var(--accent)";return}
+  if(path){navigator.clipboard?.writeText(path.textContent.replace(/^[a-z]+: /,"").replace(/ \+ media\.db$/,""));path.style.color="var(--accent)";return}
   const act=e.target.closest(".act");if(!act)return;
   runIngest(act.closest(".pd").dataset.id,
     {full:act.dataset.act==="ingest-full",level:act.dataset.act==="ingest-fuzzy"?"headwords":""},act);
@@ -401,7 +443,7 @@ $("panelList").addEventListener("click",e=>{
 $("panelList").addEventListener("change",e=>{
   if(e.target.classList.contains("en"))toggleDict(e.target.closest(".pd").dataset.id);
 });
-/* the "enable fuzzy & full-text search" link inside result summaries */
+/* the "enable full-text search" link inside result summaries */
 document.addEventListener("click",e=>{
   const up=e.target.closest("summary .upgrade");
   if(!up)return;
@@ -554,7 +596,7 @@ async function fetchStream(url,onMsg,signal){
   buf=buf.trim();if(buf)onMsg(JSON.parse(buf));
 }
 function highlight(roots,mode,q){
-  if(!((mode==="fuzzy"||mode==="fts")&&window.Mark))return;
+  if(!((mode==="contains"||mode==="fts")&&window.Mark))return;
   const rx=new RegExp(q.trim().split(/\s+/).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|"),"gi");
   for(const root of roots){if(root)try{new Mark(root).markRegExp(rx)}catch(e){}}
 }
@@ -568,14 +610,14 @@ function renderSlot(box,h,mode,q,perDict){
     return{shown:true};
   }
   if(h.skipped){
-    // full-text is opt-in → offer the upgrade link; fuzzy auto-builds on
-    // first search, so it is just "preparing" and will work on the next one.
+    // full-text is opt-in → offer the upgrade link; the contains index
+    // auto-builds on first search, so it is just "preparing" and works next.
     if(mode==="fts"){
       box.innerHTML=`<details class="dict"><summary>${esc(h.name)}<span class="upgrade" data-id="${h.dict}">enable full-text search</span></summary></details>`;
       return{shown:true};
     }
-    if(mode==="fuzzy"){
-      box.innerHTML=`<details class="dict"><summary>${esc(h.name)}<span class="count">preparing fuzzy index…</span></summary></details>`;
+    if(mode==="contains"){
+      box.innerHTML=`<details class="dict"><summary>${esc(h.name)}<span class="count">preparing index…</span></summary></details>`;
       return{shown:true};
     }
     return{};

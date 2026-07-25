@@ -6,12 +6,113 @@ package store
 
 import (
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
 )
+
+func TestCacheBaseMemoInvalidatesOnChange(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "d.mdx")
+	if err := os.WriteFile(src, []byte("first content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b1 := CacheBase(src, "Dict")
+	if got := CacheBase(src, "Dict"); got != b1 {
+		t.Fatalf("CacheBase not stable across calls: %s vs %s", got, b1)
+	}
+	// changed source content (and mtime) must produce a different hash
+	if err := os.WriteFile(src, []byte("second, different content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(2 * time.Second)
+	_ = os.Chtimes(src, future, future)
+	if b2 := CacheBase(src, "Dict"); b2 == b1 {
+		t.Fatalf("CacheBase did not re-hash after source change: %s", b2)
+	}
+	// missing file → deterministic empty-input digest, stable across calls
+	miss := filepath.Join(dir, "gone.mdx")
+	if CacheBase(miss, "X") != CacheBase(miss, "X") {
+		t.Fatal("missing-file CacheBase not deterministic")
+	}
+}
+
+// ingestTo builds a minimal real .text.db at dir/dbName recording srcPath as
+// its source, for the native-root / orphan tests.
+func ingestTo(t *testing.T, dir, dbName, srcPath, name string) string {
+	t.Helper()
+	r := &fakeReader{
+		meta:    dict.Meta{Name: name, Format: "mdx", Path: srcPath},
+		entries: []dict.Entry{h("a", "<p>x</p>")},
+	}
+	p := filepath.Join(dir, dbName)
+	if err := Ingest(r, p, nil); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestStandaloneNativeDBs(t *testing.T) {
+	dir := t.TempDir()
+	// source vanished → standalone native dictionary
+	gone := ingestTo(t, dir, "gone-1111.text.db", "/no/such/gone.mdx", "Gone")
+	// source present → omitted (its external entry represents it)
+	srcDir := t.TempDir()
+	src := filepath.Join(srcDir, "live.mdx")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ingestTo(t, dir, "live-2222.text.db", src, "Live")
+
+	got, err := StandaloneNativeDBs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != gone {
+		t.Fatalf("want [%s] (source-gone only), got %v", gone, got)
+	}
+}
+
+func TestFindOrphansSemantics(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GONOW_DB_DIR", dir) // FindOrphans scans DefaultDBDir()
+
+	// 1. source-less native: MUST NOT be an orphan (the data-loss guard)
+	ingestTo(t, dir, "native-aaaa.text.db", "/gone/x.mdx", "Native")
+	// 2. superseded: source exists but the db name doesn't match its hash
+	srcDir := t.TempDir()
+	src := filepath.Join(srcDir, "s.mdx")
+	if err := os.WriteFile(src, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ingestTo(t, dir, "wrong-name.text.db", src, "S")
+	// 3. media.db with no text.db sibling
+	if err := os.WriteFile(filepath.Join(dir, "loner-bbbb.media.db"), []byte("m"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orphs, err := FindOrphans()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, o := range orphs {
+		got[filepath.Base(o.Path)] = o.Reason
+	}
+	if _, bad := got["native-aaaa.text.db"]; bad {
+		t.Fatal("DATA LOSS: source-less native dict must NOT be an orphan")
+	}
+	if _, ok := got["wrong-name.text.db"]; !ok {
+		t.Error("superseded ingest should be an orphan")
+	}
+	if _, ok := got["loner-bbbb.media.db"]; !ok {
+		t.Error("media.db with no dictionary should be an orphan")
+	}
+}
 
 // fakeReader replays a fixed entry list.
 type fakeReader struct {
@@ -71,8 +172,8 @@ func TestIngestAndMeta(t *testing.T) {
 	if m.EntryCount != 6 { // 8 raw - 2 pure links
 		t.Errorf("entry_count = %d, want 6", m.EntryCount)
 	}
-	if !s.Caps().Fuzzy || !s.Caps().FTS {
-		t.Error("store must advertise fuzzy+fts")
+	if !s.Caps().Contains || !s.Caps().FTS {
+		t.Error("store must advertise contains+fts")
 	}
 }
 
@@ -148,6 +249,30 @@ func TestFuzzyAccentInsensitive(t *testing.T) {
 	}
 }
 
+func TestContains(t *testing.T) {
+	s := testStore(t)
+	// substring in the MIDDLE of a headword (trigram, ≥3 chars) — not a prefix
+	res, err := s.Contains("razon", 10)
+	if err != nil {
+		t.Fatalf("Contains razon: %v", err)
+	}
+	got := map[string]bool{}
+	for _, r := range res {
+		got[r.Headword] = true
+	}
+	if !got["corazón"] || !got["corazonada"] {
+		t.Errorf("contains 'razon' should match corazón/corazonada, got %v", res)
+	}
+	// accent-insensitive: folded query matches accented headword
+	if r, _ := s.Contains("orazó", 10); len(r) == 0 {
+		t.Error("contains should be accent-insensitive")
+	}
+	// short (<3 char) query falls back to LIKE, still returns something
+	if r, _ := s.Contains("re", 10); len(r) == 0 {
+		t.Error("short contains query should fall back to LIKE and match 'pregunta'")
+	}
+}
+
 func TestFullText(t *testing.T) {
 	s := testStore(t)
 	res, err := s.FullText("muscular", 10)
@@ -178,6 +303,9 @@ func TestHostileFtsInput(t *testing.T) {
 	for _, q := range hostile {
 		if _, err := s.Fuzzy(q, 5); err != nil {
 			t.Errorf("Fuzzy(%q) errored: %v", q, err)
+		}
+		if _, err := s.Contains(q, 5); err != nil {
+			t.Errorf("Contains(%q) errored: %v", q, err)
 		}
 		if _, err := s.FullText(q, 5); err != nil {
 			t.Errorf("FullText(%q) errored: %v", q, err)
@@ -297,13 +425,13 @@ func TestHeadwordsOnlyLevel(t *testing.T) {
 	}
 	defer s.Close()
 	c := s.Caps()
-	if !c.Fuzzy || c.FTS {
-		t.Errorf("caps: want fuzzy=true fts=false, got %+v", c)
+	if !c.Contains || c.FTS {
+		t.Errorf("caps: want contains=true fts=false, got %+v", c)
 	}
-	// fuzzy over headwords still works, accent-insensitive
+	// accent-insensitive prefix (the old "fuzzy" engine) still works
 	res, err := s.Fuzzy("corazon", 5)
 	if err != nil || len(res) != 1 {
-		t.Fatalf("fuzzy: %v %v", res, err)
+		t.Fatalf("prefix-fold: %v %v", res, err)
 	}
 	// full-text is honestly unsupported
 	if _, err := s.FullText("muscular", 5); err != dict.ErrUnsupported {

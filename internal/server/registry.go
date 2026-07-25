@@ -89,8 +89,18 @@ type entry struct {
 	d    dict.Dictionary
 	err  error
 
+	mediaEmpty bool // a full ingest found no packable resources (dMu-guarded)
+
 	ingestMu sync.Mutex // one ingest at a time per dictionary
-	autoOnce sync.Once  // first-search fuzzy auto-index, attempted once
+	autoOnce sync.Once  // first-search auto-index, attempted once
+}
+
+// noPackableMedia reports whether a prior full ingest found nothing to pack,
+// so the panel can stop offering "pack media".
+func (e *entry) noPackableMedia() bool {
+	e.dMu.RLock()
+	defer e.dMu.RUnlock()
+	return e.mediaEmpty
 }
 
 // maybeAutoIndex builds a fuzzy (headwords-level) index for this dictionary
@@ -102,8 +112,8 @@ func (e *entry) maybeAutoIndex() {
 	e.autoOnce.Do(func() {
 		go func() {
 			d, err := e.open()
-			if err != nil || d.Caps().Fuzzy {
-				return // unopenable, or already fuzzy-capable (ingested/DSL/gonow)
+			if err != nil || d.Caps().Contains {
+				return // unopenable, or already contains-capable (ingested/DSL/gonow)
 			}
 			if err := e.ingest(false, store.LevelHeadwords, nil); err != nil {
 				logx.V("auto-index %s: %v", e.Path, err)
@@ -127,8 +137,8 @@ func (e *entry) open() (dict.Dictionary, error) {
 			logx.V("open %s: FAILED: %v", e.Path, err)
 		} else {
 			m := d.Meta()
-			logx.V("open %s [%s] %d entries fuzzy=%v (%s)",
-				m.Name, m.Format, m.EntryCount, d.Caps().Fuzzy, time.Since(start).Round(time.Millisecond))
+			logx.V("open %s [%s] %d entries contains=%v (%s)",
+				m.Name, m.Format, m.EntryCount, d.Caps().Contains, time.Since(start).Round(time.Millisecond))
 		}
 	})
 	e.dMu.RLock()
@@ -136,11 +146,38 @@ func (e *entry) open() (dict.Dictionary, error) {
 	return e.d, e.err
 }
 
+// native is a standalone naturalized dictionary: a .text.db whose foreign
+// source is gone (the db dir is the native dictionary root). It presents like
+// `upgraded` — the internal gonow: format prefix stripped, Path set to the db
+// file — but has no source to fall back to, so resources come only from its
+// attached media.db when present.
+type native struct {
+	*store.Store
+	path string
+}
+
+func (n *native) Meta() dict.Meta {
+	m := n.Store.Meta()
+	m.Format = strings.TrimPrefix(m.Format, "gonow:")
+	m.Path = n.path
+	return m
+}
+
 // openUpgradedOrDirect resolves the best backend for a source file. When a
 // cached text.db exists it is opened alone (cheap) with the direct source
 // kept lazy; the source name is obtained via a header-only Probe so the
 // heavy direct backend is never built just to locate the cache.
 func openUpgradedOrDirect(path string) (dict.Dictionary, error) {
+	// A .text.db is a naturalized dictionary opened directly: self-describing
+	// (name/format/uuid in its meta) and auto-attaching its sibling media.db.
+	// No source file, no CacheBase probe.
+	if strings.HasSuffix(strings.ToLower(path), ".text.db") {
+		s, err := store.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		return &native{Store: s, path: path}, nil
+	}
 	// fast path: a cheap header-only probe locates a content-matched
 	// text.db without building the heavy direct backend. Only formats with
 	// a real prober take this path — for others dict.Probe would fall back
@@ -172,9 +209,12 @@ func openUpgradedOrDirect(path string) (dict.Dictionary, error) {
 	return src, nil // no cache yet: plain direct backend
 }
 
-// Registry tracks all dictionaries under the dict dir.
+// Registry tracks all dictionaries: foreign-format sources under the external
+// dict dir, plus standalone native (.text.db) dictionaries under the native
+// root (the db dir) whose source has been removed.
 type Registry struct {
-	dictDir string
+	dictDir    string // external root: .mdx/.slob/.ifo/.dsl sources
+	nativeRoot string // native root: the db dir (store.DefaultDBDir())
 
 	mu      sync.RWMutex
 	entries []*entry
@@ -182,7 +222,7 @@ type Registry struct {
 }
 
 func NewRegistry(dictDir string) (*Registry, error) {
-	r := &Registry{dictDir: dictDir, byID: map[string]*entry{}}
+	r := &Registry{dictDir: dictDir, nativeRoot: store.DefaultDBDir(), byID: map[string]*entry{}}
 	if err := r.Rescan(); err != nil {
 		return r, err
 	}
@@ -221,10 +261,20 @@ func (r *Registry) SetDir(dir string) error {
 func (r *Registry) Rescan() error {
 	r.mu.RLock()
 	dir := r.dictDir
+	nativeRoot := r.nativeRoot
 	r.mu.RUnlock()
 	paths, err := dict.Discover(dir)
 	if err != nil {
 		return err
+	}
+	// also surface standalone native dictionaries whose foreign source was
+	// removed — the db dir is the native dictionary root. Any overlap with the
+	// external walk (e.g. a db dir nested inside the dict dir) is deduped by id
+	// in the loop below.
+	if nat, nerr := store.StandaloneNativeDBs(nativeRoot); nerr != nil {
+		logx.V("native root scan %s: %v", nativeRoot, nerr)
+	} else {
+		paths = append(paths, nat...)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -310,13 +360,20 @@ func (e *entry) ingest(full bool, level store.Level, progress store.Progress) er
 	base := store.CacheBase(e.Path, name)
 	textDB := base + ".text.db"
 
-	if _, err := os.Stat(textDB); err == nil && level == store.LevelText {
+	// decide whether the text.db needs (re)building. Never delete the existing
+	// one first: IngestLevel writes a temp and renames over it atomically, so
+	// an interrupted upgrade leaves the old index intact instead of destroying
+	// it (a stopped "enable all" must not corrupt a dictionary).
+	needIngest := false
+	if _, err := os.Stat(textDB); err != nil {
+		needIngest = true // missing
+	} else if level == store.LevelText {
 		if cl, _ := store.ReadMetaValue(textDB, "ingest_level"); cl == string(store.LevelHeadwords) {
 			logx.V("ingest %s: upgrading headwords-only db to full text", name)
-			_ = os.Remove(textDB)
+			needIngest = true
 		}
 	}
-	if _, err := os.Stat(textDB); err != nil {
+	if needIngest {
 		rd, err := dict.OpenReader(e.Path)
 		if err != nil {
 			return err
@@ -339,11 +396,11 @@ func (e *entry) ingest(full bool, level store.Level, progress store.Progress) er
 				}
 				src = s
 			}
-			lister, ok := src.(dict.ResourceLister)
-			if !ok {
-				return fmt.Errorf("%s: format cannot enumerate resources", name)
+			lister, _ := src.(dict.ResourceLister)
+			var names []string
+			if lister != nil {
+				names = lister.Resources()
 			}
-			names := lister.Resources()
 			if len(names) > 0 {
 				uuid, err := store.ReadMetaValue(textDB, "dict_uuid")
 				if err != nil {
@@ -352,6 +409,12 @@ func (e *entry) ingest(full bool, level store.Level, progress store.Progress) er
 				if err := store.IngestMedia(src, names, mediaDB, uuid, progress); err != nil {
 					return err
 				}
+			} else {
+				// nothing to pack (text-only dict, or format has no resources):
+				// remember it so the panel stops offering "pack media".
+				e.dMu.Lock()
+				e.mediaEmpty = true
+				e.dMu.Unlock()
 			}
 		}
 	}

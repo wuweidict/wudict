@@ -18,7 +18,83 @@ import (
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
 	_ "github.com/glowinthedark/gonow-dict/internal/format/dsl" // register .dsl
+	"github.com/glowinthedark/gonow-dict/internal/store"
 )
+
+// stubReader ingests a single entry; used to fabricate a native .text.db.
+type stubReader struct {
+	meta dict.Meta
+	done bool
+}
+
+func (s *stubReader) Meta() dict.Meta { return s.meta }
+func (s *stubReader) Close() error    { return nil }
+func (s *stubReader) Next() (dict.Entry, error) {
+	if s.done {
+		return dict.Entry{}, io.EOF
+	}
+	s.done = true
+	return dict.Entry{Headwords: []string{"hello"}, Body: "<p>world</p>", Kind: dict.BodyHTML}, nil
+}
+
+// TestDictProvenance: /api/dicts reports the foreign source and its media
+// companion, and flags packable media (the DSL fixture ships a .files.zip).
+func TestDictProvenance(t *testing.T) {
+	s := newTestServer(t)
+	var dicts []dictInfo
+	getJSON(t, s, "/api/dicts", &dicts)
+	if len(dicts) != 1 {
+		t.Fatalf("want 1 dict, got %d", len(dicts))
+	}
+	d := dicts[0]
+	if !strings.HasSuffix(d.Source, "test.dsl") {
+		t.Errorf("source=%q, want the .dsl path", d.Source)
+	}
+	if len(d.MediaSrc) != 1 || !strings.HasSuffix(d.MediaSrc[0], "test.dsl.files.zip") {
+		t.Errorf("mediaSrc=%v, want [test.dsl.files.zip]", d.MediaSrc)
+	}
+	if !d.HasMedia {
+		t.Error("a DSL with a .files.zip should report packable media")
+	}
+}
+
+// TestNativeRootSurvivesSourceRemoval: a .text.db whose foreign source is gone
+// is a standalone native dictionary — discovered from the db dir and opened
+// with the internal gonow: format prefix stripped.
+func TestNativeRootSurvivesSourceRemoval(t *testing.T) {
+	dbDir := t.TempDir()
+	t.Setenv("GONOW_DB_DIR", dbDir)
+	r := &stubReader{meta: dict.Meta{Name: "Naturalized", Format: "mdx", Path: "/gone/x.mdx"}}
+	dbPath := filepath.Join(dbDir, "naturalized-native.text.db")
+	if err := store.Ingest(r, dbPath, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := NewRegistry(t.TempDir()) // empty external root
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reg.Count() != 1 {
+		t.Fatalf("native dict not discovered from db dir: count=%d", reg.Count())
+	}
+	d, err := reg.all()[0].open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := d.Meta()
+	if m.Name != "Naturalized" {
+		t.Errorf("name=%q, want Naturalized", m.Name)
+	}
+	if m.Format != "mdx" {
+		t.Errorf("format=%q, want mdx (gonow: prefix stripped)", m.Format)
+	}
+	if m.Path != dbPath {
+		t.Errorf("path=%q, want the .text.db path %q", m.Path, dbPath)
+	}
+	if !d.Caps().Contains {
+		t.Error("native dict should be contains-capable")
+	}
+}
 
 const sampleDSL = "#NAME \"Server Test Dict\"\n\n" +
 	"corazón\n\t[b]1.[/b] órgano muscular [s]beat.mp3[/s]\n\n" +
@@ -104,16 +180,16 @@ func TestDictsAndSearch(t *testing.T) {
 	}
 	id := dicts[0].ID
 
-	hits := searchStream(t, s, "/api/search?q=corazon&mode=fuzzy&dict="+id)
+	hits := searchStream(t, s, "/api/search?q=razon&mode=contains&dict="+id)
 	if len(hits) != 1 || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "corazón" {
-		t.Fatalf("fuzzy hits: %+v", hits)
+		t.Fatalf("contains hits: %+v", hits)
 	}
 	hits = searchStream(t, s, "/api/search?q=vivienda&mode=fts&dict=all")
 	if len(hits) != 1 || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "casa" {
 		t.Fatalf("fts hits: %+v", hits)
 	}
 
-	if rec := getJSON(t, s, "/api/search?mode=fuzzy", nil); rec.Code != 400 {
+	if rec := getJSON(t, s, "/api/search?mode=contains", nil); rec.Code != 400 {
 		t.Errorf("missing q: %d", rec.Code)
 	}
 	if rec := getJSON(t, s, "/api/search?q=x&mode=bogus", nil); rec.Code != 400 {
@@ -172,10 +248,10 @@ func init() {
 	dict.RegisterReader(".fake", func(string) (dict.Reader, error) { return &fakeReader{words: words}, nil })
 }
 
-// TestAutoIndexOnFirstSearch: a direct-only dictionary (no fuzzy) must gain
-// a fuzzy index in the background the first time it is searched, so a
-// later fuzzy query — including accent-folded — succeeds without any
-// explicit "enable" step.
+// TestAutoIndexOnFirstSearch: a direct-only dictionary (no contains) must gain
+// an index in the background the first time it is searched, so a later
+// contains query — including accent-folded — succeeds without any explicit
+// "enable" step.
 func TestAutoIndexOnFirstSearch(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "x.fake"), []byte("x"), 0o644); err != nil {
@@ -192,24 +268,51 @@ func TestAutoIndexOnFirstSearch(t *testing.T) {
 	var dicts []dictInfo
 	getJSON(t, s, "/api/dicts", &dicts)
 	id := dicts[0].ID
-	if dicts[0].Caps.Fuzzy {
-		t.Fatalf("fake dict should start without fuzzy: %+v", dicts[0])
+	if dicts[0].Caps.Contains {
+		t.Fatalf("fake dict should start without contains: %+v", dicts[0])
 	}
 
-	// first search (prefix) triggers the background fuzzy build
+	// first search (prefix) triggers the background index build
 	searchStream(t, s, "/api/search?q=beta&mode=prefix&dict="+id)
 
-	// poll until the accent-folded fuzzy query resolves via the new index
+	// poll until the accent-folded contains query resolves via the new index
 	var hits []streamMsg
 	for i := 0; i < 100; i++ {
-		hits = searchStream(t, s, "/api/search?q=corazon&mode=fuzzy&dict="+id)
+		hits = searchStream(t, s, "/api/search?q=corazon&mode=contains&dict="+id)
 		if len(hits) == 1 && !hits[0].Skipped && len(hits[0].Results) == 1 {
 			break
 		}
 		time.Sleep(30 * time.Millisecond)
 	}
 	if len(hits) != 1 || hits[0].Skipped || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "córazon" {
-		t.Fatalf("auto-index fuzzy did not become available: %+v", hits)
+		t.Fatalf("auto-index contains did not become available: %+v", hits)
+	}
+}
+
+// TestFullIngestNoResourcesFlagsEmpty: a full ingest of a dictionary with no
+// packable resources must flag the entry so the panel stops offering "pack
+// media" (fixes the flash-and-revert loop), and must not error.
+func TestFullIngestNoResourcesFlagsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.fake"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	reg, err := NewRegistry(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := reg.all()[0]
+	if err := e.ingest(true, store.LevelText, nil); err != nil {
+		t.Fatalf("full ingest errored: %v", err)
+	}
+	if !e.noPackableMedia() {
+		t.Error("a resource-less full ingest should flag the entry as having no packable media")
+	}
+	var dicts []dictInfo
+	getJSON(t, New(reg), "/api/dicts", &dicts)
+	if dicts[0].HasMedia {
+		t.Error("HasMedia must be false after a resource-less full ingest")
 	}
 }
 

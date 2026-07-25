@@ -6,10 +6,26 @@ package dict
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// TestOpenWrapsEOF: a bare io.EOF from a truncated-file parser is rewritten to
+// a named, human-readable error so a broken dictionary is identifiable in the
+// UI instead of showing a cryptic "EOF".
+func TestOpenWrapsEOF(t *testing.T) {
+	RegisterFormat(".eoftest", func(path string) (Dictionary, error) { return nil, io.EOF })
+	_, err := Open("/some/where/broken.eoftest")
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if got := err.Error(); got == "EOF" || !strings.Contains(got, "broken.eoftest") {
+		t.Errorf("error %q should name the file and not be a bare EOF", got)
+	}
+}
 
 // TestOpenNeverPanics: corrupt and truncated files must produce errors,
 // not panics — the registered opener may blow up internally; Open must

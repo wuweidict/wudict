@@ -24,10 +24,10 @@ var (
 // Caps advertises which search modes a backend supports. The UI/API must
 // consult this instead of probing with queries.
 type Caps struct {
-	Exact  bool
-	Prefix bool
-	Fuzzy  bool // FTS5 over headwords — ingested backend only
-	FTS    bool // FTS5 over headwords + article text — ingested backend only
+	Exact    bool
+	Prefix   bool // starts-with (accent-insensitive on ingested backends)
+	Contains bool // substring/typo-tolerant headword match (FTS5 trigram) — ingested backend only
+	FTS      bool // FTS5 over headwords + article text — ingested backend only
 }
 
 // Meta describes one opened dictionary.
@@ -75,9 +75,10 @@ type ResourceLister interface {
 	Resources() []string
 }
 
-// FuzzySearcher is implemented by backends with Caps.Fuzzy.
-type FuzzySearcher interface {
-	Fuzzy(word string, limit int) ([]Result, error)
+// ContainsSearcher is implemented by backends with Caps.Contains: a
+// substring match over headwords (FTS5 trigram), accent/case-insensitive.
+type ContainsSearcher interface {
+	Contains(word string, limit int) ([]Result, error)
 }
 
 // FullTextSearcher is implemented by backends with Caps.FTS.

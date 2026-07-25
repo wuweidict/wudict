@@ -16,15 +16,15 @@ import (
 
 // fake is a minimal Dictionary; fuzzy support is toggled per instance.
 type fake struct {
-	name     string
-	words    []string
-	hasFuzzy bool
-	err      error
+	name        string
+	words       []string
+	hasContains bool
+	err         error
 }
 
 func (f *fake) Meta() dict.Meta { return dict.Meta{Name: f.name, Format: "fake"} }
 func (f *fake) Caps() dict.Caps {
-	return dict.Caps{Exact: true, Prefix: true, Fuzzy: f.hasFuzzy}
+	return dict.Caps{Exact: true, Prefix: true, Contains: f.hasContains}
 }
 func (f *fake) Close() error                    { return nil }
 func (f *fake) Keywords(offset, n int) []string { return nil }
@@ -52,7 +52,7 @@ func (f *fake) Exact(w string, n int) ([]dict.Result, error) {
 func (f *fake) Prefix(w string, n int) ([]dict.Result, error) {
 	return f.match(func(x string) bool { return strings.HasPrefix(x, w) }, n)
 }
-func (f *fake) Fuzzy(w string, n int) ([]dict.Result, error) {
+func (f *fake) Contains(w string, n int) ([]dict.Result, error) {
 	return f.match(func(x string) bool { return strings.Contains(x, w) }, n)
 }
 
@@ -79,10 +79,28 @@ func TestStreamCoversAllSlots(t *testing.T) {
 	}
 }
 
+func TestStreamOpenSurfacesOpenError(t *testing.T) {
+	openers := []Opener{
+		func() (dict.Dictionary, error) { return &fake{name: "A", words: []string{"casa"}}, nil },
+		func() (dict.Dictionary, error) { return nil, errors.New("open boom") },
+	}
+	seen := make([]*Hit, len(openers))
+	StreamOpen(context.Background(), openers, Prefix, "cas", 10, func(i int, h Hit) {
+		hc := h
+		seen[i] = &hc
+	})
+	if seen[0] == nil || len(seen[0].Results) != 1 {
+		t.Fatalf("slot 0 (opened): %+v", seen[0])
+	}
+	if seen[1] == nil || seen[1].Err == nil {
+		t.Fatalf("slot 1 must carry the open error: %+v", seen[1])
+	}
+}
+
 func TestAllOrderAndModes(t *testing.T) {
 	dicts := []dict.Dictionary{
 		&fake{name: "A", words: []string{"casa", "casona"}},
-		&fake{name: "B", words: []string{"casa"}, hasFuzzy: true},
+		&fake{name: "B", words: []string{"casa"}, hasContains: true},
 		&fake{name: "C", err: errors.New("boom")},
 	}
 	hits := All(context.Background(), dicts, Prefix, "cas", 10)
@@ -96,13 +114,13 @@ func TestAllOrderAndModes(t *testing.T) {
 		t.Error("error not propagated")
 	}
 
-	// fuzzy: A lacks the capability -> skipped; B serves
-	hits = All(context.Background(), dicts[:2], Fuzzy, "as", 10)
+	// contains: A lacks the capability -> skipped; B serves
+	hits = All(context.Background(), dicts[:2], Contains, "as", 10)
 	if !hits[0].Skipped {
-		t.Error("A should be skipped for fuzzy")
+		t.Error("A should be skipped for contains")
 	}
 	if hits[1].Skipped || len(hits[1].Results) != 1 {
-		t.Errorf("B fuzzy failed: %+v", hits[1])
+		t.Errorf("B contains failed: %+v", hits[1])
 	}
 }
 

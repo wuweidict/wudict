@@ -214,6 +214,14 @@ type dictInfo struct {
 	Caps    dict.Caps `json:"caps"`
 	DBPath  string    `json:"dbPath,omitempty"` // exposed per D7: users share these files
 	Error   string    `json:"error,omitempty"`
+
+	// provenance (panel display): where the dictionary came from and what
+	// derived files exist. All optional and filesystem-cheap.
+	Source   string   `json:"source,omitempty"`   // foreign source file, if still on disk
+	MediaSrc []string `json:"mediaSrc,omitempty"` // companion media sources (.mdd, .files.zip, res/)
+	TextDB   string   `json:"textDB,omitempty"`   // cached .text.db, if present
+	MediaDB  string   `json:"mediaDB,omitempty"`  // packed .media.db, if present
+	HasMedia bool     `json:"hasMedia,omitempty"` // packable binary resources exist (drives "pack media")
 }
 
 func (s *Server) handleDicts(w http.ResponseWriter, r *http.Request) {
@@ -244,6 +252,15 @@ func (s *Server) handleDicts(w http.ResponseWriter, r *http.Request) {
 // backend; a probeable format with no cache reports direct caps
 // (exact+prefix); everything else falls back to a full open for real caps.
 func (s *Server) dictInfoFor(e *entry) dictInfo {
+	info := s.baseDictInfo(e)
+	addProvenance(&info, e.Path)
+	if e.noPackableMedia() {
+		info.HasMedia = false // a prior pack found nothing — stop offering it
+	}
+	return info
+}
+
+func (s *Server) baseDictInfo(e *entry) dictInfo {
 	// only probe formats with a real cheap prober — otherwise dict.Probe
 	// falls back to a full dict.Open outside the entry's memoization (and
 	// can trigger DSL auto-ingest), racing the background warm.
@@ -258,7 +275,7 @@ func (s *Server) dictInfoFor(e *entry) dictInfo {
 				}
 				return dictInfo{
 					ID: e.ID, Path: e.Path, Name: name, Format: m.Format, Entries: ec,
-					Caps:   dict.Caps{Exact: true, Prefix: true, Fuzzy: true, FTS: meta["ingest_level"] != string(store.LevelHeadwords)},
+					Caps:   dict.Caps{Exact: true, Prefix: true, Contains: meta["has_trigram"] == "1", FTS: meta["ingest_level"] != string(store.LevelHeadwords)},
 					DBPath: base + ".text.db",
 				}
 			}
@@ -283,6 +300,97 @@ func (s *Server) dictInfoFor(e *entry) dictInfo {
 	return info
 }
 
+// addProvenance fills the panel's "where did this come from" fields cheaply
+// (stat only): the foreign source and its media companions, the cached
+// text.db/media.db, and whether any packable media exists. entryPath is the
+// registry entry's path — a foreign source, or a .text.db for a standalone
+// native dictionary (which has no source).
+func addProvenance(info *dictInfo, entryPath string) {
+	native := strings.HasSuffix(strings.ToLower(entryPath), ".text.db")
+	if !native && fileExists(entryPath) {
+		info.Source = entryPath
+		info.MediaSrc = companionMedia(entryPath)
+	}
+
+	// locate the cached text.db: the entry itself when native, else the
+	// DBPath from baseDictInfo, else the content-addressed cache name.
+	textDB := ""
+	switch {
+	case native:
+		textDB = entryPath
+	case info.DBPath != "":
+		textDB = info.DBPath
+	case info.Name != "":
+		textDB = store.CacheBase(entryPath, info.Name) + ".text.db"
+	}
+	if fileExists(textDB) {
+		info.TextDB = textDB
+		if mediaDB := strings.TrimSuffix(textDB, ".text.db") + ".media.db"; fileExists(mediaDB) {
+			info.MediaDB = mediaDB
+		}
+	}
+	info.DBPath = info.TextDB // keep the legacy field consistent (never a bogus name)
+
+	// packable media: an already-packed media.db, external companions, or a
+	// SLOB (which embeds resources — not cheaply enumerable, so assume it may).
+	info.HasMedia = info.MediaDB != "" || len(info.MediaSrc) > 0 ||
+		(info.Source != "" && strings.HasSuffix(strings.ToLower(info.Source), ".slob"))
+}
+
+// companionMedia lists the media SOURCE files that sit beside a foreign source
+// and would be packed into a media.db: MDX .mdd siblings, a DSL .files.zip, a
+// StarDict res/ dir or res.zip. Cheap (stat only). Empty for SLOB (media is
+// embedded in the .slob) and for formats with none.
+func companionMedia(src string) []string {
+	ext := strings.ToLower(filepath.Ext(src))
+	noExt := strings.TrimSuffix(src, filepath.Ext(src))
+	dir := filepath.Dir(src)
+	var out []string
+	switch ext {
+	case ".mdx":
+		for _, f := range []string{noExt + ".mdd", noExt + ".1.mdd"} {
+			if fileExists(f) {
+				out = append(out, f)
+			}
+		}
+		for n := 2; ; n++ {
+			f := fmt.Sprintf("%s.%d.mdd", noExt, n)
+			if !fileExists(f) {
+				break
+			}
+			out = append(out, f)
+		}
+	case ".dsl", ".dz":
+		for _, f := range []string{src + ".files.zip", noExt + ".files.zip"} {
+			if fileExists(f) {
+				out = append(out, f)
+				break
+			}
+		}
+	case ".ifo":
+		if d := filepath.Join(dir, "res"); dirExists(d) {
+			out = append(out, d)
+		}
+		if z := filepath.Join(dir, "res.zip"); fileExists(z) {
+			out = append(out, z)
+		}
+	}
+	return out
+}
+
+func fileExists(p string) bool {
+	if p == "" {
+		return false
+	}
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
+}
+
+func dirExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
+}
+
 func (s *Server) handleRescan(w http.ResponseWriter, r *http.Request) {
 	if err := s.reg.Rescan(); err != nil {
 		httpErr(w, 500, "rescan: %v", err)
@@ -298,8 +406,10 @@ func parseMode(s string) (search.Mode, error) {
 		return search.Prefix, nil
 	case "exact":
 		return search.Exact, nil
-	case "fuzzy":
-		return search.Fuzzy, nil
+	case "contains":
+		return search.Contains, nil
+	case "fuzzy": // legacy alias: the old "fuzzy" behaviour is now part of prefix
+		return search.Prefix, nil
 	case "fts":
 		return search.FullText, nil
 	}
@@ -387,50 +497,42 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		fl.Flush()
 	}
 
-	// open all requested dictionaries in preference order (memoized).
-	type slot struct {
-		id, name string
-		d        dict.Dictionary
-		err      error
-	}
-	slots := make([]slot, len(entries))
+	// Emit the slot layout FIRST, from cheap entry ids only — no opens on the
+	// request path. The client paints the empty accordion immediately; each
+	// dictionary's real name arrives with its "hit" as it completes. Opening
+	// (cold MDX ~180ms, cold SLOB ~1s) is deferred into the workers below, so
+	// time-to-first-byte is one open at most, never the sum of all of them.
 	begin := make([]streamSlot, len(entries))
+	openers := make([]search.Opener, len(entries))
 	for i, e := range entries {
-		d, err := e.open()
-		name := e.ID
-		if err == nil {
-			name = d.Meta().Name
-			if s.AutoIndex {
+		e := e
+		begin[i] = streamSlot{Dict: e.ID, Name: e.ID}
+		openers[i] = func() (dict.Dictionary, error) {
+			d, err := e.open()
+			if err == nil && s.AutoIndex {
 				e.maybeAutoIndex() // first search of a direct dict → build fuzzy in background
 			}
+			return d, err
 		}
-		slots[i] = slot{id: e.ID, name: name, d: d, err: err}
-		begin[i] = streamSlot{Dict: e.ID, Name: name}
 	}
 	writeLine(streamMsg{T: "begin", Slots: begin})
 
-	// emit open-errors immediately; collect the openable dictionaries.
-	var dicts []dict.Dictionary
-	var slotOf []int
-	for i, sl := range slots {
-		if sl.err != nil {
-			writeLine(streamMsg{T: "hit", I: i, Dict: sl.id, Name: sl.name, Error: sl.err.Error()})
-			continue
-		}
-		dicts = append(dicts, sl.d)
-		slotOf = append(slotOf, i)
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	search.Stream(ctx, dicts, mode, q, n, func(k int, h search.Hit) {
-		i := slotOf[k]
+	search.StreamOpen(ctx, openers, mode, q, n, func(i int, h search.Hit) {
+		id := entries[i].ID
+		name := h.Meta.Name
+		if name == "" {
+			// open failed or cancelled: no Meta. Show the filename, not the
+			// opaque id hash, so a broken dictionary is identifiable.
+			name = filepath.Base(entries[i].Path)
+		}
 		// resolve dictionary-internal refs (sound://, relative, absolute)
 		// to /res/{dict}/… here, where it is unit-tested.
 		for j := range h.Results {
-			h.Results[j].Body = RewriteEntryHTML(h.Results[j].Body, slots[i].id)
+			h.Results[j].Body = RewriteEntryHTML(h.Results[j].Body, id)
 		}
-		m := streamMsg{T: "hit", I: i, Dict: slots[i].id, Name: slots[i].name, Results: h.Results, Skipped: h.Skipped}
+		m := streamMsg{T: "hit", I: i, Dict: id, Name: name, Results: h.Results, Skipped: h.Skipped}
 		if h.Err != nil {
 			m.Error = h.Err.Error()
 		}

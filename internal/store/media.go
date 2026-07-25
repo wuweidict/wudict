@@ -131,6 +131,7 @@ func IngestMedia(d dict.Dictionary, names []string, dbPath, dictUUID string, pro
 	if progress != nil {
 		progress(len(names), len(names))
 	}
+	syncFile(tmp)
 	return os.Rename(tmp, dbPath)
 }
 

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
@@ -74,6 +75,8 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 		CREATE VIRTUAL TABLE entry_fts USING fts5(
 			w, txt, content='', columnsize=0,
 			tokenize='unicode61 remove_diacritics 2');
+		CREATE VIRTUAL TABLE entry_trigram USING fts5(
+			w, content='', columnsize=0, tokenize='trigram');
 	`, schemaVersion)); err != nil {
 		return err
 	}
@@ -93,6 +96,10 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 		return err
 	}
 	insFts, err := tx.Prepare("INSERT INTO entry_fts(rowid, w, txt) VALUES(?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	insTrig, err := tx.Prepare("INSERT INTO entry_trigram(rowid, w) VALUES(?, ?)")
 	if err != nil {
 		return err
 	}
@@ -140,6 +147,11 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 			txt = StripHTML(body)
 		}
 		if _, err = insFts.Exec(id, hw, txt); err != nil {
+			return err
+		}
+		// trigram index over the accent/case-folded headword powers the
+		// "contains" substring mode.
+		if _, err = insTrig.Exec(id, dict.Fold(hw)); err != nil {
 			return err
 		}
 		if _, ok := idByWord[hw]; !ok {
@@ -190,6 +202,7 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 		"description":      srcMeta.Description,
 		"entry_count":      fmt.Sprint(id),
 		"ingest_level":     string(level),
+		"has_trigram":      "1", // entry_trigram present → contains mode (cheap-list flag)
 		"created":          time.Now().UTC().Format(time.RFC3339),
 		"source_sha256_1M": sourceHash(srcMeta.Path),
 	}
@@ -215,6 +228,9 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 	if _, err = db.Exec("INSERT INTO entry_fts(entry_fts) VALUES('optimize')"); err != nil {
 		return err
 	}
+	if _, err = db.Exec("INSERT INTO entry_trigram(entry_trigram) VALUES('optimize')"); err != nil {
+		return err
+	}
 	if _, err = db.Exec("ANALYZE; PRAGMA optimize;"); err != nil {
 		return err
 	}
@@ -224,7 +240,19 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 	if progress != nil {
 		progress(int(id), total)
 	}
+	syncFile(tmp)
 	return os.Rename(tmp, dbPath)
+}
+
+// syncFile flushes a finished ingest temp to disk. dsnIngest runs with
+// synchronous=OFF for speed, so pages may linger in the OS cache; fsyncing
+// before the atomic rename ensures an interrupted shutdown cannot leave a
+// torn database at the final path. Best-effort — failures are non-fatal.
+func syncFile(path string) {
+	if f, err := os.Open(path); err == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
 }
 
 // tempDBName returns a per-call unique scratch path for an ingest target
@@ -273,13 +301,45 @@ func sourceHash(path string) string {
 // cache to the exact source content, so a changed source re-ingests and
 // same-named dictionaries in different formats never collide.
 func CacheBase(srcPath, name string) string {
+	return filepath.Join(DefaultDBDir(), Slug(name)+"-"+cacheHash8(srcPath))
+}
+
+// srcHashCache memoizes CacheBase's 1 MiB source-content hash, keyed by
+// source path and invalidated when the file's size or mtime changes.
+// CacheBase runs on every dictionary open and every /api/dicts row, so
+// recomputing the SHA-256 (open + read 1 MiB + hash) each time was pure
+// repeated work.
+var srcHashCache sync.Map // srcPath -> srcHashEntry
+
+type srcHashEntry struct {
+	size  int64
+	mtime time.Time
+	hash8 string
+}
+
+// cacheHash8 is the memoized first-8-hex-chars of the SHA-256 over a
+// source's first 1 MiB. A missing/unreadable file hashes to the empty-input
+// digest, exactly as the previous inline CacheBase code did; only successful
+// stats are cached, so a file that appears later is picked up on the next call.
+func cacheHash8(srcPath string) string {
+	st, statErr := os.Stat(srcPath)
+	if statErr == nil {
+		if v, ok := srcHashCache.Load(srcPath); ok {
+			if e := v.(srcHashEntry); e.size == st.Size() && e.mtime.Equal(st.ModTime()) {
+				return e.hash8
+			}
+		}
+	}
 	h := sha256.New()
 	if f, err := os.Open(srcPath); err == nil {
 		_, _ = io.CopyN(h, f, 1<<20)
 		f.Close()
 	}
 	hash8 := hex.EncodeToString(h.Sum(nil))[:8]
-	return filepath.Join(DefaultDBDir(), Slug(name)+"-"+hash8)
+	if statErr == nil {
+		srcHashCache.Store(srcPath, srcHashEntry{size: st.Size(), mtime: st.ModTime(), hash8: hash8})
+	}
+	return hash8
 }
 
 // Slug converts a dictionary display name into a filesystem-safe base

@@ -5,7 +5,9 @@
 package dict
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"path/filepath"
 	"sort"
@@ -90,7 +92,13 @@ func Open(path string) (d Dictionary, err error) {
 		return nil, fmt.Errorf("unsupported dictionary format: %s", filepath.Ext(path))
 	}
 	defer recoverOpen(path, &err)
-	return fn(path)
+	d, err = fn(path)
+	if err != nil && (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) {
+		// a bare "EOF" from a header/parse read is an unreadable file; name it
+		// so a broken dictionary is identifiable instead of a cryptic "EOF".
+		err = fmt.Errorf("%s: corrupt or truncated file", filepath.Base(path))
+	}
+	return d, err
 }
 
 func recoverOpen(path string, err *error) {

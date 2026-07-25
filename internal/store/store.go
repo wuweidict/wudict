@@ -32,10 +32,11 @@ const schemaVersion = 1
 
 // Store is one opened .text.db. Safe for concurrent readers.
 type Store struct {
-	db    *sql.DB
-	meta  dict.Meta
-	ftsOK bool   // article text indexed (ingest_level != "headwords")
-	media *Media // sibling .media.db, when present and uuid-paired
+	db         *sql.DB
+	meta       dict.Meta
+	ftsOK      bool   // article text indexed (ingest_level != "headwords")
+	hasTrigram bool   // entry_trigram present → "contains" substring search
+	media      *Media // sibling .media.db, when present and uuid-paired
 }
 
 // Open opens and validates a gonow-dict text database.
@@ -66,6 +67,12 @@ func Open(path string) (*Store, error) {
 		Description: m["description"],
 	}
 	s.ftsOK = m["ingest_level"] != string(LevelHeadwords)
+	// feature-detect the trigram "contains" index rather than gating on
+	// schema version, so older .text.db (and standalone native dicts whose
+	// source is gone) keep opening — they simply lack the contains mode.
+	var trig int
+	db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='entry_trigram'`).Scan(&trig)
+	s.hasTrigram = trig > 0
 	fmt.Sscanf(m["entry_count"], "%d", &s.meta.EntryCount)
 	// standalone use: attach the sibling media.db so a copied pair works
 	// without the original source (D2/D9); uuid mismatch = not our pair
@@ -113,7 +120,7 @@ func ReadMeta(dbPath string) (map[string]string, error) {
 func (s *Store) Meta() dict.Meta { return s.meta }
 
 func (s *Store) Caps() dict.Caps {
-	return dict.Caps{Exact: true, Prefix: true, Fuzzy: true, FTS: s.ftsOK}
+	return dict.Caps{Exact: true, Prefix: true, Contains: s.hasTrigram, FTS: s.ftsOK}
 }
 
 func (s *Store) Close() error {
@@ -243,9 +250,10 @@ func (s *Store) Prefix(word string, limit int) ([]dict.Result, error) {
 	return s.Fuzzy(word, n)
 }
 
-// Fuzzy is the FTS5 headword mode: accent/case-insensitive prefix-phrase
-// match via the unicode61 remove_diacritics tokenizer, ordered by
-// headword (deliberate — FTS-audit #4).
+// Fuzzy is the accent/case-insensitive prefix-phrase engine (FTS5 unicode61
+// remove_diacritics tokenizer, ordered by headword). It is no longer a
+// standalone search mode — its behaviour is folded into Prefix, which calls
+// it as the accent-insensitive fallback (FTS-audit #4).
 func (s *Store) Fuzzy(word string, limit int) ([]dict.Result, error) {
 	match := buildMatch(word, "w")
 	if match == "" {
@@ -254,6 +262,40 @@ func (s *Store) Fuzzy(word string, limit int) ([]dict.Result, error) {
 	return s.collect(s.db.Query(`
 		SELECT e.w, e.m FROM entry_fts f JOIN entry e ON e.id = f.rowid
 		WHERE entry_fts MATCH ?1 ORDER BY e.w LIMIT ?2`, match, clamp(limit)))
+}
+
+// Contains is the substring/typo-tolerant headword mode, backed by the FTS5
+// trigram index over accent/case-folded headwords. The trigram tokenizer
+// needs at least 3 characters; shorter queries fall back to a folded LIKE.
+// Ordered by headword. Requires a trigram-indexed database (re-ingest older
+// ones); unsupported otherwise.
+func (s *Store) Contains(word string, limit int) ([]dict.Result, error) {
+	word = strings.TrimSpace(word)
+	if word == "" {
+		return nil, nil
+	}
+	if !s.hasTrigram {
+		return nil, dict.ErrUnsupported
+	}
+	folded := dict.Fold(word)
+	if folded == "" {
+		return nil, nil
+	}
+	n := clamp(limit)
+	if len([]rune(folded)) >= 3 {
+		phrase := `"` + strings.ReplaceAll(folded, `"`, `""`) + `"`
+		res, err := s.collect(s.db.Query(`
+			SELECT e.w, e.m FROM entry_trigram t JOIN entry e ON e.id = t.rowid
+			WHERE entry_trigram MATCH ?1 ORDER BY e.w LIMIT ?2`, phrase, n))
+		if err != nil || len(res) > 0 {
+			return res, err
+		}
+	}
+	// short query (< 3 chars) or trigram miss: LIKE substring on the raw
+	// headword (accent-sensitive — acceptable for the <3-char contains edge).
+	return s.collect(s.db.Query(`
+		SELECT e.w, e.m FROM entry e WHERE e.w LIKE ?1 ESCAPE '\' ORDER BY e.w LIMIT ?2`,
+		"%"+escapeLike(word)+"%", n))
 }
 
 // FullText searches headwords and article text, ordered by BM25 rank.

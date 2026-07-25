@@ -54,8 +54,8 @@ COMMANDS
   list   <dir>                            Discover dictionaries under a folder
   info   <dictfile>                       Show dictionary metadata and capabilities
   lookup [-n max] <dictfile> <word>       Exact lookup (accent-fold fallback); HTML to stdout
-  prefix [-n max] <dictfile> <word>       Exact-else-prefix lookup; HTML to stdout
-  fuzzy  [-n max] <dictfile> <word>       FTS5 fuzzy headword search (ingested dicts only)
+  prefix [-n max] <dictfile> <word>       Exact-else-prefix lookup (accent-insensitive); HTML to stdout
+  contains [-n max] <dictfile> <word>     Substring headword search (FTS5 trigram; ingested dicts only)
   fts    [-n max] <dictfile> <query>      FTS5 full-text search (ingested dicts only)
   keys   [-offset N] [-n max] <dictfile>  List headwords
   res    [-o out] <dictfile> <name>       Extract one resource (e.g. "audio/word.mp3")
@@ -154,7 +154,7 @@ func main() {
 		err = cmdList(args)
 	case "info":
 		err = cmdInfo(args)
-	case "lookup", "prefix", "fuzzy", "fts":
+	case "lookup", "prefix", "contains", "fts":
 		err = cmdQuery(cmd, args)
 	case "ingest":
 		err = cmdIngest(args)
@@ -214,8 +214,8 @@ func cmdInfo(args []string) error {
 	}
 	defer d.Close()
 	m, c := d.Meta(), d.Caps()
-	fmt.Printf("name:        %s\nformat:      %s\npath:        %s\nentries:     %d\ncapabilities: exact=%v prefix=%v fuzzy=%v fts=%v\n",
-		m.Name, m.Format, m.Path, m.EntryCount, c.Exact, c.Prefix, c.Fuzzy, c.FTS)
+	fmt.Printf("name:        %s\nformat:      %s\npath:        %s\nentries:     %d\ncapabilities: exact=%v prefix=%v contains=%v fts=%v\n",
+		m.Name, m.Format, m.Path, m.EntryCount, c.Exact, c.Prefix, c.Contains, c.FTS)
 	if m.Description != "" {
 		fmt.Printf("description: %s\n", m.Description)
 	}
@@ -240,12 +240,12 @@ func cmdQuery(mode string, args []string) error {
 		results, err = d.Exact(fs.Arg(1), *n)
 	case "prefix":
 		results, err = d.Prefix(fs.Arg(1), *n)
-	case "fuzzy":
-		f, ok := d.(dict.FuzzySearcher)
+	case "contains":
+		f, ok := d.(dict.ContainsSearcher)
 		if !ok {
 			return dict.ErrUnsupported
 		}
-		results, err = f.Fuzzy(fs.Arg(1), *n)
+		results, err = f.Contains(fs.Arg(1), *n)
 	case "fts":
 		f, ok := d.(dict.FullTextSearcher)
 		if !ok {
@@ -605,7 +605,7 @@ func openBrowser(url string) {
 
 func cmdSearchAll(args []string) error {
 	fs := flag.NewFlagSet("searchall", flag.ExitOnError)
-	modeStr := fs.String("mode", "prefix", "exact|prefix|fuzzy|fts")
+	modeStr := fs.String("mode", "prefix", "exact|prefix|contains|fts")
 	n := fs.Int("n", 10, "max results per dictionary")
 	fs.Parse(args)
 	if fs.NArg() != 2 {
@@ -617,8 +617,8 @@ func cmdSearchAll(args []string) error {
 		mode = search.Exact
 	case "prefix":
 		mode = search.Prefix
-	case "fuzzy":
-		mode = search.Fuzzy
+	case "contains":
+		mode = search.Contains
 	case "fts":
 		mode = search.FullText
 	default:
