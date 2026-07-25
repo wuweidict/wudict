@@ -18,7 +18,7 @@ on:
         required: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -57,7 +57,7 @@ jobs:
           CGO_ENABLED: "1"
           CC: ${{ matrix.cc }} # empty ⇒ Go's default compiler for the host
         run: |
-          BINARY="gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          BINARY="gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo${{ matrix.ext }}"
           VERSION="${{ inputs.tag }}"
           [ -z "$VERSION" ] && VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
           go build -trimpath -tags sqlite_fts5 \
@@ -73,5 +73,48 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          name: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo
+          path: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo${{ matrix.ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0        # full history + tags so git describe works
+          persist-credentials: true
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ inputs.tag }}"
+          [ -z "$TAG" ] && TAG="$(git describe --abbrev=0 2>/dev/null || true)"
+          if [ -z "$TAG" ]; then
+            echo "::error::No tag input and no existing git tag to fall back on." >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create or update GitHub release
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            echo "Release ${TAG} exists — replacing native assets."
+            gh release upload "${TAG}" artifacts/* --clobber
+          else
+            echo "Creating release ${TAG}."
+            gh release create "${TAG}" artifacts/* \
+              --title "${{ github.event.repository.name }} ${TAG}" \
+              --generate-notes
+          fi
