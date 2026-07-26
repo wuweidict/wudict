@@ -706,23 +706,19 @@ func (s *Server) spxToWav(dictID, name string, rc io.Reader) ([]byte, error) {
 	return wav, nil
 }
 
-// decodeSpx converts one Ogg-Speex stream to WAV. It uses the in-process
-// libspeex decoder by default; the external speexdec binary is used when forced
-// (UseExternalSpeex), when the in-process decoder is not compiled in
-// (CGO_ENABLED=0), or as a fallback if the in-process decode fails on a file.
+// decodeSpx converts one Ogg-Speex stream to WAV. The in-process libspeex
+// decoder is used by default and trusted — there is no per-file fallback to
+// speexdec (a file the built-in decoder can't handle, speexdec almost certainly
+// can't either). The external speexdec is used only when explicitly forced
+// (SPEEX_BACKEND=external) or when the in-process decoder is not compiled in
+// (CGO_ENABLED=0).
 func (s *Server) decodeSpx(rc io.Reader) ([]byte, error) {
 	raw, err := io.ReadAll(rc)
 	if err != nil {
 		return nil, err
 	}
 	if !s.UseExternalSpeex && speex.Available {
-		if wav, derr := speex.DecodeToWAV(bytes.NewReader(raw)); derr == nil {
-			return wav, nil
-		} else if s.Speexdec == "" {
-			return nil, derr
-		} else {
-			logx.V("internal speex decode failed (%v); falling back to %s", derr, s.Speexdec)
-		}
+		return speex.DecodeToWAV(bytes.NewReader(raw))
 	}
 	return s.externalSpxToWav(raw)
 }

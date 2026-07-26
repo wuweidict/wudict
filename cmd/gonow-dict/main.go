@@ -467,7 +467,14 @@ func cmdServe(args []string) error {
 	srv.ConfigPath = cfgFile
 	useExternalSpeex := cfg.SpeexBackend == "external"
 	srv.UseExternalSpeex = useExternalSpeex
-	sxPath, sxSource := resolveSpeexdec(cfg.Speexdec)
+	// Only look for the external speexdec binary when it will actually be used:
+	// forced via SPEEX_BACKEND=external, or a purego build without the built-in
+	// decoder. A full cgo build trusts its own in-process decoder and never
+	// touches speexdec.
+	var sxPath, sxSource string
+	if useExternalSpeex || !speex.Available {
+		sxPath, sxSource = resolveSpeexdec(cfg.Speexdec)
+	}
 	srv.Speexdec = sxPath
 	announceSpeex(useExternalSpeex, sxPath, sxSource)
 	srv.AutoIndex = cfg.AutoIndex != "off"
