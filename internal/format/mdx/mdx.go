@@ -77,7 +77,9 @@ type Dict struct {
 	meta       dict.Meta
 	mdx        *gomdict.Mdict
 	entries    []*gomdict.MDictKeywordEntry // headwords decoded to UTF-8, dictionary order
+	exactOnce  sync.Once                    // exactIdx built on first exact lookup only
 	exactIdx   map[string][]int             // headword -> entry indexes
+	foldOnce   sync.Once                    // foldIdx built on first accent-folded lookup only
 	foldIdx    map[string][]int             // folded headword -> entry indexes
 	enc        int
 	stylesheet map[string][2]string
@@ -99,14 +101,15 @@ func Open(filename string) (*Dict, error) {
 		entries:    entries,
 		enc:        enc,
 		stylesheet: parseStylesheet(md.StyleSheet()),
-		exactIdx:   make(map[string][]int, len(entries)),
-		foldIdx:    make(map[string][]int, len(entries)),
 	}
-	for i, e := range entries {
+	// Decode every headword to UTF-8 at open (entries carry the decoded key
+	// everywhere). No headword index is built here — both the raw
+	// (ensureExact) and accent-folded (ensureFold) indexes are lazy, so an open
+	// that only serves resources or feeds the ingest scan builds nothing.
+	// Runtime readers keep no in-memory headword index; our ingested SQLite
+	// path is that index.
+	for _, e := range entries {
 		e.KeyWord = strings.TrimSpace(decodeEnc([]byte(e.KeyWord), enc))
-		d.exactIdx[e.KeyWord] = append(d.exactIdx[e.KeyWord], i)
-		f := fold(e.KeyWord)
-		d.foldIdx[f] = append(d.foldIdx[f], i)
 	}
 	d.meta = dict.Meta{
 		Name:        dictName(md, filename),
@@ -171,11 +174,38 @@ func (d *Dict) Close() error { return nil } // gomdict opens files per read
 // case/accent-folded matches.
 func (d *Dict) Exact(word string, limit int) ([]dict.Result, error) {
 	word = strings.TrimSpace(word)
+	d.ensureExact()
 	idxs := d.exactIdx[word]
 	if len(idxs) == 0 {
+		d.ensureFold()
 		idxs = d.foldIdx[fold(word)]
 	}
 	return d.results(idxs, word, limit), nil
+}
+
+// ensureExact builds the raw headword index on first lookup, so opens that only
+// serve resources or feed the ingest scan never build it.
+func (d *Dict) ensureExact() {
+	d.exactOnce.Do(func() {
+		idx := make(map[string][]int, len(d.entries))
+		for i, e := range d.entries {
+			idx[e.KeyWord] = append(idx[e.KeyWord], i)
+		}
+		d.exactIdx = idx
+	})
+}
+
+// ensureFold builds the accent/case-folded headword index on first use,
+// deferring the per-headword NFD fold that dominates open time and RAM.
+func (d *Dict) ensureFold() {
+	d.foldOnce.Do(func() {
+		idx := make(map[string][]int, len(d.entries))
+		for i, e := range d.entries {
+			f := fold(e.KeyWord)
+			idx[f] = append(idx[f], i)
+		}
+		d.foldIdx = idx
+	})
 }
 
 // Prefix returns exact matches if any, else up to limit prefix matches
@@ -245,8 +275,10 @@ func (d *Dict) render(e *gomdict.MDictKeywordEntry, seen map[string]bool) []stri
 		}
 		seen[target] = true
 		var out []string
+		d.ensureExact()
 		idxs := d.exactIdx[target]
 		if len(idxs) == 0 {
+			d.ensureFold()
 			idxs = d.foldIdx[fold(target)]
 		}
 		for _, i := range idxs {

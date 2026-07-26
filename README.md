@@ -13,6 +13,7 @@ once.
 | StarDict | `.ifo` + `.idx(.gz)` + `.dict(.dz)` | `.syn` synonyms, `res/` folder or `res.zip` resources |
 | Aard2 | `.slob` | zlib/bz2/lzma2; embedded images/audio/css |
 | Lingvo DSL | `.dsl`, `.dsl.dz` | UTF-8/16/32 auto-detected; `NAME.dsl.files.zip` resources; indexed automatically on first open |
+| Babylon | `.bgl` | gzip block stream; source/target charset auto-detected (Latin / Cyrillic / CJK code pages); embedded images; indexed automatically on first open |
 | gonow | `.text.db` | this app's own portable database format (see *Sharing*, below) |
 
 ## Quick start
@@ -29,18 +30,19 @@ once.
 
 | Mode | What it does | Needs indexing? |
 |---|---|---|
-| **prefix** | exact matches, else headwords starting with the term | no |
+| **starts with** | exact matches, else headwords starting with the term (accent/case-insensitive) | no |
 | **exact** | exact headword (accent/case-fold fallback: `corazon` → `corazón`) | no |
-| **fuzzy** | accent/case-insensitive headword search via FTS5 | automatic |
+| **contains** | substring / typo-tolerant headword match, anywhere in the word (FTS5 trigram) | automatic |
 | **full-text** | search inside article text, ranked by relevance | yes |
 
-Every dictionary works immediately for prefix/exact lookups using its
-native index. **Fuzzy search is prepared automatically** the first time
-you search a dictionary — a small headword index builds quietly in the
-background, so fuzzy is ready on your next query (disable with
-`AUTO_INDEX=off`). **Full-text search** (searching inside article text)
-is the one deliberate step: click *full-text search* on a dictionary (or
-*⚡ enable all* in the ☰ panel), or run `gonow-dict ingest <file-or-folder>`.
+Every dictionary works immediately for starts-with/exact lookups using
+its native index. **The *contains* index is prepared automatically** the
+first time you search a dictionary — a small headword index builds
+quietly in the background, so *contains* is ready on your next query
+(disable with `AUTO_INDEX=off`). **Full-text search** (searching inside
+article text) is the one deliberate step: click *full-text search* on a
+dictionary (or *⚡ index all* in the ☰ panel), or run
+`gonow-dict ingest <file-or-folder>`.
 
 Results stream in as each dictionary responds — the top one opens
 automatically. In the ☰ panel you can **reorder** dictionaries (drag the
@@ -110,8 +112,13 @@ index) and optionally, with *pack media*, `<name>-<hash>.media.db`
 files: **copy them to another machine's db folder and they work as
 standalone dictionaries** — no original source files needed (a text.db
 without its media.db still works; audio/images just fall back to the
-source file if present). The ☰ panel shows each dictionary's db path —
-click it to copy.
+source file if present).
+
+The db folder is itself a dictionary root, so a `.text.db` shows up as a
+standalone dictionary on its own — even after you delete the original
+source. The ☰ panel shows each dictionary's provenance: the source file
+it came from (expand the row for the generated `.text.db` / `.media.db`
+paths), click any path to copy.
 
 ## Speex audio (.spx)
 
@@ -140,5 +147,8 @@ for macOS (arm64/amd64), Linux (amd64/arm64/armv7/armv6) and Windows
 
 GPL-3.0-or-later — see [LICENSE](LICENSE). Includes code derived from
 [go-mdict](https://github.com/terasum/go-mdict) (GPL-3) and format
-knowledge from [pyglossary](https://github.com/ilius/pyglossary);
+knowledge from [pyglossary](https://github.com/ilius/pyglossary) (the BGL
+parser is ported from its `babylon_bgl` plugin, with streaming modeled on
+[GoldenDict](https://github.com/xiaoyifang/goldendict-ng); both trace to
+the reverse engineering by Raul Fernandes and Karl Grill);
 [mark.js](https://markjs.io/) (MIT) is bundled for highlighting.

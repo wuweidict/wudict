@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
 )
@@ -24,10 +25,12 @@ func init() {
 // an in-memory copy of the ref list with exact/fold maps — no ICU
 // collation needed (see docs/FORMATS.md). Safe for concurrent readers.
 type Dict struct {
-	c        *container
-	meta     dict.Meta
-	exactIdx map[string][]int
-	foldIdx  map[string][]int
+	c         *container
+	meta      dict.Meta
+	exactOnce sync.Once // exactIdx is built on first exact lookup only
+	exactIdx  map[string][]int
+	foldOnce  sync.Once // foldIdx is built on first accent-folded lookup only
+	foldIdx   map[string][]int
 }
 
 func Open(path string) (*Dict, error) {
@@ -35,16 +38,12 @@ func Open(path string) (*Dict, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &Dict{
-		c:        c,
-		exactIdx: make(map[string][]int, len(c.refs)),
-		foldIdx:  make(map[string][]int, len(c.refs)),
-	}
-	for i, r := range c.refs {
-		d.exactIdx[r.key] = append(d.exactIdx[r.key], i)
-		f := fold(r.key)
-		d.foldIdx[f] = append(d.foldIdx[f], i)
-	}
+	// No headword index is built at open — neither exact nor folded. Both are
+	// built lazily on first use (see ensureExact/ensureFold), so opening a slob
+	// only for its resources (native path) or for the ingest scan never pays
+	// for a lookup index. The official aard2/GoldenDict readers keep no
+	// in-memory headword index at all; our ingested SQLite path is that index.
+	d := &Dict{c: c}
 	name := strings.TrimSpace(c.tags["label"])
 	if name == "" {
 		base := filepath.Base(path)
@@ -69,11 +68,38 @@ func (d *Dict) Tags() map[string]string { return d.c.tags }
 
 func (d *Dict) Exact(word string, limit int) ([]dict.Result, error) {
 	word = strings.TrimSpace(word)
+	d.ensureExact()
 	idxs := d.exactIdx[word]
 	if len(idxs) == 0 {
+		d.ensureFold()
 		idxs = d.foldIdx[fold(word)]
 	}
 	return d.results(idxs, limit)
+}
+
+// ensureExact builds the raw headword index on first lookup, so opens that only
+// serve resources or feed the ingest scan never build it.
+func (d *Dict) ensureExact() {
+	d.exactOnce.Do(func() {
+		idx := make(map[string][]int, len(d.c.refs))
+		for i, r := range d.c.refs {
+			idx[r.key] = append(idx[r.key], i)
+		}
+		d.exactIdx = idx
+	})
+}
+
+// ensureFold builds the accent/case-folded ref index on first use, deferring
+// the per-headword NFD fold that dominates open time and RAM.
+func (d *Dict) ensureFold() {
+	d.foldOnce.Do(func() {
+		idx := make(map[string][]int, len(d.c.refs))
+		for i, r := range d.c.refs {
+			f := fold(r.key)
+			idx[f] = append(idx[f], i)
+		}
+		d.foldIdx = idx
+	})
 }
 
 func (d *Dict) Prefix(word string, limit int) ([]dict.Result, error) {

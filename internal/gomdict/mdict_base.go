@@ -1040,12 +1040,6 @@ func locateDefByKWIndex(index *MDictKeywordIndex, filePath string, isRecordEncry
 }
 
 func (mdict *MdictBase) locateByKeywordEntry(item *MDictKeywordEntry) ([]byte, error) {
-	file, err := os.Open(mdict.filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
 	var recordBlockInfo *MdictRecordBlockInfoListItem
 
 	var i = 0
@@ -1073,59 +1067,10 @@ func (mdict *MdictBase) locateByKeywordEntry(item *MDictKeywordEntry) ([]byte, e
 	recordBlockStartOffset := recordBlockInfo.compressAccumulatorOffset + mdict.recordBlockInfo.recordBlockDataStartOffset
 	recordBlockLen := recordBlockInfo.compressSize
 
-	recordBlockDataCompBuff, err := readFileFromPos(file, recordBlockStartOffset, recordBlockLen)
+	recordBlock, err := mdict.decompressedRecordBlock(recordBlockStartOffset, recordBlockLen, recordBlockInfo)
 	if err != nil {
 		return nil, err
 	}
-
-	// 4 bytes: compression type
-	var rbCompType = recordBlockDataCompBuff[0:4]
-
-	// record_block stores the final record data
-	var recordBlock []byte
-
-	// TODO: ignore adler32 offset
-	// Note: here ignore the checksum part
-	// bytes: adler32 checksum of decompressed record block
-	// adler32 = unpack('>I', record_block_compressed[4:8])[0]
-	if rbCompType[0] == 0 {
-		recordBlock = recordBlockDataCompBuff[8:recordBlockInfo.compressSize]
-	} else {
-		// decrypt
-		var blockBufDecrypted []byte
-		// if encrypt type == 1, the record block was encrypted
-		if mdict.meta.encryptType == EncryptRecordEnc {
-			// const passkey = new Uint8Array(8);
-			// record_block_compressed.copy(passkey, 0, 4, 8);
-			// passkey.set([0x95, 0x36, 0x00, 0x00], 4); // key part 2: fixed data
-			blockBufDecrypted = mdxDecrypt(recordBlockDataCompBuff, recordBlockInfo.compressSize)
-		} else {
-			blockBufDecrypted = recordBlockDataCompBuff[8:recordBlockInfo.compressSize]
-		}
-
-		// decompress
-		if rbCompType[0] == 1 {
-			// LZO1X: go-lzo expects raw LZO1X data (no MDict \xf0 prefix),
-			// with the decompressed size passed as an outLen hint.
-			out, err1 := lzo.Decompress1X(bytes.NewReader(blockBufDecrypted), len(blockBufDecrypted), int(recordBlockInfo.deCompressSize))
-			if err1 != nil {
-				return nil, err1
-			}
-
-			recordBlock = out
-
-		} else if rbCompType[0] == 2 {
-			var err2 error
-			recordBlock, err2 = zlibDecompress(blockBufDecrypted, 0, int64(len(blockBufDecrypted)))
-			if err2 != nil {
-				return nil, err2
-			}
-		}
-	}
-
-	// TODO: ignore the checksum
-	// notice that adler32 return signed value
-	// assert(adler32 == zlib.adler32(record_block) & 0xffffffff)
 
 	if int64(len(recordBlock)) != recordBlockInfo.deCompressSize {
 		return nil, errors.New("recordBlock length not equals decompress Size")
@@ -1148,12 +1093,80 @@ func (mdict *MdictBase) locateByKeywordEntry(item *MDictKeywordEntry) ([]byte, e
 	if mdict.meta.encoding == EncodingUtf16 {
 		datastr, err1 := decodeLittleEndianUtf16(data)
 		if err1 != nil {
-			return nil, err
+			return nil, err1
 		}
 		return []byte(datastr), nil
 	}
 	return data, nil
+}
 
+// recordBlockCacheCap bounds the per-file decompressed record-block cache.
+const recordBlockCacheCap = 8
+
+// decompressedRecordBlock returns the decompressed record block at startOffset,
+// caching it (bounded FIFO) so adjacent lookups and inline resources that share
+// a block skip the re-open + re-decompress — the dominant per-lookup cost. The
+// returned slice is shared read-only; callers only sub-slice it, never mutate.
+func (mdict *MdictBase) decompressedRecordBlock(startOffset, compLen int64, info *MdictRecordBlockInfoListItem) ([]byte, error) {
+	mdict.blkMu.Lock()
+	if blk, ok := mdict.blkCache[startOffset]; ok {
+		mdict.blkMu.Unlock()
+		return blk, nil
+	}
+	mdict.blkMu.Unlock()
+
+	file, err := os.Open(mdict.filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	comp, err := readFileFromPos(file, startOffset, compLen)
+	if err != nil {
+		return nil, err
+	}
+
+	// comp[0]: compression type (comp[0:4]); then optional decrypt + decompress.
+	var recordBlock []byte
+	if comp[0] == 0 {
+		recordBlock = comp[8:info.compressSize]
+	} else {
+		var dec []byte
+		if mdict.meta.encryptType == EncryptRecordEnc {
+			dec = mdxDecrypt(comp, info.compressSize)
+		} else {
+			dec = comp[8:info.compressSize]
+		}
+		switch comp[0] {
+		case 1:
+			// LZO1X: raw data + decompressed-size hint.
+			out, err1 := lzo.Decompress1X(bytes.NewReader(dec), len(dec), int(info.deCompressSize))
+			if err1 != nil {
+				return nil, err1
+			}
+			recordBlock = out
+		case 2:
+			out, err2 := zlibDecompress(dec, 0, int64(len(dec)))
+			if err2 != nil {
+				return nil, err2
+			}
+			recordBlock = out
+		}
+	}
+
+	mdict.blkMu.Lock()
+	if mdict.blkCache == nil {
+		mdict.blkCache = make(map[int64][]byte, recordBlockCacheCap)
+	}
+	if _, exists := mdict.blkCache[startOffset]; !exists {
+		mdict.blkCache[startOffset] = recordBlock
+		mdict.blkOrder = append(mdict.blkOrder, startOffset)
+		if len(mdict.blkOrder) > recordBlockCacheCap {
+			delete(mdict.blkCache, mdict.blkOrder[0])
+			mdict.blkOrder = mdict.blkOrder[1:]
+		}
+	}
+	mdict.blkMu.Unlock()
+	return recordBlock, nil
 }
 
 func (mdict *MdictBase) getKeyWordEntries() ([]*MDictKeywordEntry, error) {

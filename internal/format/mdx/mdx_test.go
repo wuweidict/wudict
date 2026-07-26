@@ -68,6 +68,35 @@ func testMdx(t *testing.T) string {
 	return p
 }
 
+// BenchmarkExactWarm measures a repeated in-process lookup — with the record
+// block cache this should be microseconds; without it, each op re-opened the
+// file and re-decompressed the whole record block (~1 ms, per the audit).
+func BenchmarkExactWarm(b *testing.B) {
+	p := os.Getenv("GONOW_TEST_MDX")
+	if p == "" {
+		b.Skip("GONOW_TEST_MDX not set")
+	}
+	d, err := Open(p)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer d.Close()
+	keys := d.Keywords(d.Meta().EntryCount/2, 1)
+	if len(keys) == 0 {
+		b.Skip("no keywords")
+	}
+	w := keys[0]
+	if _, err := d.Exact(w, 1); err != nil { // warm the block cache
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := d.Exact(w, 1); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestIntegrationOpenLookup(t *testing.T) {
 	d, err := Open(testMdx(t))
 	if err != nil {

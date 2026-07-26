@@ -55,15 +55,17 @@ func (p plainDict) readRange(offset int64, size int) ([]byte, error) {
 
 // Dict is one opened StarDict dictionary. Safe for concurrent readers.
 type Dict struct {
-	meta     dict.Meta
-	ifo      map[string]string
-	sameType string
-	entries  []idxEntry
-	synonyms map[int][]string // idx entry -> synonym words (from .syn)
-	exactIdx map[string][]int // headword or synonym -> entry indexes
-	foldIdx  map[string][]int
-	data     articleSource
-	dictFile *os.File
+	meta      dict.Meta
+	ifo       map[string]string
+	sameType  string
+	entries   []idxEntry
+	synonyms  map[int][]string // idx entry -> synonym words (from .syn)
+	exactOnce sync.Once        // exactIdx is built on first exact lookup only
+	exactIdx  map[string][]int // headword or synonym -> entry indexes
+	foldOnce  sync.Once        // foldIdx is built on first accent-folded lookup only
+	foldIdx   map[string][]int
+	data      articleSource
+	dictFile  *os.File
 
 	basePath string // path without .ifo
 	resOnce  sync.Once
@@ -102,22 +104,11 @@ func Open(ifoPath string) (*Dict, error) {
 		parseSyn(synData, len(d.entries), d.synonyms)
 	}
 
-	d.exactIdx = make(map[string][]int, len(d.entries))
-	d.foldIdx = make(map[string][]int, len(d.entries))
-	add := func(w string, i int) {
-		d.exactIdx[w] = append(d.exactIdx[w], i)
-		f := fold(w)
-		d.foldIdx[f] = append(d.foldIdx[f], i)
-	}
-	for i, e := range d.entries {
-		add(e.word, i)
-	}
-	for i, words := range d.synonyms {
-		for _, w := range words {
-			add(w, i)
-		}
-	}
-
+	// No headword index is built at open — both the raw (ensureExact) and the
+	// accent-folded (ensureFold) indexes are built lazily on first use, so an
+	// open only for resources or the ingest scan builds nothing. Runtime
+	// readers (GoldenDict, aard2) keep no in-memory headword index at all; our
+	// ingested SQLite path is that on-disk index.
 	if err := d.openDictData(base); err != nil {
 		return nil, fmt.Errorf("stardict %s: %w", ifoPath, err)
 	}
@@ -279,11 +270,51 @@ func (d *Dict) Close() error {
 
 func (d *Dict) Exact(word string, limit int) ([]dict.Result, error) {
 	word = strings.TrimSpace(word)
+	d.ensureExact()
 	idxs := d.exactIdx[word]
 	if len(idxs) == 0 {
+		d.ensureFold()
 		idxs = d.foldIdx[fold(word)]
 	}
 	return d.results(idxs, limit)
+}
+
+// ensureExact builds the raw headword+synonym index on first lookup, so opens
+// that only serve resources or feed the ingest scan never build it.
+func (d *Dict) ensureExact() {
+	d.exactOnce.Do(func() {
+		idx := make(map[string][]int, len(d.entries))
+		for i, e := range d.entries {
+			idx[e.word] = append(idx[e.word], i)
+		}
+		for i, words := range d.synonyms {
+			for _, w := range words {
+				idx[w] = append(idx[w], i)
+			}
+		}
+		d.exactIdx = idx
+	})
+}
+
+// ensureFold builds the accent/case-folded headword index on first use. The
+// per-headword NFD fold is the expensive part of opening, so deferring it keeps
+// open fast and costs nothing for dictionaries that are only ever queried by
+// exact (or ingested) headword.
+func (d *Dict) ensureFold() {
+	d.foldOnce.Do(func() {
+		idx := make(map[string][]int, len(d.entries))
+		for i, e := range d.entries {
+			f := fold(e.word)
+			idx[f] = append(idx[f], i)
+		}
+		for i, words := range d.synonyms {
+			for _, w := range words {
+				f := fold(w)
+				idx[f] = append(idx[f], i)
+			}
+		}
+		d.foldIdx = idx
+	})
 }
 
 func (d *Dict) Prefix(word string, limit int) ([]dict.Result, error) {
