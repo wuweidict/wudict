@@ -5,6 +5,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	_ "embed"
@@ -25,6 +26,7 @@ import (
 	"github.com/glowinthedark/gonow-dict/internal/dict"
 	"github.com/glowinthedark/gonow-dict/internal/logx"
 	"github.com/glowinthedark/gonow-dict/internal/search"
+	"github.com/glowinthedark/gonow-dict/internal/speex"
 	"github.com/glowinthedark/gonow-dict/internal/store"
 )
 
@@ -53,10 +55,14 @@ type Server struct {
 	// even when the folder came from a CLI flag or the file is read-only.
 	ConfigPath string
 
-	// Speexdec is the path to the speexdec binary; when set, .spx
-	// resources are transcoded to WAV on demand (cached) since no
-	// browser can play Speex natively.
+	// Speexdec is the path to the external speexdec binary. It is used when
+	// UseExternalSpeex is set, or as a fallback when the in-process decoder is
+	// not compiled in (CGO_ENABLED=0) or fails on a given file.
 	Speexdec string
+
+	// UseExternalSpeex forces the external speexdec binary even when the
+	// in-process (cgo) libspeex decoder is available (config SPEEX_BACKEND).
+	UseExternalSpeex bool
 
 	// spxLocks single-flights .spx→WAV transcodes per cache key so two
 	// concurrent plays of the same word don't spawn two speexdec processes
@@ -622,10 +628,10 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { rc.Close() }() // closure: rc may be swapped below
 	isSpx := strings.HasSuffix(strings.ToLower(name), ".spx")
-	// browsers cannot play Speex: transcode .spx to WAV via speexdec. The
-	// bytes we send are WAV, so the Content-Type is audio/wav (never the
-	// audio/ogg of the raw container).
-	if isSpx && s.Speexdec != "" {
+	// browsers cannot play Speex: transcode .spx to WAV (in-process libspeex by
+	// default, else the external speexdec). The bytes we send are WAV, so the
+	// Content-Type is audio/wav (never the audio/ogg of the raw container).
+	if isSpx && s.canTranscodeSpx() {
 		if wav, err := s.spxToWav(id, name, rc); err == nil {
 			w.Header().Set("Content-Type", "audio/wav")
 			w.Header().Set("Cache-Control", "public, max-age=86400")
@@ -657,8 +663,17 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, rc)
 }
 
-// spxToWav transcodes one Speex resource to WAV via the external
-// speexdec binary, caching the result under <dbdir>/spxcache/.
+// canTranscodeSpx reports whether any Speex→WAV backend is available.
+func (s *Server) canTranscodeSpx() bool {
+	if s.UseExternalSpeex {
+		return s.Speexdec != ""
+	}
+	return speex.Available || s.Speexdec != ""
+}
+
+// spxToWav transcodes one Speex resource to WAV, caching the result under
+// <dbdir>/spxcache/. The decode itself is done by decodeSpx (in-process or
+// external); this wrapper handles the on-disk cache + per-key single-flight.
 func (s *Server) spxToWav(dictID, name string, rc io.Reader) ([]byte, error) {
 	sum := sha256.Sum256([]byte(dictID + "\x00" + name))
 	cacheDir := filepath.Join(store.DefaultDBDir(), "spxcache")
@@ -666,11 +681,10 @@ func (s *Server) spxToWav(dictID, name string, rc io.Reader) ([]byte, error) {
 	if data, err := os.ReadFile(wavPath); err == nil && len(data) > 0 {
 		return data, nil
 	}
-	// single-flight per cache key: the loser waits on the mutex, then finds
-	// the winner's WAV in the re-check below — no duplicate transcode, no two
-	// writers racing wavPath. The guard is on the shared on-disk cache, so it
-	// stays correct if the exec.Command trip is later replaced by an in-process
-	// Speex decoder.
+	// single-flight per cache key: the loser waits on the mutex, then finds the
+	// winner's WAV in the re-check below — no duplicate decode, no two writers
+	// racing wavPath. The guard is on the shared on-disk cache, so it is
+	// backend-agnostic.
 	muRaw, _ := s.spxLocks.LoadOrStore(wavPath, &sync.Mutex{})
 	mu := muRaw.(*sync.Mutex)
 	mu.Lock()
@@ -678,31 +692,63 @@ func (s *Server) spxToWav(dictID, name string, rc io.Reader) ([]byte, error) {
 	if data, err := os.ReadFile(wavPath); err == nil && len(data) > 0 {
 		return data, nil
 	}
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		return nil, err
-	}
-	spxPath := wavPath + ".spx"
-	f, err := os.Create(spxPath)
+
+	wav, err := s.decodeSpx(rc)
 	if err != nil {
 		return nil, err
 	}
-	_, cpErr := io.Copy(f, rc)
-	f.Close()
-	defer os.Remove(spxPath)
-	if cpErr != nil {
-		return nil, cpErr
+	if err := os.MkdirAll(cacheDir, 0o755); err == nil {
+		if err := os.WriteFile(wavPath, wav, 0o644); err != nil {
+			logx.V("spx cache write %s: %v", wavPath, err)
+		}
 	}
-	cmd := exec.Command(s.Speexdec, spxPath, wavPath)
-	if outb, err := cmd.CombinedOutput(); err != nil {
-		_ = os.Remove(wavPath) // never leave a 0-byte cache entry
+	logx.V("spx decoded %s/%s -> %d bytes", dictID, name, len(wav))
+	return wav, nil
+}
+
+// decodeSpx converts one Ogg-Speex stream to WAV. It uses the in-process
+// libspeex decoder by default; the external speexdec binary is used when forced
+// (UseExternalSpeex), when the in-process decoder is not compiled in
+// (CGO_ENABLED=0), or as a fallback if the in-process decode fails on a file.
+func (s *Server) decodeSpx(rc io.Reader) ([]byte, error) {
+	raw, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, err
+	}
+	if !s.UseExternalSpeex && speex.Available {
+		if wav, derr := speex.DecodeToWAV(bytes.NewReader(raw)); derr == nil {
+			return wav, nil
+		} else if s.Speexdec == "" {
+			return nil, derr
+		} else {
+			logx.V("internal speex decode failed (%v); falling back to %s", derr, s.Speexdec)
+		}
+	}
+	return s.externalSpxToWav(raw)
+}
+
+// externalSpxToWav runs the external speexdec binary over the given .spx bytes.
+func (s *Server) externalSpxToWav(raw []byte) ([]byte, error) {
+	if s.Speexdec == "" {
+		return nil, fmt.Errorf("no speex decoder available")
+	}
+	tmp, err := os.MkdirTemp("", "gonow-spx")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	spxPath := filepath.Join(tmp, "in.spx")
+	wavPath := filepath.Join(tmp, "out.wav")
+	if err := os.WriteFile(spxPath, raw, 0o644); err != nil {
+		return nil, err
+	}
+	if outb, err := exec.Command(s.Speexdec, spxPath, wavPath).CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("%s: %v (%s)", s.Speexdec, err, strings.TrimSpace(string(outb)))
 	}
 	data, err := os.ReadFile(wavPath)
 	if err != nil || len(data) == 0 {
-		_ = os.Remove(wavPath)
 		return nil, fmt.Errorf("speexdec produced no output")
 	}
-	logx.V("spx transcoded %s/%s -> %s (%d bytes)", dictID, name, wavPath, len(data))
 	return data, nil
 }
 

@@ -17,15 +17,16 @@ import (
 
 // Config holds all server settings.
 type Config struct {
-	DictDir   string // DICT_DIR: directory scanned for dictionaries
-	DBDir     string // DB_DIR: cache dir for generated .text.db/.media.db
-	IP        string // SERVER_IP
-	Port      string // SERVER_PORT
-	NoBrowser bool   // NO_BROWSER=1: do not open a browser tab
-	Verbose   bool   // VERBOSE=1: verbose logging
-	Speexdec  string // SPEEXDEC: path to the speexdec binary (.spx audio)
-	AutoIndex string // AUTO_INDEX: off|fuzzy — build a fuzzy headword index on first search of a dict
-	Source    string // path of the config.toml that was loaded ("" if none)
+	DictDir      string // DICT_DIR: directory scanned for dictionaries
+	DBDir        string // DB_DIR: cache dir for generated .text.db/.media.db
+	IP           string // SERVER_IP
+	Port         string // SERVER_PORT
+	NoBrowser    bool   // NO_BROWSER=1: do not open a browser tab
+	Verbose      bool   // VERBOSE=1: verbose logging
+	Speexdec     string // SPEEXDEC: path to the external speexdec binary (.spx audio)
+	SpeexBackend string // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
+	AutoIndex    string // AUTO_INDEX: off|fuzzy — build a fuzzy headword index on first search of a dict
+	Source       string // path of the config.toml that was loaded ("" if none)
 }
 
 func defaults() Config {
@@ -37,8 +38,9 @@ func defaults() Config {
 		Port:    "8808",
 		// Speexdec "" = auto-detect at launch (next to the executable, then
 		// $PATH); SPEEXDEC overrides. See resolveSpeexdec in the CLI.
-		Speexdec:  "",
-		AutoIndex: "fuzzy", // opt-out: build fuzzy indexes on first use
+		Speexdec:     "",
+		SpeexBackend: "internal", // in-process libspeex (cgo); "external" = speexdec binary
+		AutoIndex:    "fuzzy",    // opt-out: build fuzzy indexes on first use
 	}
 }
 
@@ -82,6 +84,9 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	}
 	if v := get("SPEEXDEC"); v != "" {
 		cfg.Speexdec = ExpandHome(v)
+	}
+	if v := get("SPEEX_BACKEND"); v != "" {
+		cfg.SpeexBackend = strings.ToLower(v)
 	}
 	if v := get("AUTO_INDEX"); v != "" {
 		cfg.AutoIndex = strings.ToLower(v)
@@ -133,7 +138,8 @@ const configTemplate = `# gonow-dict configuration
 # SERVER_PORT = "8808"
 # NO_BROWSER  = "0"                   # "1" = do not open a browser tab on startup
 # VERBOSE     = "0"                   # "1" = verbose logging for debugging
-# SPEEXDEC    = "/usr/bin/speexdec"   # override; blank = auto-detect (next to the executable, then $PATH)
+# SPEEX_BACKEND = "internal"          # ".spx" audio decoder: "internal" (built-in libspeex) or "external" (speexdec)
+# SPEEXDEC    = "/usr/bin/speexdec"   # external speexdec path; blank = auto-detect (next to the executable, then $PATH)
 # AUTO_INDEX  = "fuzzy"               # "off" = do not auto-build fuzzy indexes on first search
 `
 

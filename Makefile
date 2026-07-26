@@ -5,10 +5,23 @@
 BINARY     := gonow-dict
 CMD        := ./cmd/gonow-dict
 BUILD_DIR  := dist
-# FTS5 is required by the ingest tier (mattn/go-sqlite3, arrives Phase 2);
-# the tag is harmless before that and must never be dropped (D4).
-GO_TAGS    := sqlite_fts5
-GOFLAGS    := -tags $(GO_TAGS) -trimpath
+# ---- build flavours -----------------------------------------------------
+# gonow-dict builds in two flavours; `build`/`install`/`check` use cgo:
+#
+#   cgo  (default, `make build`): CGO_ENABLED=1 -tags sqlite_fts5
+#     * mattn/go-sqlite3 — fast FTS5 (D4)
+#     * built-in libspeex .spx decoder (internal/speex + internal/speex/clib)
+#     Requires a C compiler.
+#
+#   purego (`make build-purego`, `make cross` releases): CGO_ENABLED=0 -tags purego
+#     * modernc.org/sqlite — pure Go, no C toolchain
+#     * NO built-in speex; .spx audio falls back to the external `speexdec`
+#       binary (SPEEX_BACKEND=external has the same effect on a cgo build)
+#
+# The sqlite_fts5 tag must never be dropped from the cgo flavour (D4).
+GO_TAGS      := sqlite_fts5
+GOFLAGS      := -tags $(GO_TAGS) -trimpath
+PUREGO_FLAGS := -tags purego -trimpath
 LDFLAGS    := -s -w -X main.version=$(VERSION)
 VERSION    := $(shell git -C . describe --tags --always --dirty 2>/dev/null || echo dev)
 
@@ -37,8 +50,12 @@ help: ## Show this help
 # ---- build & run --------------------------------------------------------
 
 .PHONY: build
-build: ## Build ./gonow-dict binary for the host platform
-	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
+build: ## Build the host binary — cgo flavour (built-in sqlite FTS5 + built-in speex .spx decoder)
+	CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
+
+.PHONY: build-purego
+build-purego: ## Build the host binary — purego flavour (pure-Go sqlite, external speexdec)
+	CGO_ENABLED=0 go build $(PUREGO_FLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
 
 .PHONY: install
 install: ## go install into GOBIN
@@ -58,7 +75,7 @@ serve: build ## Run the HTTP server (DICT_DIR/PORT/ARGS overridable), e.g. make 
 	./$(BINARY) serve $(if $(DICT_DIR),-dict-dir "$(DICT_DIR)") $(if $(PORT),-port $(PORT)) $(ARGS)
 
 .PHONY: cross
-cross: ## Cross-compile all release targets into dist/ (pure-Go sqlite via -tags purego, no C toolchain needed)
+cross: ## Cross-compile all release targets into dist/ (purego flavour: pure-Go sqlite, no C toolchain; .spx via external speexdec)
 	@mkdir -p $(BUILD_DIR)
 	@for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 linux/arm/7 linux/arm/6 windows/amd64 windows/arm64; do \
 	  os=$$(echo $$target | cut -d/ -f1); arch=$$(echo $$target | cut -d/ -f2); arm=$$(echo $$target | cut -d/ -f3); \
@@ -144,8 +161,12 @@ clean: ## Remove binary, dist/, coverage artifacts
 version: ## Print the version stamp used for builds
 	@echo $(VERSION)
 
+.PHONY: push
 push:  ## sync remotes
 	git push origin
 	git push hz
 	git push iq
 	git push od
+	
+open: build  ## run browser
+	open http://localhost:8808

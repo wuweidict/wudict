@@ -28,6 +28,7 @@ import (
 	"github.com/glowinthedark/gonow-dict/internal/logx"
 	"github.com/glowinthedark/gonow-dict/internal/search"
 	"github.com/glowinthedark/gonow-dict/internal/server"
+	"github.com/glowinthedark/gonow-dict/internal/speex"
 	"github.com/glowinthedark/gonow-dict/internal/store"
 
 	_ "github.com/glowinthedark/gonow-dict/internal/format/bgl"      // register .bgl
@@ -464,9 +465,11 @@ func cmdServe(args []string) error {
 	}
 	srv := server.New(reg)
 	srv.ConfigPath = cfgFile
+	useExternalSpeex := cfg.SpeexBackend == "external"
+	srv.UseExternalSpeex = useExternalSpeex
 	sxPath, sxSource := resolveSpeexdec(cfg.Speexdec)
 	srv.Speexdec = sxPath
-	announceSpeexdec(sxPath, sxSource)
+	announceSpeex(useExternalSpeex, sxPath, sxSource)
 	srv.AutoIndex = cfg.AutoIndex != "off"
 
 	url := "http://" + cfg.Addr() + "/"
@@ -576,18 +579,32 @@ func isExecFile(p string) bool {
 	return fi.Mode()&0o111 != 0
 }
 
-// announceSpeexdec reports the speexdec resolution at startup: the resolved
-// path when found, or a warning with install pointers when not.
-func announceSpeexdec(path, source string) {
-	if path != "" {
-		fmt.Fprintf(os.Stderr, "speexdec: %s (%s) — .spx audio enabled\n", path, source)
+// announceSpeex reports the active .spx audio backend at startup: the built-in
+// libspeex decoder (cgo, default), the external speexdec binary (when forced or
+// when built without cgo), or a warning with install pointers when neither is
+// available.
+func announceSpeex(useExternal bool, path, source string) {
+	if !useExternal && speex.Available {
+		if path != "" {
+			fmt.Fprintf(os.Stderr, "speex: built-in decoder — .spx audio enabled (external speexdec at %s as fallback)\n", path)
+		} else {
+			fmt.Fprintln(os.Stderr, "speex: built-in decoder — .spx audio enabled")
+		}
 		return
 	}
-	fmt.Fprint(os.Stderr, "speexdec: not found — .spx audio will not play.\n"+
-		"  Install it and restart, drop the binary next to gonow-dict, or set SPEEXDEC=/path/to/speexdec:\n"+
+	why := "SPEEX_BACKEND=external"
+	if !speex.Available {
+		why = "built without cgo"
+	}
+	if path != "" {
+		fmt.Fprintf(os.Stderr, "speex: external speexdec at %s (%s) — .spx audio enabled\n", path, why)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "speex: no decoder available (%s, and no speexdec found) — .spx audio will not play.\n"+
+		"  Build with cgo for the built-in decoder, or install speex / set SPEEXDEC=/path/to/speexdec:\n"+
 		"    macOS:    brew install speex\n"+
 		"    Linux:    sudo apt install speex   (or your distro's speex package)\n"+
-		"    Windows:  https://www.speex.org/downloads/\n")
+		"    Windows:  https://www.speex.org/downloads/\n", why)
 }
 
 func openBrowser(url string) {
