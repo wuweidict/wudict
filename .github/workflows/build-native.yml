@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Version stamp for the binaries (e.g. v0.1); blank = short SHA"
+        description: "Version stamp for the binaries (e.g. v0.1); blank = use latest tag"
         required: false
 
 permissions:
@@ -59,7 +59,7 @@ jobs:
         run: |
           BINARY="gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo${{ matrix.ext }}"
           VERSION="${{ inputs.tag }}"
-          [ -z "$VERSION" ] && VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
+          [ -z "$VERSION" ] && VERSION="$(git describe --abbrev=0 2>/dev/null || echo dev)"
           go build -trimpath -tags sqlite_fts5 \
             -ldflags="-s -w -X main.version=${VERSION}" \
             -o "${BINARY}" ./cmd/gonow-dict
