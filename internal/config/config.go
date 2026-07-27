@@ -17,26 +17,26 @@ import (
 
 // Config holds all server settings.
 type Config struct {
-	DictDir      string // DICT_DIR: directory scanned for dictionaries
-	DBDir        string // DB_DIR: cache dir for generated .text.db/.media.db
-	IP           string // SERVER_IP
-	Port         string // SERVER_PORT
-	NoBrowser    bool   // NO_BROWSER=1: do not open a browser tab
-	Verbose      bool   // VERBOSE=1: verbose logging
-	Speexdec     string // SPEEXDEC: path to the external speexdec binary (.spx audio)
-	SpeexBackend string // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
-	AutoIndex    string // AUTO_INDEX: off|fuzzy — build a fuzzy headword index on first search of a dict
-	UseCached    bool   // USE_CACHED=1: also list previously imported dictionaries from the db dir
-	Source       string // path of the config.toml that was loaded ("" if none)
+	DictDirs     []string // DICT_DIR: one or more folders scanned for dictionaries
+	DBDir        string   // DB_DIR: cache dir for generated .text.db/.media.db
+	IP           string   // SERVER_IP
+	Port         string   // SERVER_PORT
+	NoBrowser    bool     // NO_BROWSER=1: do not open a browser tab
+	Verbose      bool     // VERBOSE=1: verbose logging
+	Speexdec     string   // SPEEXDEC: path to the external speexdec binary (.spx audio)
+	SpeexBackend string   // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
+	AutoIndex    string   // AUTO_INDEX: off|fuzzy — build a fuzzy headword index on first search of a dict
+	UseCached    bool     // USE_CACHED=1: also list previously imported dictionaries from the db dir
+	Source       string   // path of the config.toml that was loaded ("" if none)
 }
 
 func defaults() Config {
 	home, _ := os.UserHomeDir()
 	return Config{
-		DictDir: filepath.Join(home, "Dictionaries"),
-		DBDir:   "", // empty = store.DefaultDBDir()
-		IP:      "127.0.0.1",
-		Port:    "8808",
+		DictDirs: []string{filepath.Join(home, "Dictionaries")},
+		DBDir:    "", // empty = store.DefaultDBDir()
+		IP:       "127.0.0.1",
+		Port:     "8808",
 		// Speexdec "" = auto-detect at launch (next to the executable, then
 		// $PATH); SPEEXDEC overrides. See resolveSpeexdec in the CLI.
 		Speexdec:     "",
@@ -66,7 +66,9 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 		return fileVals[key]
 	}
 	if v := get("DICT_DIR"); v != "" {
-		cfg.DictDir = ExpandHome(v)
+		if dirs := ParseList(v); len(dirs) > 0 {
+			cfg.DictDirs = dirs
+		}
 	}
 	if v := get("DB_DIR"); v != "" {
 		cfg.DBDir = ExpandHome(v)
@@ -137,7 +139,9 @@ const configTemplate = `# gonow-dict configuration
 # All keys are optional — uncomment a line to override its default.
 
 # DICT_DIR    = "~/Dictionaries"      # folder with dictionaries (.mdx, .ifo, .slob, .dsl, .bgl)
-#                                     # must NOT be the same folder as DB_DIR
+#                                     # several folders: ["~/Dictionaries", "/Volumes/Ext/Dicts"]
+#                                     # (in the environment separate them with ":", ";" on Windows)
+#                                     # none of them may be the DB_DIR folder
 # DB_DIR      = "~/.gonow-dict/db"    # library of prepared dictionaries (one folder each)
 # SERVER_IP   = "127.0.0.1"           # listen address (0.0.0.0 = all interfaces)
 # SERVER_PORT = "8808"
@@ -187,11 +191,18 @@ func EnsureConfigFile() (path string, created bool, err error) {
 // replacing an existing `KEY =` line (commented or not) and preserving
 // the rest of the file; the key is appended when absent.
 func SaveKey(path, key, value string) error {
+	return SaveKeyRaw(path, key, fmt.Sprintf("%q", value))
+}
+
+// SaveKeyRaw is SaveKey for a value that is already TOML syntax — an array
+// from FormatList, say — so lists round-trip through the same
+// uncomment-in-place, comments-preserved edit as scalars.
+func SaveKeyRaw(path, key, raw string) error {
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	line := fmt.Sprintf("%s = %q", key, value)
+	line := fmt.Sprintf("%s = %s", key, raw)
 	re := regexp.MustCompile(`(?m)^[ \t]*#?[ \t]*` + regexp.QuoteMeta(key) + `[ \t]*=.*$`)
 	s := string(data)
 	if loc := re.FindStringIndex(s); loc != nil {
@@ -229,6 +240,49 @@ func parseTOML(s string) map[string]string {
 		out[strings.TrimSpace(k)] = v
 	}
 	return out
+}
+
+// ParseList reads a DICT_DIR value in any of the forms the layers produce:
+//
+//	["~/Dicts", "/Volumes/Ext/Dicts"]   config.toml array
+//	~/Dicts:/Volumes/Ext/Dicts          environment (os.PathListSeparator,
+//	                                    ';' on Windows — ':' would collide
+//	                                    with drive letters, and this is a path
+//	                                    list, so it follows $PATH convention)
+//	~/Dicts                             a single folder, exactly as before
+//
+// Entries are ~-expanded and blanks dropped; order is preserved (it decides
+// nothing but which root wins a tie — result ranking belongs to the panel).
+func ParseList(v string) []string {
+	v = strings.TrimSpace(v)
+	var parts []string
+	if strings.HasPrefix(v, "[") {
+		for _, raw := range strings.Split(strings.Trim(v, "[]"), ",") {
+			parts = append(parts, strings.Trim(strings.TrimSpace(raw), "\"'`"))
+		}
+	} else {
+		parts = strings.Split(v, string(os.PathListSeparator))
+	}
+	var out []string
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, ExpandHome(p))
+		}
+	}
+	return out
+}
+
+// FormatList renders folders back into config.toml syntax: a bare string for
+// one folder (the common case stays readable), an array for several.
+func FormatList(dirs []string) string {
+	if len(dirs) == 1 {
+		return fmt.Sprintf("%q", dirs[0])
+	}
+	quoted := make([]string, len(dirs))
+	for i, d := range dirs {
+		quoted[i] = fmt.Sprintf("%q", d)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
 // ExpandHome expands a leading ~ to the user home directory.

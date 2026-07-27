@@ -199,10 +199,63 @@ func isExcluded(dir string) bool {
 	return false
 }
 
+// RootScan is what one root contributed: New counts the dictionaries it was
+// the first to offer, Total everything it holds. They differ when roots
+// overlap, which lets the UI say "already listed from another folder" instead
+// of the misleading "no dictionaries found".
+type RootScan struct{ New, Total int }
+
+// DiscoverAll walks several roots and returns their dictionaries as one list,
+// with each dictionary appearing exactly once.
+//
+// Deduplication is by CANONICAL path (symlinks resolved), because overlapping
+// roots are normal once more than one is allowed — "~/Dicts" alongside
+// "~/Dicts/Spanish", or a symlinked shortcut to a folder already listed.
+// Without it the same dictionary would get two registry ids: two rows in the
+// panel and two copies of every hit in an all-dictionaries search.
+//
+// A root that cannot be walked (an unmounted drive, a deleted folder) is
+// skipped rather than failing the scan — the other roots must keep working —
+// and reported through the returned per-root counts, which say how many
+// dictionaries each root contributed *first* (earlier roots win a tie).
+func DiscoverAll(roots []string) (paths []string, perRoot []RootScan, err error) {
+	perRoot = make([]RootScan, len(roots))
+	seen := map[string]bool{}
+	for i, root := range roots {
+		found, ferr := Discover(root)
+		if ferr != nil && err == nil {
+			err = ferr
+		}
+		perRoot[i].Total = len(found)
+		for _, p := range found {
+			key := canonPath(p)
+			if key == "" {
+				key = p
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			paths = append(paths, p)
+			perRoot[i].New++
+		}
+	}
+	sort.Slice(paths, func(i, j int) bool { return strings.ToLower(paths[i]) < strings.ToLower(paths[j]) })
+	return paths, perRoot, err
+}
+
 // Discover walks root recursively and returns the main files of all
 // recognizable dictionaries, sorted case-insensitively. Excluded subtrees
 // (see ExcludeDir) are skipped whole.
 func Discover(root string) ([]string, error) {
+	// Resolve the root first: filepath.WalkDir lstats what it is given, so a
+	// SYMLINKED dictionary folder ("~/Dicts" → /Volumes/Ext/Dicts) yielded
+	// nothing at all. Following the link the user explicitly configured is
+	// intended; links *inside* the tree are still not followed, which is what
+	// keeps cycles and surprise duplicates out.
+	if c := canonPath(root); c != "" {
+		root = c
+	}
 	var out []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {

@@ -209,17 +209,27 @@ func openUpgradedOrDirect(path string) (dict.Dictionary, error) {
 // non-empty registry. Opting in is a deliberate, remembered choice made on the
 // setup page ("Use these dictionaries").
 type Registry struct {
-	dictDir string // dictionary folder: .mdx/.slob/.ifo/.dsl/.bgl sources
-
 	mu        sync.RWMutex
-	useCached bool // include prepared dictionaries from the library (USE_CACHED)
+	dictDirs  []string // dictionary folders: .mdx/.slob/.ifo/.dsl/.bgl sources
+	useCached bool     // include prepared dictionaries from the library (USE_CACHED)
 	entries   []*entry
 	byID      map[string]*entry
-	fromLib   int // how many entries came from the library, not the dict folder
+	fromLib   int    // how many entries came from the library, not a dict folder
+	roots     []Root // per-folder status, for the startup summary and setup page
 }
 
-func NewRegistry(dictDir string, useCached bool) (*Registry, error) {
-	r := &Registry{dictDir: dictDir, useCached: useCached, byID: map[string]*entry{}}
+// Root is one dictionary folder and what it contributed. A folder that is
+// missing (an unmounted drive, a deleted path) is reported, never fatal: the
+// other folders must keep working.
+type Root struct {
+	Path   string `json:"path"`
+	Count  int    `json:"count"` // dictionaries this folder was the first to offer
+	Total  int    `json:"total"` // everything it holds (Total > Count ⇒ overlap)
+	Exists bool   `json:"exists"`
+}
+
+func NewRegistry(dictDirs []string, useCached bool) (*Registry, error) {
+	r := &Registry{dictDirs: dictDirs, useCached: useCached, byID: map[string]*entry{}}
 	if err := r.Rescan(); err != nil {
 		return r, err
 	}
@@ -247,11 +257,18 @@ func (r *Registry) SetUseCached(on bool) error {
 	return nil
 }
 
-// Dir returns the current dictionary directory.
-func (r *Registry) Dir() string {
+// Dirs returns the current dictionary folders.
+func (r *Registry) Dirs() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.dictDir
+	return append([]string(nil), r.dictDirs...)
+}
+
+// Roots reports each dictionary folder with its status and contribution.
+func (r *Registry) Roots() []Root {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return append([]Root(nil), r.roots...)
 }
 
 // Count returns the number of discovered dictionaries.
@@ -261,11 +278,11 @@ func (r *Registry) Count() int {
 	return len(r.entries)
 }
 
-// SetDir re-points the registry at a new dictionary directory and
-// rescans (used by the first-run setup flow — no restart needed).
-func (r *Registry) SetDir(dir string) error {
+// SetDirs re-points the registry at new dictionary folders and rescans
+// (used by the first-run setup flow — no restart needed).
+func (r *Registry) SetDirs(dirs []string) error {
 	r.mu.Lock()
-	r.dictDir = dir
+	r.dictDirs = append([]string(nil), dirs...)
 	r.mu.Unlock()
 	if err := r.Rescan(); err != nil {
 		return err
@@ -277,12 +294,16 @@ func (r *Registry) SetDir(dir string) error {
 // Rescan re-discovers dictionaries, keeping already-open entries.
 func (r *Registry) Rescan() error {
 	r.mu.RLock()
-	dir := r.dictDir
+	dirs := append([]string(nil), r.dictDirs...)
 	useCached := r.useCached
 	r.mu.RUnlock()
-	paths, err := dict.Discover(dir)
+	paths, perRoot, err := dict.DiscoverAll(dirs)
 	if err != nil {
-		return err
+		logx.V("scanning dictionary folders: %v", err)
+	}
+	roots := make([]Root, len(dirs))
+	for i, d := range dirs {
+		roots[i] = Root{Path: d, Count: perRoot[i].New, Total: perRoot[i].Total, Exists: dirExists(d)}
 	}
 	fromLib := 0
 	if useCached {
@@ -313,6 +334,7 @@ func (r *Registry) Rescan() error {
 	})
 	r.entries = entries
 	r.fromLib = fromLib
+	r.roots = roots
 	return nil
 }
 

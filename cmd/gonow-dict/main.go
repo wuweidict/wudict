@@ -53,7 +53,7 @@ USAGE
 
 COMMANDS
   serve                                   Start the HTTP server (the default command)
-  list   <dir>                            Discover dictionaries under a folder
+  list   <dir> [dir…]                     Discover dictionaries under one or more folders
   info   <dictfile>                       Show dictionary metadata and capabilities
   lookup [-n max] <dictfile> <word>       Exact lookup (accent-fold fallback); HTML to stdout
   prefix [-n max] <dictfile> <word>       Exact-else-prefix lookup (accent-insensitive); HTML to stdout
@@ -61,7 +61,7 @@ COMMANDS
   fts    [-n max] <dictfile> <query>      FTS5 full-text search (ingested dicts only)
   keys   [-offset N] [-n max] <dictfile>  List headwords
   res    [-o out] <dictfile> <name>       Extract one resource (e.g. "audio/word.mp3")
-  ingest [-full] [-fuzzy-only] <dictfile|folder>
+  ingest [-full] [-fuzzy-only] <dictfile|folder…>
                                           Prepare a dictionary into the library:
                                           <db-dir>/<dictionary name>/text.db (+ info.txt),
                                           enabling contains & full-text search (a folder
@@ -71,6 +71,7 @@ COMMANDS
                                           (smaller db, no full-text search)
   searchall [-mode m] [-n perDict] <dir> <term>
                                           Concurrent search across all dictionaries in a folder
+                                          (<dir> may be a "a:b" list, as in DICT_DIR)
   clean  [-f]                             List removable items in the library: incomplete or
                                           unreadable folders, interrupted ingests, leftovers
                                           from the old flat layout. A prepared dictionary is
@@ -78,8 +79,15 @@ COMMANDS
                                           -f deletes them. Dry run by default.
 
 SERVE FLAGS
-  --dict-dir     <path>   Folder with dictionary files (scanned recursively)
+  --dict-dir     <path>   Folder with dictionary files (scanned recursively).
+                          Repeat the flag for several folders:
+                            --dict-dir ~/Dictionaries --dict-dir /Volumes/Ext/Dicts
                           env: DICT_DIR       toml: DICT_DIR
+                            DICT_DIR="~/Dictionaries:/Volumes/Ext/Dicts"   (";" on Windows)
+                            DICT_DIR = ["~/Dictionaries", "/Volumes/Ext/Dicts"]
+                          A dictionary found in two folders is listed once (the
+                          first folder wins); a missing folder is reported and
+                          the others still work.
                           default: ~/Dictionaries
 
   --db-dir       <path>   Library folder: one subfolder per prepared dictionary,
@@ -204,10 +212,11 @@ func main() {
 }
 
 func cmdList(args []string) error {
-	if len(args) != 1 {
-		return fmt.Errorf("usage: gonow-dict list <dir>")
+	dirs := folderArgs(args)
+	if len(dirs) == 0 {
+		return fmt.Errorf("usage: gonow-dict list <dir> [dir…]")
 	}
-	paths, err := dict.Discover(args[0])
+	paths, _, err := dict.DiscoverAll(dirs)
 	if err != nil {
 		return err
 	}
@@ -215,9 +224,20 @@ func cmdList(args []string) error {
 		fmt.Println(p)
 	}
 	if len(paths) == 0 {
-		fmt.Fprintf(os.Stderr, "no dictionaries found in %s\n", args[0])
+		fmt.Fprintf(os.Stderr, "no dictionaries found in %s\n", strings.Join(dirs, ", "))
 	}
 	return nil
+}
+
+// folderArgs reads folder arguments the same way everywhere in the CLI: one
+// per argument, and each argument may itself be a separator-joined list, so
+// `list A B`, `list A:B` and `DICT_DIR`-style values all work.
+func folderArgs(args []string) []string {
+	var out []string
+	for _, a := range args {
+		out = append(out, config.ParseList(a)...)
+	}
+	return out
 }
 
 func cmdInfo(args []string) error {
@@ -316,11 +336,11 @@ func cmdIngest(args []string) error {
 	srcPath := fs.Arg(0)
 
 	// folder: ingest every dictionary found under it
-	if st, err := os.Stat(srcPath); err == nil && st.IsDir() {
+	if st, err := os.Stat(folderArgs([]string{srcPath})[0]); err == nil && st.IsDir() {
 		if *out != "" {
 			return fmt.Errorf("-o cannot be used with a folder")
 		}
-		paths, err := dict.Discover(srcPath)
+		paths, _, err := dict.DiscoverAll(folderArgs(fs.Args()))
 		if err != nil {
 			return err
 		}
@@ -435,7 +455,8 @@ func maybePackMedia(srcPath, dbPath, name string, full bool) error {
 
 func cmdServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	dictDir := fs.String("dict-dir", "", "directory with dictionaries (env/toml: DICT_DIR)")
+	var dictDirs multiFlag
+	fs.Var(&dictDirs, "dict-dir", "folder with dictionaries; repeat for several (env/toml: DICT_DIR)")
 	dbDir := fs.String("db-dir", "", "library dir for prepared dictionaries (env/toml: DB_DIR)")
 	useCached := fs.Bool("use-cached", false, "also serve previously imported dictionaries from the library (env/toml: USE_CACHED)")
 	ip := fs.String("ip", "", "listen IP (env/toml: SERVER_IP)")
@@ -450,7 +471,7 @@ func cmdServe(args []string) error {
 		*configPath = os.Getenv("CONFIG_PATH")
 	}
 	flagVals := map[string]string{
-		"DICT_DIR": *dictDir, "DB_DIR": *dbDir,
+		"DICT_DIR": dictDirs.String(), "DB_DIR": *dbDir,
 		"SERVER_IP": *ip, "SERVER_PORT": *port,
 		"SPEEXDEC": *speexdec,
 	}
@@ -470,8 +491,8 @@ func cmdServe(args []string) error {
 	if cfg.Verbose {
 		logx.Enabled = true
 	}
-	logx.V("config: source=%q dictDir=%s dbDir=%q addr=%s speexdec=%s",
-		cfg.Source, cfg.DictDir, cfg.DBDir, cfg.Addr(), cfg.Speexdec)
+	logx.V("config: source=%q dictDirs=%v dbDir=%q addr=%s speexdec=%s",
+		cfg.Source, cfg.DictDirs, cfg.DBDir, cfg.Addr(), cfg.Speexdec)
 	if cfg.DBDir != "" {
 		os.Setenv("GONOW_DB_DIR", cfg.DBDir) // store + auto-ingest honor this
 	}
@@ -482,7 +503,10 @@ func cmdServe(args []string) error {
 	// hard error; and wherever it lives, discovery skips it — which also covers
 	// the subtler case of a DB_DIR nested inside the dictionary folder.
 	libDir := store.DefaultDBDir()
-	if dict.SameDir(cfg.DictDir, libDir) {
+	for _, d := range cfg.DictDirs {
+		if !dict.SameDir(d, libDir) {
+			continue
+		}
 		return fmt.Errorf("DICT_DIR and DB_DIR are the same folder:\n"+
 			"  %s\n"+
 			"  DB_DIR holds the dictionaries gonow-dict has already prepared; DICT_DIR must point at\n"+
@@ -517,9 +541,9 @@ func cmdServe(args []string) error {
 		}
 	}
 
-	reg, err := server.NewRegistry(cfg.DictDir, cfg.UseCached)
+	reg, err := server.NewRegistry(cfg.DictDirs, cfg.UseCached)
 	if err != nil {
-		return fmt.Errorf("scanning %s: %w", cfg.DictDir, err)
+		return fmt.Errorf("scanning %s: %w", strings.Join(cfg.DictDirs, ", "), err)
 	}
 	srv := server.New(reg)
 	srv.ConfigPath = cfgFile
@@ -540,6 +564,7 @@ func cmdServe(args []string) error {
 	lib, _ := store.Library()
 	inFolder, fromLib := reg.Counts()
 	printStartup(cfg, startupInfo{
+		roots:    reg.Roots(),
 		inFolder: inFolder, fromLibrary: fromLib, prepared: len(lib),
 		total: reg.Count(), libDir: libDir, url: url,
 		speex: speexSummary(useExternalSpeex, sxPath, sxSource),
@@ -670,10 +695,11 @@ func speexSummary(useExternal bool, path, source string) string {
 // what IT contributed (a blended total next to the dictionary folder made an
 // empty folder look full when the library was in use).
 type startupInfo struct {
-	inFolder    int // dictionaries discovered in the dictionary folder
-	fromLibrary int // prepared dictionaries actually serving (USE_CACHED)
-	prepared    int // prepared dictionaries that exist, in use or not
-	total       int // what is being served
+	roots       []server.Root // dictionary folders, each with its own status
+	inFolder    int           // dictionaries discovered across those folders
+	fromLibrary int           // prepared dictionaries actually serving (USE_CACHED)
+	prepared    int           // prepared dictionaries that exist, in use or not
+	total       int           // what is being served
 	libDir      string
 	url         string
 	speex       string
@@ -683,14 +709,28 @@ func printStartup(cfg config.Config, in startupInfo) {
 	out := os.Stderr
 	fmt.Fprintf(out, "gonow-dict %s\n", version)
 
-	dictNote := plural(in.inFolder, "dictionary", "dictionaries")
-	switch {
-	case !dirExists(cfg.DictDir):
-		dictNote = "folder does not exist"
-	case in.inFolder == 0:
-		dictNote = "no dictionaries found"
+	// one line per folder, aligned in a single column, each with its own
+	// status — an unmounted drive must be visible, not silently absent
+	for i, root := range in.roots {
+		label := "  dictionaries  "
+		if i > 0 {
+			label = "                "
+		}
+		note := plural(root.Count, "dictionary", "dictionaries")
+		switch {
+		case !root.Exists:
+			note = "folder not found"
+		case root.Total == 0:
+			note = "no dictionaries found"
+		case root.Count == 0:
+			// overlapping folders: saying "none found" here would be a lie
+			note = plural(root.Total, "dictionary", "dictionaries") + ", already listed above"
+		case root.Total > root.Count:
+			note = fmt.Sprintf("%s (+%d already listed above)",
+				plural(root.Count, "dictionary", "dictionaries"), root.Total-root.Count)
+		}
+		fmt.Fprintf(out, "%s%s  (%s)\n", label, root.Path, note)
 	}
-	fmt.Fprintf(out, "  dictionaries  %s  (%s)\n", cfg.DictDir, dictNote)
 
 	libNote := fmt.Sprintf("%d prepared", in.prepared)
 	switch {
@@ -735,6 +775,19 @@ func printStartup(cfg config.Config, in startupInfo) {
 			"    Linux:    sudo apt install speex   (or your distro's speex package)\n"+
 			"    Windows:  https://www.speex.org/downloads/\n")
 	}
+}
+
+// multiFlag collects a repeatable path flag. Repetition rather than a
+// separator inside one value: nothing to escape and it reads the same on every
+// platform (`--dict-dir A --dict-dir B`). It joins with os.PathListSeparator
+// so the value travels through the same string-keyed config layering as the
+// environment variable, which follows the $PATH convention.
+type multiFlag []string
+
+func (m *multiFlag) String() string { return strings.Join(*m, string(os.PathListSeparator)) }
+func (m *multiFlag) Set(v string) error {
+	*m = append(*m, v)
+	return nil
 }
 
 // plural renders a count with the right noun: "1 dictionary", "55 dictionaries".
@@ -787,7 +840,7 @@ func cmdSearchAll(args []string) error {
 	default:
 		return fmt.Errorf("unknown mode %q", *modeStr)
 	}
-	paths, err := dict.Discover(fs.Arg(0))
+	paths, _, err := dict.DiscoverAll(folderArgs([]string{fs.Arg(0)}))
 	if err != nil {
 		return err
 	}

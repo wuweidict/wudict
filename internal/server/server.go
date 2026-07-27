@@ -148,12 +148,24 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// first-run: no dictionaries yet → serve the setup page instead
 	if s.reg.Count() == 0 {
-		dir := s.reg.Dir()
+		dirs := s.reg.Dirs()
 		reason := "contains no dictionaries yet"
-		if _, err := os.Stat(dir); err != nil {
-			reason = "does not exist"
+		if len(dirs) > 1 {
+			reason = "contain no dictionaries yet"
 		}
-		page := strings.ReplaceAll(setupHTML, "{{DIR}}", htmlEscape(dir))
+		missing := 0
+		for _, d := range dirs {
+			if _, err := os.Stat(d); err != nil {
+				missing++
+			}
+		}
+		if missing == len(dirs) {
+			reason = "does not exist"
+			if len(dirs) > 1 {
+				reason = "do not exist"
+			}
+		}
+		page := strings.ReplaceAll(setupHTML, "{{DIR}}", htmlEscape(strings.Join(dirs, ", ")))
 		page = strings.ReplaceAll(page, "{{REASON}}", reason)
 		_, _ = io.WriteString(w, page)
 		return
@@ -249,27 +261,69 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"path": dir, "found": len(paths)}
-	if r.URL.Query().Get("save") != "" {
-		if len(paths) == 0 {
+	if save {
+		// saving may carry several folders (the setup page's list); validation
+		// above always concerns the first, which is what live typing checks.
+		dirs, total, verr := s.resolveDirs(q["path"])
+		switch {
+		case verr != nil:
+			out["error"] = verr.Error()
+		case total == 0:
 			out["error"] = "no dictionaries found in this folder"
-		} else if err := s.reg.SetDir(dir); err != nil {
-			out["error"] = err.Error()
-		} else {
+		default:
+			out["dirs"] = dirs
+			out["found"] = total
+			if err := s.reg.SetDirs(dirs); err != nil {
+				out["error"] = err.Error()
+				break
+			}
 			out["saved"] = true
 			if s.ConfigPath != "" {
-				if err := config.SaveKey(s.ConfigPath, "DICT_DIR", dir); err != nil {
-					out["warning"] = "folder switched, but saving config failed: " + err.Error()
+				if err := config.SaveKeyRaw(s.ConfigPath, "DICT_DIR", config.FormatList(dirs)); err != nil {
+					out["warning"] = "folders switched, but saving config failed: " + err.Error()
 				}
 			}
 			if useCached {
 				out["useCached"] = true
 				if err := s.setUseCached(true); err != nil {
-					out["warning"] = "folder saved, but keeping the prepared dictionaries failed: " + err.Error()
+					out["warning"] = "folders saved, but keeping the prepared dictionaries failed: " + err.Error()
 				}
 			}
 		}
 	}
 	writeJSON(w, out)
+}
+
+// resolveDirs cleans up the folder list a save carries: ~-expanded, absolute,
+// blanks and exact duplicates dropped, order preserved. It reports the total
+// number of dictionaries across them (deduplicated the same way the registry
+// will), and refuses a folder that is the library itself.
+func (s *Server) resolveDirs(raw []string) ([]string, int, error) {
+	var dirs []string
+	seen := map[string]bool{}
+	for _, p := range raw {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		p = config.ExpandHome(p)
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		if dict.SameDir(p, store.DefaultDBDir()) {
+			return nil, 0, fmt.Errorf("%s is gonow-dict's own library folder — choose the folder holding your dictionary files", p)
+		}
+		dirs = append(dirs, p)
+	}
+	if len(dirs) == 0 {
+		return nil, 0, fmt.Errorf("no folder given")
+	}
+	found, _, _ := dict.DiscoverAll(dirs)
+	return dirs, len(found), nil
 }
 
 // dictInfo is the /api/dicts row.

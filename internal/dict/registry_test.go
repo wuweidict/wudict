@@ -160,3 +160,71 @@ func TestExcludeDirAndSameDir(t *testing.T) {
 		t.Error("SameDir must not equate a parent with its child")
 	}
 }
+
+// TestDiscoverAllDedupe: overlapping roots are normal once several are allowed
+// — a parent and its own subfolder, a repeat, a symlink pointing at a folder
+// already listed. Each dictionary must appear exactly once (two ids would mean
+// two panel rows and doubled search results), attributed to the first root
+// that offered it.
+func TestDiscoverAllDedupe(t *testing.T) {
+	RegisterFormat(".multitest", func(path string) (Dictionary, error) { return fakeDict{}, nil })
+	a, b := t.TempDir(), t.TempDir()
+	sub := filepath.Join(a, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{filepath.Join(a, "one.multitest"), filepath.Join(sub, "two.multitest"), filepath.Join(b, "three.multitest")} {
+		if err := os.WriteFile(f, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(t.TempDir(), "link-to-a")
+	if err := os.Symlink(a, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	paths, perRoot, err := DiscoverAll([]string{a, sub, b, a, link})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 3 {
+		t.Fatalf("want 3 dictionaries, got %v", paths)
+	}
+	// a contributed one.multitest and sub/two.multitest; b contributed one;
+	// the nested root, the repeat and the symlink contributed nothing new
+	want := []RootScan{{New: 2, Total: 2}, {New: 0, Total: 1}, {New: 1, Total: 1}, {New: 0, Total: 2}, {New: 0, Total: 2}}
+	for i := range want {
+		if perRoot[i] != want[i] {
+			t.Fatalf("per-root counts = %+v, want %+v", perRoot, want)
+		}
+	}
+	// a missing root is skipped, not fatal
+	paths2, perRoot2, err := DiscoverAll([]string{filepath.Join(t.TempDir(), "gone"), b})
+	if err != nil {
+		t.Fatalf("missing root should not fail: %v", err)
+	}
+	if len(paths2) != 1 || perRoot2[0].New != 0 || perRoot2[1].New != 1 {
+		t.Errorf("paths=%v perRoot=%v", paths2, perRoot2)
+	}
+}
+
+// A symlinked dictionary folder must work: filepath.WalkDir lstats its root,
+// so before this was resolved a symlinked folder yielded nothing at all.
+func TestDiscoverFollowsSymlinkedRoot(t *testing.T) {
+	RegisterFormat(".linktest", func(path string) (Dictionary, error) { return fakeDict{}, nil })
+	real := t.TempDir()
+	if err := os.WriteFile(filepath.Join(real, "d.linktest"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "shortcut")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	got, err := Discover(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || filepath.Base(got[0]) != "d.linktest" {
+		t.Fatalf("symlinked root yielded %v", got)
+	}
+}

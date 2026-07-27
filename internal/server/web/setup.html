@@ -28,6 +28,15 @@ code{background:var(--bg);border:1px solid var(--line);border-radius:4px;
   padding:0 .3em;font-size:12.5px;word-break:break-all}
 input{width:100%;font-size:15px;color:var(--fg);background:var(--bg);
   border:1px solid var(--line);border-radius:8px;padding:.5em .7em;margin:.618em 0 .382em;outline:none}
+.frow{display:flex;align-items:center;gap:.4em}
+.frow input{margin:.3em 0}
+.frow .rm{flex:none;background:none;border:0;color:var(--faint);font-size:16px;
+  cursor:pointer;padding:0 .2em;margin:0;line-height:1}
+.frow .rm:hover{color:var(--err)}
+.frow .st{flex:none;font-size:12px;min-width:8.5em;text-align:right;color:var(--soft)}
+.frow .st.ok{color:var(--ok)}.frow .st.err{color:var(--err)}
+button.link{background:none;border:0;color:var(--accent);font-size:13px;
+  cursor:pointer;padding:0;margin:.2em 0 .4em;text-decoration:underline}
 input:focus{border-color:var(--focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 25%,transparent)}
 #msg{min-height:1.5em;font-size:13.5px}
 #msg.ok{color:var(--ok)}#msg.err{color:var(--err)}
@@ -48,7 +57,10 @@ label.keep input{width:auto;margin:.25em 0 0}
 .row .n{color:var(--soft);font-variant-numeric:tabular-nums;font-size:12px}
 .tag{font-size:10.5px;border:1px solid var(--line);border-radius:99px;padding:0 .5em;color:var(--soft)}
 .tag.on{border-color:var(--accent);color:var(--accent)}
-.hidden{display:none}
+/* !important: `label.keep` (0,1,1) outranks a bare `.hidden` (0,1,0), so the
+   "keep my N previously imported" checkbox stayed visible with an empty
+   library no matter the source order */
+.hidden{display:none!important}
 </style>
 </head>
 <body>
@@ -57,8 +69,10 @@ label.keep input{width:auto;margin:.25em 0 0}
 <p>Your dictionary folder <code>{{DIR}}</code> {{REASON}}.</p>
 
 <h2>Point gonow at your dictionaries</h2>
-<p>Paste the full path of the folder that holds your dictionary files (subfolders are scanned too):</p>
-<input id="path" placeholder="/path/to/your/dictionaries" autofocus spellcheck="false">
+<p>Paste the full path of a folder that holds your dictionary files (subfolders are scanned too).
+   You can add more than one — an external drive, a shared folder:</p>
+<div id="rows"></div>
+<button type="button" id="addRow" class="link">+ add another folder</button>
 <div id="msg"></div>
 <label class="keep hidden" id="keepWrap"><input type="checkbox" id="keep">
   <span>Also keep my <b id="keepN">0</b> previously imported dictionaries</span></label>
@@ -116,24 +130,72 @@ async function useLibrary(){
   location.href="/";
 }
 
-async function validate(save){
-  const p=$("path").value.trim();
-  if(!p){$("msg").textContent="";$("save").disabled=true;return}
-  const keep=$("keep").checked?"&useCached=1":"";
-  const r=await fetch("/api/setup?path="+encodeURIComponent(p)+(save?"&save=1"+keep:""));
-  const j=await r.json();
-  const msg=$("msg");
-  if(j.error){msg.className="err";msg.textContent="✕ "+j.error;$("save").disabled=true;lastOK=false;return}
-  lastOK=j.found>0;
-  msg.className=lastOK?"ok":"err";
-  msg.textContent=lastOK?("✓ Found "+j.found+" dictionar"+(j.found===1?"y":"ies")+" in "+j.path)
-                        :"✕ No dictionaries found in this folder";
-  $("save").disabled=!lastOK;
-  if(save&&j.saved)location.href="/";
+/* One row per folder. Each validates itself as you type (its own status sits
+   at the end of the row, so three folders never argue over one message line);
+   the shared line below reports only the total, which is what the Save button
+   depends on. */
+function addRow(value){
+  const row=document.createElement("div");row.className="frow";
+  row.innerHTML=`<input placeholder="/path/to/your/dictionaries" spellcheck="false">
+    <span class="st"></span><button type="button" class="rm" title="Remove this folder">✕</button>`;
+  const input=row.querySelector("input");
+  if(value)input.value=value;
+  input.addEventListener("input",()=>{clearTimeout(timer);timer=setTimeout(validateAll,350)});
+  input.addEventListener("keydown",e=>{if(e.key==="Enter"&&lastOK)save()});
+  row.querySelector(".rm").addEventListener("click",()=>{
+    row.remove();if(!$("rows").children.length)addRow("");syncRemoveButtons();validateAll();
+  });
+  $("rows").appendChild(row);
+  syncRemoveButtons();
+  return input;
 }
-$("path").addEventListener("input",()=>{clearTimeout(timer);timer=setTimeout(()=>validate(false),350)});
-$("path").addEventListener("keydown",e=>{if(e.key==="Enter"&&lastOK)validate(true)});
-$("save").addEventListener("click",()=>validate(true));
+// the ✕ on a lone row would only ever clear it — hide it until there are two
+function syncRemoveButtons(){
+  const rows=[...$("rows").children];
+  for(const r of rows)r.querySelector(".rm").style.visibility=rows.length>1?"visible":"hidden";
+}
+function rowInputs(){return [...document.querySelectorAll("#rows input")]}
+function paths(){return rowInputs().map(i=>i.value.trim()).filter(Boolean)}
+
+async function validateAll(){
+  const inputs=rowInputs();
+  let total=0,bad=0,checked=0;
+  await Promise.all(inputs.map(async input=>{
+    const st=input.parentElement.querySelector(".st");
+    const p=input.value.trim();
+    if(!p){st.className="st";st.textContent="";return}
+    checked++;
+    let j;
+    try{ j=await (await fetch("/api/setup?path="+encodeURIComponent(p))).json() }
+    catch(e){ st.className="st err";st.textContent="✕ unreachable";bad++;return }
+    if(j.error){st.className="st err";st.textContent="✕ "+j.error;bad++;return}
+    if(!j.found){st.className="st err";st.textContent="✕ none found";bad++;return}
+    st.className="st ok";st.textContent="✓ "+j.found.toLocaleString()+" found";
+    total+=j.found;
+  }));
+  const msg=$("msg");
+  lastOK=total>0;
+  if(!checked){msg.textContent="";msg.className=""}
+  else if(lastOK){
+    msg.className="ok";
+    msg.textContent="✓ "+total.toLocaleString()+" dictionar"+(total===1?"y":"ies")+
+      (checked>1?" in "+checked+" folders":"");
+  }else{msg.className="err";msg.textContent="✕ No dictionaries found"}
+  $("save").disabled=!lastOK;
+  $("save").textContent=checked>1?"Use these folders":"Use this folder";
+}
+
+async function save(){
+  const q=paths().map(p=>"path="+encodeURIComponent(p)).join("&");
+  if(!q)return;
+  const keep=$("keep").checked?"&useCached=1":"";
+  const j=await (await fetch("/api/setup?"+q+"&save=1"+keep)).json();
+  if(j.error){$("msg").className="err";$("msg").textContent="✕ "+j.error;return}
+  if(j.saved)location.href="/";
+}
+$("addRow").addEventListener("click",()=>{addRow("").focus()});
+$("save").addEventListener("click",save);
+addRow("").focus();
 $("useLib").addEventListener("click",useLibrary);
 loadLibrary();
 </script>

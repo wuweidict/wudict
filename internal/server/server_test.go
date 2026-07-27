@@ -62,8 +62,7 @@ func TestDictProvenance(t *testing.T) {
 // is what kept the setup page hidden — and USE_CACHED turns it on. A prepared
 // dictionary whose source is gone then opens with the gonow: prefix stripped.
 func TestLibraryIsOptIn(t *testing.T) {
-	dbDir := t.TempDir()
-	t.Setenv("GONOW_DB_DIR", dbDir)
+	isolatedDBDir(t)
 	src := "/gone/x.mdx"
 	dir, err := store.ClaimDir(src)
 	if err != nil {
@@ -80,7 +79,7 @@ func TestLibraryIsOptIn(t *testing.T) {
 
 	// default: opted out — an empty dictionary folder means an empty registry,
 	// so the first-run setup page shows.
-	off, err := NewRegistry(t.TempDir(), false)
+	off, err := NewRegistry([]string{t.TempDir()}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +87,7 @@ func TestLibraryIsOptIn(t *testing.T) {
 		t.Fatalf("library must not be a discovery root by default: count=%d", off.Count())
 	}
 
-	reg, err := NewRegistry(t.TempDir(), true) // opted in
+	reg, err := NewRegistry([]string{t.TempDir()}, true) // opted in
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,8 +136,8 @@ func newTestServer(t *testing.T) *Server {
 	zw.Close()
 	zf.Close()
 
-	t.Setenv("GONOW_DB_DIR", t.TempDir())
-	reg, err := NewRegistry(dir, false)
+	isolatedDBDir(t)
+	reg, err := NewRegistry([]string{dir}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,8 +278,8 @@ func TestAutoIndexOnFirstSearch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "x.fake"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GONOW_DB_DIR", t.TempDir())
-	reg, err := NewRegistry(dir, false)
+	isolatedDBDir(t)
+	reg, err := NewRegistry([]string{dir}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,8 +318,8 @@ func TestFullIngestNoResourcesFlagsEmpty(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "x.fake"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GONOW_DB_DIR", t.TempDir())
-	reg, err := NewRegistry(dir, false)
+	isolatedDBDir(t)
+	reg, err := NewRegistry([]string{dir}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,8 +406,8 @@ func TestIngestSSEAndMedia(t *testing.T) {
 // validates, rejects empty folders, then switches live and persists.
 func TestSetupFlow(t *testing.T) {
 	emptyDir := t.TempDir()
-	t.Setenv("GONOW_DB_DIR", t.TempDir())
-	reg, err := NewRegistry(filepath.Join(emptyDir, "does-not-exist"), false)
+	isolatedDBDir(t)
+	reg, err := NewRegistry([]string{filepath.Join(emptyDir, "does-not-exist")}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,8 +446,8 @@ func TestSetupFlow(t *testing.T) {
 		t.Fatalf("save failed: %v", v)
 	}
 	// registry switched live
-	if reg.Dir() != dictDir || reg.Count() != 1 {
-		t.Errorf("registry not switched: %q %d", reg.Dir(), reg.Count())
+	if dirs := reg.Dirs(); len(dirs) != 1 || dirs[0] != dictDir || reg.Count() != 1 {
+		t.Errorf("registry not switched: %q %d", reg.Dirs(), reg.Count())
 	}
 	// persisted to config
 	data, err := os.ReadFile(s.ConfigPath)
@@ -483,8 +482,7 @@ func TestUnknownDict(t *testing.T) {
 // opted in, the dictionary must be listed exactly once — never a second,
 // phantom "gonow:…" row for the sidecar.
 func TestMediaDBIsNeverADictionary(t *testing.T) {
-	dbDir := t.TempDir()
-	t.Setenv("GONOW_DB_DIR", dbDir)
+	isolatedDBDir(t)
 	src := "/gone/AHD5-2017.slob"
 	dir, err := store.ClaimDir(src)
 	if err != nil {
@@ -504,7 +502,7 @@ func TestMediaDBIsNeverADictionary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reg, err := NewRegistry(t.TempDir(), true)
+	reg, err := NewRegistry([]string{t.TempDir()}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,8 +552,7 @@ func (resDict) Resource(name string) (io.ReadCloser, string, error) {
 // suppress it), and "Use these dictionaries" enrolls them live and remembers
 // the choice in the config file.
 func TestSetupConsentFlow(t *testing.T) {
-	dbDir := t.TempDir()
-	t.Setenv("GONOW_DB_DIR", dbDir)
+	isolatedDBDir(t)
 	dir, err := store.ClaimDir("/gone/Prepared.mdx")
 	if err != nil {
 		t.Fatal(err)
@@ -565,7 +562,7 @@ func TestSetupConsentFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reg, err := NewRegistry(t.TempDir(), false)
+	reg, err := NewRegistry([]string{t.TempDir()}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,6 +610,22 @@ func TestSetupConsentFlow(t *testing.T) {
 	}
 }
 
+// isolatedDBDir points GONOW_DB_DIR at a temp dir that is deliberately NOT
+// t.TempDir(): background work started by the test (Registry.Warm, and with it
+// DSL/BGL auto-preparation) can still be writing when the test ends, and
+// t.TempDir's cleanup FAILS the test if the directory grows while it is being
+// removed. Removal here is best-effort for exactly the same reason.
+func isolatedDBDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "gonow-db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GONOW_DB_DIR", dir)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // TestMain isolates the whole package from the user's real library. Tests set
 // GONOW_DB_DIR per-test, but background work started by a test (Registry.Warm,
 // auto-index, DSL auto-preparation) can outlive it and read the variable after
@@ -627,4 +640,86 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(tmp)
 	os.Exit(code)
+}
+
+// TestSetupMultipleFolders: the setup page can save several folders; they are
+// scanned as one library, persisted as a TOML array, and a folder listed twice
+// (or nested inside another) contributes its dictionaries exactly once.
+func TestSetupMultipleFolders(t *testing.T) {
+	isolatedDBDir(t)
+	a, b := t.TempDir(), t.TempDir()
+	nested := filepath.Join(a, "sub")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{filepath.Join(a, "one.dsl"), filepath.Join(b, "two.dsl"), filepath.Join(nested, "three.dsl")} {
+		if err := os.WriteFile(f, []byte(sampleDSL), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg, err := NewRegistry([]string{filepath.Join(t.TempDir(), "none")}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(reg)
+	s.ConfigPath = filepath.Join(t.TempDir(), "config.toml")
+
+	// a + b + (a/sub, already covered by a) + a repeated
+	q := "path=" + a + "&path=" + b + "&path=" + nested + "&path=" + a + "&save=1"
+	var v map[string]any
+	getJSON(t, s, "/api/setup?"+q, &v)
+	if v["saved"] != true {
+		t.Fatalf("save failed: %v", v)
+	}
+	if got := v["found"].(float64); got != 3 {
+		t.Errorf("found = %v, want 3 (each dictionary counted once)", got)
+	}
+	if reg.Count() != 3 {
+		t.Fatalf("registry has %d dictionaries, want 3", reg.Count())
+	}
+	// the duplicate and the nested folder are dropped; order is preserved
+	dirs := reg.Dirs()
+	if len(dirs) != 3 || dirs[0] != a || dirs[1] != b {
+		t.Errorf("dirs = %q", dirs)
+	}
+	roots := reg.Roots()
+	if len(roots) != 3 || roots[0].Count != 2 || roots[1].Count != 1 || roots[2].Count != 0 {
+		t.Errorf("per-root counts = %+v, want 2/1/0 (earlier root wins a tie)", roots)
+	}
+	// the nested folder holds a dictionary but contributed none — the UI must
+	// be able to say "already listed", not "empty"
+	if roots[2].Total != 1 {
+		t.Errorf("nested root Total = %d, want 1", roots[2].Total)
+	}
+	// persisted as an array
+	data, _ := os.ReadFile(s.ConfigPath)
+	if !strings.Contains(string(data), `DICT_DIR = ["`+a+`", "`+b+`"`) {
+		t.Errorf("array not persisted: %q", data)
+	}
+	// and the library folder is refused as a dictionary folder
+	getJSON(t, s, "/api/setup?path="+store.DefaultDBDir()+"&save=1", &v)
+	if v["error"] == nil || !strings.Contains(v["error"].(string), "library folder") {
+		t.Errorf("db dir should be refused: %v", v)
+	}
+}
+
+// A missing folder must not take the others down with it.
+func TestMissingRootIsNotFatal(t *testing.T) {
+	isolatedDBDir(t)
+	good := t.TempDir()
+	if err := os.WriteFile(filepath.Join(good, "one.dsl"), []byte(sampleDSL), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(t.TempDir(), "unmounted-drive")
+	reg, err := NewRegistry([]string{gone, good}, false)
+	if err != nil {
+		t.Fatalf("a missing folder must not fail the scan: %v", err)
+	}
+	if reg.Count() != 1 {
+		t.Fatalf("count = %d, want 1", reg.Count())
+	}
+	roots := reg.Roots()
+	if len(roots) != 2 || roots[0].Exists || roots[1].Count != 1 {
+		t.Errorf("roots = %+v, want the missing one flagged and the good one counted", roots)
+	}
 }

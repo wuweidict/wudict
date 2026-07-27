@@ -85,7 +85,27 @@ A commented `config.toml` is generated next to the binary on first run
 | `--no-browser` | `NO_BROWSER=1` | open browser |
 | `--verbose` | `VERBOSE=1` | quiet |
 | `--speexdec` | `SPEEXDEC` | found on `PATH` |
+| `--use-cached` | `USE_CACHED` | off |
 | — | `AUTO_INDEX` | `fuzzy` (`off` to disable) |
+
+### Several dictionary folders
+
+`DICT_DIR` takes more than one folder — an external drive, a shared
+folder, a second collection:
+
+```sh
+gonow-dict --dict-dir ~/Dictionaries --dict-dir /Volumes/Ext/Dicts   # repeat the flag
+DICT_DIR="~/Dictionaries:/Volumes/Ext/Dicts" gonow-dict              # ":" — ";" on Windows
+```
+```toml
+DICT_DIR = ["~/Dictionaries", "/Volumes/Ext/Dicts"]
+```
+
+The setup page has an **+ add another folder** row for the same thing, and
+saves your list back to `config.toml`. Folders may overlap freely: a
+dictionary reachable from two of them is listed once (the folder listed
+first wins), and a folder that is missing — an unplugged drive — is
+reported at startup while the rest keep working.
 
 Config file search order: `--config` / `CONFIG_PATH`, then
 `<exe-dir>/config.toml`, `~/.gonow-dict/config.toml`,
@@ -98,6 +118,7 @@ Run `gonow-dict --help` for the full reference. Highlights:
 ```sh
 gonow-dict                                   # start the server (default command)
 gonow-dict --dict-dir ~/Dicts --port 9090    # server with options
+gonow-dict --dict-dir ~/Dicts --dict-dir /Volumes/Ext/Dicts   # several folders
 gonow-dict lookup ~/Dicts/Oxford.mdx word    # exact lookup, HTML to stdout
 gonow-dict ingest ~/Dicts                    # index every dictionary in a folder
 gonow-dict ingest -full ~/Dicts/Oxford.mdx   # index + pack media into the same folder

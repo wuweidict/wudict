@@ -26,8 +26,8 @@ NO_BROWSER = "1"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DictDir != "/from/toml" {
-		t.Errorf("toml DICT_DIR: %q", cfg.DictDir)
+	if len(cfg.DictDirs) != 1 || cfg.DictDirs[0] != "/from/toml" {
+		t.Errorf("toml DICT_DIR: %q", cfg.DictDirs)
 	}
 	if cfg.Port != "7777" {
 		t.Errorf("env should beat toml: %q", cfg.Port)
@@ -95,5 +95,62 @@ func TestExpandHome(t *testing.T) {
 	}
 	if got := ExpandHome("/abs"); got != "/abs" {
 		t.Errorf("abs untouched: %q", got)
+	}
+}
+
+// DICT_DIR accepts one folder or several, in every layer's own spelling.
+func TestDictDirList(t *testing.T) {
+	sep := string(os.PathListSeparator)
+	home, _ := os.UserHomeDir()
+	cases := []struct {
+		name, value string
+		want        []string
+	}{
+		{"single", "/a", []string{"/a"}},
+		{"toml array", `["/a", "/b"]`, []string{"/a", "/b"}},
+		{"toml array, single entry", `["/a"]`, []string{"/a"}},
+		{"env separated", "/a" + sep + "/b", []string{"/a", "/b"}},
+		{"blanks dropped", "/a" + sep + sep + " /b ", []string{"/a", "/b"}},
+		{"tilde expanded", "~/d", []string{filepath.Join(home, "d")}},
+		{"order preserved", `["/b","/a"]`, []string{"/b", "/a"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ParseList(c.value)
+			if len(got) != len(c.want) {
+				t.Fatalf("ParseList(%q) = %q, want %q", c.value, got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("ParseList(%q) = %q, want %q", c.value, got, c.want)
+				}
+			}
+		})
+	}
+	// and it round-trips through the config file in both shapes
+	dir := t.TempDir()
+	for _, dirs := range [][]string{{"/only"}, {"/a", "/b b"}} {
+		p := filepath.Join(dir, "config.toml")
+		if err := os.WriteFile(p, []byte("# DICT_DIR = \"~/Dictionaries\"\nSERVER_PORT = \"1\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := SaveKeyRaw(p, "DICT_DIR", FormatList(dirs)); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(p, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.DictDirs) != len(dirs) {
+			t.Fatalf("round-trip %q → %q", dirs, cfg.DictDirs)
+		}
+		for i := range dirs {
+			if cfg.DictDirs[i] != dirs[i] {
+				t.Fatalf("round-trip %q → %q", dirs, cfg.DictDirs)
+			}
+		}
+		if cfg.Port != "1" {
+			t.Errorf("saving DICT_DIR disturbed another key: %q", cfg.Port)
+		}
 	}
 }
