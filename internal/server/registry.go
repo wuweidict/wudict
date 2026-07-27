@@ -215,6 +215,7 @@ type Registry struct {
 	useCached bool // include prepared dictionaries from the library (USE_CACHED)
 	entries   []*entry
 	byID      map[string]*entry
+	fromLib   int // how many entries came from the library, not the dict folder
 }
 
 func NewRegistry(dictDir string, useCached bool) (*Registry, error) {
@@ -283,8 +284,11 @@ func (r *Registry) Rescan() error {
 	if err != nil {
 		return err
 	}
+	fromLib := 0
 	if useCached {
-		paths = append(paths, libraryPaths(paths)...)
+		lib := libraryPaths(paths)
+		fromLib = len(lib)
+		paths = append(paths, lib...)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -308,7 +312,17 @@ func (r *Registry) Rescan() error {
 		return strings.ToLower(entries[i].Path) < strings.ToLower(entries[j].Path)
 	})
 	r.entries = entries
+	r.fromLib = fromLib
 	return nil
+}
+
+// Counts reports how many dictionaries came from the dictionary folder and
+// how many from the library, so the startup summary can describe each folder
+// by what it actually contributed instead of showing one blended total.
+func (r *Registry) Counts() (fromFolder, fromLibrary int) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.entries) - r.fromLib, r.fromLib
 }
 
 // libraryPaths returns the text.db of every prepared dictionary that is not
@@ -430,10 +444,15 @@ func (e *entry) ingest(full bool, level store.Level, progress store.Progress) er
 		if err != nil {
 			return err
 		}
-		err = store.IngestLevel(rd, textDB, level, progress)
+		rep, ierr := store.IngestLevelReport(rd, textDB, level, progress)
 		rd.Close()
-		if err != nil {
-			return err
+		if ierr != nil {
+			return fmt.Errorf("preparing %q: %w", name, ierr)
+		}
+		logx.V("%s%d entries indexed (%s)", logx.Dict(name), rep.Entries, level)
+		if rep.UnresolvedLinks > 0 {
+			logx.V("%s%d redirects pointed at headwords not present in the source (skipped)",
+				logx.Dict(name), rep.UnresolvedLinks)
 		}
 	}
 

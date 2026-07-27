@@ -32,6 +32,7 @@ import (
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
 	gomdict "github.com/glowinthedark/gonow-dict/internal/gomdict"
+	"github.com/glowinthedark/gonow-dict/internal/logx"
 )
 
 func init() {
@@ -121,7 +122,8 @@ func Open(filename string) (*Dict, error) {
 	for _, f := range companionMdds(filename) {
 		rmd, rents, err := openIndexed(f)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "mdx: skipping mdd %s: %v\n", f, err)
+			logx.Warn("%smedia file %s cannot be read: %v — its audio and images will be missing",
+				logx.Dict(d.meta.Name), filepath.Base(f), err)
 			continue
 		}
 		d.mdds = append(d.mdds, mddFile{md: rmd, entries: rents})
@@ -263,7 +265,7 @@ func (d *Dict) results(idxs []int, word string, limit int) []dict.Result {
 func (d *Dict) render(e *gomdict.MDictKeywordEntry, seen map[string]bool) []string {
 	raw, err := d.mdx.LocateByKeywordEntry(e)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mdx: locate %q: %v\n", e.KeyWord, err)
+		logx.V("%sentry %q could not be read: %v", logx.Dict(d.meta.Name), e.KeyWord, err)
 		return nil
 	}
 	body := strings.TrimSpace(strings.Trim(decodeEnc(raw, d.enc), "\x00"))

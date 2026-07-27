@@ -56,9 +56,18 @@ func FindOrphans() ([]Orphan, error) {
 		case strings.Contains(name, ".ingest."):
 			reason = "interrupted ingest (temp file)"
 		case strings.HasSuffix(name, ".text.db"):
-			reason = "loose database from the old flat layout — re-index to get a folder"
+			// a loose database is real data, never garbage: AdoptLoose moves it
+			// into a folder at startup. One survives that only when the same
+			// dictionary already has a prepared folder — then it is a true
+			// duplicate and deleting it loses nothing.
+			reason = "superseded by a prepared folder for the same dictionary"
 		case strings.HasSuffix(name, ".media.db"):
-			reason = "loose media database from the old flat layout"
+			// its text.db partner (if any) survived adoption, so it too is a
+			// superseded duplicate; alone, it has nothing to pair with.
+			reason = "media database with no dictionary to pair with"
+			if fileExists(strings.TrimSuffix(p, ".media.db") + ".text.db") {
+				reason = "paired with a superseded database"
+			}
 		}
 		if reason != "" {
 			out = append(out, Orphan{Path: p, Size: fi.Size(), Reason: reason})

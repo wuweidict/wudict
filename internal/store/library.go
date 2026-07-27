@@ -210,27 +210,34 @@ func LookupDir(srcPath string) (string, bool) {
 // ingests of same-named sources cannot both take the same folder: the loser
 // sees IsExist, reads the recorded owner, and moves to the next candidate.
 func ClaimDir(srcPath string) (string, error) {
+	return claimFrom(candidateDirs(srcPath), srcPath)
+}
+
+// claimFrom walks candidate folder names and takes the first free one (or the
+// one already owned by claim). claim is the source path recorded in the
+// receipt; it may be empty for a database with no known source.
+func claimFrom(candidates []string, claim string) (string, error) {
 	if err := os.MkdirAll(DefaultDBDir(), 0o755); err != nil {
 		return "", err
 	}
-	for _, cand := range candidateDirs(srcPath) {
+	for _, cand := range candidates {
 		err := os.Mkdir(cand, 0o755)
 		switch {
 		case err == nil:
 			// record ownership immediately, before the (long) ingest, so a
 			// concurrent claim sees this folder as taken.
-			if werr := writeClaim(cand, srcPath); werr != nil {
+			if werr := writeClaim(cand, claim); werr != nil {
 				return "", werr
 			}
 			return cand, nil
 		case os.IsExist(err):
 			owner, hasDB, _ := dirOwner(cand)
-			if sameSource(owner, srcPath) {
+			if sameSource(owner, claim) {
 				return cand, nil
 			}
 			if owner == "" && !hasDB {
 				// an empty leftover from an interrupted claim: adopt it.
-				if werr := writeClaim(cand, srcPath); werr != nil {
+				if werr := writeClaim(cand, claim); werr != nil {
 					return "", werr
 				}
 				return cand, nil
@@ -239,7 +246,7 @@ func ClaimDir(srcPath string) (string, error) {
 			return "", err
 		}
 	}
-	return "", fmt.Errorf("library: no free folder name for %s", filepath.Base(srcPath))
+	return "", fmt.Errorf("library: no free folder name for %q", claim)
 }
 
 // writeClaim stamps a minimal receipt so the folder's owner is knowable before

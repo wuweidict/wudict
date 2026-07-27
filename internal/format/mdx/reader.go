@@ -5,12 +5,11 @@
 package mdx
 
 import (
-	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/glowinthedark/gonow-dict/internal/logx"
 )
 
 func init() {
@@ -41,7 +40,7 @@ func (r *Reader) Next() (dict.Entry, error) {
 		r.pos++
 		raw, err := r.d.mdx.LocateByKeywordEntry(e)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "mdx ingest: locate %q: %v (skipped)\n", e.KeyWord, err)
+			logx.V("%sentry %q could not be read: %v (skipped)", logx.Dict(r.d.meta.Name), e.KeyWord, err)
 			continue
 		}
 		body := strings.TrimSpace(strings.Trim(decodeEnc(raw, r.d.enc), "\x00"))

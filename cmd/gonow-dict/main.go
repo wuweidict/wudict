@@ -215,7 +215,7 @@ func cmdList(args []string) error {
 		fmt.Println(p)
 	}
 	if len(paths) == 0 {
-		fmt.Fprintln(os.Stderr, "no dictionaries found")
+		fmt.Fprintf(os.Stderr, "no dictionaries found in %s\n", args[0])
 	}
 	return nil
 }
@@ -329,9 +329,9 @@ func cmdIngest(args []string) error {
 		}
 		var failed int
 		for i, p := range paths {
-			fmt.Fprintf(os.Stderr, "[%d/%d] %s\n", i+1, len(paths), p)
+			fmt.Fprintf(os.Stderr, "[%d/%d] %s\n", i+1, len(paths), filepath.Base(p))
 			if err := ingestOne(p, "", *full, level); err != nil {
-				fmt.Fprintf(os.Stderr, "  FAILED: %v\n", err)
+				fmt.Fprintf(os.Stderr, "  failed: %v\n", err)
 				failed++
 			}
 		}
@@ -350,6 +350,10 @@ func ingestOne(srcPath, out string, full bool, level store.Level) error {
 	}
 	defer r.Close()
 
+	name := r.Meta().Name
+	if name == "" {
+		name = filepath.Base(srcPath)
+	}
 	dbPath := out
 	if dbPath == "" {
 		// claim this source's library folder: <db dir>/<source name>/text.db
@@ -362,37 +366,41 @@ func ingestOne(srcPath, out string, full bool, level store.Level) error {
 		cl, _ := store.ReadMetaValue(dbPath, "ingest_level")
 		fresh := !store.SourceChanged(dbPath, srcPath)
 		if fresh && (store.Level(cl) == level || level == store.LevelHeadwords) {
-			fmt.Printf("%s (already prepared, skipped)\n", dbPath)
-			return maybePackMedia(srcPath, dbPath, full)
+			fmt.Printf("%salready prepared in %s — skipped\n", logx.Dict(name), filepath.Dir(dbPath))
+			return maybePackMedia(srcPath, dbPath, name, full)
 		}
 		// a level upgrade or a changed source: IngestLevel overwrites the
 		// existing database atomically, so nothing is deleted up front.
 	}
 	progress := func(done, total int) {
 		if total > 0 {
-			fmt.Fprintf(os.Stderr, "\r%d/%d", done, total)
+			logx.Progress("  %d/%d entries", done, total)
 		} else {
-			fmt.Fprintf(os.Stderr, "\r%d", done)
+			logx.Progress("  %d entries", done)
 		}
 	}
 	start := time.Now()
-	if err := store.IngestLevel(r, dbPath, level, progress); err != nil {
-		fmt.Fprintln(os.Stderr)
-		return err
+	rep, err := store.IngestLevelReport(r, dbPath, level, progress)
+	logx.ClearLine()
+	if err != nil {
+		return fmt.Errorf("preparing %q: %w", name, err)
 	}
-	fmt.Fprintln(os.Stderr)
-	fmt.Printf("%s (%.1fs)\n", dbPath, time.Since(start).Seconds())
-	return maybePackMedia(srcPath, dbPath, full)
+	fmt.Printf("%s%s indexed in %.1fs → %s\n",
+		logx.Dict(name), plural(rep.Entries, "entry", "entries"), time.Since(start).Seconds(), filepath.Dir(dbPath))
+	if rep.UnresolvedLinks > 0 {
+		fmt.Printf("%s%s pointed at headwords not present in the source (skipped)\n",
+			logx.Dict(name), plural(rep.UnresolvedLinks, "redirect", "redirects"))
+	}
+	return maybePackMedia(srcPath, dbPath, name, full)
 }
 
-func maybePackMedia(srcPath, dbPath string, full bool) error {
-
+func maybePackMedia(srcPath, dbPath, name string, full bool) error {
 	if !full {
 		return nil
 	}
 	mediaPath := store.MediaSibling(dbPath)
 	if _, err := os.Stat(mediaPath); err == nil {
-		fmt.Printf("%s (already packed, skipped)\n", mediaPath)
+		fmt.Printf("%smedia already packed — skipped\n", logx.Dict(name))
 		return nil
 	}
 	d, err := dict.Open(srcPath)
@@ -406,21 +414,22 @@ func maybePackMedia(srcPath, dbPath string, full bool) error {
 	}
 	names := lister.Resources()
 	if len(names) == 0 {
-		fmt.Fprintln(os.Stderr, "no resources to pack")
+		fmt.Printf("%sno media to pack\n", logx.Dict(name))
 		return nil
 	}
 	uuid, err := store.ReadMetaValue(dbPath, "dict_uuid")
 	if err != nil {
 		return err
 	}
-	progress := func(done, total int) { fmt.Fprintf(os.Stderr, "\r%d/%d", done, total) }
+	progress := func(done, total int) { logx.Progress("  %d/%d media files", done, total) }
 	start := time.Now()
 	if err := store.IngestMedia(d, names, mediaPath, uuid, progress); err != nil {
-		fmt.Fprintln(os.Stderr)
-		return err
+		logx.ClearLine()
+		return fmt.Errorf("packing media for %q: %w", name, err)
 	}
-	fmt.Fprintln(os.Stderr)
-	fmt.Printf("%s (%d resources, %.1fs)\n", mediaPath, len(names), time.Since(start).Seconds())
+	logx.ClearLine()
+	fmt.Printf("%s%s packed in %.1fs\n",
+		logx.Dict(name), plural(len(names), "media file", "media files"), time.Since(start).Seconds())
 	return nil
 }
 
@@ -482,13 +491,24 @@ func cmdServe(args []string) error {
 	}
 	dict.ExcludeDir(libDir)
 
+	// Bring databases from the pre-folder layout into the current one (a
+	// rename, never a re-index): data already prepared must stay usable
+	// instead of forcing the user to prepare the same dictionary twice.
+	if moved, err := store.AdoptLoose(); err != nil {
+		logx.Warn("could not tidy the library: %v", err)
+	} else if len(moved) > 0 {
+		for _, m := range moved {
+			fmt.Fprintf(os.Stderr, "library: %s → %s/\n", filepath.Base(m.From), filepath.Base(m.Dir))
+		}
+	}
+
 	// first run: generate a commented config.toml so users can discover
 	// the knobs; an existing file anywhere in the search order wins
 	cfgFile := cfg.Source
 	if cfgFile == "" && *configPath == "" {
 		p, created, err := config.EnsureConfigFile()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not create config.toml: %v\n", err)
+			logx.Warn("could not create config.toml: %v", err)
 		} else {
 			cfgFile = p
 			if created {
@@ -514,29 +534,16 @@ func cmdServe(args []string) error {
 		sxPath, sxSource = resolveSpeexdec(cfg.Speexdec)
 	}
 	srv.Speexdec = sxPath
-	announceSpeex(useExternalSpeex, sxPath, sxSource)
 	srv.AutoIndex = cfg.AutoIndex != "off"
 
 	url := "http://" + cfg.Addr() + "/"
 	lib, _ := store.Library()
-	switch {
-	case !dirExists(cfg.DictDir):
-		fmt.Fprintf(os.Stderr, "gonow-dict %s listening on %s\n", version, url)
-		fmt.Fprintf(os.Stderr, "note: dictionary folder %s does not exist — open %s to choose one\n", cfg.DictDir, url)
-	case reg.Count() == 0:
-		fmt.Fprintf(os.Stderr, "gonow-dict %s listening on %s\n", version, url)
-		fmt.Fprintf(os.Stderr, "note: no dictionaries found in %s — open %s to choose another folder\n", cfg.DictDir, url)
-	default:
-		fmt.Fprintf(os.Stderr, "gonow-dict %s serving %d dictionaries from %s on %s\n",
-			version, reg.Count(), cfg.DictDir, url)
-	}
-	switch {
-	case cfg.UseCached:
-		fmt.Fprintf(os.Stderr, "including %d previously imported dictionaries from %s\n", len(lib), libDir)
-	case len(lib) > 0 && reg.Count() == 0:
-		fmt.Fprintf(os.Stderr, "note: %d previously imported dictionaries are ready in %s — open %s to use them\n",
-			len(lib), libDir, url)
-	}
+	inFolder, fromLib := reg.Counts()
+	printStartup(cfg, startupInfo{
+		inFolder: inFolder, fromLibrary: fromLib, prepared: len(lib),
+		total: reg.Count(), libDir: libDir, url: url,
+		speex: speexSummary(useExternalSpeex, sxPath, sxSource),
+	})
 	if !cfg.NoBrowser {
 		go openBrowser(url)
 	}
@@ -607,7 +614,7 @@ func resolveSpeexdec(override string) (path, source string) {
 		if p, err := exec.LookPath(override); err == nil {
 			return p, "SPEEXDEC override"
 		}
-		fmt.Fprintf(os.Stderr, "gonow-dict: SPEEXDEC=%q not found — falling back to auto-detection\n", override)
+		logx.Warn("SPEEXDEC=%q not found — falling back to auto-detection", override)
 	}
 	if exe, err := os.Executable(); err == nil {
 		if cand := filepath.Join(filepath.Dir(exe), name); isExecFile(cand) {
@@ -636,28 +643,113 @@ func isExecFile(p string) bool {
 // libspeex decoder (cgo, default), the external speexdec binary (when forced or
 // when built without cgo), or a warning with install pointers when neither is
 // available.
-func announceSpeex(useExternal bool, path, source string) {
+// speexSummary describes the active .spx decoder in one phrase for the
+// startup block; the install hint is printed separately when there is none.
+func speexSummary(useExternal bool, path, source string) string {
 	if !useExternal && speex.Available {
 		if path != "" {
-			fmt.Fprintf(os.Stderr, "speex: built-in decoder — .spx audio enabled (external speexdec at %s as fallback)\n", path)
-		} else {
-			fmt.Fprintln(os.Stderr, "speex: built-in decoder — .spx audio enabled")
+			return "built-in decoder (external speexdec at " + path + " as fallback)"
 		}
-		return
+		return "built-in decoder"
 	}
 	why := "SPEEX_BACKEND=external"
 	if !speex.Available {
 		why = "built without cgo"
 	}
 	if path != "" {
-		fmt.Fprintf(os.Stderr, "speex: external speexdec at %s (%s) — .spx audio enabled\n", path, why)
-		return
+		return "external speexdec at " + path + " (" + why + ")"
 	}
-	fmt.Fprintf(os.Stderr, "speex: no decoder available (%s, and no speexdec found) — .spx audio will not play.\n"+
-		"  Build with cgo for the built-in decoder, or install speex / set SPEEXDEC=/path/to/speexdec:\n"+
-		"    macOS:    brew install speex\n"+
-		"    Linux:    sudo apt install speex   (or your distro's speex package)\n"+
-		"    Windows:  https://www.speex.org/downloads/\n", why)
+	return "" // none available — printStartup emits the install hint
+}
+
+// printStartup shows the configuration that actually took effect. Every value
+// a user might have set somewhere (flag, env, config.toml, default) is listed
+// with the folder or address it resolved to, so "why is it not finding my
+// dictionaries" is answerable from the first screen.
+// startupInfo is what the startup summary describes: each folder counted by
+// what IT contributed (a blended total next to the dictionary folder made an
+// empty folder look full when the library was in use).
+type startupInfo struct {
+	inFolder    int // dictionaries discovered in the dictionary folder
+	fromLibrary int // prepared dictionaries actually serving (USE_CACHED)
+	prepared    int // prepared dictionaries that exist, in use or not
+	total       int // what is being served
+	libDir      string
+	url         string
+	speex       string
+}
+
+func printStartup(cfg config.Config, in startupInfo) {
+	out := os.Stderr
+	fmt.Fprintf(out, "gonow-dict %s\n", version)
+
+	dictNote := plural(in.inFolder, "dictionary", "dictionaries")
+	switch {
+	case !dirExists(cfg.DictDir):
+		dictNote = "folder does not exist"
+	case in.inFolder == 0:
+		dictNote = "no dictionaries found"
+	}
+	fmt.Fprintf(out, "  dictionaries  %s  (%s)\n", cfg.DictDir, dictNote)
+
+	libNote := fmt.Sprintf("%d prepared", in.prepared)
+	switch {
+	case in.prepared == 0:
+		libNote = "empty"
+	case cfg.UseCached:
+		libNote += fmt.Sprintf(", %d in use", in.fromLibrary)
+	default:
+		libNote += ", not in use"
+	}
+	fmt.Fprintf(out, "  library       %s  (%s)\n", in.libDir, libNote)
+
+	cfgSrc := cfg.Source
+	if cfgSrc == "" {
+		cfgSrc = "(none — built-in defaults)"
+	}
+	fmt.Fprintf(out, "  config        %s\n", cfgSrc)
+	fmt.Fprintf(out, "  address       %s\n", in.url)
+	if in.speex != "" {
+		fmt.Fprintf(out, "  .spx audio    %s\n", in.speex)
+	}
+	fmt.Fprintf(out, "  indexing      %s\n", indexingSummary(cfg.AutoIndex))
+	fmt.Fprintf(out, "  serving       %s\n", plural(in.total, "dictionary", "dictionaries"))
+
+	// what to do next, when there is something to do
+	switch {
+	case in.total == 0:
+		if in.prepared > 0 && !cfg.UseCached {
+			fmt.Fprintf(out, "\nopen %s — choose a dictionary folder, or use the %s already prepared\n",
+				in.url, plural(in.prepared, "dictionary", "dictionaries"))
+		} else {
+			fmt.Fprintf(out, "\nopen %s to choose your dictionary folder\n", in.url)
+		}
+	case in.prepared > 0 && !cfg.UseCached:
+		fmt.Fprintf(out, "\n%s previously imported — enable with --use-cached (or on the setup page)\n",
+			plural(in.prepared, "dictionary", "dictionaries"))
+	}
+	if in.speex == "" {
+		fmt.Fprintf(out, "\nnote: no .spx decoder available — Speex audio will not play.\n"+
+			"  Build with cgo for the built-in decoder, or install speex / set SPEEXDEC=/path/to/speexdec:\n"+
+			"    macOS:    brew install speex\n"+
+			"    Linux:    sudo apt install speex   (or your distro's speex package)\n"+
+			"    Windows:  https://www.speex.org/downloads/\n")
+	}
+}
+
+// plural renders a count with the right noun: "1 dictionary", "55 dictionaries".
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+func indexingSummary(autoIndex string) string {
+	if autoIndex == "off" {
+		return "manual (AUTO_INDEX=off)"
+	}
+	return "automatic on first search (headwords); full-text on request"
 }
 
 func openBrowser(url string) {
@@ -703,7 +795,7 @@ func cmdSearchAll(args []string) error {
 	for _, p := range paths {
 		d, err := dict.Open(p)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "skip %s: %v\n", p, err)
+			logx.Warn("%scannot be opened: %v — skipped", logx.Dict(filepath.Base(p)), err)
 			continue
 		}
 		defer d.Close()
@@ -714,7 +806,7 @@ func cmdSearchAll(args []string) error {
 		case h.Skipped:
 			continue
 		case h.Err != nil:
-			fmt.Fprintf(os.Stderr, "%s: %v\n", h.Meta.Name, h.Err)
+			logx.Warn("%ssearch failed: %v", logx.Dict(h.Meta.Name), h.Err)
 		case len(h.Results) > 0:
 			fmt.Printf("== %s (%d)\n", h.Meta.Name, len(h.Results))
 			for _, r := range h.Results {

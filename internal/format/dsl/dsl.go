@@ -16,7 +16,10 @@ import (
 	"strings"
 	"sync"
 
+	"time"
+
 	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/glowinthedark/gonow-dict/internal/logx"
 	"github.com/glowinthedark/gonow-dict/internal/store"
 )
 
@@ -60,15 +63,18 @@ func Open(path string) (*Dict, error) {
 			r.Close()
 			return nil, err
 		}
-		fmt.Fprintf(os.Stderr, "dsl: preparing search index for %q (first open)…\n", name)
-		err = store.Ingest(r, dbPath, func(done, total int) {
-			fmt.Fprintf(os.Stderr, "\r%d entries", done)
+		start := time.Now()
+		const format = "dsl"
+		logx.Status("%spreparing search index (%s, first open)…", logx.Dict(name), format)
+		rep, ierr := store.IngestLevelReport(r, dbPath, store.LevelText, func(done, total int) {
+			logx.Progress("  %d entries", done)
 		})
-		fmt.Fprintln(os.Stderr)
 		r.Close()
-		if err != nil {
-			return nil, fmt.Errorf("dsl auto-ingest: %w", err)
+		if ierr != nil {
+			logx.ClearLine()
+			return nil, fmt.Errorf("preparing %q: %w", name, ierr)
 		}
+		store.ReportPrepared(name, rep, time.Since(start))
 	} else {
 		r.Close()
 	}

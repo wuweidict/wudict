@@ -603,3 +603,121 @@ func TestBodyTextNormalization(t *testing.T) {
 		t.Errorf("BodyText not escaped/wrapped: %q", res[0].Body)
 	}
 }
+
+// Databases prepared under the pre-folder layout must keep working: they are
+// moved into folders (a rename, no re-index), never deleted, and never
+// overwrite a folder that already holds the same dictionary.
+func TestAdoptLoose(t *testing.T) {
+	db := t.TempDir()
+	t.Setenv("GONOW_DB_DIR", db)
+	srcDir := t.TempDir()
+	src := writeSrc(t, filepath.Join(srcDir, "Espasa.mdx"), "content")
+
+	// (1) a flat pair whose source is recorded and still present
+	loose := filepath.Join(db, "Espasa-Calpe-1f5fa4b2.text.db")
+	r := &fakeReader{
+		meta:    dict.Meta{Name: "Espasa", Format: "mdx", Path: src},
+		entries: []dict.Entry{h("a", "<p>x</p>")},
+	}
+	if err := Ingest(r, loose, nil); err != nil {
+		t.Fatal(err)
+	}
+	looseMedia := strings.TrimSuffix(loose, ".text.db") + ".media.db"
+	writeSrc(t, looseMedia, "MEDIA")
+	// (2) a flat database with no recorded source: named after the file,
+	//     minus the old content-hash suffix
+	orphanSrc := ""
+	noSrc := filepath.Join(db, "spa-cat-index-7d9963cd.text.db")
+	r2 := &fakeReader{
+		meta:    dict.Meta{Name: "Spa-Cat", Format: "mdx", Path: orphanSrc},
+		entries: []dict.Entry{h("b", "<p>y</p>")},
+	}
+	if err := Ingest(r2, noSrc, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	moved, err := AdoptLoose()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(moved) != 2 {
+		t.Fatalf("adopted %d databases, want 2: %+v", len(moved), moved)
+	}
+	// the recorded-source one lands where a fresh ingest of that source would
+	want := filepath.Join(db, "Espasa")
+	if !fileExists(TextDBPath(want)) {
+		t.Fatalf("expected %s/text.db after adoption", want)
+	}
+	if !fileExists(MediaDBPath(want)) {
+		t.Error("the paired media.db should move with its dictionary")
+	}
+	if fileExists(loose) || fileExists(looseMedia) {
+		t.Error("adoption should move the files, not copy them")
+	}
+	if got, ok := PreparedFor(src); !ok || got != TextDBPath(want) {
+		t.Errorf("adopted dictionary not resolvable from its source: %q %v", got, ok)
+	}
+	if !fileExists(filepath.Join(db, "spa-cat-index", TextDBName)) {
+		t.Error("a source-less database should be named after its file, hash suffix dropped")
+	}
+
+	lib, err := Library()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lib) != 2 {
+		t.Fatalf("Library() lists %d after adoption, want 2", len(lib))
+	}
+	// idempotent
+	again, err := AdoptLoose()
+	if err != nil || len(again) != 0 {
+		t.Fatalf("second AdoptLoose = %v, %v; want none", again, err)
+	}
+	// nothing is deletable
+	orph, err := FindOrphans()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orph) != 0 {
+		t.Fatalf("adopted dictionaries must not be orphans: %+v", orph)
+	}
+}
+
+// A loose database whose dictionary already has a prepared folder is a true
+// duplicate: left in place by adoption, and only then reported as removable.
+func TestAdoptLooseKeepsExistingFolder(t *testing.T) {
+	db := t.TempDir()
+	t.Setenv("GONOW_DB_DIR", db)
+	srcDir := t.TempDir()
+	src := writeSrc(t, filepath.Join(srcDir, "Dup.mdx"), "content")
+	dir := prepare(t, src, "Dup") // current-layout folder
+
+	loose := filepath.Join(db, "Dup-11112222.text.db")
+	r := &fakeReader{
+		meta:    dict.Meta{Name: "Dup", Format: "mdx", Path: src},
+		entries: []dict.Entry{h("a", "<p>x</p>")},
+	}
+	if err := Ingest(r, loose, nil); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := AdoptLoose()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(moved) != 0 {
+		t.Fatalf("must not adopt over an existing folder: %+v", moved)
+	}
+	if !fileExists(loose) {
+		t.Fatal("the loose file must be left in place, not deleted")
+	}
+	if !fileExists(TextDBPath(dir)) {
+		t.Fatal("the existing prepared folder must be untouched")
+	}
+	orph, err := FindOrphans()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orph) != 1 || filepath.Base(orph[0].Path) != "Dup-11112222.text.db" {
+		t.Fatalf("the duplicate should be the only removable item: %+v", orph)
+	}
+}

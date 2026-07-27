@@ -123,6 +123,10 @@ folder and it works — no original source files needed (a `text.db`
 without its `media.db` still works; audio and images just fall back to
 the source file when one is present).
 
+Databases from earlier versions (the old flat `<name>-<hash>.text.db`
+files) are moved into folders automatically on startup — a rename, never
+a re-index, and nothing is deleted.
+
 Your own library is used only if you say so. On first run, when the
 dictionary folder is empty, the setup page lists everything already
 prepared under *Previously imported dictionaries* with a **Use these

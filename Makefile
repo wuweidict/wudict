@@ -22,8 +22,11 @@ BUILD_DIR  := dist
 GO_TAGS      := sqlite_fts5
 GOFLAGS      := -tags $(GO_TAGS) -trimpath
 PUREGO_FLAGS := -tags purego -trimpath
-LDFLAGS    := -s -w -X main.version=$(VERSION)
+# VERSION must be defined BEFORE LDFLAGS: `:=` expands immediately, so the
+# other order stamped -X main.version= with an empty string (the binary then
+# printed a blank version, overriding main.go's "dev" default).
 VERSION    := $(shell git -C . describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS    := -s -w -X main.version=$(VERSION)
 
 # Integration tests need real dictionaries; point these at files you have
 # (tests skip silently when a path is unset/missing).

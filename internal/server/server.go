@@ -113,7 +113,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			logx.V("PANIC %s %s: %v", r.Method, r.URL.RequestURI(), rec)
-			fmt.Fprintf(os.Stderr, "panic serving %s: %v\n", r.URL.RequestURI(), rec)
+			logx.Warn("panic serving %s: %v", r.URL.RequestURI(), rec)
 			httpErr(w, 500, "internal error: %v", rec)
 		}
 	}()

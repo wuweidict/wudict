@@ -38,16 +38,31 @@ const (
 	LevelHeadwords Level = "headwords"
 )
 
+// Report summarizes one completed ingest. Diagnostics are RETURNED, never
+// printed: store is a library, and only the CLI and the server know whether a
+// given ingest is a foreground command the user is watching or one of fifty
+// background index builds that must stay quiet (D13).
+type Report struct {
+	Entries         int // entries written
+	UnresolvedLinks int // redirects whose target headword was never found
+}
+
 // Ingest scans r into a new text database at dbPath with full text
 // indexing (see IngestLevel).
 func Ingest(r dict.Reader, dbPath string, progress Progress) error {
 	return IngestLevel(r, dbPath, LevelText, progress)
 }
 
-// IngestLevel scans r into a new text database at dbPath (atomically:
+// IngestLevel scans r into a new text database, discarding the Report.
+func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) error {
+	_, err := IngestLevelReport(r, dbPath, level, progress)
+	return err
+}
+
+// IngestLevelReport scans r into a new text database at dbPath (atomically:
 // written to a temp file, renamed on success). The FTS index is built
 // inside the same transaction as the data (FTS-audit #3).
-func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (err error) {
+func IngestLevelReport(r dict.Reader, dbPath string, level Level, progress Progress) (rep Report, err error) {
 	srcMeta := r.Meta()
 	tmp := tempDBName(dbPath)
 	_ = os.Remove(tmp)
@@ -57,12 +72,12 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 		}
 	}()
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		return err
+		return rep, err
 	}
 
 	db, err := sql.Open(driverName, dsnIngest(tmp))
 	if err != nil {
-		return err
+		return rep, err
 	}
 	defer db.Close()
 
@@ -77,12 +92,12 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 		CREATE VIRTUAL TABLE entry_trigram USING fts5(
 			w, content='', columnsize=0, tokenize='trigram');
 	`, schemaVersion)); err != nil {
-		return err
+		return rep, err
 	}
 
 	tx, err := db.Begin()
 	if err != nil {
-		return err
+		return rep, err
 	}
 	defer func() {
 		if err != nil {
@@ -92,19 +107,19 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 
 	insEntry, err := tx.Prepare("INSERT INTO entry(id, w, m) VALUES(?, ?, ?)")
 	if err != nil {
-		return err
+		return rep, err
 	}
 	insFts, err := tx.Prepare("INSERT INTO entry_fts(rowid, w, txt) VALUES(?, ?, ?)")
 	if err != nil {
-		return err
+		return rep, err
 	}
 	insTrig, err := tx.Prepare("INSERT INTO entry_trigram(rowid, w) VALUES(?, ?)")
 	if err != nil {
-		return err
+		return rep, err
 	}
 	insAlias, err := tx.Prepare("INSERT INTO alias(w, entry_id) VALUES(?, ?)")
 	if err != nil {
-		return err
+		return rep, err
 	}
 
 	type pendingLink struct{ w, target string }
@@ -120,7 +135,7 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 			break
 		}
 		if rerr != nil {
-			return rerr
+			return rep, rerr
 		}
 		if len(e.Headwords) == 0 {
 			continue
@@ -135,23 +150,23 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 		}
 		body, err2 := normalizeBody(e)
 		if err2 != nil {
-			return err2
+			return rep, err2
 		}
 		id++
 		if _, err = insEntry.Exec(id, hw, body); err != nil {
-			return err
+			return rep, err
 		}
 		txt := ""
 		if level == LevelText {
 			txt = StripHTML(body)
 		}
 		if _, err = insFts.Exec(id, hw, txt); err != nil {
-			return err
+			return rep, err
 		}
 		// trigram index over the accent/case-folded headword powers the
 		// "contains" substring mode.
 		if _, err = insTrig.Exec(id, dict.Fold(hw)); err != nil {
-			return err
+			return rep, err
 		}
 		if _, ok := idByWord[hw]; !ok {
 			idByWord[hw] = id
@@ -164,7 +179,7 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 			extra = strings.TrimSpace(extra)
 			if extra != "" && extra != hw {
 				if _, err = insAlias.Exec(extra, id); err != nil {
-					return err
+					return rep, err
 				}
 			}
 		}
@@ -184,11 +199,8 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 			continue
 		}
 		if _, err = insAlias.Exec(l.w, target); err != nil {
-			return err
+			return rep, err
 		}
-	}
-	if unresolved > 0 {
-		fmt.Fprintf(os.Stderr, "ingest: %d unresolved link targets (skipped)\n", unresolved)
 	}
 
 	uuid := make([]byte, 16)
@@ -211,44 +223,45 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 	}
 	for k, v := range metaKV {
 		if _, err = tx.Exec("INSERT INTO meta(key, value) VALUES(?, ?)", k, v); err != nil {
-			return err
+			return rep, err
 		}
 	}
 
 	if _, err = tx.Exec("CREATE INDEX idx_entry_w ON entry(w COLLATE NOCASE)"); err != nil {
-		return err
+		return rep, err
 	}
 	if _, err = tx.Exec("CREATE INDEX idx_alias_w ON alias(w COLLATE NOCASE)"); err != nil {
-		return err
+		return rep, err
 	}
 	if err = tx.Commit(); err != nil {
-		return err
+		return rep, err
 	}
 	if _, err = db.Exec("INSERT INTO entry_fts(entry_fts) VALUES('optimize')"); err != nil {
-		return err
+		return rep, err
 	}
 	if _, err = db.Exec("INSERT INTO entry_trigram(entry_trigram) VALUES('optimize')"); err != nil {
-		return err
+		return rep, err
 	}
 	if _, err = db.Exec("ANALYZE; PRAGMA optimize;"); err != nil {
-		return err
+		return rep, err
 	}
 	if err = db.Close(); err != nil {
-		return err
+		return rep, err
 	}
 	if progress != nil {
 		progress(int(id), total)
 	}
+	rep = Report{Entries: int(id), UnresolvedLinks: unresolved}
 	syncFile(tmp)
 	if err = os.Rename(tmp, dbPath); err != nil {
-		return err
+		return rep, err
 	}
 	// refresh the folder receipt (derived from the meta just written; a
 	// failure here must not fail an otherwise complete ingest).
 	if strings.EqualFold(filepath.Base(dbPath), TextDBName) {
 		_ = WriteInfo(filepath.Dir(dbPath))
 	}
-	return nil
+	return rep, nil
 }
 
 // syncFile flushes a finished ingest temp to disk. dsnIngest runs with
