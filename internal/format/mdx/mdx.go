@@ -40,9 +40,8 @@ func init() {
 }
 
 // probe reads name/description/entry-count from the MDX header only (no
-// BuildIndex, no fold-maps) for the cheap dictionary-list path. The name
-// matches Open's exactly (shared dictName), so CacheBase resolves to the
-// same cached text.db.
+// BuildIndex, no fold-maps) for the cheap dictionary-list path. It shares
+// dictName with Open so both report the same display name.
 func probe(filename string) (dict.Meta, error) {
 	md, err := gomdict.New(filename)
 	if err != nil {

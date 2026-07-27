@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
 )
 
-// Media is one opened `<slug>.media.db` (SPEC §3): binary resources
+// Media is one opened `media.db` (SPEC §3): binary resources
 // packed at ingest=full, paired to its text.db by dict_uuid.
 type Media struct {
 	db   *sql.DB
@@ -132,7 +134,14 @@ func IngestMedia(d dict.Dictionary, names []string, dbPath, dictUUID string, pro
 		progress(len(names), len(names))
 	}
 	syncFile(tmp)
-	return os.Rename(tmp, dbPath)
+	if err = os.Rename(tmp, dbPath); err != nil {
+		return err
+	}
+	// the receipt now has media to describe (best-effort, see IngestLevel).
+	if strings.EqualFold(filepath.Base(dbPath), MediaDBName) {
+		_ = WriteInfo(filepath.Dir(dbPath))
+	}
+	return nil
 }
 
 // ReadMetaValue reads one meta value from a gonow database file.

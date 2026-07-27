@@ -129,7 +129,7 @@ func Open(ifoPath string) (*Dict, error) {
 
 // probe reads bookname/wordcount from the tiny .ifo header only (no .idx
 // load, no fold-maps) for the cheap dictionary-list path. Name mirrors
-// Open's derivation so CacheBase resolves the same cached text.db.
+// Open's derivation so both report the same display name.
 func probe(ifoPath string) (dict.Meta, error) {
 	ifo, err := parseIfo(ifoPath)
 	if err != nil {

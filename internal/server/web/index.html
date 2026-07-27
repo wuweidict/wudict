@@ -321,10 +321,12 @@ function toggleDict(id){
 $("dict").onchange=e=>{localStorage.setItem("gonow_dict",e.target.value);if($("q").value.trim())doSearch()};
 
 /* provenance: the collapsed line says where the dictionary came from (its
-   foreign source + a media companion count); expanding reveals the cached
-   .text.db/.media.db and the full media source paths. A standalone native
-   dictionary (no source) shows its .text.db directly. Paths are click-to-copy
-   (reusing the .path handler). */
+   foreign source + a media companion count); expanding reveals the library
+   folder that holds the prepared databases and the full media source paths.
+   A dictionary with no source left shows its library folder directly. The
+   folder is what a user copies, zips or hands over — so it, not the .db file
+   inside it, is the path we show first. Paths are click-to-copy (reusing the
+   .path handler). */
 function mediaKind(list){
   const f=list[0].toLowerCase();
   if(f.endsWith(".mdd"))return "mdd";
@@ -338,11 +340,13 @@ function provenance(d){
     const ms=d.mediaSrc||[],n=ms.length;
     head=`<span class="fmt">${esc(d.format||"?")}</span>: ${esc(d.source)}`+
       (n?` <span class="more">+ ${n} ${mediaKind(ms)}</span>`:"");
-    if(d.textDB)rows.push(label("db: "+d.textDB+(d.mediaDB?" + media.db":"")));
+    if(d.folder)rows.push(label("prepared: "+d.folder+" ("+(d.mediaDB?"text.db + media.db + info.txt":"text.db + info.txt")+")"));
+    else if(d.textDB)rows.push(label("db: "+d.textDB+(d.mediaDB?" + media.db":"")));
     for(const m of ms)rows.push(label(m,"sub"));
   }else{
-    head=`<span class="fmt">native</span>: ${esc(d.textDB||d.path||"")}`;
-    if(d.mediaDB)rows.push(label("media: "+d.mediaDB));
+    head=`<span class="fmt">prepared</span>: ${esc(d.folder||d.textDB||d.path||"")}`;
+    if(d.folder)rows.push(label("contains: text.db"+(d.mediaDB?" + media.db":"")+" + info.txt"));
+    else if(d.mediaDB)rows.push(label("media: "+d.mediaDB));
   }
   if(!rows.length)return `<div class="prov1">${head}</div>`;
   return `<details class="prov"><summary>${head}</summary><div class="provbody">${rows.join("")}</div></details>`;
@@ -367,7 +371,7 @@ function renderPanel(){
       acts=`<span class="act" data-act="ingest">full-text search</span>`+
         (canPack?`<span class="act" data-act="ingest-full">FTS + pack media</span>`:"");
     }else if(canPack){
-      acts=`<span class="act" data-act="ingest-full">Pack media into .media.db</span>`;
+      acts=`<span class="act" data-act="ingest-full">Pack media into the library folder</span>`;
     }
     div.innerHTML=`<div class="hd">
         <span class="grip" draggable="true" title="Drag to reorder">⠿</span>

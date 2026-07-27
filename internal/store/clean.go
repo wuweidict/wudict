@@ -11,24 +11,23 @@ import (
 	"strings"
 )
 
-// Orphan is one stale cache database that is safe to delete: a superseded
-// ingest (its source changed and re-ingested under a new content-hash name),
-// an unreadable/corrupt cache, or a media.db with no dictionary to pair with.
+// Orphan is one deletable item in the db dir: an incomplete or unreadable
+// library folder, an interrupted ingest temp file, or a file left over from
+// the pre-folder flat layout.
 //
-// A .text.db whose source file merely VANISHED is deliberately NOT an orphan:
-// it is a naturalized standalone dictionary now (see StandaloneNativeDBs), and
-// deleting it would destroy the user's only copy. The db dir is the native
-// dictionary root, not a disposable cache.
+// A prepared dictionary whose source file merely VANISHED is deliberately NOT
+// an orphan — the folder is the user's only copy of that dictionary now, and
+// deleting it would be data loss. Nor is a dictionary whose source CHANGED:
+// re-indexing overwrites its text.db in place, so nothing is superseded.
 type Orphan struct {
 	Path   string
 	Size   int64
 	Reason string
+	IsDir  bool
 }
 
-// FindOrphans scans the cache dir for deletable databases. It never flags a
-// .text.db just because its source is gone — that .text.db is a standalone
-// native dictionary. Orphans are: superseded ingests, unreadable caches, and
-// media.db files whose .text.db partner is missing or itself an orphan.
+// FindOrphans scans the db dir for deletable items. It never flags a healthy
+// prepared-dictionary folder, whatever became of its source.
 func FindOrphans() ([]Orphan, error) {
 	dir := DefaultDBDir()
 	des, err := os.ReadDir(dir)
@@ -38,102 +37,52 @@ func FindOrphans() ([]Orphan, error) {
 		}
 		return nil, err
 	}
-	present := map[string]bool{}  // base (no .text.db) -> the text.db exists on disk
-	orphaned := map[string]bool{} // base -> that text.db is itself an orphan
 	var out []Orphan
-	// pass 1: judge the .text.db files.
 	for _, de := range des {
-		name := de.Name()
-		if de.IsDir() || !strings.HasSuffix(name, ".text.db") {
+		p := filepath.Join(dir, de.Name())
+		if de.IsDir() {
+			if o, ok := judgeFolder(p); ok {
+				out = append(out, o)
+			}
 			continue
 		}
-		base := strings.TrimSuffix(name, ".text.db")
-		present[base] = true
-		p := filepath.Join(dir, name)
-		info, err := de.Info()
+		fi, err := de.Info()
 		if err != nil {
 			continue
 		}
+		name := strings.ToLower(de.Name())
 		reason := ""
-		src, err := ReadMetaValue(p, "source_path")
 		switch {
-		case err != nil:
-			reason = "unreadable metadata"
-		case src == "":
-			// no recorded source: a standalone native dictionary — keep.
-		default:
-			if _, statErr := os.Stat(src); statErr != nil {
-				// source vanished: promoted to a standalone native dict — keep.
-				break
-			}
-			// source still present: an orphan only if a newer ingest has
-			// superseded this content-hash under a different name.
-			dictName, _ := ReadMetaValue(p, "name")
-			if expected := CacheBase(src, dictName) + ".text.db"; expected != p {
-				reason = "source file changed (superseded by a newer ingest)"
-			}
+		case strings.Contains(name, ".ingest."):
+			reason = "interrupted ingest (temp file)"
+		case strings.HasSuffix(name, ".text.db"):
+			reason = "loose database from the old flat layout — re-index to get a folder"
+		case strings.HasSuffix(name, ".media.db"):
+			reason = "loose media database from the old flat layout"
 		}
-		if reason == "" {
-			continue
+		if reason != "" {
+			out = append(out, Orphan{Path: p, Size: fi.Size(), Reason: reason})
 		}
-		orphaned[base] = true
-		out = append(out, Orphan{Path: p, Size: info.Size(), Reason: reason})
 	}
-	// pass 2: judge the .media.db files against their text.db partner.
-	for _, de := range des {
-		name := de.Name()
-		if de.IsDir() || !strings.HasSuffix(name, ".media.db") {
-			continue
-		}
-		base := strings.TrimSuffix(name, ".media.db")
-		if present[base] && !orphaned[base] {
-			continue // paired with a live dictionary (standalone or cached)
-		}
-		info, err := de.Info()
-		if err != nil {
-			continue
-		}
-		reason := "media.db with no dictionary"
-		if orphaned[base] {
-			reason = "paired with orphaned text.db"
-		}
-		out = append(out, Orphan{Path: filepath.Join(dir, name), Size: info.Size(), Reason: reason})
-	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
 }
 
-// StandaloneNativeDBs returns the .text.db files in dir that have become
-// standalone native dictionaries: their recorded foreign source is gone (or
-// was never recorded), so nothing else in the registry represents them. A
-// .text.db whose source still EXISTS is omitted on purpose — that source
-// already appears in the external root and listing the cache too would
-// double-list it. (This is the same source-existence test FindOrphans uses,
-// applied to the opposite conclusion: gone ⇒ dictionary, not garbage.)
-func StandaloneNativeDBs(dir string) ([]string, error) {
-	des, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
+// judgeFolder decides whether a library folder is garbage: no text.db at all
+// (an interrupted claim, or a media.db with nothing to pair with) or one that
+// cannot be read as a gonow database.
+func judgeFolder(dir string) (Orphan, bool) {
+	textDB := TextDBPath(dir)
+	fi, err := os.Stat(textDB)
+	if err != nil || fi.IsDir() {
+		reason := "incomplete dictionary folder (no text.db)"
+		if _, err := os.Stat(MediaDBPath(dir)); err == nil {
+			reason = "media.db with no dictionary to pair with"
 		}
-		return nil, err
+		return Orphan{Path: dir, Size: dirSize(dir), Reason: reason, IsDir: true}, true
 	}
-	var out []string
-	for _, de := range des {
-		if de.IsDir() || !strings.HasSuffix(de.Name(), ".text.db") {
-			continue
-		}
-		p := filepath.Join(dir, de.Name())
-		src, err := ReadMetaValue(p, "source_path")
-		if err != nil {
-			continue // unreadable/corrupt: not a listable dict (FindOrphans handles it)
-		}
-		if src != "" {
-			if _, err := os.Stat(src); err == nil {
-				continue // source present → represented by its external entry
-			}
-		}
-		out = append(out, p)
+	if _, err := ReadMeta(textDB); err != nil {
+		return Orphan{Path: dir, Size: dirSize(dir), Reason: "unreadable database", IsDir: true}, true
 	}
-	sort.Strings(out)
-	return out, nil
+	return Orphan{}, false
 }

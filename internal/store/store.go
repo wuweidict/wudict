@@ -3,9 +3,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package store is the ingested backend: the gonow-dict canonical SQLite
-// format (docs/SPEC.md §2). One `<slug>.text.db` per dictionary holds
-// headwords, aliases, article HTML, and a contentless FTS5 index that
-// powers the fuzzy and full-text modes the direct backends cannot offer.
+// format (docs/SPEC.md §2). One `text.db` per dictionary — inside its library
+// folder, see library.go — holds headwords, aliases, article HTML, and the
+// FTS5 indexes powering the contains and full-text modes the direct backends
+// cannot offer.
 //
 // Query modes are ported from draego/drae.go with the fixes catalogued in
 // docs/SPEC.md §FTS-audit (stripped-text indexing, quoted-phrase MATCH
@@ -22,7 +23,15 @@ import (
 )
 
 func init() {
-	dict.RegisterFormat(".db", func(path string) (dict.Dictionary, error) { return Open(path) })
+	// A prepared dictionary is a FOLDER whose main file is `text.db`
+	// (see library.go); `<name>.text.db` is the same database copied out of
+	// its folder. Registering bare ".db" — as this once did — made every
+	// internal sidecar a public dictionary type: a `media.db` opened as a
+	// phantom dictionary, because for uuid pairing it carries the same
+	// user_version and meta table as a text.db.
+	open := func(path string) (dict.Dictionary, error) { return Open(path) }
+	dict.RegisterFileName(TextDBName, open)
+	dict.RegisterFormat(".text.db", open)
 }
 
 // maxLimit clamps any caller-supplied result limit (FTS-audit #7).
@@ -35,6 +44,7 @@ type Store struct {
 	db         *sql.DB
 	meta       dict.Meta
 	ftsOK      bool   // article text indexed (ingest_level != "headwords")
+	srcPath    string // source_path recorded at ingest ("" if unknown)
 	hasTrigram bool   // entry_trigram present → "contains" substring search
 	media      *Media // sibling .media.db, when present and uuid-paired
 }
@@ -67,6 +77,7 @@ func Open(path string) (*Store, error) {
 		Description: m["description"],
 	}
 	s.ftsOK = m["ingest_level"] != string(LevelHeadwords)
+	s.srcPath = m["source_path"]
 	// feature-detect the trigram "contains" index rather than gating on
 	// schema version, so older .text.db (and standalone native dicts whose
 	// source is gone) keep opening — they simply lack the contains mode.
@@ -74,10 +85,10 @@ func Open(path string) (*Store, error) {
 	db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='entry_trigram'`).Scan(&trig)
 	s.hasTrigram = trig > 0
 	fmt.Sscanf(m["entry_count"], "%d", &s.meta.EntryCount)
-	// standalone use: attach the sibling media.db so a copied pair works
+	// standalone use: attach the sibling media.db so a copied folder works
 	// without the original source (D2/D9); uuid mismatch = not our pair
-	if base, ok := strings.CutSuffix(path, ".text.db"); ok {
-		if md, err := OpenMedia(base + ".media.db"); err == nil {
+	if sib := MediaSibling(path); sib != "" {
+		if md, err := OpenMedia(sib); err == nil {
 			if md.UUID == m["dict_uuid"] {
 				s.media = md
 			} else {
@@ -118,6 +129,11 @@ func ReadMeta(dbPath string) (map[string]string, error) {
 }
 
 func (s *Store) Meta() dict.Meta { return s.meta }
+
+// SourcePath returns the foreign source this database was prepared from
+// (empty when unrecorded). The file may no longer exist — a prepared
+// dictionary stands on its own.
+func (s *Store) SourcePath() string { return s.srcPath }
 
 func (s *Store) Caps() dict.Caps {
 	return dict.Caps{Exact: true, Prefix: true, Contains: s.hasTrigram, FTS: s.ftsOK}

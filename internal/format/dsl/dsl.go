@@ -33,9 +33,9 @@ func init() {
 }
 
 // Dict is the DSL "direct" backend. DSL has no native index, so Open
-// transparently ingests into a cached text.db on first use (SPEC §1);
-// the cache file name embeds a source-content hash, so a changed source
-// gets a fresh ingest automatically. Resources stay lazy in
+// transparently prepares a library folder (<db dir>/<source name>/text.db) on
+// first use (SPEC §1); a changed source is detected from the recorded
+// size/mtime/hash and re-indexed in place. Resources stay lazy in
 // `<name>.files.zip` (or loose beside the .dsl).
 type Dict struct {
 	*store.Store
@@ -53,8 +53,13 @@ func Open(path string) (*Dict, error) {
 	}
 	name := r.Meta().Name
 
-	dbPath := store.CacheBase(path, name) + ".text.db"
-	if _, statErr := os.Stat(dbPath); statErr != nil {
+	dbPath, prepared := store.PreparedFor(path)
+	if !prepared {
+		dbPath, err = store.PrepareTarget(path)
+		if err != nil {
+			r.Close()
+			return nil, err
+		}
 		fmt.Fprintf(os.Stderr, "dsl: preparing search index for %q (first open)…\n", name)
 		err = store.Ingest(r, dbPath, func(done, total int) {
 			fmt.Fprintf(os.Stderr, "\r%d entries", done)

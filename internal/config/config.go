@@ -26,6 +26,7 @@ type Config struct {
 	Speexdec     string // SPEEXDEC: path to the external speexdec binary (.spx audio)
 	SpeexBackend string // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
 	AutoIndex    string // AUTO_INDEX: off|fuzzy — build a fuzzy headword index on first search of a dict
+	UseCached    bool   // USE_CACHED=1: also list previously imported dictionaries from the db dir
 	Source       string // path of the config.toml that was loaded ("" if none)
 }
 
@@ -91,6 +92,9 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	if v := get("AUTO_INDEX"); v != "" {
 		cfg.AutoIndex = strings.ToLower(v)
 	}
+	if v := get("USE_CACHED"); v != "" && v != "0" && !strings.EqualFold(v, "false") {
+		cfg.UseCached = true
+	}
 	return cfg, nil
 }
 
@@ -132,8 +136,9 @@ const configTemplate = `# gonow-dict configuration
 # Priority: CLI flag > environment variable > this file > built-in default.
 # All keys are optional — uncomment a line to override its default.
 
-# DICT_DIR    = "~/Dictionaries"      # folder with dictionaries (.mdx, .ifo, .slob, .dsl, .db)
-# DB_DIR      = "~/.gonow-dict/db"    # cache for generated .text.db / .media.db files
+# DICT_DIR    = "~/Dictionaries"      # folder with dictionaries (.mdx, .ifo, .slob, .dsl, .bgl)
+#                                     # must NOT be the same folder as DB_DIR
+# DB_DIR      = "~/.gonow-dict/db"    # library of prepared dictionaries (one folder each)
 # SERVER_IP   = "127.0.0.1"           # listen address (0.0.0.0 = all interfaces)
 # SERVER_PORT = "8808"
 # NO_BROWSER  = "0"                   # "1" = do not open a browser tab on startup
@@ -141,6 +146,8 @@ const configTemplate = `# gonow-dict configuration
 # SPEEX_BACKEND = "internal"          # ".spx" audio decoder: "internal" (built-in libspeex) or "external" (speexdec)
 # SPEEXDEC    = "/usr/bin/speexdec"   # external speexdec path; blank = auto-detect (next to the executable, then $PATH)
 # AUTO_INDEX  = "fuzzy"               # "off" = do not auto-build fuzzy indexes on first search
+# USE_CACHED  = "0"                   # "1" = also list previously imported dictionaries kept in DB_DIR
+#                                     #       (set from the setup page: "Use these dictionaries")
 `
 
 // EnsureConfigFile makes sure a config.toml exists somewhere in the

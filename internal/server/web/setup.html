@@ -34,27 +34,93 @@ input:focus{border-color:var(--focus);box-shadow:0 0 0 3px color-mix(in srgb,var
 button{font-size:15px;background:var(--accent);color:#fff;border:none;border-radius:8px;
   padding:.5em 1.2em;cursor:pointer;margin-top:.618em}
 button:disabled{opacity:.45;cursor:default}
+button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
 .formats{color:var(--faint);font-size:12px;margin-top:1em}
+.sep{border:none;border-top:1px solid var(--line);margin:1.618em 0 1em}
+h2{margin:0 0 .2em;font-size:16px}
+label.keep{display:flex;gap:.5em;align-items:flex-start;font-size:13.5px;color:var(--soft);margin-top:.618em}
+label.keep input{width:auto;margin:.25em 0 0}
+#lib{max-height:38vh;overflow:auto;margin:.618em 0 0;border:1px solid var(--line);border-radius:8px}
+.row{display:flex;gap:.5em;align-items:baseline;padding:.38em .618em;border-bottom:1px solid var(--line);font-size:13px}
+.row:last-child{border-bottom:none}
+.row .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .fmt{color:var(--faint);font-size:11.5px;text-transform:uppercase;letter-spacing:.04em}
+.row .n{color:var(--soft);font-variant-numeric:tabular-nums;font-size:12px}
+.tag{font-size:10.5px;border:1px solid var(--line);border-radius:99px;padding:0 .5em;color:var(--soft)}
+.tag.on{border-color:var(--accent);color:var(--accent)}
+.hidden{display:none}
 </style>
 </head>
 <body>
 <div class="card">
-<h1><b>gonow</b>·dict — choose your dictionary folder</h1>
-<p>The configured folder <code>{{DIR}}</code> {{REASON}}.</p>
-<p>Paste the full path of the folder that contains your dictionaries (subfolders are scanned too):</p>
+<h1><b>gonow</b>·dict — set up</h1>
+<p>Your dictionary folder <code>{{DIR}}</code> {{REASON}}.</p>
+
+<h2>Point gonow at your dictionaries</h2>
+<p>Paste the full path of the folder that holds your dictionary files (subfolders are scanned too):</p>
 <input id="path" placeholder="/path/to/your/dictionaries" autofocus spellcheck="false">
 <div id="msg"></div>
+<label class="keep hidden" id="keepWrap"><input type="checkbox" id="keep">
+  <span>Also keep my <b id="keepN">0</b> previously imported dictionaries</span></label>
 <button id="save" disabled>Use this folder</button>
-<p class="formats">Supported: MDict (.mdx + .mdd) · StarDict (.ifo) · Aard2 (.slob) · Lingvo DSL (.dsl, .dsl.dz) · gonow (.text.db)</p>
+
+<div id="libSection" class="hidden">
+  <hr class="sep">
+  <h2>Previously imported dictionaries</h2>
+  <p><b id="libN">0</b> ready to use — prepared earlier and kept in <code id="libDir"></code>.
+     They work right now, even without their original files.</p>
+  <div id="lib"></div>
+  <button id="useLib" class="ghost">Use these dictionaries</button>
+</div>
+
+<p class="formats">Supported: MDict (.mdx + .mdd) · StarDict (.ifo) · Aard2 (.slob) · Lingvo DSL (.dsl, .dsl.dz) · Babylon (.bgl) · prepared dictionary folders</p>
 </div>
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
 let timer=null,lastOK=false;
+
+const fmtN=n=>n.toLocaleString();
+const el=(tag,cls,txt)=>{const e=document.createElement(tag);if(cls)e.className=cls;
+  if(txt!==undefined)e.textContent=txt;return e};
+
+// Previously imported dictionaries: listed for information only. Nothing is
+// enrolled until the user clicks a Use button (that click is the consent, and
+// it is remembered — this page only appears while no dictionaries are in use).
+async function loadLibrary(){
+  let j;
+  try{ j=await (await fetch("/api/library")).json() }catch(e){ return }
+  if(!j||!j.count)return;
+  $("libDir").textContent=j.dir;
+  $("libN").textContent=fmtN(j.count);
+  $("keepN").textContent=fmtN(j.count);
+  const box=$("lib");
+  for(const d of j.entries){
+    const row=el("div","row");
+    row.appendChild(el("span","nm",d.name));
+    row.appendChild(el("span","fmt",d.format||""));
+    row.appendChild(el("span","n",fmtN(d.entries||0)+" entries"));
+    row.appendChild(el("span","tag on","search"));
+    if(d.fullText)row.appendChild(el("span","tag on","full-text"));
+    if(d.media)row.appendChild(el("span","tag on","media"));
+    box.appendChild(row);
+  }
+  $("libSection").classList.remove("hidden");
+  $("keepWrap").classList.remove("hidden");
+}
+
+async function useLibrary(){
+  $("useLib").disabled=true;
+  const j=await (await fetch("/api/setup?useCached=1&save=1")).json();
+  if(j.error){$("useLib").disabled=false;alert(j.error);return}
+  location.href="/";
+}
+
 async function validate(save){
   const p=$("path").value.trim();
   if(!p){$("msg").textContent="";$("save").disabled=true;return}
-  const r=await fetch("/api/setup?path="+encodeURIComponent(p)+(save?"&save=1":""));
+  const keep=$("keep").checked?"&useCached=1":"";
+  const r=await fetch("/api/setup?path="+encodeURIComponent(p)+(save?"&save=1"+keep:""));
   const j=await r.json();
   const msg=$("msg");
   if(j.error){msg.className="err";msg.textContent="✕ "+j.error;$("save").disabled=true;lastOK=false;return}
@@ -68,6 +134,8 @@ async function validate(save){
 $("path").addEventListener("input",()=>{clearTimeout(timer);timer=setTimeout(()=>validate(false),350)});
 $("path").addEventListener("keydown",e=>{if(e.key==="Enter"&&lastOK)validate(true)});
 $("save").addEventListener("click",()=>validate(true));
+$("useLib").addEventListener("click",useLibrary);
+loadLibrary();
 </script>
 </body>
 </html>

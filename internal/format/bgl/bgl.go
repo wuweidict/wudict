@@ -45,8 +45,13 @@ func Open(path string) (*Dict, error) {
 	}
 	name := r.Meta().Name
 
-	dbPath := store.CacheBase(path, name) + ".text.db"
-	if _, statErr := os.Stat(dbPath); statErr != nil {
+	dbPath, prepared := store.PreparedFor(path)
+	if !prepared {
+		dbPath, err = store.PrepareTarget(path)
+		if err != nil {
+			r.Close()
+			return nil, err
+		}
 		fmt.Fprintf(os.Stderr, "bgl: preparing search index for %q (first open)…\n", name)
 		err = store.Ingest(r, dbPath, func(done, _ int) {
 			fmt.Fprintf(os.Stderr, "\r%d entries", done)

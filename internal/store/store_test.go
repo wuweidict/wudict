@@ -15,85 +15,219 @@ import (
 	"github.com/glowinthedark/gonow-dict/internal/dict"
 )
 
-func TestCacheBaseMemoInvalidatesOnChange(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "d.mdx")
-	if err := os.WriteFile(src, []byte("first content"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	b1 := CacheBase(src, "Dict")
-	if got := CacheBase(src, "Dict"); got != b1 {
-		t.Fatalf("CacheBase not stable across calls: %s vs %s", got, b1)
-	}
-	// changed source content (and mtime) must produce a different hash
-	if err := os.WriteFile(src, []byte("second, different content"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	future := time.Now().Add(2 * time.Second)
-	_ = os.Chtimes(src, future, future)
-	if b2 := CacheBase(src, "Dict"); b2 == b1 {
-		t.Fatalf("CacheBase did not re-hash after source change: %s", b2)
-	}
-	// missing file → deterministic empty-input digest, stable across calls
-	miss := filepath.Join(dir, "gone.mdx")
-	if CacheBase(miss, "X") != CacheBase(miss, "X") {
-		t.Fatal("missing-file CacheBase not deterministic")
-	}
-}
-
-// ingestTo builds a minimal real .text.db at dir/dbName recording srcPath as
-// its source, for the native-root / orphan tests.
-func ingestTo(t *testing.T, dir, dbName, srcPath, name string) string {
+// prepare ingests a minimal real dictionary into a library folder for srcPath.
+func prepare(t *testing.T, srcPath, name string) string {
 	t.Helper()
+	dir, err := ClaimDir(srcPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	r := &fakeReader{
 		meta:    dict.Meta{Name: name, Format: "mdx", Path: srcPath},
 		entries: []dict.Entry{h("a", "<p>x</p>")},
 	}
-	p := filepath.Join(dir, dbName)
-	if err := Ingest(r, p, nil); err != nil {
+	if err := Ingest(r, TextDBPath(dir), nil); err != nil {
 		t.Fatal(err)
 	}
-	return p
+	return dir
 }
 
-func TestStandaloneNativeDBs(t *testing.T) {
-	dir := t.TempDir()
-	// source vanished → standalone native dictionary
-	gone := ingestTo(t, dir, "gone-1111.text.db", "/no/such/gone.mdx", "Gone")
-	// source present → omitted (its external entry represents it)
-	srcDir := t.TempDir()
-	src := filepath.Join(srcDir, "live.mdx")
-	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+// writeSrc creates a stand-in source file.
+func writeSrc(t *testing.T, path, content string) string {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ingestTo(t, dir, "live-2222.text.db", src, "Live")
+	return path
+}
 
-	got, err := StandaloneNativeDBs(dir)
+func TestFolderName(t *testing.T) {
+	cases := map[string]string{
+		"/d/AHD5-2017.slob":      "AHD5-2017",
+		"/d/Oxford Advanced.mdx": "Oxford Advanced",
+		"/d/big.dsl.dz":          "big",
+		"/d/we:ird/na*me.ifo":    "na-me",
+		"/d/trailing. ":          "trailing",
+		"/d/.mdx":                "dictionary",
+	}
+	for in, want := range cases {
+		if got := FolderName(in); got != want {
+			t.Errorf("FolderName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := FolderName("/d/" + strings.Repeat("x", 200) + ".mdx"); len(got) > 80 {
+		t.Errorf("FolderName did not cap length: %d", len(got))
+	}
+}
+
+// Same file name, different formats — the case that exists in real libraries
+// (AHD5-2017.slob and AHD5-2017.mdx). Each must own its own folder, and each
+// must keep resolving to its own folder afterwards.
+func TestClaimDirCollision(t *testing.T) {
+	db := t.TempDir()
+	t.Setenv("GONOW_DB_DIR", db)
+	srcDir := t.TempDir()
+	slob := writeSrc(t, filepath.Join(srcDir, "AHD5-2017.slob"), "s")
+	mdx := writeSrc(t, filepath.Join(srcDir, "AHD5-2017.mdx"), "m")
+
+	d1 := prepare(t, slob, "AHD5")
+	d2 := prepare(t, mdx, "AHD5")
+	if filepath.Base(d1) != "AHD5-2017" {
+		t.Errorf("first claim = %q, want AHD5-2017", filepath.Base(d1))
+	}
+	if filepath.Base(d2) != "AHD5-2017 (mdx)" {
+		t.Errorf("second claim = %q, want \"AHD5-2017 (mdx)\"", filepath.Base(d2))
+	}
+	// re-claims and lookups are stable and never cross over
+	if again, _ := ClaimDir(slob); again != d1 {
+		t.Errorf("re-claim moved folder: %s -> %s", d1, again)
+	}
+	if got, ok := LookupDir(mdx); !ok || got != d2 {
+		t.Errorf("LookupDir(mdx) = %q,%v; want %q", got, ok, d2)
+	}
+	if got, ok := LookupDir(filepath.Join(srcDir, "never-prepared.mdx")); ok {
+		t.Errorf("LookupDir returned %q for an unprepared source", got)
+	}
+	// looking up must not create anything
+	des, _ := os.ReadDir(db)
+	if len(des) != 2 {
+		t.Errorf("library has %d folders, want 2 (lookups must not create)", len(des))
+	}
+}
+
+func TestSourceChanged(t *testing.T) {
+	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	srcDir := t.TempDir()
+	src := writeSrc(t, filepath.Join(srcDir, "d.mdx"), "first content")
+	dir := prepare(t, src, "D")
+	textDB := TextDBPath(dir)
+
+	if SourceChanged(textDB, src) {
+		t.Error("unchanged source reported as changed")
+	}
+	// a touch that does not alter content must not force a re-index
+	future := time.Now().Add(2 * time.Second)
+	_ = os.Chtimes(src, future, future)
+	if SourceChanged(textDB, src) {
+		t.Error("touched (same content) source reported as changed")
+	}
+	writeSrc(t, src, "second, different content")
+	_ = os.Chtimes(src, future.Add(time.Second), future.Add(time.Second))
+	if !SourceChanged(textDB, src) {
+		t.Error("edited source not detected")
+	}
+	// a source that is simply gone is NOT "changed": the prepared folder
+	// stands on its own (data-loss guard).
+	if err := os.Remove(src); err != nil {
+		t.Fatal(err)
+	}
+	if SourceChanged(textDB, src) {
+		t.Error("missing source must not count as changed")
+	}
+}
+
+func TestLibraryListingAndReceipt(t *testing.T) {
+	db := t.TempDir()
+	t.Setenv("GONOW_DB_DIR", db)
+	srcDir := t.TempDir()
+	live := writeSrc(t, filepath.Join(srcDir, "live.mdx"), "x")
+	prepare(t, live, "Live")
+	prepare(t, filepath.Join(srcDir, "gone.mdx"), "Gone") // never created on disk
+
+	lib, err := Library()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0] != gone {
-		t.Fatalf("want [%s] (source-gone only), got %v", gone, got)
+	if len(lib) != 2 {
+		t.Fatalf("Library() = %d entries, want 2", len(lib))
+	}
+	byName := map[string]LibEntry{}
+	for _, e := range lib {
+		byName[e.Name] = e
+	}
+	if !byName["Live"].SourceExists {
+		t.Error("Live: SourceExists should be true")
+	}
+	if byName["Gone"].SourceExists {
+		t.Error("Gone: SourceExists should be false")
+	}
+	if byName["Live"].Entries != 1 || !byName["Live"].FullText || !byName["Live"].Contains {
+		t.Errorf("Live entry flags wrong: %+v", byName["Live"])
+	}
+
+	// the receipt is written at ingest and describes the same source
+	info, err := readInfo(InfoPath(byName["Live"].Dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info["source"] != live {
+		t.Errorf("info.txt source = %q, want %q", info["source"], live)
+	}
+	if info["name"] != "Live" {
+		t.Errorf("info.txt name = %q, want Live", info["name"])
+	}
+	// and it is the fast index behind LookupDir even without reading the db
+	if got, ok := LookupDir(live); !ok || got != byName["Live"].Dir {
+		t.Errorf("LookupDir(live) = %q,%v", got, ok)
+	}
+}
+
+// A format reader may report a relative, stale or empty source path in its
+// meta (several real ones do). The folder must still know what it was prepared
+// from — the claim written at allocation time is the ownership record — or the
+// prepared dictionary is orphaned from its source and silently rebuilt forever.
+func TestOwnershipSurvivesBogusReaderPath(t *testing.T) {
+	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	srcDir := t.TempDir()
+	src := writeSrc(t, filepath.Join(srcDir, "real.mdx"), "content")
+
+	dir, err := ClaimDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// reader reports a bare relative name instead of the real path
+	r := &fakeReader{
+		meta:    dict.Meta{Name: "Real", Format: "mdx", Path: "real.mdx"},
+		entries: []dict.Entry{h("a", "<p>x</p>")},
+	}
+	if err := Ingest(r, TextDBPath(dir), nil); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := PreparedFor(src)
+	if !ok || got != TextDBPath(dir) {
+		t.Fatalf("PreparedFor = %q,%v; want %q,true", got, ok, TextDBPath(dir))
+	}
+	info, err := readInfo(InfoPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info["source"] != src {
+		t.Errorf("receipt source = %q, want the claimed path %q", info["source"], src)
 	}
 }
 
 func TestFindOrphansSemantics(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GONOW_DB_DIR", dir) // FindOrphans scans DefaultDBDir()
-
-	// 1. source-less native: MUST NOT be an orphan (the data-loss guard)
-	ingestTo(t, dir, "native-aaaa.text.db", "/gone/x.mdx", "Native")
-	// 2. superseded: source exists but the db name doesn't match its hash
+	db := t.TempDir()
+	t.Setenv("GONOW_DB_DIR", db)
 	srcDir := t.TempDir()
-	src := filepath.Join(srcDir, "s.mdx")
-	if err := os.WriteFile(src, []byte("content"), 0o644); err != nil {
+
+	// 1. prepared dictionary whose source vanished: MUST NOT be an orphan
+	keep := prepare(t, filepath.Join(srcDir, "gone.mdx"), "Gone")
+	// 2. prepared dictionary whose source changed: also NOT an orphan
+	//    (re-indexing overwrites it in place; nothing is superseded)
+	changing := writeSrc(t, filepath.Join(srcDir, "s.mdx"), "content")
+	kept2 := prepare(t, changing, "S")
+	writeSrc(t, changing, "different content entirely")
+	// 3. folder with no text.db (interrupted claim / stray media.db)
+	stray := filepath.Join(db, "stray")
+	if err := os.MkdirAll(stray, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ingestTo(t, dir, "wrong-name.text.db", src, "S")
-	// 3. media.db with no text.db sibling
-	if err := os.WriteFile(filepath.Join(dir, "loner-bbbb.media.db"), []byte("m"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeSrc(t, filepath.Join(stray, MediaDBName), "m")
+	// 4. leftovers from the old flat layout and an interrupted ingest
+	writeSrc(t, filepath.Join(db, "old-aaaa.text.db"), "x")
+	writeSrc(t, filepath.Join(db, "old-aaaa.media.db"), "x")
+	writeSrc(t, filepath.Join(db, "text.db.ingest.abc123"), "x")
 
 	orphs, err := FindOrphans()
 	if err != nil {
@@ -103,14 +237,16 @@ func TestFindOrphansSemantics(t *testing.T) {
 	for _, o := range orphs {
 		got[filepath.Base(o.Path)] = o.Reason
 	}
-	if _, bad := got["native-aaaa.text.db"]; bad {
-		t.Fatal("DATA LOSS: source-less native dict must NOT be an orphan")
+	if _, bad := got[filepath.Base(keep)]; bad {
+		t.Fatal("DATA LOSS: prepared dictionary with a missing source must NOT be an orphan")
 	}
-	if _, ok := got["wrong-name.text.db"]; !ok {
-		t.Error("superseded ingest should be an orphan")
+	if _, bad := got[filepath.Base(kept2)]; bad {
+		t.Fatal("DATA LOSS: prepared dictionary with a changed source must NOT be an orphan")
 	}
-	if _, ok := got["loner-bbbb.media.db"]; !ok {
-		t.Error("media.db with no dictionary should be an orphan")
+	for _, want := range []string{"stray", "old-aaaa.text.db", "old-aaaa.media.db", "text.db.ingest.abc123"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("%s should be an orphan (got %v)", want, got)
+		}
 	}
 }
 

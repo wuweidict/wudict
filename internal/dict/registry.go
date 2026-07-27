@@ -19,12 +19,34 @@ type opener func(path string) (Dictionary, error)
 
 var openers = map[string]opener{} // key: lowercase extension incl. dot, e.g. ".mdx"
 
+// fileOpeners keys on an exact lowercase base name rather than a suffix, for
+// formats whose main file has a fixed name inside a bundle directory (a
+// prepared-dictionary folder holds "text.db"). Suffix matching cannot express
+// this safely: a "text.db" suffix key would also swallow an unrelated
+// "context.db", and matching bare ".db" is exactly the greedy registration
+// that made a "media.db" sidecar open as a phantom dictionary.
+var fileOpeners = map[string]opener{}
+
 // RegisterFormat wires a file extension to a format package. Called from
 // format package init(); the cmd package blank-imports each format. The key
 // may be a multi-part suffix (e.g. ".dsl.dz") — matchKey prefers the longest
 // match, so a StarDict companion ".dict.dz" is not mistaken for a ".dz" dict.
 func RegisterFormat(ext string, fn opener) {
 	openers[strings.ToLower(ext)] = fn
+}
+
+// RegisterFileName wires an exact file name (not a suffix) to a format.
+func RegisterFileName(name string, fn opener) {
+	fileOpeners[strings.ToLower(name)] = fn
+}
+
+// openerFor resolves the opener for path: an exact base-name registration
+// first (bundle main files), then the longest matching suffix.
+func openerFor(path string) (opener, bool) {
+	if fn, ok := fileOpeners[strings.ToLower(filepath.Base(path))]; ok {
+		return fn, true
+	}
+	return matchKey(openers, path)
 }
 
 // matchKey returns the registered map key that path ends with, preferring the
@@ -108,7 +130,7 @@ func OpenReader(path string) (r Reader, err error) {
 // panics: a slice-bounds panic deep in a format parser is converted here
 // so one bad file cannot take down the server or a batch ingest.
 func Open(path string) (d Dictionary, err error) {
-	fn, ok := matchKey(openers, path)
+	fn, ok := openerFor(path)
 	if !ok {
 		return nil, fmt.Errorf("unsupported dictionary format: %s", filepath.Ext(path))
 	}
@@ -128,18 +150,72 @@ func recoverOpen(path string, err *error) {
 	}
 }
 
+// excludedDirs are subtrees Discover never walks — canonical absolute paths.
+// The generated-database directory is registered here at startup: it is the
+// app's private library, never a discovery root, so a dict dir that happens to
+// contain (or equal an ancestor of) it cannot list prepared dictionaries twice.
+var excludedDirs []string
+
+// ExcludeDir marks dir as never-walked by Discover.
+func ExcludeDir(dir string) {
+	if c := canonPath(dir); c != "" {
+		excludedDirs = append(excludedDirs, c)
+	}
+}
+
+// canonPath resolves dir to an absolute, symlink-free, cleaned path so that
+// "~/.gonow-dict/db" and "/Users/x/.gonow-dict/db" compare equal.
+func canonPath(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return filepath.Clean(abs)
+}
+
+// SameDir reports whether two paths denote the same directory, comparing
+// canonical (absolute, symlink-resolved) forms.
+func SameDir(a, b string) bool {
+	ca, cb := canonPath(a), canonPath(b)
+	return ca != "" && ca == cb
+}
+
+func isExcluded(dir string) bool {
+	if len(excludedDirs) == 0 {
+		return false
+	}
+	c := canonPath(dir)
+	if c == "" {
+		return false
+	}
+	for _, e := range excludedDirs {
+		if e == c {
+			return true
+		}
+	}
+	return false
+}
+
 // Discover walks root recursively and returns the main files of all
-// recognizable dictionaries, sorted case-insensitively.
+// recognizable dictionaries, sorted case-insensitively. Excluded subtrees
+// (see ExcludeDir) are skipped whole.
 func Discover(root string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // unreadable subtree: skip, keep walking
 		}
-		if !d.IsDir() {
-			if _, ok := matchKey(openers, p); ok {
-				out = append(out, p)
+		if d.IsDir() {
+			if isExcluded(p) {
+				return fs.SkipDir
 			}
+			return nil
+		}
+		if _, ok := openerFor(p); ok {
+			out = append(out, p)
 		}
 		return nil
 	})

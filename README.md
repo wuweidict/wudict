@@ -14,7 +14,7 @@ once.
 | Aard2 | `.slob` | zlib/bz2/lzma2; embedded images/audio/css |
 | Lingvo DSL | `.dsl`, `.dsl.dz` | UTF-8/16/32 auto-detected; `NAME.dsl.files.zip` resources; indexed automatically on first open |
 | Babylon | `.bgl` | gzip block stream; source/target charset auto-detected (Latin / Cyrillic / CJK code pages); embedded images; indexed automatically on first open |
-| gonow | `.text.db` | this app's own portable database format (see *Sharing*, below) |
+| gonow | prepared folder (`text.db`) | this app's own portable format (see *Sharing*, below) |
 
 ## Quick start
 
@@ -100,25 +100,39 @@ gonow-dict                                   # start the server (default command
 gonow-dict --dict-dir ~/Dicts --port 9090    # server with options
 gonow-dict lookup ~/Dicts/Oxford.mdx word    # exact lookup, HTML to stdout
 gonow-dict ingest ~/Dicts                    # index every dictionary in a folder
-gonow-dict ingest -full ~/Dicts/Oxford.mdx   # index + pack media into .media.db
-gonow-dict clean                             # list stale cache databases (-f deletes)
+gonow-dict ingest -full ~/Dicts/Oxford.mdx   # index + pack media into the same folder
+gonow-dict clean                             # list removable library items (-f deletes)
 ```
 
-## Sharing dictionaries (.text.db / .media.db)
+## Sharing dictionaries (one folder each)
 
-Indexing a dictionary produces `<name>-<hash>.text.db` (text + search
-index) and optionally, with *pack media*, `<name>-<hash>.media.db`
-(audio/images) under `~/.gonow-dict/db/`. These are ordinary SQLite
-files: **copy them to another machine's db folder and they work as
-standalone dictionaries** — no original source files needed (a text.db
-without its media.db still works; audio/images just fall back to the
-source file if present).
+Indexing a dictionary creates a folder named after it under
+`~/.gonow-dict/db/` — the **library**:
 
-The db folder is itself a dictionary root, so a `.text.db` shows up as a
-standalone dictionary on its own — even after you delete the original
-source. The ☰ panel shows each dictionary's provenance: the source file
-it came from (expand the row for the generated `.text.db` / `.media.db`
-paths), click any path to copy.
+```
+~/.gonow-dict/db/
+  Oxford/
+    text.db     articles + search indexes
+    media.db    audio/images (only after "pack media")
+    info.txt    what this is, where it came from
+```
+
+A dictionary is one folder, so it moves as one thing: **copy, move or zip
+it and hand it over**. On the other machine, drop it into a dictionary
+folder and it works — no original source files needed (a `text.db`
+without its `media.db` still works; audio and images just fall back to
+the source file when one is present).
+
+Your own library is used only if you say so. On first run, when the
+dictionary folder is empty, the setup page lists everything already
+prepared under *Previously imported dictionaries* with a **Use these
+dictionaries** button; that choice is remembered (`USE_CACHED = "1"`, or
+`--use-cached`). Your dictionary folder must not be the db folder —
+gonow-dict refuses to start if they are the same.
+
+The ☰ panel shows each dictionary's provenance: the source file it came
+from, and — expanded — the library folder holding its prepared files.
+Click any path to copy.
 
 ## Speex audio (.spx)
 

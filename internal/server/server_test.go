@@ -58,24 +58,42 @@ func TestDictProvenance(t *testing.T) {
 	}
 }
 
-// TestNativeRootSurvivesSourceRemoval: a .text.db whose foreign source is gone
-// is a standalone native dictionary — discovered from the db dir and opened
-// with the internal gonow: format prefix stripped.
-func TestNativeRootSurvivesSourceRemoval(t *testing.T) {
+// TestLibraryIsOptIn: the library is never a discovery root by default — that
+// is what kept the setup page hidden — and USE_CACHED turns it on. A prepared
+// dictionary whose source is gone then opens with the gonow: prefix stripped.
+func TestLibraryIsOptIn(t *testing.T) {
 	dbDir := t.TempDir()
 	t.Setenv("GONOW_DB_DIR", dbDir)
-	r := &stubReader{meta: dict.Meta{Name: "Naturalized", Format: "mdx", Path: "/gone/x.mdx"}}
-	dbPath := filepath.Join(dbDir, "naturalized-native.text.db")
+	src := "/gone/x.mdx"
+	dir, err := store.ClaimDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &stubReader{meta: dict.Meta{Name: "Naturalized", Format: "mdx", Path: src}}
+	dbPath := store.TextDBPath(dir)
 	if err := store.Ingest(r, dbPath, nil); err != nil {
 		t.Fatal(err)
 	}
+	if filepath.Base(dir) != "x" {
+		t.Errorf("library folder = %q, want %q (mirrors the source file name)", filepath.Base(dir), "x")
+	}
 
-	reg, err := NewRegistry(t.TempDir()) // empty external root
+	// default: opted out — an empty dictionary folder means an empty registry,
+	// so the first-run setup page shows.
+	off, err := NewRegistry(t.TempDir(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off.Count() != 0 {
+		t.Fatalf("library must not be a discovery root by default: count=%d", off.Count())
+	}
+
+	reg, err := NewRegistry(t.TempDir(), true) // opted in
 	if err != nil {
 		t.Fatal(err)
 	}
 	if reg.Count() != 1 {
-		t.Fatalf("native dict not discovered from db dir: count=%d", reg.Count())
+		t.Fatalf("prepared dict not listed with USE_CACHED: count=%d", reg.Count())
 	}
 	d, err := reg.all()[0].open()
 	if err != nil {
@@ -120,7 +138,7 @@ func newTestServer(t *testing.T) *Server {
 	zf.Close()
 
 	t.Setenv("GONOW_DB_DIR", t.TempDir())
-	reg, err := NewRegistry(dir)
+	reg, err := NewRegistry(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,10 +217,13 @@ func TestDictsAndSearch(t *testing.T) {
 
 // --- fake direct-only format, for the auto-index test ------------------
 
-type fakeDict struct{ words []string }
+type fakeDict struct {
+	words []string
+	path  string
+}
 
 func (d *fakeDict) Meta() dict.Meta {
-	return dict.Meta{Name: "Fake Dict", Format: "fake", Path: "x.fake", EntryCount: len(d.words)}
+	return dict.Meta{Name: "Fake Dict", Format: "fake", Path: d.path, EntryCount: len(d.words)}
 }
 func (d *fakeDict) Caps() dict.Caps { return dict.Caps{Exact: true, Prefix: true} }
 func (d *fakeDict) match(pred func(string) bool) []dict.Result {
@@ -228,10 +249,11 @@ func (d *fakeDict) Close() error { return nil }
 
 type fakeReader struct {
 	words []string
+	path  string
 	i     int
 }
 
-func (r *fakeReader) Meta() dict.Meta { return (&fakeDict{words: r.words}).Meta() }
+func (r *fakeReader) Meta() dict.Meta { return (&fakeDict{words: r.words, path: r.path}).Meta() }
 func (r *fakeReader) Close() error    { return nil }
 func (r *fakeReader) Next() (dict.Entry, error) {
 	if r.i >= len(r.words) {
@@ -244,8 +266,8 @@ func (r *fakeReader) Next() (dict.Entry, error) {
 
 func init() {
 	words := []string{"córazon", "beta", "gamma"}
-	dict.RegisterFormat(".fake", func(string) (dict.Dictionary, error) { return &fakeDict{words: words}, nil })
-	dict.RegisterReader(".fake", func(string) (dict.Reader, error) { return &fakeReader{words: words}, nil })
+	dict.RegisterFormat(".fake", func(p string) (dict.Dictionary, error) { return &fakeDict{words: words, path: p}, nil })
+	dict.RegisterReader(".fake", func(p string) (dict.Reader, error) { return &fakeReader{words: words, path: p}, nil })
 }
 
 // TestAutoIndexOnFirstSearch: a direct-only dictionary (no contains) must gain
@@ -258,7 +280,7 @@ func TestAutoIndexOnFirstSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GONOW_DB_DIR", t.TempDir())
-	reg, err := NewRegistry(dir)
+	reg, err := NewRegistry(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +320,7 @@ func TestFullIngestNoResourcesFlagsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GONOW_DB_DIR", t.TempDir())
-	reg, err := NewRegistry(dir)
+	reg, err := NewRegistry(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,12 +392,12 @@ func TestIngestSSEAndMedia(t *testing.T) {
 	}
 
 	// media.db must exist and hold the resource
-	matches, _ := filepath.Glob(filepath.Join(os.Getenv("GONOW_DB_DIR"), "*.media.db"))
+	matches, _ := filepath.Glob(filepath.Join(os.Getenv("GONOW_DB_DIR"), "*", store.MediaDBName))
 	if len(matches) != 1 {
 		t.Fatalf("media.db: %v", matches)
 	}
 	// uuid pairing: media uuid matches text.db uuid
-	textDB := strings.TrimSuffix(matches[0], ".media.db") + ".text.db"
+	textDB := store.TextDBPath(filepath.Dir(matches[0]))
 	if _, err := os.Stat(textDB); err != nil {
 		t.Fatalf("paired text.db missing: %v", err)
 	}
@@ -386,7 +408,7 @@ func TestIngestSSEAndMedia(t *testing.T) {
 func TestSetupFlow(t *testing.T) {
 	emptyDir := t.TempDir()
 	t.Setenv("GONOW_DB_DIR", t.TempDir())
-	reg, err := NewRegistry(filepath.Join(emptyDir, "does-not-exist"))
+	reg, err := NewRegistry(filepath.Join(emptyDir, "does-not-exist"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +418,7 @@ func TestSetupFlow(t *testing.T) {
 	// missing folder → setup page, not the app
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "choose your dictionary folder") {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Point gonow at your dictionaries") {
 		t.Fatalf("expected setup page, got %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "does not exist") {
@@ -454,4 +476,155 @@ func TestUnknownDict(t *testing.T) {
 	if rec := getJSON(t, s, "/api/ingest?dict=deadbeef", nil); rec.Code != 404 {
 		t.Errorf("unknown ingest: %d", rec.Code)
 	}
+}
+
+// TestMediaDBIsNeverADictionary: the reported bug, end to end. A full ingest
+// leaves a media.db beside the text.db in the library folder; with the library
+// opted in, the dictionary must be listed exactly once — never a second,
+// phantom "gonow:…" row for the sidecar.
+func TestMediaDBIsNeverADictionary(t *testing.T) {
+	dbDir := t.TempDir()
+	t.Setenv("GONOW_DB_DIR", dbDir)
+	src := "/gone/AHD5-2017.slob"
+	dir, err := store.ClaimDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &stubReader{meta: dict.Meta{Name: "AHD5", Format: "slob", Path: src}}
+	if err := store.Ingest(r, store.TextDBPath(dir), nil); err != nil {
+		t.Fatal(err)
+	}
+	uuid, err := store.ReadMetaValue(store.TextDBPath(dir), "dict_uuid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a real packed media.db: same user_version + meta table as a text.db,
+	// which is exactly why bare ".db" registration used to open it.
+	if err := store.IngestMedia(&resDict{}, []string{"a.mp3"}, store.MediaDBPath(dir), uuid, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := NewRegistry(t.TempDir(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(reg)
+	var dicts []dictInfo
+	getJSON(t, s, "/api/dicts", &dicts)
+	// (other tests share this process and the GONOW_DB_DIR env var, so assert
+	// on this dictionary specifically rather than on the total row count)
+	var ahd []dictInfo
+	for _, d := range dicts {
+		if strings.HasSuffix(strings.ToLower(d.Path), store.MediaDBName) {
+			t.Errorf("a media.db was listed as a dictionary: %+v", d)
+		}
+		if strings.HasPrefix(d.Format, "gonow") {
+			t.Errorf("internal gonow format leaked into the list: %+v", d)
+		}
+		if d.Name == "AHD5" {
+			ahd = append(ahd, d)
+		}
+	}
+	if len(ahd) != 1 {
+		t.Fatalf("want exactly 1 row for AHD5, got %d: %+v", len(ahd), ahd)
+	}
+	if ahd[0].Format != "slob" {
+		t.Errorf("format = %q, want slob", ahd[0].Format)
+	}
+	if ahd[0].MediaDB == "" {
+		t.Error("the packed media.db should be reported as provenance, not as a dictionary")
+	}
+}
+
+// resDict is a minimal dictionary that can serve one resource, for packing.
+type resDict struct{}
+
+func (resDict) Meta() dict.Meta                           { return dict.Meta{Name: "res", Format: "fake"} }
+func (resDict) Caps() dict.Caps                           { return dict.Caps{} }
+func (resDict) Close() error                              { return nil }
+func (resDict) Exact(string, int) ([]dict.Result, error)  { return nil, nil }
+func (resDict) Prefix(string, int) ([]dict.Result, error) { return nil, nil }
+func (resDict) Keywords(int, int) []string                { return nil }
+func (resDict) Resource(name string) (io.ReadCloser, string, error) {
+	return io.NopCloser(strings.NewReader("SOUND")), "audio/mpeg", nil
+}
+
+// TestSetupConsentFlow: with an empty dictionary folder and a non-empty
+// library, "/" must still serve the setup page (the library alone must not
+// suppress it), and "Use these dictionaries" enrolls them live and remembers
+// the choice in the config file.
+func TestSetupConsentFlow(t *testing.T) {
+	dbDir := t.TempDir()
+	t.Setenv("GONOW_DB_DIR", dbDir)
+	dir, err := store.ClaimDir("/gone/Prepared.mdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &stubReader{meta: dict.Meta{Name: "Prepared", Format: "mdx", Path: "/gone/Prepared.mdx"}}
+	if err := store.Ingest(r, store.TextDBPath(dir), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err := NewRegistry(t.TempDir(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(reg)
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	s.ConfigPath = cfgPath
+
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if !strings.Contains(rec.Body.String(), "Point gonow at your dictionaries") {
+		t.Fatal("prepared dictionaries must not suppress the setup page")
+	}
+
+	// the page offers them, without enrolling anything
+	var lib map[string]any
+	getJSON(t, s, "/api/library", &lib)
+	if lib["count"].(float64) != 1 || lib["useCached"].(bool) {
+		t.Fatalf("library listing wrong: %v", lib)
+	}
+	if reg.Count() != 0 {
+		t.Fatal("listing the library must not enroll it")
+	}
+
+	// "Use these dictionaries"
+	var out map[string]any
+	getJSON(t, s, "/api/setup?useCached=1&save=1", &out)
+	if out["saved"] != true {
+		t.Fatalf("consent not saved: %v", out)
+	}
+	if reg.Count() != 1 {
+		t.Fatalf("prepared dictionaries not in use after consent: %d", reg.Count())
+	}
+	saved, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(saved), `USE_CACHED = "1"`) {
+		t.Errorf("USE_CACHED not persisted: %s", saved)
+	}
+	// and the app page is served now that dictionaries are in use
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if strings.Contains(rec.Body.String(), "Point gonow at your dictionaries") {
+		t.Error("setup page still shown after dictionaries were enrolled")
+	}
+}
+
+// TestMain isolates the whole package from the user's real library. Tests set
+// GONOW_DB_DIR per-test, but background work started by a test (Registry.Warm,
+// auto-index, DSL auto-preparation) can outlive it and read the variable after
+// t.Setenv has restored it — which would prepare dictionaries into the real
+// ~/.gonow-dict/db. Setting it for the process makes that fallback a temp dir.
+func TestMain(m *testing.M) {
+	tmp, err := os.MkdirTemp("", "gonow-server-tests")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("GONOW_DB_DIR", tmp)
+	code := m.Run()
+	os.RemoveAll(tmp)
+	os.Exit(code)
 }

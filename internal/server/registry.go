@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -168,66 +169,81 @@ func (n *native) Meta() dict.Meta {
 // kept lazy; the source name is obtained via a header-only Probe so the
 // heavy direct backend is never built just to locate the cache.
 func openUpgradedOrDirect(path string) (dict.Dictionary, error) {
-	// A .text.db is a naturalized dictionary opened directly: self-describing
-	// (name/format/uuid in its meta) and auto-attaching its sibling media.db.
-	// No source file, no CacheBase probe.
-	if strings.HasSuffix(strings.ToLower(path), ".text.db") {
+	// A prepared dictionary (library folder text.db, or a loose .text.db) is
+	// opened directly: self-describing (name/format/uuid in its meta) and
+	// auto-attaching its media.db. When the source it was built from is still
+	// on disk it also serves as the resource fallback (D2 order).
+	if store.IsTextDB(path) {
 		s, err := store.Open(path)
 		if err != nil {
 			return nil, err
 		}
+		if src := s.SourcePath(); src != "" && fileExists(src) {
+			return &upgraded{Store: s, srcPath: src}, nil
+		}
 		return &native{Store: s, path: path}, nil
 	}
-	// fast path: a cheap header-only probe locates a content-matched
-	// text.db without building the heavy direct backend. Only formats with
-	// a real prober take this path — for others dict.Probe would fall back
-	// to a full dict.Open (and e.g. trigger DSL auto-ingest) outside any
-	// memoization, racing the background warm, so we skip straight to the
-	// direct open below.
-	if dict.HasProber(path) {
-		if m, err := dict.Probe(path); err == nil {
-			base := store.CacheBase(path, m.Name)
-			if s, err := store.Open(base + ".text.db"); err == nil {
-				return &upgraded{Store: s, srcPath: path}, nil
-			}
+	// a prepared folder for this source short-circuits the heavy direct
+	// backend entirely — no probe needed, since the folder is located from
+	// the source path, not from the dictionary name.
+	if textDB, ok := store.PreparedFor(path); ok {
+		if s, err := store.Open(textDB); err == nil {
+			return &upgraded{Store: s, srcPath: path}, nil
 		}
 	}
-	// no usable probe or no cache: open the direct backend.
+	// not prepared (or the source changed since): open the direct backend.
 	src, err := dict.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	if src.Caps().FTS { // e.g. DSL auto-ingest: already store-backed
-		return src, nil
-	}
-	// probe may have been unavailable (e.g. slob); retry the cache under
-	// the authoritative name from the full open before settling on direct.
-	base := store.CacheBase(path, src.Meta().Name)
-	if s, err := store.Open(base + ".text.db"); err == nil {
-		return &upgraded{Store: s, srcPath: path}, nil
-	}
-	return src, nil // no cache yet: plain direct backend
+	return src, nil
 }
 
-// Registry tracks all dictionaries: foreign-format sources under the external
-// dict dir, plus standalone native (.text.db) dictionaries under the native
-// root (the db dir) whose source has been removed.
+// Registry tracks all dictionaries: the foreign-format sources found under the
+// dictionary folder and — only when the user has opted in (USE_CACHED) — the
+// prepared dictionaries in the library (the db dir).
+//
+// The library is NOT a discovery root by default. It is the app's private
+// working area, and treating it as a dictionary folder is what let a media.db
+// masquerade as a dictionary and kept the first-run setup page hidden behind a
+// non-empty registry. Opting in is a deliberate, remembered choice made on the
+// setup page ("Use these dictionaries").
 type Registry struct {
-	dictDir    string // external root: .mdx/.slob/.ifo/.dsl sources
-	nativeRoot string // native root: the db dir (store.DefaultDBDir())
+	dictDir string // dictionary folder: .mdx/.slob/.ifo/.dsl/.bgl sources
 
-	mu      sync.RWMutex
-	entries []*entry
-	byID    map[string]*entry
+	mu        sync.RWMutex
+	useCached bool // include prepared dictionaries from the library (USE_CACHED)
+	entries   []*entry
+	byID      map[string]*entry
 }
 
-func NewRegistry(dictDir string) (*Registry, error) {
-	r := &Registry{dictDir: dictDir, nativeRoot: store.DefaultDBDir(), byID: map[string]*entry{}}
+func NewRegistry(dictDir string, useCached bool) (*Registry, error) {
+	r := &Registry{dictDir: dictDir, useCached: useCached, byID: map[string]*entry{}}
 	if err := r.Rescan(); err != nil {
 		return r, err
 	}
 	r.Warm()
 	return r, nil
+}
+
+// UseCached reports whether prepared dictionaries are included.
+func (r *Registry) UseCached() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.useCached
+}
+
+// SetUseCached opts the library in or out and rescans (setup flow — no
+// restart needed).
+func (r *Registry) SetUseCached(on bool) error {
+	r.mu.Lock()
+	r.useCached = on
+	r.mu.Unlock()
+	if err := r.Rescan(); err != nil {
+		return err
+	}
+	r.Warm()
+	return nil
 }
 
 // Dir returns the current dictionary directory.
@@ -261,20 +277,14 @@ func (r *Registry) SetDir(dir string) error {
 func (r *Registry) Rescan() error {
 	r.mu.RLock()
 	dir := r.dictDir
-	nativeRoot := r.nativeRoot
+	useCached := r.useCached
 	r.mu.RUnlock()
 	paths, err := dict.Discover(dir)
 	if err != nil {
 		return err
 	}
-	// also surface standalone native dictionaries whose foreign source was
-	// removed — the db dir is the native dictionary root. Any overlap with the
-	// external walk (e.g. a db dir nested inside the dict dir) is deduped by id
-	// in the loop below.
-	if nat, nerr := store.StandaloneNativeDBs(nativeRoot); nerr != nil {
-		logx.V("native root scan %s: %v", nativeRoot, nerr)
-	} else {
-		paths = append(paths, nat...)
+	if useCached {
+		paths = append(paths, libraryPaths(paths)...)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -299,6 +309,35 @@ func (r *Registry) Rescan() error {
 	})
 	r.entries = entries
 	return nil
+}
+
+// libraryPaths returns the text.db of every prepared dictionary that is not
+// already represented by a discovered source file. The dedup is by source
+// path, not by "is the source still on disk": a dictionary whose source lives
+// outside the current dictionary folder is unrepresented and therefore listed,
+// which is the whole point of opting the library in.
+func libraryPaths(discovered []string) []string {
+	lib, err := store.Library()
+	if err != nil {
+		logx.V("library scan: %v", err)
+		return nil
+	}
+	seen := make(map[string]bool, len(discovered))
+	for _, p := range discovered {
+		if abs, err := filepath.Abs(p); err == nil {
+			seen[filepath.Clean(abs)] = true
+		}
+	}
+	var out []string
+	for _, e := range lib {
+		if e.Source != "" {
+			if abs, err := filepath.Abs(e.Source); err == nil && seen[filepath.Clean(abs)] {
+				continue // its source is in the dictionary folder: same dictionary
+			}
+		}
+		out = append(out, e.TextDB)
+	}
+	return out
 }
 
 // pathID derives a stable slash-free dictionary id from its path.
@@ -357,17 +396,30 @@ func (e *entry) ingest(full bool, level store.Level, progress store.Progress) er
 		return err
 	}
 	name := cur.Meta().Name
-	base := store.CacheBase(e.Path, name)
-	textDB := base + ".text.db"
+	if store.IsTextDB(e.Path) {
+		// already a prepared dictionary: nothing to (re)build from, since its
+		// source is what an ingest would read.
+		return fmt.Errorf("%s is already a prepared dictionary", name)
+	}
+	// claim (or re-use) this source's library folder: <db dir>/<source name>/
+	dir, err := store.ClaimDir(e.Path)
+	if err != nil {
+		return err
+	}
+	textDB := store.TextDBPath(dir)
 
 	// decide whether the text.db needs (re)building. Never delete the existing
 	// one first: IngestLevel writes a temp and renames over it atomically, so
 	// an interrupted upgrade leaves the old index intact instead of destroying
 	// it (a stopped "enable all" must not corrupt a dictionary).
 	needIngest := false
-	if _, err := os.Stat(textDB); err != nil {
+	switch {
+	case !fileExists(textDB):
 		needIngest = true // missing
-	} else if level == store.LevelText {
+	case store.SourceChanged(textDB, e.Path):
+		logx.V("ingest %s: source changed since it was prepared — re-indexing", name)
+		needIngest = true
+	case level == store.LevelText:
 		if cl, _ := store.ReadMetaValue(textDB, "ingest_level"); cl == string(store.LevelHeadwords) {
 			logx.V("ingest %s: upgrading headwords-only db to full text", name)
 			needIngest = true
@@ -386,7 +438,7 @@ func (e *entry) ingest(full bool, level store.Level, progress store.Progress) er
 	}
 
 	if full {
-		mediaDB := base + ".media.db"
+		mediaDB := store.MediaDBPath(dir)
 		if _, err := os.Stat(mediaDB); err != nil {
 			src := cur
 			if u, ok := cur.(*upgraded); ok {

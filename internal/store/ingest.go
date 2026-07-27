@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
@@ -241,7 +240,15 @@ func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) (
 		progress(int(id), total)
 	}
 	syncFile(tmp)
-	return os.Rename(tmp, dbPath)
+	if err = os.Rename(tmp, dbPath); err != nil {
+		return err
+	}
+	// refresh the folder receipt (derived from the meta just written; a
+	// failure here must not fail an otherwise complete ingest).
+	if strings.EqualFold(filepath.Base(dbPath), TextDBName) {
+		_ = WriteInfo(filepath.Dir(dbPath))
+	}
+	return nil
 }
 
 // syncFile flushes a finished ingest temp to disk. dsnIngest runs with
@@ -296,54 +303,9 @@ func sourceHash(path string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// CacheBase returns `<dbdir>/<slug>-<hash8>` for a source file: the
-// shared base path for its cached text.db / media.db. The hash keys the
-// cache to the exact source content, so a changed source re-ingests and
-// same-named dictionaries in different formats never collide.
-func CacheBase(srcPath, name string) string {
-	return filepath.Join(DefaultDBDir(), Slug(name)+"-"+cacheHash8(srcPath))
-}
-
-// srcHashCache memoizes CacheBase's 1 MiB source-content hash, keyed by
-// source path and invalidated when the file's size or mtime changes.
-// CacheBase runs on every dictionary open and every /api/dicts row, so
-// recomputing the SHA-256 (open + read 1 MiB + hash) each time was pure
-// repeated work.
-var srcHashCache sync.Map // srcPath -> srcHashEntry
-
-type srcHashEntry struct {
-	size  int64
-	mtime time.Time
-	hash8 string
-}
-
-// cacheHash8 is the memoized first-8-hex-chars of the SHA-256 over a
-// source's first 1 MiB. A missing/unreadable file hashes to the empty-input
-// digest, exactly as the previous inline CacheBase code did; only successful
-// stats are cached, so a file that appears later is picked up on the next call.
-func cacheHash8(srcPath string) string {
-	st, statErr := os.Stat(srcPath)
-	if statErr == nil {
-		if v, ok := srcHashCache.Load(srcPath); ok {
-			if e := v.(srcHashEntry); e.size == st.Size() && e.mtime.Equal(st.ModTime()) {
-				return e.hash8
-			}
-		}
-	}
-	h := sha256.New()
-	if f, err := os.Open(srcPath); err == nil {
-		_, _ = io.CopyN(h, f, 1<<20)
-		f.Close()
-	}
-	hash8 := hex.EncodeToString(h.Sum(nil))[:8]
-	if statErr == nil {
-		srcHashCache.Store(srcPath, srcHashEntry{size: st.Size(), mtime: st.ModTime(), hash8: hash8})
-	}
-	return hash8
-}
-
-// Slug converts a dictionary display name into a filesystem-safe base
-// name for `<slug>.text.db` (D9).
+// Slug converts a dictionary display name into a filesystem-safe base name.
+// Library folders are named after the source FILE (see FolderName); Slug
+// remains for callers that need a safe name derived from a display name.
 func Slug(name string) string {
 	var b strings.Builder
 	dash := false

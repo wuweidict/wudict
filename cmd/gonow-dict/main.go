@@ -62,24 +62,38 @@ COMMANDS
   keys   [-offset N] [-n max] <dictfile>  List headwords
   res    [-o out] <dictfile> <name>       Extract one resource (e.g. "audio/word.mp3")
   ingest [-full] [-fuzzy-only] <dictfile|folder>
-                                          Build <slug>.text.db enabling fuzzy & full-text search
-                                          (a folder ingests every dictionary in it, skipping
-                                          already-ingested ones); -full also packs media into
-                                          <slug>.media.db; -fuzzy-only indexes headwords only
-                                          (smaller db, fuzzy search but no full-text search)
+                                          Prepare a dictionary into the library:
+                                          <db-dir>/<dictionary name>/text.db (+ info.txt),
+                                          enabling contains & full-text search (a folder
+                                          prepares every dictionary in it, skipping ones
+                                          already done); -full also packs media.db into the
+                                          same folder; -fuzzy-only indexes headwords only
+                                          (smaller db, no full-text search)
   searchall [-mode m] [-n perDict] <dir> <term>
                                           Concurrent search across all dictionaries in a folder
-  clean  [-f]                             List orphaned cache databases (deleted/changed
-                                          sources); -f deletes them. Dry run by default.
+  clean  [-f]                             List removable items in the library: incomplete or
+                                          unreadable folders, interrupted ingests, leftovers
+                                          from the old flat layout. A prepared dictionary is
+                                          never listed, even if its source is gone or changed.
+                                          -f deletes them. Dry run by default.
 
 SERVE FLAGS
   --dict-dir     <path>   Folder with dictionary files (scanned recursively)
                           env: DICT_DIR       toml: DICT_DIR
                           default: ~/Dictionaries
 
-  --db-dir       <path>   Cache folder for generated .text.db / .media.db files
+  --db-dir       <path>   Library folder: one subfolder per prepared dictionary,
+                          holding text.db (+ media.db, info.txt). Must not be the
+                          same folder as --dict-dir.
                           env: DB_DIR         toml: DB_DIR
                           default: ~/.gonow-dict/db
+
+  --use-cached            Also serve the previously imported dictionaries kept in
+                          the library, whether or not their original files are still
+                          present. Normally set by clicking "Use these dictionaries"
+                          on the first-run setup page.
+                          env: USE_CACHED     toml: USE_CACHED
+                          default: off
 
   --ip           <addr>   Listen IP address
                           env: SERVER_IP      toml: SERVER_IP
@@ -288,7 +302,7 @@ func cmdKeys(args []string) error {
 
 func cmdIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
-	out := fs.String("o", "", "output .db path (default: <cache>/<slug>-<hash8>.text.db)")
+	out := fs.String("o", "", "output .db path (default: <db-dir>/<dictionary name>/text.db)")
 	full := fs.Bool("full", false, "also pack binary resources into a companion .media.db")
 	fuzzyOnly := fs.Bool("fuzzy-only", false, "index headwords only: fuzzy search, smaller db, no full-text search")
 	fs.Parse(args)
@@ -338,16 +352,21 @@ func ingestOne(srcPath, out string, full bool, level store.Level) error {
 
 	dbPath := out
 	if dbPath == "" {
-		dbPath = store.CacheBase(srcPath, r.Meta().Name) + ".text.db"
+		// claim this source's library folder: <db dir>/<source name>/text.db
+		dbPath, err = store.PrepareTarget(srcPath)
+		if err != nil {
+			return err
+		}
 	}
 	if _, err := os.Stat(dbPath); err == nil && out == "" {
 		cl, _ := store.ReadMetaValue(dbPath, "ingest_level")
-		if store.Level(cl) == level || level == store.LevelHeadwords {
-			fmt.Printf("%s (already ingested, skipped)\n", dbPath)
+		fresh := !store.SourceChanged(dbPath, srcPath)
+		if fresh && (store.Level(cl) == level || level == store.LevelHeadwords) {
+			fmt.Printf("%s (already prepared, skipped)\n", dbPath)
 			return maybePackMedia(srcPath, dbPath, full)
 		}
-		// headwords-only db upgraded to full text
-		_ = os.Remove(dbPath)
+		// a level upgrade or a changed source: IngestLevel overwrites the
+		// existing database atomically, so nothing is deleted up front.
 	}
 	progress := func(done, total int) {
 		if total > 0 {
@@ -371,7 +390,7 @@ func maybePackMedia(srcPath, dbPath string, full bool) error {
 	if !full {
 		return nil
 	}
-	mediaPath := strings.TrimSuffix(dbPath, ".text.db") + ".media.db"
+	mediaPath := store.MediaSibling(dbPath)
 	if _, err := os.Stat(mediaPath); err == nil {
 		fmt.Printf("%s (already packed, skipped)\n", mediaPath)
 		return nil
@@ -408,7 +427,8 @@ func maybePackMedia(srcPath, dbPath string, full bool) error {
 func cmdServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	dictDir := fs.String("dict-dir", "", "directory with dictionaries (env/toml: DICT_DIR)")
-	dbDir := fs.String("db-dir", "", "cache dir for generated databases (env/toml: DB_DIR)")
+	dbDir := fs.String("db-dir", "", "library dir for prepared dictionaries (env/toml: DB_DIR)")
+	useCached := fs.Bool("use-cached", false, "also serve previously imported dictionaries from the library (env/toml: USE_CACHED)")
 	ip := fs.String("ip", "", "listen IP (env/toml: SERVER_IP)")
 	port := fs.String("port", "", "listen port (env/toml: SERVER_PORT)")
 	configPath := fs.String("config", "", "path to config.toml (env: CONFIG_PATH)")
@@ -431,6 +451,9 @@ func cmdServe(args []string) error {
 	if *verbose {
 		flagVals["VERBOSE"] = "1"
 	}
+	if *useCached {
+		flagVals["USE_CACHED"] = "1"
+	}
 	cfg, err := config.Load(*configPath, flagVals)
 	if err != nil {
 		return err
@@ -443,6 +466,21 @@ func cmdServe(args []string) error {
 	if cfg.DBDir != "" {
 		os.Setenv("GONOW_DB_DIR", cfg.DBDir) // store + auto-ingest honor this
 	}
+
+	// The library (DB_DIR) is gonow-dict's own working area, never a folder of
+	// user dictionaries. Using it as DICT_DIR listed every prepared dictionary
+	// twice and exposed internal sidecars as phantom dictionaries, so it is a
+	// hard error; and wherever it lives, discovery skips it — which also covers
+	// the subtler case of a DB_DIR nested inside the dictionary folder.
+	libDir := store.DefaultDBDir()
+	if dict.SameDir(cfg.DictDir, libDir) {
+		return fmt.Errorf("DICT_DIR and DB_DIR are the same folder:\n"+
+			"  %s\n"+
+			"  DB_DIR holds the dictionaries gonow-dict has already prepared; DICT_DIR must point at\n"+
+			"  the folder with your dictionary files (.mdx, .ifo, .slob, .dsl, .bgl).\n"+
+			"  To work from the prepared ones alone, leave DICT_DIR unset and set USE_CACHED = \"1\".", libDir)
+	}
+	dict.ExcludeDir(libDir)
 
 	// first run: generate a commented config.toml so users can discover
 	// the knobs; an existing file anywhere in the search order wins
@@ -459,7 +497,7 @@ func cmdServe(args []string) error {
 		}
 	}
 
-	reg, err := server.NewRegistry(cfg.DictDir)
+	reg, err := server.NewRegistry(cfg.DictDir, cfg.UseCached)
 	if err != nil {
 		return fmt.Errorf("scanning %s: %w", cfg.DictDir, err)
 	}
@@ -480,6 +518,7 @@ func cmdServe(args []string) error {
 	srv.AutoIndex = cfg.AutoIndex != "off"
 
 	url := "http://" + cfg.Addr() + "/"
+	lib, _ := store.Library()
 	switch {
 	case !dirExists(cfg.DictDir):
 		fmt.Fprintf(os.Stderr, "gonow-dict %s listening on %s\n", version, url)
@@ -490,6 +529,13 @@ func cmdServe(args []string) error {
 	default:
 		fmt.Fprintf(os.Stderr, "gonow-dict %s serving %d dictionaries from %s on %s\n",
 			version, reg.Count(), cfg.DictDir, url)
+	}
+	switch {
+	case cfg.UseCached:
+		fmt.Fprintf(os.Stderr, "including %d previously imported dictionaries from %s\n", len(lib), libDir)
+	case len(lib) > 0 && reg.Count() == 0:
+		fmt.Fprintf(os.Stderr, "note: %d previously imported dictionaries are ready in %s — open %s to use them\n",
+			len(lib), libDir, url)
 	}
 	if !cfg.NoBrowser {
 		go openBrowser(url)
@@ -688,27 +734,37 @@ func cmdClean(args []string) error {
 		return err
 	}
 	if len(orphans) == 0 {
-		fmt.Println("cache is clean — no orphaned databases")
+		fmt.Println("library is clean — nothing to remove")
 		return nil
 	}
 	var total int64
 	for _, o := range orphans {
 		total += o.Size
-		fmt.Printf("%s  (%.1f MB)\n  %s\n", o.Path, float64(o.Size)/(1<<20), o.Reason)
+		kind := "file"
+		if o.IsDir {
+			kind = "folder"
+		}
+		fmt.Printf("%s  (%s, %.1f MB)\n  %s\n", o.Path, kind, float64(o.Size)/(1<<20), o.Reason)
 	}
-	fmt.Printf("%d orphaned files, %.1f MB total\n", len(orphans), float64(total)/(1<<20))
+	fmt.Printf("%d items, %.1f MB total\n", len(orphans), float64(total)/(1<<20))
 	if !*force {
 		fmt.Println("dry run — re-run with -f to delete")
 		return nil
 	}
 	var failed int
 	for _, o := range orphans {
-		if err := os.Remove(o.Path); err != nil {
+		var err error
+		if o.IsDir {
+			err = os.RemoveAll(o.Path)
+		} else {
+			err = os.Remove(o.Path)
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "delete %s: %v\n", o.Path, err)
 			failed++
 		}
 	}
-	fmt.Printf("deleted %d files\n", len(orphans)-failed)
+	fmt.Printf("deleted %d items\n", len(orphans)-failed)
 	if failed > 0 {
 		return fmt.Errorf("%d deletions failed", failed)
 	}

@@ -84,6 +84,7 @@ func New(reg *Registry) *Server {
 	s.mux.HandleFunc("GET /api/rescan", s.handleRescan)
 	s.mux.HandleFunc("GET /api/ingest", s.handleIngest)
 	s.mux.HandleFunc("GET /api/setup", s.handleSetup)
+	s.mux.HandleFunc("GET /api/library", s.handleLibrary)
 	s.mux.HandleFunc("GET /res/", s.handleResource)
 	s.mux.HandleFunc("GET /assets/mark.min.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
@@ -165,12 +166,67 @@ func htmlEscape(s string) string {
 	return r.Replace(s)
 }
 
-// handleSetup validates a dictionary folder and, with save=1, switches
-// the registry to it live and persists DICT_DIR to the config file.
+// handleLibrary lists the previously imported dictionaries kept in the db dir
+// — the ones the setup page offers to use, and the basis of the USE_CACHED
+// choice. Reading it never enrolls them: listing is not consent.
+func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
+	entries, err := store.Library()
+	if err != nil {
+		httpErr(w, 500, "reading library: %v", err)
+		return
+	}
+	if entries == nil {
+		entries = []store.LibEntry{}
+	}
+	writeJSON(w, map[string]any{
+		"dir":       store.DefaultDBDir(),
+		"count":     len(entries),
+		"useCached": s.reg.UseCached(),
+		"entries":   entries,
+	})
+}
+
+// setUseCached opts the library in or out, live, and remembers the choice so
+// the setup page never asks again.
+func (s *Server) setUseCached(on bool) error {
+	if err := s.reg.SetUseCached(on); err != nil {
+		return err
+	}
+	if s.ConfigPath == "" {
+		return nil
+	}
+	v := "0"
+	if on {
+		v = "1"
+	}
+	return config.SaveKey(s.ConfigPath, "USE_CACHED", v)
+}
+
+// handleSetup drives the first-run choices. With a path it validates a
+// dictionary folder and, with save=1, switches the registry to it live and
+// persists DICT_DIR. With useCached=1 it enrolls the previously imported
+// dictionaries (persisting USE_CACHED) — on its own, or together with a
+// folder. Clicking a Use button IS the "don't ask again": the setup page only
+// appears while the registry is empty.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
-	raw := strings.TrimSpace(r.URL.Query().Get("path"))
+	q := r.URL.Query()
+	raw := strings.TrimSpace(q.Get("path"))
+	save := q.Get("save") != ""
+	useCached := q.Get("useCached") == "1"
+
 	if raw == "" {
-		httpErr(w, 400, "missing path parameter")
+		if !save || !useCached {
+			httpErr(w, 400, "missing path parameter")
+			return
+		}
+		out := map[string]any{"useCached": true}
+		if err := s.setUseCached(true); err != nil {
+			out["error"] = err.Error()
+		} else {
+			out["saved"] = true
+			out["found"] = s.reg.Count()
+		}
+		writeJSON(w, out)
 		return
 	}
 	dir := config.ExpandHome(raw)
@@ -205,6 +261,12 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 					out["warning"] = "folder switched, but saving config failed: " + err.Error()
 				}
 			}
+			if useCached {
+				out["useCached"] = true
+				if err := s.setUseCached(true); err != nil {
+					out["warning"] = "folder saved, but keeping the prepared dictionaries failed: " + err.Error()
+				}
+			}
 		}
 	}
 	writeJSON(w, out)
@@ -225,8 +287,9 @@ type dictInfo struct {
 	// derived files exist. All optional and filesystem-cheap.
 	Source   string   `json:"source,omitempty"`   // foreign source file, if still on disk
 	MediaSrc []string `json:"mediaSrc,omitempty"` // companion media sources (.mdd, .files.zip, res/)
-	TextDB   string   `json:"textDB,omitempty"`   // cached .text.db, if present
-	MediaDB  string   `json:"mediaDB,omitempty"`  // packed .media.db, if present
+	TextDB   string   `json:"textDB,omitempty"`   // prepared text.db, if present
+	MediaDB  string   `json:"mediaDB,omitempty"`  // packed media.db, if present
+	Folder   string   `json:"folder,omitempty"`   // library folder holding them (the transferable unit)
 	HasMedia bool     `json:"hasMedia,omitempty"` // packable binary resources exist (drives "pack media")
 }
 
@@ -267,25 +330,26 @@ func (s *Server) dictInfoFor(e *entry) dictInfo {
 }
 
 func (s *Server) baseDictInfo(e *entry) dictInfo {
+	// a prepared dictionary answers the whole row from its own meta — no
+	// probe, no direct open, and it works for every format (the library
+	// folder is located from the source PATH, so the name is not needed to
+	// find it).
+	if textDB, ok := preparedTextDB(e.Path); ok {
+		if meta, err := store.ReadMeta(textDB); err == nil {
+			ec, _ := strconv.Atoi(meta["entry_count"])
+			return dictInfo{
+				ID: e.ID, Path: e.Path, Name: meta["name"], Format: meta["format"], Entries: ec,
+				Caps:   dict.Caps{Exact: true, Prefix: true, Contains: meta["has_trigram"] == "1", FTS: meta["ingest_level"] != string(store.LevelHeadwords)},
+				DBPath: textDB,
+			}
+		}
+	}
 	// only probe formats with a real cheap prober — otherwise dict.Probe
 	// falls back to a full dict.Open outside the entry's memoization (and
 	// can trigger DSL auto-ingest), racing the background warm.
 	if dict.HasProber(e.Path) {
 		if m, err := dict.Probe(e.Path); err == nil {
-			base := store.CacheBase(e.Path, m.Name)
-			if meta, err := store.ReadMeta(base + ".text.db"); err == nil {
-				ec, _ := strconv.Atoi(meta["entry_count"])
-				name := meta["name"]
-				if name == "" {
-					name = m.Name
-				}
-				return dictInfo{
-					ID: e.ID, Path: e.Path, Name: name, Format: m.Format, Entries: ec,
-					Caps:   dict.Caps{Exact: true, Prefix: true, Contains: meta["has_trigram"] == "1", FTS: meta["ingest_level"] != string(store.LevelHeadwords)},
-					DBPath: base + ".text.db",
-				}
-			}
-			return dictInfo{ // probeable, no cache → direct backend
+			return dictInfo{ // probeable, not prepared → direct backend
 				ID: e.ID, Path: e.Path, Name: m.Name, Format: m.Format, Entries: m.EntryCount,
 				Caps: dict.Caps{Exact: true, Prefix: true},
 			}
@@ -300,10 +364,28 @@ func (s *Server) baseDictInfo(e *entry) dictInfo {
 	}
 	m := d.Meta()
 	info.Name, info.Format, info.Entries, info.Caps = m.Name, m.Format, m.EntryCount, d.Caps()
-	if info.Caps.FTS {
-		info.DBPath = store.CacheBase(e.Path, m.Name) + ".text.db"
+	if textDB, ok := preparedTextDB(e.Path); ok {
+		info.DBPath = textDB
 	}
 	return info
+}
+
+// dbPathOf is the prepared database path for an entry, or "" when it has none.
+func dbPathOf(e *entry) string {
+	if p, ok := preparedTextDB(e.Path); ok {
+		return p
+	}
+	return ""
+}
+
+// preparedTextDB locates the prepared database for a registry entry: the entry
+// itself when it IS one, else this source's library folder (when prepared and
+// still matching the source).
+func preparedTextDB(entryPath string) (string, bool) {
+	if store.IsTextDB(entryPath) {
+		return entryPath, true
+	}
+	return store.PreparedFor(entryPath)
 }
 
 // addProvenance fills the panel's "where did this come from" fields cheaply
@@ -312,7 +394,7 @@ func (s *Server) baseDictInfo(e *entry) dictInfo {
 // registry entry's path — a foreign source, or a .text.db for a standalone
 // native dictionary (which has no source).
 func addProvenance(info *dictInfo, entryPath string) {
-	native := strings.HasSuffix(strings.ToLower(entryPath), ".text.db")
+	native := store.IsTextDB(entryPath)
 	if !native && fileExists(entryPath) {
 		info.Source = entryPath
 		info.MediaSrc = companionMedia(entryPath)
@@ -320,19 +402,20 @@ func addProvenance(info *dictInfo, entryPath string) {
 
 	// locate the cached text.db: the entry itself when native, else the
 	// DBPath from baseDictInfo, else the content-addressed cache name.
-	textDB := ""
-	switch {
-	case native:
-		textDB = entryPath
-	case info.DBPath != "":
-		textDB = info.DBPath
-	case info.Name != "":
-		textDB = store.CacheBase(entryPath, info.Name) + ".text.db"
+	textDB := info.DBPath
+	if textDB == "" {
+		if p, ok := preparedTextDB(entryPath); ok {
+			textDB = p
+		}
 	}
 	if fileExists(textDB) {
 		info.TextDB = textDB
-		if mediaDB := strings.TrimSuffix(textDB, ".text.db") + ".media.db"; fileExists(mediaDB) {
+		if mediaDB := store.MediaSibling(textDB); fileExists(mediaDB) {
 			info.MediaDB = mediaDB
+		}
+		if strings.EqualFold(filepath.Base(textDB), store.TextDBName) {
+			// the folder, not the .db file, is what a user copies or shares
+			info.Folder = filepath.Dir(textDB)
 		}
 	}
 	info.DBPath = info.TextDB // keep the legacy field consistent (never a bogus name)
@@ -803,6 +886,6 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	emit("done", dictInfo{
 		ID: e.ID, Name: m.Name, Format: m.Format, Path: e.Path,
 		Entries: m.EntryCount, Caps: d.Caps(),
-		DBPath: store.CacheBase(e.Path, m.Name) + ".text.db",
+		DBPath: dbPathOf(e),
 	})
 }
