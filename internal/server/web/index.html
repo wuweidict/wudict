@@ -340,7 +340,7 @@ function provenance(d){
     const ms=d.mediaSrc||[],n=ms.length;
     head=`<span class="fmt">${esc(d.format||"?")}</span>: ${esc(d.source)}`+
       (n?` <span class="more">+ ${n} ${mediaKind(ms)}</span>`:"");
-    if(d.folder)rows.push(label("prepared: "+d.folder+" ("+(d.mediaDB?"text.db + media.db + info.txt":"text.db + info.txt")+")"));
+    if(d.folder)rows.push(label("db: "+d.folder+" ("+(d.mediaDB?"text.db + media.db + info.txt":"text.db + info.txt")+")"));
     else if(d.textDB)rows.push(label("db: "+d.textDB+(d.mediaDB?" + media.db":"")));
     for(const m of ms)rows.push(label(m,"sub"));
   }else{
