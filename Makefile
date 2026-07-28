@@ -65,7 +65,7 @@ install: ## go install into GOBIN
 	go install $(GOFLAGS) -ldflags "$(LDFLAGS)" $(CMD)
 
 .PHONY: run
-run: build ## Build then run with ARGS, e.g. make run ARGS="lookup dict.mdx word"
+run: build open ## Build then run with ARGS, e.g. make run ARGS="lookup dict.mdx word"
 	./$(BINARY) $(ARGS)
 
 .PHONY: ingest
@@ -170,6 +170,13 @@ push:  ## sync remotes
 	git push hz
 	git push iq
 	git push od
-	
+
+.PHONY: remotes
+remotes: ## git git remotes
+	git remote -v
+	echo '---'
+	git --no-pager branch -vv
+
+.PHONY: open
 open: build  ## run browser
 	open http://localhost:8808

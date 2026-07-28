@@ -25,10 +25,26 @@ type Config struct {
 	Verbose      bool     // VERBOSE=1: verbose logging
 	Speexdec     string   // SPEEXDEC: path to the external speexdec binary (.spx audio)
 	SpeexBackend string   // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
-	AutoIndex    string   // AUTO_INDEX: off|fuzzy — build a fuzzy headword index on first search of a dict
+	AutoIndex    string   // AUTO_INDEX: on|off — prepare a dictionary's index on first search
 	UseCached    bool     // USE_CACHED=1: also list previously imported dictionaries from the db dir
+	NoCompress   bool     // NO_COMPRESS=1: store article text verbatim (bigger databases)
 	Source       string   // path of the config.toml that was loaded ("" if none)
+
+	// Origins records which layer supplied each key: "flag", "env", "file" or
+	// "default". With four layers, "I edited config.toml and nothing changed"
+	// is the classic confusion — a flag or an environment variable outranks
+	// the file — so the UI can say where a value actually came from, and
+	// refuse to pretend that saving it will take effect.
+	Origins map[string]string
 }
+
+// Origin layers, in priority order.
+const (
+	OriginFlag    = "flag"
+	OriginEnv     = "env"
+	OriginFile    = "file"
+	OriginDefault = "default"
+)
 
 func defaults() Config {
 	home, _ := os.UserHomeDir()
@@ -40,8 +56,8 @@ func defaults() Config {
 		// Speexdec "" = auto-detect at launch (next to the executable, then
 		// $PATH); SPEEXDEC overrides. See resolveSpeexdec in the CLI.
 		Speexdec:     "",
-		SpeexBackend: "internal", // in-process libspeex (cgo); "external" = speexdec binary
-		AutoIndex:    "fuzzy",    // opt-out: build fuzzy indexes on first use
+		SpeexBackend: "internal",  // in-process libspeex (cgo); "external" = speexdec binary
+		AutoIndex:    AutoIndexOn, // opt-out: prepare an index on first use
 	}
 }
 
@@ -56,14 +72,22 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 		return cfg, err
 	}
 	cfg.Source = source
+	cfg.Origins = map[string]string{}
 	get := func(key string) string {
 		if v, ok := flags[key]; ok && v != "" {
+			cfg.Origins[key] = OriginFlag
 			return v
 		}
 		if v := os.Getenv(key); v != "" {
+			cfg.Origins[key] = OriginEnv
 			return v
 		}
-		return fileVals[key]
+		if v := fileVals[key]; v != "" {
+			cfg.Origins[key] = OriginFile
+			return v
+		}
+		cfg.Origins[key] = OriginDefault
+		return ""
 	}
 	if v := get("DICT_DIR"); v != "" {
 		if dirs := ParseList(v); len(dirs) > 0 {
@@ -92,10 +116,13 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 		cfg.SpeexBackend = strings.ToLower(v)
 	}
 	if v := get("AUTO_INDEX"); v != "" {
-		cfg.AutoIndex = strings.ToLower(v)
+		cfg.AutoIndex = normalizeAutoIndex(v)
 	}
 	if v := get("USE_CACHED"); v != "" && v != "0" && !strings.EqualFold(v, "false") {
 		cfg.UseCached = true
+	}
+	if v := get("NO_COMPRESS"); v != "" && v != "0" && !strings.EqualFold(v, "false") {
+		cfg.NoCompress = true
 	}
 	return cfg, nil
 }
@@ -149,7 +176,10 @@ const configTemplate = `# gonow-dict configuration
 # VERBOSE     = "0"                   # "1" = verbose logging for debugging
 # SPEEX_BACKEND = "internal"          # ".spx" audio decoder: "internal" (built-in libspeex) or "external" (speexdec)
 # SPEEXDEC    = "/usr/bin/speexdec"   # external speexdec path; blank = auto-detect (next to the executable, then $PATH)
-# AUTO_INDEX  = "fuzzy"               # "off" = do not auto-build fuzzy indexes on first search
+# AUTO_INDEX  = "on"                  # "off" = never prepare an index on its own; searching then
+#                                     #         uses the dictionary's own format directly
+# NO_COMPRESS = "0"                   # "1" = store article text uncompressed (databases roughly 3x larger,
+#                                     #       marginally faster reads; only worth it with disk to spare)
 # USE_CACHED  = "0"                   # "1" = also list previously imported dictionaries kept in DB_DIR
 #                                     #       (set from the setup page: "Use these dictionaries")
 `
@@ -293,6 +323,42 @@ func ExpandHome(p string) string {
 		}
 	}
 	return p
+}
+
+// AUTO_INDEX values. "fuzzy" is the pre-D16 spelling of "on" — the mode it
+// named was retired, the setting was not — and is still accepted so an
+// existing config.toml keeps working.
+const (
+	AutoIndexOn  = "on"
+	AutoIndexOff = "off"
+)
+
+// normalizeAutoIndex maps what a user may have written onto on/off.
+func normalizeAutoIndex(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "off", "0", "false", "no", "none":
+		return AutoIndexOff
+	default: // "on", "1", "true", and the legacy "fuzzy"
+		return AutoIndexOn
+	}
+}
+
+// AutoIndexEnabled reports whether dictionaries index themselves on first use.
+func (c Config) AutoIndexEnabled() bool { return c.AutoIndex != AutoIndexOff }
+
+// Origin reports which layer supplied key ("default" when nothing did).
+func (c Config) Origin(key string) string {
+	if o, ok := c.Origins[key]; ok {
+		return o
+	}
+	return OriginDefault
+}
+
+// EditableInFile reports whether saving key to config.toml would actually take
+// effect, i.e. no higher-priority layer is currently setting it.
+func (c Config) EditableInFile(key string) bool {
+	o := c.Origin(key)
+	return o != OriginFlag && o != OriginEnv
 }
 
 // Addr returns the listen address.

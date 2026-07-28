@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -158,14 +159,14 @@ var excludedDirs []string
 
 // ExcludeDir marks dir as never-walked by Discover.
 func ExcludeDir(dir string) {
-	if c := canonPath(dir); c != "" {
+	if c := CanonPath(dir); c != "" {
 		excludedDirs = append(excludedDirs, c)
 	}
 }
 
-// canonPath resolves dir to an absolute, symlink-free, cleaned path so that
+// CanonPath resolves dir to an absolute, symlink-free, cleaned path so that
 // "~/.gonow-dict/db" and "/Users/x/.gonow-dict/db" compare equal.
-func canonPath(dir string) string {
+func CanonPath(dir string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return ""
@@ -176,10 +177,57 @@ func canonPath(dir string) string {
 	return filepath.Clean(abs)
 }
 
+// DedupeDirs drops folders that are the SAME folder reached by a different
+// spelling, keeping the first spelling and the original order.
+//
+// Discovery already guarantees a dictionary is never listed twice, so this is
+// not about correctness of results — it is about not showing the user four
+// rows for one folder, not walking that folder four times, and not writing
+// duplicates into config.toml.
+//
+// Identity is os.SameFile where both paths exist: that catches a symlink, a
+// case-variant spelling on a case-insensitive filesystem, a hard link and a
+// bind mount, none of which string comparison sees. Paths that do not exist
+// (an unmounted drive, a folder yet to be created) fall back to comparing
+// canonical strings — they must still be deduped, and must still be kept.
+func DedupeDirs(dirs []string) []string {
+	var out []string
+	var infos []os.FileInfo
+	var keys []string
+	for _, d := range dirs {
+		if strings.TrimSpace(d) == "" {
+			continue
+		}
+		key := CanonPath(d)
+		fi, _ := os.Stat(d)
+		dup := false
+		for i := range out {
+			if fi != nil && infos[i] != nil {
+				if os.SameFile(fi, infos[i]) {
+					dup = true
+					break
+				}
+				continue // both exist and differ: a string match cannot override
+			}
+			if key != "" && key == keys[i] {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			continue
+		}
+		out = append(out, d)
+		infos = append(infos, fi)
+		keys = append(keys, key)
+	}
+	return out
+}
+
 // SameDir reports whether two paths denote the same directory, comparing
 // canonical (absolute, symlink-resolved) forms.
 func SameDir(a, b string) bool {
-	ca, cb := canonPath(a), canonPath(b)
+	ca, cb := CanonPath(a), CanonPath(b)
 	return ca != "" && ca == cb
 }
 
@@ -187,7 +235,7 @@ func isExcluded(dir string) bool {
 	if len(excludedDirs) == 0 {
 		return false
 	}
-	c := canonPath(dir)
+	c := CanonPath(dir)
 	if c == "" {
 		return false
 	}
@@ -228,7 +276,7 @@ func DiscoverAll(roots []string) (paths []string, perRoot []RootScan, err error)
 		}
 		perRoot[i].Total = len(found)
 		for _, p := range found {
-			key := canonPath(p)
+			key := CanonPath(p)
 			if key == "" {
 				key = p
 			}
@@ -253,7 +301,7 @@ func Discover(root string) ([]string, error) {
 	// nothing at all. Following the link the user explicitly configured is
 	// intended; links *inside* the tree are still not followed, which is what
 	// keeps cycles and surprise duplicates out.
-	if c := canonPath(root); c != "" {
+	if c := CanonPath(root); c != "" {
 		root = c
 	}
 	var out []string

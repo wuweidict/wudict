@@ -154,3 +154,43 @@ func TestDictDirList(t *testing.T) {
 		}
 	}
 }
+
+// AUTO_INDEX is on|off since the "fuzzy" search mode it was named after was
+// retired — but an existing config.toml saying "fuzzy" must keep working.
+func TestAutoIndexValues(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want string
+		on   bool
+	}{
+		{"", AutoIndexOn, true}, // unset → default
+		{"on", AutoIndexOn, true},
+		{"ON", AutoIndexOn, true},
+		{"1", AutoIndexOn, true},
+		{"true", AutoIndexOn, true},
+		{"fuzzy", AutoIndexOn, true}, // the legacy spelling
+		{"off", AutoIndexOff, false},
+		{"OFF", AutoIndexOff, false},
+		{"0", AutoIndexOff, false},
+		{"false", AutoIndexOff, false},
+		{"no", AutoIndexOff, false},
+	} {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "config.toml")
+		body := ""
+		if c.in != "" {
+			body = "AUTO_INDEX = \"" + c.in + "\"\n"
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(p, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.AutoIndex != c.want || cfg.AutoIndexEnabled() != c.on {
+			t.Errorf("AUTO_INDEX=%q → %q (enabled=%v), want %q (%v)",
+				c.in, cfg.AutoIndex, cfg.AutoIndexEnabled(), c.want, c.on)
+		}
+	}
+}

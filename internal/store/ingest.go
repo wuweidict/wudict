@@ -47,22 +47,45 @@ type Report struct {
 	UnresolvedLinks int // redirects whose target headword was never found
 }
 
+// Plan is what to build for one dictionary. Finding a headword (exact,
+// prefix, accent-insensitive) always works and costs almost nothing — around
+// 2 MB on a 40k-entry dictionary — so it has no switch. The two indexes that
+// do cost something are opt-in per dictionary.
+type Plan struct {
+	FullText bool // index article text as well as headwords (the largest index)
+	Contains bool // trigram over folded headwords, for substring search
+}
+
+// PlanOf maps a legacy Level onto a Plan. Contains is off: a trigram index
+// serves a mode most people never use, and it more than doubles the size of an
+// otherwise ~2 MB index.
+func PlanOf(level Level) Plan { return Plan{FullText: level != LevelHeadwords} }
+
 // Ingest scans r into a new text database at dbPath with full text
-// indexing (see IngestLevel).
+// indexing (see IngestPlan).
 func Ingest(r dict.Reader, dbPath string, progress Progress) error {
 	return IngestLevel(r, dbPath, LevelText, progress)
 }
 
 // IngestLevel scans r into a new text database, discarding the Report.
 func IngestLevel(r dict.Reader, dbPath string, level Level, progress Progress) error {
-	_, err := IngestLevelReport(r, dbPath, level, progress)
+	_, err := IngestPlan(r, dbPath, PlanOf(level), progress)
 	return err
+}
+
+// IngestLevelReport is IngestPlan for a legacy Level.
+func IngestLevelReport(r dict.Reader, dbPath string, level Level, progress Progress) (Report, error) {
+	return IngestPlan(r, dbPath, PlanOf(level), progress)
 }
 
 // IngestLevelReport scans r into a new text database at dbPath (atomically:
 // written to a temp file, renamed on success). The FTS index is built
 // inside the same transaction as the data (FTS-audit #3).
-func IngestLevelReport(r dict.Reader, dbPath string, level Level, progress Progress) (rep Report, err error) {
+func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep Report, err error) {
+	level := LevelHeadwords
+	if plan.FullText {
+		level = LevelText
+	}
 	srcMeta := r.Meta()
 	tmp := tempDBName(dbPath)
 	_ = os.Remove(tmp)
@@ -89,10 +112,14 @@ func IngestLevelReport(r dict.Reader, dbPath string, level Level, progress Progr
 		CREATE VIRTUAL TABLE entry_fts USING fts5(
 			w, txt, content='', columnsize=0,
 			tokenize='unicode61 remove_diacritics 2');
-		CREATE VIRTUAL TABLE entry_trigram USING fts5(
-			w, content='', columnsize=0, tokenize='trigram');
 	`, schemaVersion)); err != nil {
 		return rep, err
+	}
+	if plan.Contains {
+		if _, err = db.Exec(`CREATE VIRTUAL TABLE entry_trigram USING fts5(
+			w, content='', columnsize=0, tokenize='trigram')`); err != nil {
+			return rep, err
+		}
 	}
 
 	tx, err := db.Begin()
@@ -113,9 +140,11 @@ func IngestLevelReport(r dict.Reader, dbPath string, level Level, progress Progr
 	if err != nil {
 		return rep, err
 	}
-	insTrig, err := tx.Prepare("INSERT INTO entry_trigram(rowid, w) VALUES(?, ?)")
-	if err != nil {
-		return rep, err
+	var insTrig *sql.Stmt
+	if plan.Contains {
+		if insTrig, err = tx.Prepare("INSERT INTO entry_trigram(rowid, w) VALUES(?, ?)"); err != nil {
+			return rep, err
+		}
 	}
 	insAlias, err := tx.Prepare("INSERT INTO alias(w, entry_id) VALUES(?, ?)")
 	if err != nil {
@@ -153,7 +182,7 @@ func IngestLevelReport(r dict.Reader, dbPath string, level Level, progress Progr
 			return rep, err2
 		}
 		id++
-		if _, err = insEntry.Exec(id, hw, body); err != nil {
+		if _, err = insEntry.Exec(id, hw, encodeBody(body)); err != nil {
 			return rep, err
 		}
 		txt := ""
@@ -164,9 +193,11 @@ func IngestLevelReport(r dict.Reader, dbPath string, level Level, progress Progr
 			return rep, err
 		}
 		// trigram index over the accent/case-folded headword powers the
-		// "contains" substring mode.
-		if _, err = insTrig.Exec(id, dict.Fold(hw)); err != nil {
-			return rep, err
+		// "contains" substring mode (built only when asked for).
+		if insTrig != nil {
+			if _, err = insTrig.Exec(id, dict.Fold(hw)); err != nil {
+				return rep, err
+			}
 		}
 		if _, ok := idByWord[hw]; !ok {
 			idByWord[hw] = id
@@ -213,7 +244,8 @@ func IngestLevelReport(r dict.Reader, dbPath string, level Level, progress Progr
 		"description":      srcMeta.Description,
 		"entry_count":      fmt.Sprint(id),
 		"ingest_level":     string(level),
-		"has_trigram":      "1", // entry_trigram present → contains mode (cheap-list flag)
+		"has_trigram":      boolMeta(plan.Contains), // cheap-list flag; Open feature-detects the table
+		"body_encoding":    bodyEncoding(),
 		"created":          time.Now().UTC().Format(time.RFC3339),
 		"source_sha256_1M": sourceHash(srcMeta.Path),
 	}
@@ -239,8 +271,10 @@ func IngestLevelReport(r dict.Reader, dbPath string, level Level, progress Progr
 	if _, err = db.Exec("INSERT INTO entry_fts(entry_fts) VALUES('optimize')"); err != nil {
 		return rep, err
 	}
-	if _, err = db.Exec("INSERT INTO entry_trigram(entry_trigram) VALUES('optimize')"); err != nil {
-		return rep, err
+	if plan.Contains {
+		if _, err = db.Exec("INSERT INTO entry_trigram(entry_trigram) VALUES('optimize')"); err != nil {
+			return rep, err
+		}
 	}
 	if _, err = db.Exec("ANALYZE; PRAGMA optimize;"); err != nil {
 		return rep, err
@@ -262,6 +296,22 @@ func IngestLevelReport(r dict.Reader, dbPath string, level Level, progress Progr
 		_ = WriteInfo(filepath.Dir(dbPath))
 	}
 	return rep, nil
+}
+
+func boolMeta(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
+// bodyEncoding records how bodies were written, for humans reading the meta;
+// the read path detects the form per row and does not consult this.
+func bodyEncoding() string {
+	if compressBodies {
+		return "deflate"
+	}
+	return "plain"
 }
 
 // syncFile flushes a finished ingest temp to disk. dsnIngest runs with

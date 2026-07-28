@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -61,20 +62,21 @@ COMMANDS
   fts    [-n max] <dictfile> <query>      FTS5 full-text search (ingested dicts only)
   keys   [-offset N] [-n max] <dictfile>  List headwords
   res    [-o out] <dictfile> <name>       Extract one resource (e.g. "audio/word.mp3")
-  ingest [-full] [-fuzzy-only] <dictfile|folder…>
+  ingest [-full] [-headwords] [-contains] <dictfile|folder…>
                                           Prepare a dictionary into the library:
-                                          <db-dir>/<dictionary name>/text.db (+ info.txt),
-                                          enabling contains & full-text search (a folder
-                                          prepares every dictionary in it, skipping ones
-                                          already done); -full also packs media.db into the
-                                          same folder; -fuzzy-only indexes headwords only
-                                          (smaller db, no full-text search)
+                                          <db-dir>/<dictionary name>/text.db (+ info.txt).
+                                          A folder prepares everything in it, skipping what
+                                          is already done. By default this builds headword
+                                          and full-text indexes; -headwords skips full text
+                                          (much smaller), -contains adds the substring index
+                                          (roughly doubles a headwords-only db), and -full
+                                          also packs media.db into the same folder.
   searchall [-mode m] [-n perDict] <dir> <term>
                                           Concurrent search across all dictionaries in a folder
                                           (<dir> may be a "a:b" list, as in DICT_DIR)
   clean  [-f]                             List removable items in the library: incomplete or
                                           unreadable folders, interrupted ingests, leftovers
-                                          from the old flat layout. A prepared dictionary is
+                                          from the old flat layout. A cached dictionary is
                                           never listed, even if its source is gone or changed.
                                           -f deletes them. Dry run by default.
 
@@ -90,11 +92,26 @@ SERVE FLAGS
                           the others still work.
                           default: ~/Dictionaries
 
-  --db-dir       <path>   Library folder: one subfolder per prepared dictionary,
+  --db-dir       <path>   Library folder: one subfolder per cached dictionary,
                           holding text.db (+ media.db, info.txt). Must not be the
                           same folder as --dict-dir.
                           env: DB_DIR         toml: DB_DIR
                           default: ~/.gonow-dict/db
+
+  (env/toml only)
+  AUTO_INDEX = "on"       On first search, a dictionary prepares its own headword
+                          index in the background (exact, prefix, accent-insensitive;
+                          a couple of MB). "off" leaves dictionaries to be searched
+                          through their own format. Contains, full-text and media
+                          stay per-dictionary choices either way.
+                          env: AUTO_INDEX     toml: AUTO_INDEX
+                          default: on
+
+  --no-compress           Store article text uncompressed. Prepared databases are
+                          roughly 3x larger; reads are marginally faster. Only
+                          worth it with plenty of disk to spare.
+                          env: NO_COMPRESS    toml: NO_COMPRESS
+                          default: off (article text is compressed)
 
   --use-cached            Also serve the previously imported dictionaries kept in
                           the library, whether or not their original files are still
@@ -321,18 +338,22 @@ func cmdKeys(args []string) error {
 }
 
 func cmdIngest(args []string) error {
+	applyLibrarySettings()
 	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
 	out := fs.String("o", "", "output .db path (default: <db-dir>/<dictionary name>/text.db)")
 	full := fs.Bool("full", false, "also pack binary resources into a companion .media.db")
-	fuzzyOnly := fs.Bool("fuzzy-only", false, "index headwords only: fuzzy search, smaller db, no full-text search")
+	headwords := fs.Bool("headwords", false, "index headwords only: smaller db, no full-text search")
+	fuzzyOnly := fs.Bool("fuzzy-only", false, "deprecated spelling of -headwords")
+	contains := fs.Bool("contains", false, "also build the substring (contains) index — roughly doubles a headword-only index")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: gonow-dict ingest [-o out.db] [-full] [-fuzzy-only] <dictfile|folder>")
+		return fmt.Errorf("usage: gonow-dict ingest [-o out.db] [-full] [-headwords] [-contains] <dictfile|folder…>")
 	}
 	level := store.LevelText
-	if *fuzzyOnly {
+	if *headwords || *fuzzyOnly {
 		level = store.LevelHeadwords
 	}
+	plan := store.Plan{FullText: level == store.LevelText, Contains: *contains}
 	srcPath := fs.Arg(0)
 
 	// folder: ingest every dictionary found under it
@@ -350,7 +371,7 @@ func cmdIngest(args []string) error {
 		var failed int
 		for i, p := range paths {
 			fmt.Fprintf(os.Stderr, "[%d/%d] %s\n", i+1, len(paths), filepath.Base(p))
-			if err := ingestOne(p, "", *full, level); err != nil {
+			if err := ingestOne(p, "", *full, plan); err != nil {
 				fmt.Fprintf(os.Stderr, "  failed: %v\n", err)
 				failed++
 			}
@@ -360,10 +381,10 @@ func cmdIngest(args []string) error {
 		}
 		return nil
 	}
-	return ingestOne(srcPath, *out, *full, level)
+	return ingestOne(srcPath, *out, *full, plan)
 }
 
-func ingestOne(srcPath, out string, full bool, level store.Level) error {
+func ingestOne(srcPath, out string, full bool, plan store.Plan) error {
 	r, err := dict.OpenReader(srcPath)
 	if err != nil {
 		return err
@@ -383,13 +404,17 @@ func ingestOne(srcPath, out string, full bool, level store.Level) error {
 		}
 	}
 	if _, err := os.Stat(dbPath); err == nil && out == "" {
-		cl, _ := store.ReadMetaValue(dbPath, "ingest_level")
+		m, _ := store.ReadMeta(dbPath)
+		have := store.Plan{
+			FullText: m["ingest_level"] != string(store.LevelHeadwords),
+			Contains: m["has_trigram"] == "1",
+		}
 		fresh := !store.SourceChanged(dbPath, srcPath)
-		if fresh && (store.Level(cl) == level || level == store.LevelHeadwords) {
+		if fresh && have == plan {
 			fmt.Printf("%salready prepared in %s — skipped\n", logx.Dict(name), filepath.Dir(dbPath))
 			return maybePackMedia(srcPath, dbPath, name, full)
 		}
-		// a level upgrade or a changed source: IngestLevel overwrites the
+		// a different plan or a changed source: IngestPlan overwrites the
 		// existing database atomically, so nothing is deleted up front.
 	}
 	progress := func(done, total int) {
@@ -400,7 +425,7 @@ func ingestOne(srcPath, out string, full bool, level store.Level) error {
 		}
 	}
 	start := time.Now()
-	rep, err := store.IngestLevelReport(r, dbPath, level, progress)
+	rep, err := store.IngestPlan(r, dbPath, plan, progress)
 	logx.ClearLine()
 	if err != nil {
 		return fmt.Errorf("preparing %q: %w", name, err)
@@ -457,8 +482,9 @@ func cmdServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	var dictDirs multiFlag
 	fs.Var(&dictDirs, "dict-dir", "folder with dictionaries; repeat for several (env/toml: DICT_DIR)")
-	dbDir := fs.String("db-dir", "", "library dir for prepared dictionaries (env/toml: DB_DIR)")
+	dbDir := fs.String("db-dir", "", "library dir for cached dictionaries (env/toml: DB_DIR)")
 	useCached := fs.Bool("use-cached", false, "also serve previously imported dictionaries from the library (env/toml: USE_CACHED)")
+	noCompress := fs.Bool("no-compress", false, "store article text uncompressed — larger databases (env/toml: NO_COMPRESS)")
 	ip := fs.String("ip", "", "listen IP (env/toml: SERVER_IP)")
 	port := fs.String("port", "", "listen port (env/toml: SERVER_PORT)")
 	configPath := fs.String("config", "", "path to config.toml (env: CONFIG_PATH)")
@@ -484,6 +510,9 @@ func cmdServe(args []string) error {
 	if *useCached {
 		flagVals["USE_CACHED"] = "1"
 	}
+	if *noCompress {
+		flagVals["NO_COMPRESS"] = "1"
+	}
 	cfg, err := config.Load(*configPath, flagVals)
 	if err != nil {
 		return err
@@ -498,8 +527,7 @@ func cmdServe(args []string) error {
 	}
 
 	// The library (DB_DIR) is gonow-dict's own working area, never a folder of
-	// user dictionaries. Using it as DICT_DIR listed every prepared dictionary
-	// twice and exposed internal sidecars as phantom dictionaries, so it is a
+	// user dictionaries. Using it as DICT_DIR is a
 	// hard error; and wherever it lives, discovery skips it — which also covers
 	// the subtler case of a DB_DIR nested inside the dictionary folder.
 	libDir := store.DefaultDBDir()
@@ -509,15 +537,38 @@ func cmdServe(args []string) error {
 		}
 		return fmt.Errorf("DICT_DIR and DB_DIR are the same folder:\n"+
 			"  %s\n"+
-			"  DB_DIR holds the dictionaries gonow-dict has already prepared; DICT_DIR must point at\n"+
+			"  DB_DIR contains internally cached dictionaries; DICT_DIR must point at\n"+
 			"  the folder with your dictionary files (.mdx, .ifo, .slob, .dsl, .bgl).\n"+
-			"  To work from the prepared ones alone, leave DICT_DIR unset and set USE_CACHED = \"1\".", libDir)
+			"  To only use cached dictionaries, leave DICT_DIR unset and set USE_CACHED = \"1\".", libDir)
 	}
 	dict.ExcludeDir(libDir)
 
-	// Bring databases from the pre-folder layout into the current one (a
-	// rename, never a re-index): data already prepared must stay usable
-	// instead of forcing the user to prepare the same dictionary twice.
+	// Claim the port FIRST. Everything below — adopting library folders,
+	// scanning dictionaries, auto-preparing a DSL index — costs time and
+	// writes to the library, and a launch that turns out to be a duplicate
+	// must do none of it.
+	url := "http://" + cfg.Addr() + "/"
+	ln, lerr := net.Listen("tcp", cfg.Addr())
+	if lerr != nil {
+		if !strings.Contains(lerr.Error(), "address already in use") {
+			return lerr
+		}
+		// If already running then just open the browser tab instead
+		// of a port already in use error.
+		if inst, ok := probeRunning(cfg.Addr()); ok {
+			announceRunning(inst, url, cfg.DictDirs, !cfg.NoBrowser)
+			if !cfg.NoBrowser {
+				browserCmd(url)
+			}
+			return nil
+		}
+		return fmt.Errorf(`%s is already in use — another server (not gonow-dict) is running.
+Hint: pick another port with --port, e.g.:  gonow-dict --port %s
+      or find the process using it:        lsof -i :%s`, cfg.Addr(), nextPort(cfg.Port), cfg.Port)
+	}
+	defer ln.Close()
+
+	// migrate old cached dictionaries
 	if moved, err := store.AdoptLoose(); err != nil {
 		logx.Warn("could not tidy the library: %v", err)
 	} else if len(moved) > 0 {
@@ -526,8 +577,8 @@ func cmdServe(args []string) error {
 		}
 	}
 
-	// first run: generate a commented config.toml so users can discover
-	// the knobs; an existing file anywhere in the search order wins
+	// first run: generate a commented config.toml containing defaults
+	// an existing file anywhere in the search order wins
 	cfgFile := cfg.Source
 	if cfgFile == "" && *configPath == "" {
 		p, created, err := config.EnsureConfigFile()
@@ -547,20 +598,23 @@ func cmdServe(args []string) error {
 	}
 	srv := server.New(reg)
 	srv.ConfigPath = cfgFile
+	store.SetCompressBodies(!cfg.NoCompress)
+	srv.Version = version
+	srv.DictDirOrigin = cfg.Origin("DICT_DIR")
+	srv.DictDirEditable = cfg.EditableInFile("DICT_DIR")
 	useExternalSpeex := cfg.SpeexBackend == "external"
 	srv.UseExternalSpeex = useExternalSpeex
 	// Only look for the external speexdec binary when it will actually be used:
 	// forced via SPEEX_BACKEND=external, or a purego build without the built-in
-	// decoder. A full cgo build trusts its own in-process decoder and never
-	// touches speexdec.
+	// decoder. A full cgo build uses its own in-process decoder and
+	// does not need the external speexdec.
 	var sxPath, sxSource string
 	if useExternalSpeex || !speex.Available {
 		sxPath, sxSource = resolveSpeexdec(cfg.Speexdec)
 	}
 	srv.Speexdec = sxPath
-	srv.AutoIndex = cfg.AutoIndex != "off"
+	srv.AutoIndex = cfg.AutoIndexEnabled()
 
-	url := "http://" + cfg.Addr() + "/"
 	lib, _ := store.Library()
 	inFolder, fromLib := reg.Counts()
 	printStartup(cfg, startupInfo{
@@ -597,17 +651,30 @@ func cmdServe(args []string) error {
 		_ = httpSrv.Shutdown(ctx)
 		close(idle)
 	}()
-	err = httpSrv.ListenAndServe()
+	err = httpSrv.Serve(ln)
 	if errors.Is(err, http.ErrServerClosed) {
 		<-idle
 		return nil
 	}
-	if err != nil && strings.Contains(err.Error(), "address already in use") {
-		return fmt.Errorf(`%s is already in use — another gonow-dict (or other server) is running.
-Hint: pick another port with --port, e.g.:  gonow-dict --port %s
-      or find the process using it:        lsof -i :%s`, cfg.Addr(), nextPort(cfg.Port), cfg.Port)
-	}
 	return err
+}
+
+// applyLibrarySettings gives the subcommands that touch the library the same
+// settings the server uses. They previously read only the raw GONOW_DB_DIR
+// environment variable, so `gonow-dict ingest` ignored a DB_DIR set in
+// config.toml and wrote somewhere the server would never look.
+func applyLibrarySettings() {
+	cfg, err := config.Load("", nil)
+	if err != nil {
+		return // a broken config must not stop a local command
+	}
+	if cfg.DBDir != "" {
+		os.Setenv("GONOW_DB_DIR", cfg.DBDir)
+	}
+	store.SetCompressBodies(!cfg.NoCompress)
+	if cfg.Verbose {
+		logx.Enabled = true
+	}
 }
 
 // nextPort suggests port+1 for the port-in-use hint.
@@ -687,18 +754,16 @@ func speexSummary(useExternal bool, path, source string) string {
 	return "" // none available — printStartup emits the install hint
 }
 
-// printStartup shows the configuration that actually took effect. Every value
-// a user might have set somewhere (flag, env, config.toml, default) is listed
-// with the folder or address it resolved to, so "why is it not finding my
-// dictionaries" is answerable from the first screen.
+// printStartup shows the *resolved* configuration that is in effect. All values
+// are listed with the origin, i.e. flag, env, config.toml, default.
 // startupInfo is what the startup summary describes: each folder counted by
 // what IT contributed (a blended total next to the dictionary folder made an
 // empty folder look full when the library was in use).
 type startupInfo struct {
 	roots       []server.Root // dictionary folders, each with its own status
 	inFolder    int           // dictionaries discovered across those folders
-	fromLibrary int           // prepared dictionaries actually serving (USE_CACHED)
-	prepared    int           // prepared dictionaries that exist, in use or not
+	fromLibrary int           // cached dictionaries actually serving (USE_CACHED)
+	prepared    int           // cached dictionaries that exist, in use or not
 	total       int           // what is being served
 	libDir      string
 	url         string
@@ -799,14 +864,18 @@ func plural(n int, one, many string) string {
 }
 
 func indexingSummary(autoIndex string) string {
-	if autoIndex == "off" {
-		return "manual (AUTO_INDEX=off)"
+	if autoIndex == config.AutoIndexOff {
+		return "off — dictionaries are searched through their own format (AUTO_INDEX=off)"
 	}
-	return "automatic on first search (headwords); full-text on request"
+	return "on — a headword index is prepared on first search; contains, full-text and media on request"
 }
 
 func openBrowser(url string) {
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond) // let our own server finish binding
+	browserCmd(url)
+}
+
+func browserCmd(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -871,6 +940,7 @@ func cmdSearchAll(args []string) error {
 }
 
 func cmdClean(args []string) error {
+	applyLibrarySettings()
 	fs := flag.NewFlagSet("clean", flag.ExitOnError)
 	force := fs.Bool("f", false, "actually delete (default: dry run, list only)")
 	fs.Parse(args)

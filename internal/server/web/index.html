@@ -173,13 +173,59 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 .en:disabled{opacity:.4;cursor:default}
 .en:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .pd .meta{color:var(--fg-faint);font-size:11.5px;margin:.15em 0 .3em}
+.pd .feat{display:inline-block;border:1px solid var(--line);border-radius:99px;
+  padding:.05em .55em;margin:.15em .25em .15em 0;font-size:10.5px;color:var(--fg-faint);
+  cursor:pointer;user-select:none;transition:color .12s,border-color .12s,background .12s}
+.pd .feat:hover{border-color:var(--accent);color:var(--accent)}
+.pd .feat.on{border-color:var(--accent);color:#fff;background:var(--accent)}
+.pd .feat.on:hover{opacity:.82}
+.pd .feat.locked{cursor:default;opacity:.5}
+.pd .feat.locked:hover{border-color:var(--line);color:var(--fg-faint)}
+.pd .feat.on.locked:hover{border-color:var(--accent);color:#fff;opacity:.5}
+.pd .feat.busy{border-style:dashed;cursor:default}
 .pd .tag{display:inline-block;border:1px solid var(--line);border-radius:5px;
   padding:0 .4em;font-size:10.5px;color:var(--fg-soft);margin-right:.25em}
 .pd .tag.on{color:var(--accent);border-color:var(--accent)}
-.pd .act{color:var(--link);cursor:pointer;text-decoration:underline;
+.act{color:var(--link);cursor:pointer;text-decoration:underline;
   text-underline-offset:2px;font-size:12px;margin-right:var(--sp-2)}
 .pd .path{color:var(--fg-faint);font-size:10.5px;word-break:break-all;cursor:pointer}
 .pd .err{color:#c0564f}
+/* Folders & configuration: a quiet disclosure under the dictionary cards.
+   It answers "where is it looking?", "where did my prepared data go?" and
+   "which config file is in effect?" — otherwise only visible on the terminal
+   at startup, which someone who opened the app in a browser never sees. */
+/* Settings live one line under the master switch, not at the foot of a
+   55-card list where nobody scrolls. The cog carries the meaning (show, don't
+   tell) while title/aria-label keep the name for tooltips and screen readers;
+   the counts double as the panel's scope, so the line earns its place even
+   when it is never clicked. An inline SVG rather than ⚙️: emoji renders as a
+   colour blob on one platform and flat on another, sits on its own baseline,
+   and cannot inherit currentColor. */
+#folders{margin:0 var(--sp-2) var(--sp-1);padding-bottom:var(--sp-1);
+  border-bottom:1px solid var(--line)}
+#folders>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:.5em;
+  color:var(--fg-faint);font-size:12px;padding:.15em 0;border-radius:6px}
+#folders>summary::-webkit-details-marker{display:none}
+#folders>summary:hover,#folders[open]>summary{color:var(--fg-soft)}
+#folders>summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+#folders .cog{width:14px;height:14px;flex:none;transition:transform .2s}
+#folders>summary:hover .cog{transform:rotate(30deg)}
+#folders[open] .cog{transform:rotate(60deg)}
+#folders .fsum{color:var(--fg-faint)}
+#folders .grp{margin:.5em 0 .2em;color:var(--fg-faint);font-size:11px;
+  text-transform:uppercase;letter-spacing:.05em}
+#folders .frow{display:flex;align-items:baseline;gap:.5em;padding:.15em 0}
+#folders .frow .p{flex:1;min-width:0;word-break:break-all;color:var(--fg-soft);
+  font-size:11.5px;cursor:pointer}
+#folders .frow .n{color:var(--fg-faint);font-size:11px;white-space:nowrap}
+#folders .frow .n.bad{color:#c0564f}
+#folders .rv{color:var(--fg-faint);font-size:11px;cursor:pointer;white-space:nowrap}
+#folders .rv:hover{color:var(--link);text-decoration:underline}
+#folders .frow:hover .rv{color:var(--fg-soft)}
+#folders .facts{display:flex;gap:1.2em;align-items:baseline;margin-top:.7em}
+#folders .facts #rescanBtn{color:var(--fg-soft);text-decoration:none;font-size:11.5px}
+#folders .facts #rescanBtn:hover{color:var(--link);text-decoration:underline}
+#folders .warn{color:#c0564f;font-size:11.5px;margin:.3em 0}
 .pd .prov,.pd .prov1{font-size:10.5px;color:var(--fg-faint);word-break:break-all;margin-top:.15em}
 .pd .prov>summary{cursor:pointer;list-style:none;color:var(--fg-faint)}
 .pd .prov>summary::-webkit-details-marker{display:none}
@@ -227,11 +273,20 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 <div id="panel" role="dialog" aria-label="Dictionaries">
 <div class="panel-card">
 <div class="panel-head"><h2>Dictionaries
-<button class="btn" id="ingestAllBtn" title="Build the full-text search index for every dictionary (does not pack media)">⚡ index all</button>
-<button class="btn" id="rescanBtn" title="Rescan folder">⟳ rescan</button>
+<button class="btn" id="ingestAllBtn" title="Add full-text search to every dictionary that lacks it (does not pack media)">⚡ index all</button>
 <button class="btn" id="closePanel" aria-label="Close">✕</button></h2>
 <div class="allrow"><label for="enAll" id="enAllLabel">Enable all</label>
 <input type="checkbox" class="en" id="enAll" aria-label="Enable all dictionaries"></div></div>
+<details id="folders">
+  <summary title="Folders &amp; configuration" aria-label="Folders and configuration">
+    <svg class="cog" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M6.56 1.05L9.44 1.05L9.07 2.81L10.91 3.57L11.90 2.07L13.93 4.10L12.43 5.09L13.19 6.93L14.95 6.56L14.95 9.44L13.19 9.07L12.43 10.91L13.93 11.90L11.90 13.93L10.91 12.43L9.07 13.19L9.44 14.95L6.56 14.95L6.93 13.19L5.09 12.43L4.10 13.93L2.07 11.90L3.57 10.91L2.81 9.07L1.05 9.44L1.05 6.56L2.81 6.93L3.57 5.09L2.07 4.10L4.10 2.07L5.09 3.57L6.93 2.81ZM5.50 8.00a2.50 2.50 0 1 0 5.00 0a2.50 2.50 0 1 0 -5.00 0Z"/></svg>
+    <span class="fsum" id="folderSummary"></span></summary>
+  <div id="folderBody"></div>
+  <div class="facts">
+    <a class="act" id="editFolders" href="/setup">Edit folders…</a>
+    <span class="act" id="rescanBtn" title="Re-scan every folder and re-open the dictionaries found (takes a moment)">Rescan folders</span>
+  </div>
+</details>
 <div id="panelList"></div>
 </div>
 </div>
@@ -250,6 +305,7 @@ let disabled=new Set(loadJSON("gonow_disabled",[]));
 function saveOrder(){localStorage.setItem("gonow_order",JSON.stringify(prefOrder))}
 function saveDisabled(){localStorage.setItem("gonow_disabled",JSON.stringify([...disabled]))}
 /* dictionaries in preference order: saved ones first, then unseen ones A→Z */
+const mb=b=>b>=1e9?(b/1e9).toFixed(1)+" GB":b>=1e6?Math.round(b/1e6)+" MB":Math.max(1,Math.round(b/1e3))+" kB";
 function orderedDicts(){
   const byId=new Map(dicts.map(d=>[d.id,d]));
   const out=[];
@@ -405,22 +461,31 @@ function renderPanel(){
   for(const d of ord){
     const off=disabled.has(d.id);
     const div=document.createElement("div");div.className="pd"+(off?" off":"");div.dataset.id=d.id;
+    /* Only what varies AND can be changed. exact and prefix are true for every
+       dictionary and cost nothing, so showing them was decoration; contains,
+       full-text and media each cost real disk, so each is a switch.
+       Switching is offered only while the SOURCE is on disk — that is what
+       makes it reversible, and why none of this needs a confirmation. */
+    const canToggle=!!d.source;
+    const feats=[
+      ["contains","contains",d.caps?.Contains,0],
+      ["fts","full-text",d.caps?.FTS,0],
+      ["media","media",!!d.mediaDB,d.mediaSize||0],
+    ];
     let caps="";
-    for(const[k,on]of[["exact",d.caps?.Exact],["prefix",d.caps?.Prefix],["contains",d.caps?.Contains],["full-text",d.caps?.FTS]])
-      caps+=`<span class="tag${on?" on":""}">${k}</span>`;
+    for(const[key,label,on,bytes]of feats){
+      if(key==="media"&&!on&&!d.hasMedia)continue; // nothing to pack
+      const size=on&&bytes?" "+mb(bytes):"";
+      caps+=`<span class="feat${on?" on":""}${canToggle?"":" locked"}" data-feat="${key}" data-on="${on?1:0}"`+
+        ` title="${canToggle?(on?"Click to remove":"Click to add"):"The original files are gone — this is the only copy, so it cannot be changed"}"`+
+        `>${label}${size}</span>`;
+    }
     // the contains index is built automatically on first use, so the only
     // manual action offered is full-text (which also covers contains).
     // "pack media" is offered only when the dictionary actually has packable
     // media, a source to pack it from, and it isn't already packed.
-    const canPack=d.hasMedia&&d.source&&!d.mediaDB;
     let acts="";
-    if(d.error){acts=`<span class="err">${esc(d.error)}</span>`}
-    else if(!d.caps?.FTS){
-      acts=`<span class="act" data-act="ingest">full-text search</span>`+
-        (canPack?`<span class="act" data-act="ingest-full">FTS + pack media</span>`:"");
-    }else if(canPack){
-      acts=`<span class="act" data-act="ingest-full">Pack media into the library folder</span>`;
-    }
+    if(d.error)acts=`<span class="err">${esc(d.error)}</span>`;
     div.innerHTML=`<div class="hd">
         <span class="grip" draggable="true" title="Drag to reorder">⠿</span>
         <b>${esc(dictLabel(d))}</b>
@@ -432,7 +497,7 @@ function renderPanel(){
         </span>
         <input type="checkbox" class="en" ${off?"":"checked"} title="${off?"Disabled — excluded from All dictionaries":"Enabled"}">
       </div>
-      <div class="meta">${esc(d.format||"?")} · ${d.entries?d.entries.toLocaleString()+" entries":""}</div>
+      <div class="meta">${esc(d.format||"?")}${d.entries?" · "+d.entries.toLocaleString()+" entries":""}${d.dbSize?" · "+mb(d.dbSize)+" indexed":""}</div>
       <div>${caps}</div><div class="acts">${acts}</div>
       ${provenance(d)}`;
     el.appendChild(div);
@@ -463,10 +528,59 @@ $("panelList").addEventListener("drop",e=>{
   let to=ids.indexOf(pd.dataset.id);if(after)to++;
   ids.splice(to,0,dragId);prefOrder=ids;saveOrder();clearDrop();dragId=null;renderPanel();
 });
-$("panelBtn").onclick=()=>$("panel").classList.add("show");
+$("panelBtn").onclick=()=>{$("panel").classList.add("show");loadFolders()};
 $("closePanel").onclick=()=>$("panel").classList.remove("show");
 $("panel").onclick=e=>{if(e.target.id==="panel")$("panel").classList.remove("show")};
-$("rescanBtn").onclick=()=>loadDicts(true);
+$("rescanBtn").onclick=()=>{loadDicts(true).then(loadFolders)};
+
+/* Folders & configuration ------------------------------------------------ */
+let cfgInfo=null;
+async function loadFolders(){
+  try{ cfgInfo=await (await fetch("/api/config")).json() }catch(e){ return }
+  const c=cfgInfo,b=$("folderBody");
+  const n=(c.roots||[]).length;
+  $("folderSummary").textContent=`${n} folder${n===1?"":"s"} · ${c.total} dictionar${c.total===1?"y":"ies"}`;
+  b.innerHTML="";
+  const row=(path,note,bad)=>{
+    const d=document.createElement("div");d.className="frow";
+    const p=document.createElement("span");p.className="p path";p.textContent=path;
+    p.title="Click to copy";
+    const s=document.createElement("span");s.className="n"+(bad?" bad":"");s.textContent=note;
+    d.append(p,s);
+    if(c.canReveal){
+      const rv=document.createElement("span");rv.className="rv";rv.textContent=c.revealLabel;
+      rv.onclick=e=>{e.stopPropagation();fetch("/api/reveal?path="+encodeURIComponent(path))
+        .then(r=>r.json()).then(j=>{if(j.error)alert(j.error)})};
+      d.appendChild(rv);
+    }
+    b.appendChild(d);
+  };
+  const grp=t=>{const g=document.createElement("div");g.className="grp";g.textContent=t;b.appendChild(g)};
+  grp("dictionary folders");
+  for(const r of c.roots||[]){
+    let note=`${r.count} dictionar${r.count===1?"y":"ies"}`,bad=false;
+    if(!r.exists){note="folder not found";bad=true}
+    else if(!r.total){note="no dictionaries found"}
+    else if(!r.count){note=`${r.total} already listed above`}
+    else if(r.total>r.count){note+=` (+${r.total-r.count} listed above)`}
+    row(r.path,note,bad);
+  }
+  if(c.dictDirEditable===false){
+    const how=c.dictDirOrigin==="flag"?"the --dict-dir flag":"the DICT_DIR environment variable";
+    const w=document.createElement("div");w.className="warn";
+    w.textContent="⚠ set by "+how+" — it overrides the config file";
+    b.appendChild(w);
+  }
+  grp("prepared dictionaries (library)");
+  row(c.libDir,`${c.prepared} prepared`+(c.useCached?", in use":c.prepared?", not in use":""),false);
+  if(c.configPath){grp("configuration file");row(c.configPath,"",false)}
+}
+$("folders").addEventListener("toggle",()=>{if($("folders").open&&!cfgInfo)loadFolders()});
+$("folderBody").addEventListener("click",e=>{
+  const p=e.target.closest(".path");if(!p)return;
+  navigator.clipboard?.writeText(p.textContent);
+  p.style.color="var(--accent)";setTimeout(()=>{p.style.color=""},900);
+});
 $("ingestAllBtn").onclick=async()=>{
   const btn=$("ingestAllBtn");
   if(btn.disabled)return;
@@ -476,8 +590,8 @@ $("ingestAllBtn").onclick=async()=>{
   let n=0;
   for(const d of todo){
     n++;btn.textContent=`⚡ ${n}/${todo.length}…`;
-    const label=document.querySelector(`.pd[data-id="${d.id}"] .act`)||btn;
-    await runIngest(d.id,{quiet:true,statusPrefix:`${n}/${todo.length} · `},label);
+    const label=document.querySelector(`.pd[data-id="${d.id}"] .feat[data-feat="fts"]`)||btn;
+    await runIngest(d.id,{fts:1,quiet:true,statusPrefix:`${n}/${todo.length} · `},label);
   }
   btn.disabled=false;btn.textContent="⚡ index all";
   setStatus("✓ all dictionaries indexed");
@@ -488,9 +602,15 @@ $("panelList").addEventListener("click",e=>{
   if(mv){moveDict(mv.closest(".pd").dataset.id,mv.dataset.mv);return}
   const path=e.target.closest(".path");
   if(path){navigator.clipboard?.writeText(path.textContent.replace(/^[a-z]+: /,"").replace(/ \+ media\.db$/,""));path.style.color="var(--accent)";return}
+  const feat=e.target.closest(".feat");
+  if(feat){
+    if(feat.classList.contains("locked")||feat.classList.contains("busy"))return;
+    const on=feat.dataset.on==="1";
+    runIngest(feat.closest(".pd").dataset.id,{[feat.dataset.feat]:on?0:1},feat);
+    return;
+  }
   const act=e.target.closest(".act");if(!act)return;
-  runIngest(act.closest(".pd").dataset.id,
-    {full:act.dataset.act==="ingest-full",level:act.dataset.act==="ingest-fuzzy"?"headwords":""},act);
+  runIngest(act.closest(".pd").dataset.id,{fts:1},act);
 });
 $("panelList").addEventListener("change",e=>{
   if(e.target.classList.contains("en"))toggleDict(e.target.closest(".pd").dataset.id);
@@ -500,7 +620,7 @@ document.addEventListener("click",e=>{
   const up=e.target.closest("summary .upgrade");
   if(!up)return;
   e.preventDefault(); // don't toggle the <details>
-  runIngest(up.dataset.id,{},up);
+  runIngest(up.dataset.id,{[up.dataset.feat||"fts"]:1},up);
 });
 
 function runIngest(id,opts,label){
@@ -511,10 +631,13 @@ function runIngest(id,opts,label){
     label.textContent=t;
     setStatus('<span class="spin"></span>'+(opts.statusPrefix||"")+esc(name)+" — "+esc(t));
   };
-  show("preparing search index…");
-  label.classList.remove("act");
+  const removing=Object.values(opts).some(v=>v===0);
+  show(removing?"removing…":"preparing…");
+  label.classList.remove("act");label.classList.add("busy");
   label.style.textDecoration="none";label.style.cursor="default";
-  const params=(opts.full?"&full=1":"")+(opts.level==="headwords"?"&level=headwords":"");
+  const params=Object.entries(opts)
+    .filter(([k])=>k==="contains"||k==="fts"||k==="media")
+    .map(([k,v])=>"&"+k+"="+(v?1:0)).join("");
   return new Promise(resolve=>{
     const es=new EventSource("/api/ingest?dict="+id+params);
     es.addEventListener("progress",ev=>{
@@ -523,7 +646,7 @@ function runIngest(id,opts,label){
     });
     es.addEventListener("done",async()=>{
       es.close();
-      setStatus("✓ "+esc(name)+" — search index ready");
+      setStatus("✓ "+esc(name)+(removing?" — removed":" — ready"));
       if(!opts.quiet){await loadDicts();if(lastQuery)doSearch()}
       resolve(true);
     });
@@ -662,14 +785,13 @@ function renderSlot(box,h,mode,q,perDict){
     return{shown:true};
   }
   if(h.skipped){
-    // full-text is opt-in → offer the upgrade link; the contains index
-    // auto-builds on first search, so it is just "preparing" and works next.
-    if(mode==="fts"){
-      box.innerHTML=`<details class="dict"><summary>${esc(h.name)}<span class="upgrade" data-id="${h.dict}">enable full-text search</span></summary></details>`;
-      return{shown:true};
-    }
-    if(mode==="contains"){
-      box.innerHTML=`<details class="dict"><summary>${esc(h.name)}<span class="count">preparing index…</span></summary></details>`;
+    // Both heavier indexes are opt-in, so a skipped dictionary is not a dead
+    // end: offer to add the one this search needed, right where it was missed.
+    const feat=mode==="fts"?"fts":mode==="contains"?"contains":"";
+    if(feat){
+      const what=feat==="fts"?"full-text search":"substring search";
+      box.innerHTML=`<details class="dict"><summary>${esc(h.name)}`+
+        `<span class="upgrade" data-id="${h.dict}" data-feat="${feat}">enable ${what} for this dictionary</span></summary></details>`;
       return{shown:true};
     }
     return{};
@@ -785,6 +907,22 @@ function playAudio(url){
   const p=audioEl.play();
   if(p&&p.catch)p.catch(err=>{console.warn("audio play failed:",url,err);setStatus("⚠ could not play audio")});
 }
+/* Dictionary cross-reference links. Accepted forms, all equivalent:
+     bword://word   bword:word   entry://word   entry:word   d:word   x:word
+   The slash-less spelling is what GoldenDict also accepts and several MDX
+   dictionaries emit; without it here such a link was inert (it looks like a
+   scheme, so the bare-word fallback below skips it too). A trailing #fragment
+   is dropped — it addresses a place inside the target article, never part of
+   the headword — before decoding, so an encoded %23 in a real headword is
+   preserved. Returns null when the href is not a lookup link at all, "" when
+   it is one but names no word.
+   NOTE: frame.js carries the same logic for articles rendered inside the
+   sandboxed iframe; keep the two in step. */
+function wordFromHref(href){
+  if(!/^(bword|entry):(\/\/)?/i.test(href)&&!/^[dx]:/i.test(href))return null;
+  const raw=href.replace(/^(bword|entry):(\/\/)?/i,"").replace(/^[dx]:/i,"").replace(/#.*$/,"");
+  try{return decodeURIComponent(raw).trim()}catch(_){return raw.trim()}
+}
 document.addEventListener("click",e=>{
   const path=e.composedPath();
   const a=path.find(el=>el.tagName==="A");
@@ -792,8 +930,10 @@ document.addEventListener("click",e=>{
   const dd=path.find(el=>el.classList?.contains("article"));
   const dictID=dd?.dataset.dict;
   const href=a.getAttribute("href")||"";
-  if(/^(bword|entry):\/\//i.test(href)||/^[dx]:/i.test(href)){
-    e.preventDefault();lookupWord(decodeURIComponent(href.replace(/^(bword|entry):\/\//i,"").replace(/^[dx]:/i,"")));
+  const w=wordFromHref(href);
+  if(w!==null){
+    e.preventDefault();
+    if(w)lookupWord(w); // "bword://#frag" carries no word: swallow the click
   }else if(/\.(mp3|ogg|wav|spx|m4a)(\?|#|$)/i.test(href)){
     e.preventDefault();playAudio(href.startsWith("/res/")||/^https?:/i.test(href)?href:resURL(dictID,href));
   }else if(a.querySelector("img")&&href.startsWith("/res/")){

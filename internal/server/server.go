@@ -55,6 +55,19 @@ type Server struct {
 	// even when the folder came from a CLI flag or the file is read-only.
 	ConfigPath string
 
+	// Version identifies this build in the Server response header. A second
+	// launch uses that header to recognise an already-running gonow-dict on
+	// the port — without it, "the port is busy" says nothing about WHO holds
+	// it, and sending the user's browser to an unknown local service would be
+	// worse than an error message.
+	Version string
+
+	// DictDirOrigin / DictDirEditable describe where the dictionary folders
+	// came from (config layering), so the UI can warn that a flag or an
+	// environment variable will override anything saved to the file.
+	DictDirOrigin   string
+	DictDirEditable bool
+
 	// Speexdec is the path to the external speexdec binary. It is used when
 	// UseExternalSpeex is set, or as a fallback when the in-process decoder is
 	// not compiled in (CGO_ENABLED=0) or fails on a given file.
@@ -69,10 +82,11 @@ type Server struct {
 	// racing the same output file. Keyed by wav cache path → *sync.Mutex.
 	spxLocks sync.Map
 
-	// AutoIndex, when true (config auto_index != "off"), builds a fuzzy
-	// headword index for a dictionary the first time it is searched —
-	// silently, in the background — so fuzzy search becomes available on
-	// the next query without the user ever asking. Full-text stays opt-in.
+	// AutoIndex, when true (config AUTO_INDEX=on, the default), prepares a
+	// dictionary's headword index the first time it is searched — silently,
+	// in the background — so accent-insensitive search works on the next
+	// query without the user ever asking. The heavier indexes (contains,
+	// full-text) and media stay opt-in per dictionary.
 	AutoIndex bool
 }
 
@@ -85,6 +99,11 @@ func New(reg *Registry) *Server {
 	s.mux.HandleFunc("GET /api/ingest", s.handleIngest)
 	s.mux.HandleFunc("GET /api/setup", s.handleSetup)
 	s.mux.HandleFunc("GET /api/library", s.handleLibrary)
+	s.mux.HandleFunc("GET /api/config", s.handleConfig)
+	s.mux.HandleFunc("GET /api/reveal", s.handleReveal)
+	// the setup page stays reachable after first run: it is where folders are
+	// edited, not just where they are first chosen
+	s.mux.HandleFunc("GET /setup", s.handleSetupPage)
 	s.mux.HandleFunc("GET /res/", s.handleResource)
 	s.mux.HandleFunc("GET /assets/mark.min.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
@@ -108,8 +127,17 @@ func New(reg *Registry) *Server {
 	return s
 }
 
+// ServerHeader is the value gonow-dict answers with (plus its version), and
+// the token a second launch looks for.
+const ServerHeader = "gonow-dict"
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	id := ServerHeader
+	if s.Version != "" {
+		id += "/" + s.Version
+	}
+	w.Header().Set("Server", id)
 	defer func() {
 		if rec := recover(); rec != nil {
 			logx.V("PANIC %s %s: %v", r.Method, r.URL.RequestURI(), rec)
@@ -148,29 +176,49 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// first-run: no dictionaries yet → serve the setup page instead
 	if s.reg.Count() == 0 {
-		dirs := s.reg.Dirs()
-		reason := "contains no dictionaries yet"
-		if len(dirs) > 1 {
-			reason = "contain no dictionaries yet"
-		}
-		missing := 0
-		for _, d := range dirs {
-			if _, err := os.Stat(d); err != nil {
-				missing++
-			}
-		}
-		if missing == len(dirs) {
-			reason = "does not exist"
-			if len(dirs) > 1 {
-				reason = "do not exist"
-			}
-		}
-		page := strings.ReplaceAll(setupHTML, "{{DIR}}", htmlEscape(strings.Join(dirs, ", ")))
-		page = strings.ReplaceAll(page, "{{REASON}}", reason)
-		_, _ = io.WriteString(w, page)
+		_, _ = io.WriteString(w, setupPage(s.reg.Dirs(), 0))
 		return
 	}
 	_, _ = w.Write(indexHTML)
+}
+
+// handleSetupPage serves the folder editor on demand (the same page first run
+// shows). Reachable at any time so "which folders am I scanning?" is always
+// answerable from the app itself, never only from a terminal.
+func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, setupPage(s.reg.Dirs(), s.reg.Count()))
+}
+
+// setupPage renders the folder chooser/editor. The intro names a single
+// folder, but never repeats a list the editable rows below already show —
+// four long paths in a sentence pushed the actual controls off the screen.
+func setupPage(dirs []string, serving int) string {
+	var intro string
+	switch {
+	case serving > 0:
+		intro = fmt.Sprintf("Serving %s from %s.",
+			plural(serving, "dictionary", "dictionaries"), plural(len(dirs), "folder", "folders"))
+	case len(dirs) == 1:
+		state := "contains no dictionaries yet"
+		if _, err := os.Stat(dirs[0]); err != nil {
+			state = "does not exist"
+		}
+		intro = fmt.Sprintf("Your dictionary folder <code>%s</code> %s.", htmlEscape(dirs[0]), state)
+	case len(dirs) > 1:
+		intro = fmt.Sprintf("None of your %d dictionary folders hold dictionaries yet.", len(dirs))
+	default:
+		intro = "No dictionary folder is configured yet."
+	}
+	return strings.ReplaceAll(setupHTML, "{{INTRO}}", intro)
+}
+
+// plural renders a count with the right noun ("1 folder", "3 folders").
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 func htmlEscape(s string) string {
@@ -224,7 +272,11 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	raw := strings.TrimSpace(q.Get("path"))
 	save := q.Get("save") != ""
-	useCached := q.Get("useCached") == "1"
+	// tri-state: absent leaves the setting alone, "1" turns the library on,
+	// "0" turns it off. Without the off case the checkbox was write-only-true:
+	// clearing it could not undo an earlier "yes".
+	useCachedParam := q.Get("useCached")
+	useCached := useCachedParam == "1"
 
 	if raw == "" {
 		if !save || !useCached {
@@ -261,6 +313,14 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"path": dir, "found": len(paths)}
+	// several folders at once: report the DEDUPED total, since folders may
+	// overlap and summing per-folder counts would promise more dictionaries
+	// than the registry will actually serve
+	if multi := q["path"]; len(multi) > 1 {
+		if dirs, total, verr := s.resolveDirs(multi); verr == nil {
+			out["dirs"], out["found"] = dirs, total
+		}
+	}
 	if save {
 		// saving may carry several folders (the setup page's list); validation
 		// above always concerns the first, which is what live typing checks.
@@ -283,10 +343,10 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 					out["warning"] = "folders switched, but saving config failed: " + err.Error()
 				}
 			}
-			if useCached {
-				out["useCached"] = true
-				if err := s.setUseCached(true); err != nil {
-					out["warning"] = "folders saved, but keeping the prepared dictionaries failed: " + err.Error()
+			if useCachedParam != "" {
+				out["useCached"] = useCached
+				if err := s.setUseCached(useCached); err != nil {
+					out["warning"] = "folders saved, but the previously imported dictionaries setting failed: " + err.Error()
 				}
 			}
 		}
@@ -300,7 +360,6 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 // will), and refuses a folder that is the library itself.
 func (s *Server) resolveDirs(raw []string) ([]string, int, error) {
 	var dirs []string
-	seen := map[string]bool{}
 	for _, p := range raw {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -310,20 +369,35 @@ func (s *Server) resolveDirs(raw []string) ([]string, int, error) {
 		if abs, err := filepath.Abs(p); err == nil {
 			p = abs
 		}
-		if seen[p] {
-			continue
-		}
-		seen[p] = true
 		if dict.SameDir(p, store.DefaultDBDir()) {
 			return nil, 0, fmt.Errorf("%s is gonow-dict's own library folder — choose the folder holding your dictionary files", p)
 		}
 		dirs = append(dirs, p)
 	}
+	// the same folder spelled two ways (a symlink, a case variant) must not be
+	// saved twice — string comparison alone would not catch either
+	dirs = dict.DedupeDirs(dirs)
 	if len(dirs) == 0 {
 		return nil, 0, fmt.Errorf("no folder given")
 	}
 	found, _, _ := dict.DiscoverAll(dirs)
 	return dirs, len(found), nil
+}
+
+// currentFeatures reads what a dictionary has prepared right now, so a request
+// that names one feature leaves the others alone.
+func (s *Server) currentFeatures(e *entry) features {
+	f := features{}
+	textDB, ok := preparedTextDB(e.Path)
+	if !ok {
+		return f
+	}
+	if m, err := store.ReadMeta(textDB); err == nil {
+		f.FullText = m["ingest_level"] != string(store.LevelHeadwords)
+		f.Contains = m["has_trigram"] == "1"
+	}
+	f.Media = fileExists(store.MediaSibling(textDB))
+	return f
 }
 
 // dictInfo is the /api/dicts row.
@@ -339,12 +413,14 @@ type dictInfo struct {
 
 	// provenance (panel display): where the dictionary came from and what
 	// derived files exist. All optional and filesystem-cheap.
-	Source   string   `json:"source,omitempty"`   // foreign source file, if still on disk
-	MediaSrc []string `json:"mediaSrc,omitempty"` // companion media sources (.mdd, .files.zip, res/)
-	TextDB   string   `json:"textDB,omitempty"`   // prepared text.db, if present
-	MediaDB  string   `json:"mediaDB,omitempty"`  // packed media.db, if present
-	Folder   string   `json:"folder,omitempty"`   // library folder holding them (the transferable unit)
-	HasMedia bool     `json:"hasMedia,omitempty"` // packable binary resources exist (drives "pack media")
+	Source   string   `json:"source,omitempty"`    // foreign source file, if still on disk
+	MediaSrc []string `json:"mediaSrc,omitempty"`  // companion media sources (.mdd, .files.zip, res/)
+	TextDB   string   `json:"textDB,omitempty"`    // prepared text.db, if present
+	MediaDB  string   `json:"mediaDB,omitempty"`   // packed media.db, if present
+	Folder   string   `json:"folder,omitempty"`    // library folder holding them (the transferable unit)
+	DBSize   int64    `json:"dbSize,omitempty"`    // bytes of text.db — what the indexes actually cost
+	MediaSz  int64    `json:"mediaSize,omitempty"` // bytes of media.db
+	HasMedia bool     `json:"hasMedia,omitempty"`  // packable binary resources exist (drives "pack media")
 }
 
 func (s *Server) handleDicts(w http.ResponseWriter, r *http.Request) {
@@ -464,8 +540,14 @@ func addProvenance(info *dictInfo, entryPath string) {
 	}
 	if fileExists(textDB) {
 		info.TextDB = textDB
+		if fi, err := os.Stat(textDB); err == nil {
+			info.DBSize = fi.Size()
+		}
 		if mediaDB := store.MediaSibling(textDB); fileExists(mediaDB) {
 			info.MediaDB = mediaDB
+			if fi, err := os.Stat(mediaDB); err == nil {
+				info.MediaSz = fi.Size()
+			}
 		}
 		if strings.EqualFold(filepath.Base(textDB), store.TextDBName) {
 			// the folder, not the .db file, is what a user copies or shares
@@ -653,7 +735,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		openers[i] = func() (dict.Dictionary, error) {
 			d, err := e.open()
 			if err == nil && s.AutoIndex {
-				e.maybeAutoIndex() // first search of a direct dict → build fuzzy in background
+				e.maybeAutoIndex() // first search of an unprepared dict → index in background
 			}
 			return d, err
 		}
@@ -885,7 +967,8 @@ func (s *Server) externalSpxToWav(raw []byte) ([]byte, error) {
 	return data, nil
 }
 
-// handleIngest runs "Enable fuzzy & full-text search" (D5) for one
+// handleIngest brings one dictionary to the feature state the panel asked for
+// (D24; the flow D5 called "Enable fuzzy & full-text search") for one
 // dictionary, streaming progress as SSE events:
 //
 //	event: progress  data: {"done":N,"total":M}
@@ -897,10 +980,24 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 404, "%v", err)
 		return
 	}
-	full := r.URL.Query().Get("full") != ""
-	level := store.LevelText
-	if r.URL.Query().Get("level") == "headwords" {
-		level = store.LevelHeadwords
+	// The panel sends the state it wants, not a verb: contains/fts/media each
+	// 1 or 0. A parameter left out keeps whatever that feature is now, so a
+	// caller toggling one thing cannot accidentally strip another.
+	q := r.URL.Query()
+	want := s.currentFeatures(e)
+	for _, f := range []struct {
+		name string
+		to   *bool
+	}{{"contains", &want.Contains}, {"fts", &want.FullText}, {"media", &want.Media}} {
+		if v := q.Get(f.name); v != "" {
+			*f.to = v != "0" && !strings.EqualFold(v, "false")
+		}
+	}
+	if q.Get("full") != "" { // legacy: "full" meant full text + media
+		want.FullText, want.Media = true, true
+	}
+	if q.Get("level") == "headwords" {
+		want.FullText = false
 	}
 
 	fl, ok := w.(http.Flusher)
@@ -921,7 +1018,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	last := time.Now()
-	err = e.ingest(full, level, func(done, total int) {
+	err = e.setFeatures(want, func(done, total int) {
 		if time.Since(last) > 200*time.Millisecond {
 			last = time.Now()
 			emit("progress", map[string]int{"done": done, "total": total})

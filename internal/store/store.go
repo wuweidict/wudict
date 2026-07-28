@@ -171,9 +171,11 @@ func (s *Store) collect(rows *sql.Rows, err error) ([]dict.Result, error) {
 	var out []dict.Result
 	for rows.Next() {
 		var r dict.Result
-		if err := rows.Scan(&r.Headword, &r.Body); err != nil {
+		var body []byte // TEXT or a compressed BLOB; decodeBody tells them apart
+		if err := rows.Scan(&r.Headword, &body); err != nil {
 			return nil, err
 		}
+		r.Body = decodeBody(body)
 		out = append(out, r)
 	}
 	return out, rows.Err()

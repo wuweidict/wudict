@@ -37,14 +37,23 @@
 		setTimeout(post, 2500);
 	});
 
+	// Same accepted forms as the main page (bword:/entry: with or without the
+	// slashes, d:/x:, trailing #fragment dropped). Kept in step with
+	// wordFromHref in index.html.
+	function wordFromHref(href) {
+		if (!/^(bword|entry):(\/\/)?/i.test(href) && !/^[dx]:/i.test(href)) return null;
+		var raw = href.replace(/^(bword|entry):(\/\/)?/i, "").replace(/^[dx]:/i, "").replace(/#.*$/, "");
+		try { return decodeURIComponent(raw).trim(); } catch (_) { return raw.trim(); }
+	}
+
 	document.addEventListener("click", function (e) {
 		var a = e.target && e.target.closest ? e.target.closest("a") : null;
 		if (!a) return;
 		var href = a.getAttribute("href") || "";
-		if (/^(bword|entry):\/\//i.test(href) || /^[dx]:/i.test(href)) {
+		var w = wordFromHref(href);
+		if (w !== null) {
 			e.preventDefault();
-			var w = href.replace(/^(bword|entry):\/\//i, "").replace(/^[dx]:/i, "");
-			parent.postMessage({ t: "lookup", w: decodeURIComponent(w) }, "*");
+			if (w) parent.postMessage({ t: "lookup", w: w }, "*");
 		} else if (/\.(mp3|ogg|wav|spx|m4a)([?#]|$)/i.test(href)) {
 			e.preventDefault();
 			// reuse one referenced element so it can't be GC'd during the

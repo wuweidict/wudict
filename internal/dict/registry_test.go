@@ -228,3 +228,45 @@ func TestDiscoverFollowsSymlinkedRoot(t *testing.T) {
 		t.Fatalf("symlinked root yielded %v", got)
 	}
 }
+
+// The same folder reached by a different spelling must collapse to one entry:
+// otherwise it shows as several rows, is walked several times, and is written
+// several times into config.toml. Discovery already guarantees the
+// dictionaries themselves are never listed twice — this is about the folders.
+func TestDedupeDirs(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "shortcut")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	other := t.TempDir()
+	gone := filepath.Join(t.TempDir(), "unmounted")
+
+	got := DedupeDirs([]string{
+		real,                              // kept: first spelling
+		real,                              // exact repeat
+		real + string(filepath.Separator), // trailing separator
+		link,                              // a symlink to the same directory
+		other,                             // a genuinely different folder: kept
+		gone, gone,                        // missing, listed twice: kept once
+		"", "   ", // blanks dropped
+	})
+	want := []string{real, other, gone}
+	if len(got) != len(want) {
+		t.Fatalf("DedupeDirs = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("DedupeDirs = %q, want %q (order and first spelling preserved)", got, want)
+		}
+	}
+	// nested folders are NOT duplicates: they are different directories, and
+	// the overlap is reported per root rather than silently collapsed
+	sub := filepath.Join(real, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := DedupeDirs([]string{real, sub}); len(got) != 2 {
+		t.Errorf("a subfolder must survive dedupe: %q", got)
+	}
+}

@@ -108,8 +108,8 @@ func TestLibraryIsOptIn(t *testing.T) {
 	if m.Path != dbPath {
 		t.Errorf("path=%q, want the .text.db path %q", m.Path, dbPath)
 	}
-	if !d.Caps().Contains {
-		t.Error("native dict should be contains-capable")
+	if !d.Caps().FTS || !d.Caps().Prefix {
+		t.Errorf("a prepared dictionary must still search: %+v", d.Caps())
 	}
 }
 
@@ -159,6 +159,20 @@ func getJSON(t *testing.T, s *Server, path string, into any) *httptest.ResponseR
 
 // searchStream parses the NDJSON /api/search response into per-slot hits
 // (only "hit" lines with results), ordered by slot index.
+// sse drives an SSE endpoint to completion (the ingest/feature-toggle flow)
+// and fails on an error event.
+func sse(t *testing.T, s *Server, path string) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+	if rec.Code != 200 {
+		t.Fatalf("%s: status %d", path, rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "event: error") {
+		t.Fatalf("%s: %s", path, rec.Body.String())
+	}
+}
+
 func searchStream(t *testing.T, s *Server, path string) []streamMsg {
 	t.Helper()
 	req := httptest.NewRequest("GET", path, nil)
@@ -197,9 +211,16 @@ func TestDictsAndSearch(t *testing.T) {
 	}
 	id := dicts[0].ID
 
+	// contains is opt-in: skipped until asked for, then it works. (A trigram
+	// index costs about as much as the whole rest of the index.)
 	hits := searchStream(t, s, "/api/search?q=razon&mode=contains&dict="+id)
+	if len(hits) != 1 || !hits[0].Skipped {
+		t.Fatalf("contains should be unavailable until enabled: %+v", hits)
+	}
+	sse(t, s, "/api/ingest?dict="+id+"&contains=1")
+	hits = searchStream(t, s, "/api/search?q=razon&mode=contains&dict="+id)
 	if len(hits) != 1 || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "corazón" {
-		t.Fatalf("contains hits: %+v", hits)
+		t.Fatalf("contains hits after enabling: %+v", hits)
 	}
 	hits = searchStream(t, s, "/api/search?q=vivienda&mode=fts&dict=all")
 	if len(hits) != 1 || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "casa" {
@@ -296,17 +317,25 @@ func TestAutoIndexOnFirstSearch(t *testing.T) {
 	// first search (prefix) triggers the background index build
 	searchStream(t, s, "/api/search?q=beta&mode=prefix&dict="+id)
 
-	// poll until the accent-folded contains query resolves via the new index
+	// poll until the accent-folded prefix query resolves via the new index:
+	// the direct backend matches raw strings only, so "corazon" finding
+	// "córazon" proves the index was built behind the search
 	var hits []streamMsg
 	for i := 0; i < 100; i++ {
-		hits = searchStream(t, s, "/api/search?q=corazon&mode=contains&dict="+id)
+		hits = searchStream(t, s, "/api/search?q=corazon&mode=prefix&dict="+id)
 		if len(hits) == 1 && !hits[0].Skipped && len(hits[0].Results) == 1 {
 			break
 		}
 		time.Sleep(30 * time.Millisecond)
 	}
 	if len(hits) != 1 || hits[0].Skipped || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "córazon" {
-		t.Fatalf("auto-index contains did not become available: %+v", hits)
+		t.Fatalf("auto-index did not become available: %+v", hits)
+	}
+	// and it built the cheap index only — contains stays off until asked for
+	var dicts2 []dictInfo
+	getJSON(t, s, "/api/dicts", &dicts2)
+	if dicts2[0].Caps.Contains {
+		t.Error("auto-index must not build a trigram index")
 	}
 }
 
@@ -324,7 +353,7 @@ func TestFullIngestNoResourcesFlagsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := reg.all()[0]
-	if err := e.ingest(true, store.LevelText, nil); err != nil {
+	if err := e.setFeatures(features{FullText: true, Media: true}, nil); err != nil {
 		t.Fatalf("full ingest errored: %v", err)
 	}
 	if !e.noPackableMedia() {

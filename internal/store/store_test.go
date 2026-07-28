@@ -145,13 +145,16 @@ func TestLibraryListingAndReceipt(t *testing.T) {
 	for _, e := range lib {
 		byName[e.Name] = e
 	}
+	if byName["Live"].Contains {
+		t.Error("contains must be off by default — it doubles a ~2 MB index for a mode most never use")
+	}
 	if !byName["Live"].SourceExists {
 		t.Error("Live: SourceExists should be true")
 	}
 	if byName["Gone"].SourceExists {
 		t.Error("Gone: SourceExists should be false")
 	}
-	if byName["Live"].Entries != 1 || !byName["Live"].FullText || !byName["Live"].Contains {
+	if byName["Live"].Entries != 1 || !byName["Live"].FullText {
 		t.Errorf("Live entry flags wrong: %+v", byName["Live"])
 	}
 
@@ -288,7 +291,8 @@ func testStore(t *testing.T) *Store {
 		},
 	}
 	dbPath := filepath.Join(t.TempDir(), "test.text.db")
-	if err := Ingest(r, dbPath, nil); err != nil {
+	// contains is opt-in; this fixture tests it, so it asks for it
+	if _, err := IngestPlan(r, dbPath, Plan{FullText: true, Contains: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	s, err := Open(dbPath)
@@ -310,6 +314,9 @@ func TestIngestAndMeta(t *testing.T) {
 	}
 	if !s.Caps().Contains || !s.Caps().FTS {
 		t.Error("store must advertise contains+fts")
+	}
+	if m := s.SourcePath(); m == "" {
+		t.Error("source path not recorded")
 	}
 }
 
@@ -561,8 +568,8 @@ func TestHeadwordsOnlyLevel(t *testing.T) {
 	}
 	defer s.Close()
 	c := s.Caps()
-	if !c.Contains || c.FTS {
-		t.Errorf("caps: want contains=true fts=false, got %+v", c)
+	if c.Contains || c.FTS {
+		t.Errorf("headwords level: want contains=false fts=false, got %+v", c)
 	}
 	// accent-insensitive prefix (the old "fuzzy" engine) still works
 	res, err := s.Fuzzy("corazon", 5)
@@ -719,5 +726,134 @@ func TestAdoptLooseKeepsExistingFolder(t *testing.T) {
 	}
 	if len(orph) != 1 || filepath.Base(orph[0].Path) != "Dup-11112222.text.db" {
 		t.Fatalf("the duplicate should be the only removable item: %+v", orph)
+	}
+}
+
+// Compression is a storage detail: what comes back out must be exactly what
+// went in, and databases written before it existed must keep opening.
+func TestBodyCompressionRoundTrip(t *testing.T) {
+	cases := []string{
+		"",
+		"<p>short</p>", // below the threshold: stored literally
+		strings.Repeat("<p>largo y repetitivo</p>", 40), // compresses well
+		"<p>" + strings.Repeat("ñ", 500) + "</p>",       // multi-byte
+		"<p>" + string([]byte{0x01, 0x02, 0x7f}) + strings.Repeat("x", 200) + "</p>",
+	}
+	for _, want := range cases {
+		for _, on := range []bool{true, false} {
+			SetCompressBodies(on)
+			if got := decodeBody(encodeBody(want)); got != want {
+				t.Fatalf("compress=%v: round trip changed the body (%d bytes in, %d out)", on, len(want), len(got))
+			}
+		}
+	}
+	SetCompressBodies(true)
+	// long, repetitive text must actually shrink — otherwise the whole point
+	big := strings.Repeat("<p>palabra significado ejemplo</p>", 100)
+	if enc := encodeBody(big); len(enc) >= len(big)/2 {
+		t.Errorf("compression barely helped: %d → %d bytes", len(big), len(enc))
+	}
+	// a body stored by an older version (no sentinel) is read verbatim
+	if got := decodeBody([]byte("<p>legacy plain text</p>")); got != "<p>legacy plain text</p>" {
+		t.Errorf("plain body misread: %q", got)
+	}
+}
+
+// End to end: the same dictionary ingested with and without compression must
+// answer every mode identically.
+func TestSearchIdenticalWithAndWithoutCompression(t *testing.T) {
+	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	body := func(w string) string {
+		return "<p>" + strings.Repeat(w+" definición de ejemplo con texto repetido. ", 12) + "</p>"
+	}
+	entries := []dict.Entry{
+		h("corazón", body("corazón")), h("corazonada", body("corazonada")),
+		h("casa", body("casa")), h("Straße", body("Straße")),
+	}
+	results := map[bool][][]dict.Result{}
+	for _, on := range []bool{true, false} {
+		SetCompressBodies(on)
+		p := filepath.Join(t.TempDir(), "text.db")
+		r := &fakeReader{meta: dict.Meta{Name: "C", Format: "mdx", Path: "/x.mdx"}, entries: append([]dict.Entry(nil), entries...)}
+		if _, err := IngestPlan(r, p, Plan{FullText: true, Contains: true}, nil); err != nil {
+			t.Fatal(err)
+		}
+		s, err := Open(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got [][]dict.Result
+		for _, q := range []func() ([]dict.Result, error){
+			func() ([]dict.Result, error) { return s.Exact("corazón", 10) },
+			func() ([]dict.Result, error) { return s.Prefix("cora", 10) },
+			func() ([]dict.Result, error) { return s.Contains("razon", 10) },
+			func() ([]dict.Result, error) { return s.FullText("definición", 10) },
+		} {
+			res, err := q()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, res)
+		}
+		s.Close()
+		results[on] = got
+	}
+	SetCompressBodies(true)
+	for i := range results[true] {
+		a, b := results[true][i], results[false][i]
+		if len(a) != len(b) {
+			t.Fatalf("query %d: %d results compressed vs %d uncompressed", i, len(a), len(b))
+		}
+		for j := range a {
+			if a[j].Headword != b[j].Headword || a[j].Body != b[j].Body {
+				t.Fatalf("query %d result %d differs between compressed and uncompressed", i, j)
+			}
+		}
+		if len(a) == 0 {
+			t.Errorf("query %d returned nothing — the comparison proves nothing", i)
+		}
+	}
+}
+
+// The default plan builds only what finding a headword needs. Contains costs
+// as much again as the whole rest of the index, so it is asked for or absent.
+func TestDefaultPlanOmitsTrigram(t *testing.T) {
+	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	mk := func(plan Plan) *Store {
+		p := filepath.Join(t.TempDir(), "text.db")
+		r := &fakeReader{
+			meta:    dict.Meta{Name: "P", Format: "mdx", Path: "/x.mdx"},
+			entries: []dict.Entry{h("corazón", "<p>órgano</p>")},
+		}
+		if _, err := IngestPlan(r, p, plan, nil); err != nil {
+			t.Fatal(err)
+		}
+		s, err := Open(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { s.Close() })
+		return s
+	}
+	def := mk(PlanOf(LevelText))
+	if def.Caps().Contains {
+		t.Error("the default plan must not build a trigram index")
+	}
+	if _, err := def.Contains("razon", 5); err == nil {
+		t.Error("contains must report itself unsupported, not silently return nothing")
+	}
+	if !def.Caps().FTS || !def.Caps().Exact || !def.Caps().Prefix {
+		t.Errorf("the default must still find and full-text search: %+v", def.Caps())
+	}
+	// asked for, it works
+	on := mk(Plan{FullText: true, Contains: true})
+	res, err := on.Contains("razon", 5)
+	if err != nil || len(res) != 1 {
+		t.Fatalf("contains when asked for: %v %v", res, err)
+	}
+	// and contains without full text is a legal combination
+	small := mk(Plan{Contains: true})
+	if !small.Caps().Contains || small.Caps().FTS {
+		t.Errorf("contains-only plan: %+v", small.Caps())
 	}
 }

@@ -21,6 +21,11 @@ func TestRewriteEntryHTML(t *testing.T) {
 		{"data attr", `data="ame/abet.mp3"`, `data="/res/` + id + `/ame/abet.mp3"`},
 		{"bword untouched", `href="bword://abandon"`, `href="bword://abandon"`},
 		{"entry untouched", `href="entry://x"`, `href="entry://x"`},
+		// the slash-less spellings are lookup links too (the client resolves
+		// them); the rewriter must leave every scheme form alone
+		{"bword no slashes untouched", `href="bword:abandon"`, `href="bword:abandon"`},
+		{"entry no slashes untouched", `href="entry:x"`, `href="entry:x"`},
+		{"bword with fragment untouched", `href="bword://word#sense2"`, `href="bword://word#sense2"`},
 		{"d-link untouched", `href="d:other"`, `href="d:other"`},
 		{"http untouched", `href="http://x.com/a.mp3"`, `href="http://x.com/a.mp3"`},
 		{"data-uri untouched", `src="data:image/png;base64,AA"`, `src="data:image/png;base64,AA"`},

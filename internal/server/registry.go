@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package server is the persistent HTTP server (D3): dictionary
-// registry, JSON API, resource streaming, and the "Enable fuzzy &
-// full-text search" ingest flow with SSE progress (SPEC §6).
+// registry, JSON API, resource streaming, and the per-dictionary feature
+// flow (contains / full-text / media) with SSE progress (SPEC §6, D24).
 package server
 
 import (
@@ -104,22 +104,22 @@ func (e *entry) noPackableMedia() bool {
 	return e.mediaEmpty
 }
 
-// maybeAutoIndex builds a fuzzy (headwords-level) index for this dictionary
-// in the background the first time it is searched, unless it already has
-// one. Attempted at most once per process; failures (e.g. read-only cache,
-// no ingest reader for the format) are swallowed — auto-indexing is a
-// silent convenience, never a hard requirement.
+// maybeAutoIndex prepares this dictionary's headword index in the background
+// the first time it is searched, unless it already has one. Attempted at most
+// once per process; failures (e.g. a read-only library, no ingest reader for
+// the format) are swallowed — auto-indexing is a silent convenience, never a
+// hard requirement.
 func (e *entry) maybeAutoIndex() {
 	e.autoOnce.Do(func() {
 		go func() {
 			d, err := e.open()
-			if err != nil || d.Caps().Contains {
-				return // unopenable, or already contains-capable (ingested/DSL/gonow)
+			if err != nil || d.Caps().FTS {
+				return // unopenable, or already store-backed (prepared/DSL/BGL)
 			}
-			if err := e.ingest(false, store.LevelHeadwords, nil); err != nil {
+			if err := e.ensureBaseIndex(nil); err != nil {
 				logx.V("auto-index %s: %v", e.Path, err)
 			} else {
-				logx.V("auto-index %s: fuzzy index ready", e.Path)
+				logx.V("auto-index %s: index ready", e.Path)
 			}
 		}()
 	})
@@ -229,7 +229,7 @@ type Root struct {
 }
 
 func NewRegistry(dictDirs []string, useCached bool) (*Registry, error) {
-	r := &Registry{dictDirs: dictDirs, useCached: useCached, byID: map[string]*entry{}}
+	r := &Registry{dictDirs: dict.DedupeDirs(dictDirs), useCached: useCached, byID: map[string]*entry{}}
 	if err := r.Rescan(); err != nil {
 		return r, err
 	}
@@ -282,7 +282,9 @@ func (r *Registry) Count() int {
 // (used by the first-run setup flow — no restart needed).
 func (r *Registry) SetDirs(dirs []string) error {
 	r.mu.Lock()
-	r.dictDirs = append([]string(nil), dirs...)
+	// one folder listed twice (a repeat, a trailing slash, a symlink) must not
+	// become two rows, two walks and two lines in config.toml
+	r.dictDirs = dict.DedupeDirs(dirs)
 	r.mu.Unlock()
 	if err := r.Rescan(); err != nil {
 		return err
@@ -423,7 +425,27 @@ func (r *Registry) get(id string) (*entry, error) {
 // ingest builds the text.db (and media.db when full) for one entry and
 // swaps its open view to the upgraded backend. A headwords-only db is
 // deleted and rebuilt when full-text level is requested later.
-func (e *entry) ingest(full bool, level store.Level, progress store.Progress) error {
+// features is the state a dictionary's prepared data can be in. Finding a
+// headword is not among them: it needs no switch, costs ~2 MB, and every
+// backend can do it. These three are the ones that cost real disk, so each is
+// something the user turns on and off.
+type features struct {
+	Contains bool
+	FullText bool
+	Media    bool
+}
+
+// setFeatures brings a dictionary's prepared data to the requested state:
+// rebuilding the index when the wanted indexes differ from the built ones,
+// packing media, or deleting media that is no longer wanted. Rebuilds are the
+// same atomic temp+rename as any ingest, so an interrupted change leaves the
+// previous data intact.
+//
+// Stripping is only ever offered while the SOURCE exists — that is what makes
+// it reversible, and it is why none of this needs a confirmation prompt. A
+// dictionary whose source is gone carries the only copy of its own text, so
+// its features are locked rather than dangerous.
+func (e *entry) setFeatures(want features, progress store.Progress) error {
 	e.ingestMu.Lock()
 	defer e.ingestMu.Unlock()
 
@@ -433,87 +455,79 @@ func (e *entry) ingest(full bool, level store.Level, progress store.Progress) er
 	}
 	name := cur.Meta().Name
 	if store.IsTextDB(e.Path) {
-		// already a prepared dictionary: nothing to (re)build from, since its
-		// source is what an ingest would read.
-		return fmt.Errorf("%s is already a prepared dictionary", name)
+		return fmt.Errorf("%q is a prepared dictionary — its original files are gone, so its data cannot be rebuilt", name)
 	}
-	// claim (or re-use) this source's library folder: <db dir>/<source name>/
 	dir, err := store.ClaimDir(e.Path)
 	if err != nil {
 		return err
 	}
 	textDB := store.TextDBPath(dir)
+	mediaDB := store.MediaDBPath(dir)
 
-	// decide whether the text.db needs (re)building. Never delete the existing
-	// one first: IngestLevel writes a temp and renames over it atomically, so
-	// an interrupted upgrade leaves the old index intact instead of destroying
-	// it (a stopped "enable all" must not corrupt a dictionary).
-	needIngest := false
+	have := features{}
+	if fileExists(textDB) {
+		if m, err := store.ReadMeta(textDB); err == nil {
+			have.FullText = m["ingest_level"] != string(store.LevelHeadwords)
+			have.Contains = m["has_trigram"] == "1"
+		}
+	}
+	have.Media = fileExists(mediaDB)
+
+	plan := store.Plan{FullText: want.FullText, Contains: want.Contains}
 	switch {
 	case !fileExists(textDB):
-		needIngest = true // missing
+		err = e.rebuild(name, textDB, plan, progress)
 	case store.SourceChanged(textDB, e.Path):
-		logx.V("ingest %s: source changed since it was prepared — re-indexing", name)
-		needIngest = true
-	case level == store.LevelText:
-		if cl, _ := store.ReadMetaValue(textDB, "ingest_level"); cl == string(store.LevelHeadwords) {
-			logx.V("ingest %s: upgrading headwords-only db to full text", name)
-			needIngest = true
-		}
+		logx.V("%ssource changed since it was prepared — re-indexing", logx.Dict(name))
+		err = e.rebuild(name, textDB, plan, progress)
+	case have.FullText != want.FullText || have.Contains != want.Contains:
+		err = e.rebuild(name, textDB, plan, progress)
 	}
-	if needIngest {
-		rd, err := dict.OpenReader(e.Path)
-		if err != nil {
+	if err != nil {
+		return err
+	}
+
+	switch {
+	case want.Media && !have.Media:
+		if err := e.packMedia(cur, textDB, mediaDB, progress); err != nil {
 			return err
 		}
-		rep, ierr := store.IngestLevelReport(rd, textDB, level, progress)
-		rd.Close()
-		if ierr != nil {
-			return fmt.Errorf("preparing %q: %w", name, ierr)
+	case !want.Media && have.Media:
+		// the media can be packed again from the source it came from
+		if err := os.Remove(mediaDB); err != nil {
+			return fmt.Errorf("removing packed media for %q: %w", name, err)
 		}
-		logx.V("%s%d entries indexed (%s)", logx.Dict(name), rep.Entries, level)
-		if rep.UnresolvedLinks > 0 {
-			logx.V("%s%d redirects pointed at headwords not present in the source (skipped)",
-				logx.Dict(name), rep.UnresolvedLinks)
-		}
+		logx.V("%spacked media removed", logx.Dict(name))
+		e.dMu.Lock()
+		e.mediaEmpty = false
+		e.dMu.Unlock()
 	}
+	_ = store.WriteInfo(dir)
+	return e.reopen()
+}
 
-	if full {
-		mediaDB := store.MediaDBPath(dir)
-		if _, err := os.Stat(mediaDB); err != nil {
-			src := cur
-			if u, ok := cur.(*upgraded); ok {
-				s, err := u.source() // lazily open the direct backend for resources
-				if err != nil {
-					return err
-				}
-				src = s
-			}
-			lister, _ := src.(dict.ResourceLister)
-			var names []string
-			if lister != nil {
-				names = lister.Resources()
-			}
-			if len(names) > 0 {
-				uuid, err := store.ReadMetaValue(textDB, "dict_uuid")
-				if err != nil {
-					return err
-				}
-				if err := store.IngestMedia(src, names, mediaDB, uuid, progress); err != nil {
-					return err
-				}
-			} else {
-				// nothing to pack (text-only dict, or format has no resources):
-				// remember it so the panel stops offering "pack media".
-				e.dMu.Lock()
-				e.mediaEmpty = true
-				e.dMu.Unlock()
-			}
-		}
+// rebuild writes a fresh index for the requested plan.
+func (e *entry) rebuild(name, textDB string, plan store.Plan, progress store.Progress) error {
+	rd, err := dict.OpenReader(e.Path)
+	if err != nil {
+		return err
 	}
+	rep, ierr := store.IngestPlan(rd, textDB, plan, progress)
+	rd.Close()
+	if ierr != nil {
+		return fmt.Errorf("preparing %q: %w", name, ierr)
+	}
+	logx.V("%s%d entries indexed (fullText=%v contains=%v)", logx.Dict(name), rep.Entries, plan.FullText, plan.Contains)
+	if rep.UnresolvedLinks > 0 {
+		logx.V("%s%d redirects pointed at headwords not present in the source (skipped)",
+			logx.Dict(name), rep.UnresolvedLinks)
+	}
+	return nil
+}
 
-	// swap in the upgraded view (old handle stays open for in-flight
-	// requests; it is garbage collected once idle)
+// reopen swaps in a view of the freshly written data. The old handle stays
+// open for in-flight requests and is collected once idle.
+func (e *entry) reopen() error {
 	fresh, err := openUpgradedOrDirect(e.Path)
 	if err != nil {
 		return err
@@ -522,4 +536,62 @@ func (e *entry) ingest(full bool, level store.Level, progress store.Progress) er
 	e.d, e.err = fresh, nil
 	e.dMu.Unlock()
 	return nil
+}
+
+// packMedia writes the media.db for a dictionary, from whichever backend can
+// enumerate its resources.
+func (e *entry) packMedia(cur dict.Dictionary, textDB, mediaDB string, progress store.Progress) error {
+	src := cur
+	if u, ok := cur.(*upgraded); ok {
+		s, err := u.source() // lazily open the direct backend for resources
+		if err != nil {
+			return err
+		}
+		src = s
+	}
+	lister, _ := src.(dict.ResourceLister)
+	var names []string
+	if lister != nil {
+		names = lister.Resources()
+	}
+	if len(names) == 0 {
+		// nothing to pack (text-only dictionary, or a format with no
+		// resources): remember it so the panel stops offering media.
+		e.dMu.Lock()
+		e.mediaEmpty = true
+		e.dMu.Unlock()
+		return nil
+	}
+	uuid, err := store.ReadMetaValue(textDB, "dict_uuid")
+	if err != nil {
+		return err
+	}
+	return store.IngestMedia(src, names, mediaDB, uuid, progress)
+}
+
+// ensureBaseIndex builds the cheap find-only index when a dictionary has none
+// (D13's silent auto-index). It never strips or rebuilds: a dictionary the
+// user has already enriched must not be quietly demoted.
+func (e *entry) ensureBaseIndex(progress store.Progress) error {
+	e.ingestMu.Lock()
+	defer e.ingestMu.Unlock()
+	if store.IsTextDB(e.Path) {
+		return nil
+	}
+	cur, err := e.open()
+	if err != nil {
+		return err
+	}
+	if textDB, ok := store.PreparedFor(e.Path); ok && fileExists(textDB) {
+		return nil // already prepared, at whatever level the user chose
+	}
+	dir, err := store.ClaimDir(e.Path)
+	if err != nil {
+		return err
+	}
+	if err := e.rebuild(cur.Meta().Name, store.TextDBPath(dir), store.Plan{}, progress); err != nil {
+		return err
+	}
+	_ = store.WriteInfo(dir)
+	return e.reopen()
 }

@@ -40,15 +40,22 @@ button.link{background:none;border:0;color:var(--accent);font-size:13px;
 input:focus{border-color:var(--focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 25%,transparent)}
 #msg{min-height:1.5em;font-size:13.5px}
 #msg.ok{color:var(--ok)}#msg.err{color:var(--err)}
-button{font-size:15px;background:var(--accent);color:#fff;border:none;border-radius:8px;
-  padding:.5em 1.2em;cursor:pointer;margin-top:.618em}
+/* .btn lets an anchor wear the button shape without pretending to be one:
+   navigation stays a link (⌘/middle-click, right-click, status bar, the "link"
+   role), it just looks like its neighbour. */
+.btn,button{font-size:15px;background:var(--accent);color:#fff;border:none;
+  border-radius:8px;padding:.5em 1.2em;cursor:pointer;margin-top:.618em;
+  display:inline-block;text-decoration:none;line-height:1.2}
 button:disabled{opacity:.45;cursor:default}
-button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+#save+#cancel{margin-left:.5em}
+.warn{font-size:12.5px;color:var(--err);margin:.2em 0}
 .formats{color:var(--faint);font-size:12px;margin-top:1em}
 .sep{border:none;border-top:1px solid var(--line);margin:1.618em 0 1em}
 h2{margin:0 0 .2em;font-size:16px}
 label.keep{display:flex;gap:.5em;align-items:flex-start;font-size:13.5px;color:var(--soft);margin-top:.618em}
 label.keep input{width:auto;margin:.25em 0 0}
+label.keep em{font-style:normal;color:var(--faint);font-size:12.5px}
 #lib{max-height:38vh;overflow:auto;margin:.618em 0 0;border:1px solid var(--line);border-radius:8px}
 .row{display:flex;gap:.5em;align-items:baseline;padding:.38em .618em;border-bottom:1px solid var(--line);font-size:13px}
 .row:last-child{border-bottom:none}
@@ -66,26 +73,30 @@ label.keep input{width:auto;margin:.25em 0 0}
 <body>
 <div class="card">
 <h1><b>gonow</b>·dict — set up</h1>
-<p>Your dictionary folder <code>{{DIR}}</code> {{REASON}}.</p>
+<p>{{INTRO}}</p>
 
 <h2>Point gonow at your dictionaries</h2>
 <p>Paste the full path of a folder that holds your dictionary files (subfolders are scanned too).
    You can add more than one — an external drive, a shared folder:</p>
 <div id="rows"></div>
 <button type="button" id="addRow" class="link">+ add another folder</button>
-<div id="msg"></div>
-<label class="keep hidden" id="keepWrap"><input type="checkbox" id="keep">
-  <span>Also keep my <b id="keepN">0</b> previously imported dictionaries</span></label>
-<button id="save" disabled>Use this folder</button>
+<div id="origin" class="warn hidden"></div>
 
 <div id="libSection" class="hidden">
   <hr class="sep">
   <h2>Previously imported dictionaries</h2>
-  <p><b id="libN">0</b> ready to use — prepared earlier and kept in <code id="libDir"></code>.
+  <p><b id="libN">0</b> prepared earlier and kept in <code id="libDir"></code>.
      They work right now, even without their original files.</p>
+  <label class="keep" id="keepWrap"><input type="checkbox" id="keep" checked>
+    <span>Keep using them
+    <em id="keepHint">— unchecking only hides them; nothing is deleted</em></span></label>
   <div id="lib"></div>
-  <button id="useLib" class="ghost">Use these dictionaries</button>
 </div>
+
+<hr class="sep">
+<div id="msg"></div>
+<button id="save" disabled>Use this folder</button>
+<a id="cancel" class="btn ghost hidden" href="/">Back to dictionaries</a>
 
 <p class="formats">Supported: MDict (.mdx + .mdd) · StarDict (.ifo) · Aard2 (.slob) · Lingvo DSL (.dsl, .dsl.dz) · Babylon (.bgl) · prepared dictionary folders</p>
 </div>
@@ -101,13 +112,13 @@ const el=(tag,cls,txt)=>{const e=document.createElement(tag);if(cls)e.className=
 // Previously imported dictionaries: listed for information only. Nothing is
 // enrolled until the user clicks a Use button (that click is the consent, and
 // it is remembered — this page only appears while no dictionaries are in use).
+let inUse=false; // are any dictionaries being served right now?
 async function loadLibrary(){
   let j;
   try{ j=await (await fetch("/api/library")).json() }catch(e){ return }
   if(!j||!j.count)return;
   $("libDir").textContent=j.dir;
   $("libN").textContent=fmtN(j.count);
-  $("keepN").textContent=fmtN(j.count);
   const box=$("lib");
   for(const d of j.entries){
     const row=el("div","row");
@@ -120,14 +131,16 @@ async function loadLibrary(){
     box.appendChild(row);
   }
   $("libSection").classList.remove("hidden");
-  $("keepWrap").classList.remove("hidden");
-}
-
-async function useLibrary(){
-  $("useLib").disabled=true;
-  const j=await (await fetch("/api/setup?useCached=1&save=1")).json();
-  if(j.error){$("useLib").disabled=false;alert(j.error);return}
-  location.href="/";
+  /* Default ON. These dictionaries exist because the user prepared them, and
+     the box only decides whether the ones this folder does NOT account for
+     (source deleted, moved, or on another drive) stay reachable — prepared
+     dictionaries whose sources are in the folder keep working either way.
+     Checking adds nothing but visibility and is reversible; leaving it off
+     silently hides working dictionaries whose data is sitting on disk. Once
+     the library is in use (or deliberately not), mirror that instead. */
+  $("keep").checked=j.useCached||!inUse;
+  $("keep").addEventListener("change",validateAll);
+  validateAll();
 }
 
 /* One row per folder. Each validates itself as you type (its own status sits
@@ -173,31 +186,84 @@ async function validateAll(){
     st.className="st ok";st.textContent="✓ "+j.found.toLocaleString()+" found";
     total+=j.found;
   }));
-  const msg=$("msg");
-  lastOK=total>0;
-  if(!checked){msg.textContent="";msg.className=""}
-  else if(lastOK){
-    msg.className="ok";
-    msg.textContent="✓ "+total.toLocaleString()+" dictionar"+(total===1?"y":"ies")+
-      (checked>1?" in "+checked+" folders":"");
-  }else{msg.className="err";msg.textContent="✕ No dictionaries found"}
-  $("save").disabled=!lastOK;
-  $("save").textContent=checked>1?"Use these folders":"Use this folder";
+  // folders may overlap, so the honest total is the server's deduplicated
+  // count, not the sum of the rows
+  const list=paths();
+  if(list.length>1&&total>0){
+    try{
+      const q=list.map(p=>"path="+encodeURIComponent(p)).join("&");
+      const agg=await (await fetch("/api/setup?"+q)).json();
+      if(typeof agg.found==="number")total=agg.found;
+    }catch(e){}
+  }
+  syncAct(total,checked,bad);
 }
 
+/* The footer speaks for the whole page: one number covering both sources, one
+   button naming what it will actually do. */
+function syncAct(total,checked,bad){
+  const keepOn=libraryOffered()&&$("keep").checked,lib=keepOn?libraryCount():0;
+  lastOK=total>0;
+  const msg=$("msg");
+  if(!checked&&!keepOn){msg.textContent="";msg.className=""}
+  else if(total>0||lib>0){
+    msg.className="ok";
+    const parts=[];
+    if(total>0)parts.push(total.toLocaleString()+" dictionar"+(total===1?"y":"ies")+
+      (checked>1?" in "+checked+" folders":""));
+    if(lib>0)parts.push(lib.toLocaleString()+" previously imported");
+    msg.textContent="✓ "+parts.join(" + ");
+  }else{msg.className="err";msg.textContent="✕ No dictionaries found"}
+  // either source is enough to proceed
+  $("save").disabled=!(total>0||lib>0);
+  // name the deed: the folders when there are any (or when they are all there
+  // is), the library only when it is the sole source chosen
+  $("save").textContent=(total>0||!keepOn)?(checked>1?"Use these folders":"Use this folder")
+                                          :"Use these dictionaries";
+}
+
+/* One act for both sources. Folders and the library are not alternatives —
+   they are two dimensions of one library — so the page commits once. A second
+   "use these dictionaries" button was not just redundant: it posted without
+   the paths, silently discarding whatever folders had been typed above it. */
 async function save(){
   const q=paths().map(p=>"path="+encodeURIComponent(p)).join("&");
-  if(!q)return;
-  const keep=$("keep").checked?"&useCached=1":"";
-  const j=await (await fetch("/api/setup?"+q+"&save=1"+keep)).json();
+  const keepOn=libraryOffered()&&$("keep").checked;
+  const keep=libraryOffered()?(keepOn?"&useCached=1":"&useCached=0"):"";
+  if(!q&&!keepOn)return;
+  const url=q?("/api/setup?"+q+"&save=1"+keep)
+             :"/api/setup?useCached=1&save=1"; // library alone: no folder to save
+  const j=await (await fetch(url)).json();
   if(j.error){$("msg").className="err";$("msg").textContent="✕ "+j.error;return}
   if(j.saved)location.href="/";
 }
+function libraryOffered(){return !$("libSection").classList.contains("hidden")}
+function libraryCount(){return parseInt($("libN").textContent.replace(/\D/g,""),10)||0}
 $("addRow").addEventListener("click",()=>{addRow("").focus()});
 $("save").addEventListener("click",save);
-addRow("").focus();
-$("useLib").addEventListener("click",useLibrary);
-loadLibrary();
+
+/* Pre-fill with the folders in use: this page is also the folder EDITOR, not
+   only the first-run chooser, so it must show what is configured now. When a
+   flag or an environment variable set DICT_DIR, saving to config.toml cannot
+   take effect — say so instead of silently doing nothing next launch. */
+async function start(){
+  let cfg=null;
+  try{ cfg=await (await fetch("/api/config")).json() }catch(e){}
+  inUse=!!(cfg&&cfg.total>0);
+  const dirs=(cfg&&cfg.roots||[]).map(r=>r.path);
+  if(dirs.length)dirs.forEach(d=>addRow(d)); else addRow("");
+  if(cfg&&cfg.total>0)$("cancel").classList.remove("hidden");
+  if(cfg&&cfg.dictDirEditable===false){
+    const how=cfg.dictDirOrigin==="flag"?"the --dict-dir command-line flag":"the DICT_DIR environment variable";
+    $("origin").textContent="⚠ These folders come from "+how+
+      ", which overrides the config file — changes saved here take effect only once that is removed.";
+    $("origin").classList.remove("hidden");
+  }
+  if(dirs.length)validateAll(); else rowInputs()[0].focus();
+}
+// config first: the library checkbox's default depends on whether anything is
+// already in use, which only /api/config knows
+start().then(loadLibrary);
 </script>
 </body>
 </html>

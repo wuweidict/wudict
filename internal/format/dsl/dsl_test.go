@@ -239,8 +239,9 @@ func TestResourceZip(t *testing.T) {
 	if _, _, err := d.Resource("../evil"); err == nil {
 		t.Error("traversal must be rejected")
 	}
-	// caps: DSL auto-ingests, so contains/fts must be live
-	if c := d.Caps(); !c.Contains || !c.FTS {
+	// caps: DSL prepares itself, so full-text is live; contains is opt-in
+	// (a trigram index costs as much as the rest of the index put together)
+	if c := d.Caps(); c.Contains || !c.FTS {
 		t.Errorf("caps: %+v", c)
 	}
 	if res, err := d.Exact("corazon", 5); err != nil || len(res) != 1 {

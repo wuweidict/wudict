@@ -7,14 +7,14 @@ once.
 
 **Supported formats**
 
-| Format | Files | Notes |
-|---|---|---|
-| MDict | `.mdx` + `.mdd` | companion `NAME.mdd`, `NAME.1.mdd`, … resource archives; `.spx` audio via `speexdec` |
+| Format | Files                               | Notes |
+|---|-------------------------------------|---|
+| MDict | `.mdx` + `.mdd`                     | companion `NAME.mdd`, `NAME.1.mdd`, … resource archives; `.spx` audio via `speexdec` |
 | StarDict | `.ifo` + `.idx(.gz)` + `.dict(.dz)` | `.syn` synonyms, `res/` folder or `res.zip` resources |
-| Aard2 | `.slob` | zlib/bz2/lzma2; embedded images/audio/css |
-| Lingvo DSL | `.dsl`, `.dsl.dz` | UTF-8/16/32 auto-detected; `NAME.dsl.files.zip` resources; indexed automatically on first open |
-| Babylon | `.bgl` | gzip block stream; source/target charset auto-detected (Latin / Cyrillic / CJK code pages); embedded images; indexed automatically on first open |
-| gonow | prepared folder (`text.db`) | this app's own portable format (see *Sharing*, below) |
+| Aard2 | `.slob`                             | zlib/bz2/lzma2; embedded images/audio/css |
+| Lingvo DSL | `.dsl`, `.dsl.dz`                   | UTF-8/16/32 auto-detected; `NAME.dsl.files.zip` resources; indexed automatically on first open |
+| Babylon | `.bgl`                              | gzip block stream; source/target charset auto-detected (Latin / Cyrillic / CJK code pages); embedded images; indexed automatically on first open |
+| gonow | cache folder (`text.db`)            | this app's own portable format (see *Sharing*, below) |
 
 ## Quick start
 
@@ -36,13 +36,17 @@ once.
 | **full-text** | search inside article text, ranked by relevance | yes |
 
 Every dictionary works immediately for starts-with/exact lookups using
-its native index. **The *contains* index is prepared automatically** the
-first time you search a dictionary — a small headword index builds
-quietly in the background, so *contains* is ready on your next query
-(disable with `AUTO_INDEX=off`). **Full-text search** (searching inside
-article text) is the one deliberate step: click *full-text search* on a
-dictionary (or *⚡ index all* in the ☰ panel), or run
-`gonow-dict ingest <file-or-folder>`.
+its native index. The first time you search one, **a small headword index
+is prepared in the background** — a couple of MB — so accent-insensitive
+lookups (*corazon* → *corazón*) work from the next query on (disable with
+`AUTO_INDEX=off`).
+
+The two heavier indexes stay per-dictionary choices, because they cost
+real disk: ***contains*** (substring search) and ***full-text*** (searching
+inside article text). Switch either on — and off again — in the ☰ panel,
+where each shows its actual size; *⚡ index all* adds full-text everywhere
+at once, and `gonow-dict ingest [-contains] <file-or-folder>` does the
+same from the command line.
 
 Results stream in as each dictionary responds — the top one opens
 automatically. In the ☰ panel you can **reorder** dictionaries (drag the
@@ -86,7 +90,8 @@ A commented `config.toml` is generated next to the binary on first run
 | `--verbose` | `VERBOSE=1` | quiet |
 | `--speexdec` | `SPEEXDEC` | found on `PATH` |
 | `--use-cached` | `USE_CACHED` | off |
-| — | `AUTO_INDEX` | `fuzzy` (`off` to disable) |
+| — | `AUTO_INDEX` | `on` (`off` to disable) |
+| `--no-compress` | `NO_COMPRESS` | off (article text compressed) |
 
 ### Several dictionary folders
 
@@ -149,8 +154,8 @@ files) are moved into folders automatically on startup — a rename, never
 a re-index, and nothing is deleted.
 
 Your own library is used only if you say so. On first run, when the
-dictionary folder is empty, the setup page lists everything already
-prepared under *Previously imported dictionaries* with a **Use these
+dictionary folder is empty, the setup page lists previously cached
+sources under *Previously imported dictionaries* with a **Use these
 dictionaries** button; that choice is remembered (`USE_CACHED = "1"`, or
 `--use-cached`). Your dictionary folder must not be the db folder —
 gonow-dict refuses to start if they are the same.
@@ -159,12 +164,41 @@ The ☰ panel shows each dictionary's provenance: the source file it came
 from, and — expanded — the library folder holding its prepared files.
 Click any path to copy.
 
+At the foot of the panel, **Folders & configuration** shows which folders
+are being scanned (with per-folder counts), where prepared dictionaries
+live, and which `config.toml` is in effect — with *Reveal in Finder* /
+*Show in File Explorer* / *Open Containing Folder*, depending on your
+system. **Edit folders…** opens the folder editor (also at `/setup`) at
+any time. If a folder came from `--dict-dir` or `DICT_DIR`, the editor
+says so: saving to the config file cannot override them.
+
+## Disk use
+
+A prepared dictionary is usually **smaller than the file it came from**:
+article text is compressed, and only the indexes you ask for are built.
+
+| what | cost (40k-entry dictionary, 45.6 MB source) |
+|---|---|
+| finding a headword — exact, prefix, accent-insensitive | ~2 MB, always on |
+| full-text search | ~12 MB, one click |
+| contains (substring) | ~2.4 MB, one click |
+| packed media | as large as the images/audio |
+
+The ☰ panel shows these as switches per dictionary, with their real sizes —
+click to add, click again to remove. Removing is offered only while the
+original file is still on disk, since that is what makes it reversible; a
+dictionary whose source is gone shows its switches locked, because the
+prepared data is then the only copy.
+
+`NO_COMPRESS = "1"` (or `--no-compress`) stores article text verbatim:
+roughly 3x larger databases, marginally faster reads.
+
 ## Speex audio (.spx)
 
-Browsers cannot play Speex. When `speexdec` is installed
-(`brew install speex` / `apt install speex`), gonow-dict transcodes
-`.spx` resources to WAV on the fly and caches the result. Without it,
-spx audio is unavailable (everything else works).
+Browsers cannot play Speex. gonow internally transcodes
+`.spx` resources to WAV on the fly and caches the result. 
+If gonow was built without the internal speex decoder then 
+the external `speexdec` utility can be used (for mac: `brew install speex`, linux: `apt install speex`, etc).
 
 ## Build from source
 
@@ -178,8 +212,10 @@ make cross          # all release platforms (pure-Go sqlite, no C toolchain)
 make help           # every available target
 ```
 
-Releases are built by the GitHub workflow (`.github/workflows/build-release.yml`)
-for macOS (arm64/amd64), Linux (amd64/arm64/armv7/armv6) and Windows
+CI builts are generated with github actions — `.github/workflows/build-release.yml` 
+for the cgo flavour with internal speex decoder and optimized sqlite3 and 
+`.github/workflows/build-release.yml` for purego builds.
+Supported OS's: macOS (arm64/amd64), Linux (amd64/arm64/armv7/armv6) and Windows
 (amd64/arm64).
 
 ## License
