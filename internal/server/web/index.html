@@ -917,6 +917,7 @@ document.addEventListener("keydown",e=>{
 function lookupWord(w){
   $("q").value=w.trim().split(/[;.,:{}()\[\]\s]/)[0].replace(/\d+$/,"");
   if($("mode").value==="fts")$("mode").value="prefix";
+  navRecord="push"; // following a cross-reference IS navigation — Back must return here
   doSearch();
 }
 /* One reused <audio>, kept referenced so the browser can't garbage-collect
@@ -990,7 +991,15 @@ addEventListener("scroll",()=>{
   prevScroll=cur;
 });
 
-/* shareable links: ?q=…&mode=…&dict=… (kept in sync on search) */
+/* Shareable links AND working browser navigation: ?q=…&mode=…&dict=…
+   Typing and navigating must record history differently. `doSearch` runs on a
+   300 ms debounce while you type, so pushing there would put "c", "ca", "cas",
+   "casa" on the stack and Back would walk letter by letter — which is why this
+   used replaceState for everything. Now:
+     typing            → replaceState (one entry for a session of typing)
+     following a link  → pushState    (one entry per entry visited)
+     Back/Forward      → restore from the URL, recording nothing */
+let navRecord="replace"; // how the NEXT doSearch should record itself
 function applyURL(){
   const p=new URLSearchParams(location.search);
   if(p.get("theme")){localStorage.setItem("gonow_theme",p.get("theme"));applyTheme(p.get("theme"))}
@@ -1000,14 +1009,37 @@ function applyURL(){
 }
 const _doSearch=doSearch;
 doSearch=function(ev){
+  const record=navRecord;
+  navRecord="replace"; // one-shot: only the action that asked for it pushes
   const r=_doSearch(ev);
   const q=$("q").value.trim();
-  if(q){
-    const p=new URLSearchParams({q,mode:$("mode").value,dict:$("dict").value});
-    history.replaceState(null,"","?"+p.toString());
+  if(q&&record!=="none"){
+    const url="?"+new URLSearchParams({q,mode:$("mode").value,dict:$("dict").value}).toString();
+    // clicking the same word twice must not stack identical entries
+    if(record==="push"&&url!==location.search)history.pushState(null,"",url);
+    else history.replaceState(null,"",url);
   }
   return r;
 };
+
+/* Back/Forward: put the state the URL describes back on screen. Nothing is
+   recorded — the browser already moved the cursor within the stack. */
+window.addEventListener("popstate",()=>{
+  const p=new URLSearchParams(location.search);
+  if(p.get("mode"))$("mode").value=p.get("mode");
+  if(p.get("dict"))$("dict").value=p.get("dict");
+  const q=p.get("q")||"";
+  $("q").value=q;
+  if(!q){ // back to the empty start: leave nothing stale on screen
+    if(searchAC)searchAC.abort();
+    $("out").innerHTML="";
+    lastQuery="";
+    setStatus("");
+    return;
+  }
+  navRecord="none";
+  doSearch();
+});
 $("frm").removeEventListener("submit",_doSearch);
 $("frm").addEventListener("submit",e=>doSearch(e));
 
