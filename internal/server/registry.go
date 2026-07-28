@@ -14,9 +14,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
@@ -34,19 +36,64 @@ type upgraded struct {
 	*store.Store
 	srcPath string
 
-	srcOnce sync.Once
-	src     dict.Dictionary
-	srcErr  error
+	// The source handle is opened only when a resource misses media.db — but
+	// it is a full direct backend, so it holds the same ~350 bytes per headword
+	// as any preview (docs/PERF.md §3.1). It is therefore evictable on the same
+	// terms: no sync.Once, a recorded weight and last-use, and a release path.
+	srcMu  sync.Mutex
+	src    dict.Dictionary
+	srcErr error
+	srcW   atomic.Int64
+	srcUse atomic.Int64
 }
 
 // source lazily opens the direct backend for resource fallback.
 func (u *upgraded) source() (dict.Dictionary, error) {
-	u.srcOnce.Do(func() {
-		if u.src == nil && u.srcErr == nil {
-			u.src, u.srcErr = dict.Open(u.srcPath)
-		}
-	})
+	u.srcUse.Store(time.Now().UnixNano())
+	u.srcMu.Lock()
+	defer u.srcMu.Unlock()
+	if u.src != nil || u.srcErr != nil {
+		return u.src, u.srcErr
+	}
+	u.src, u.srcErr = dict.Open(u.srcPath)
+	if u.src != nil {
+		u.srcW.Store(previewWeight(u.src, u.src.Meta()))
+	}
 	return u.src, u.srcErr
+}
+
+// srcWeight, srcLastUse and releaseSource let the registry's janitor treat this
+// handle exactly like any other preview backend.
+func (u *upgraded) srcWeight() int64  { return u.srcW.Load() }
+func (u *upgraded) srcLastUse() int64 { return u.srcUse.Load() }
+
+// releaseSource closes the resource-fallback handle. The dictionary keeps
+// working — text comes from SQLite — and the handle reopens if another
+// resource misses.
+func (u *upgraded) releaseSource() int64 {
+	u.srcMu.Lock()
+	d, w := u.src, u.srcW.Load()
+	if d == nil || w == 0 {
+		u.srcMu.Unlock()
+		return 0
+	}
+	u.src, u.srcErr = nil, nil
+	u.srcW.Store(0)
+	u.srcMu.Unlock()
+	time.AfterFunc(closeGrace, func() {
+		d.Close()
+		debug.FreeOSMemory()
+	})
+	logx.V("released resource handle for %s (~%d MB)", filepath.Base(u.srcPath), w>>20)
+	return w
+}
+
+// evictableSource is a view that holds a releasable direct backend alongside
+// its prepared database.
+type evictableSource interface {
+	srcWeight() int64
+	srcLastUse() int64
+	releaseSource() int64
 }
 
 func (u *upgraded) Meta() dict.Meta {
@@ -70,25 +117,61 @@ func (u *upgraded) Resource(name string) (io.ReadCloser, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	u.srcUse.Store(time.Now().UnixNano())
 	return src.Resource(name)
 }
 
 func (u *upgraded) Close() error {
-	if u.src != nil {
-		u.src.Close()
+	u.srcMu.Lock()
+	src := u.src
+	u.src = nil
+	u.srcMu.Unlock()
+	if src != nil {
+		src.Close()
 	}
 	return u.Store.Close() // Store.Close also closes its attached media.db
 }
+
+// Preparing a dictionary costs a saturated core and a few hundred bytes of RAM
+// per headword (docs/PERF.md §3). Nothing bounded that: `maybeAutoIndex` fired
+// one goroutine per dictionary, so a single "all dictionaries" search over a
+// 100-dictionary library started 100 concurrent ingests — measured at 500 MB
+// and 424 % CPU for FOUR dictionaries, extrapolating to the reported 18 GB and
+// 1000 % CPU for the full corpus.
+//
+// Background indexing now flows through indexLimit (INDEX_WORKERS, default 1).
+// Work the user asked for explicitly gets its own single slot so a click never
+// waits behind a long background job; worst case is INDEX_WORKERS + 1.
+var (
+	indexLimit = make(chan struct{}, 1)
+	frontLimit = make(chan struct{}, 1)
+)
+
+// SetIndexWorkers sizes the background indexing limiter (config INDEX_WORKERS).
+func SetIndexWorkers(n int) {
+	if n < 1 {
+		n = 1
+	}
+	indexLimit = make(chan struct{}, n)
+}
+
+// acquire blocks until a slot is free, honouring cancellation.
+func acquire(sem chan struct{}) { sem <- struct{}{} }
+func release(sem chan struct{}) { <-sem }
 
 // entry is one discovered dictionary, opened lazily.
 type entry struct {
 	ID   string
 	Path string
 
-	once sync.Once
-	dMu  sync.RWMutex
-	d    dict.Dictionary
-	err  error
+	openMu sync.Mutex // serialises opening; NOT sync.Once — an evicted
+	// backend must be openable again
+	dMu sync.RWMutex
+	d   dict.Dictionary
+	err error
+
+	lastUse atomic.Int64 // unix nanos, for LRU eviction
+	weight  atomic.Int64 // estimated bytes held by a preview backend (0 if cheap)
 
 	mediaEmpty bool // a full ingest found no packable resources (dMu-guarded)
 
@@ -112,9 +195,8 @@ func (e *entry) noPackableMedia() bool {
 func (e *entry) maybeAutoIndex() {
 	e.autoOnce.Do(func() {
 		go func() {
-			if _, err := e.open(); err != nil {
-				return // unopenable: nothing to index
-			}
+			acquire(indexLimit) // at most INDEX_WORKERS of these run at once
+			defer release(indexLimit)
 			// ensureBaseIndex is a no-op when this dictionary is already
 			// prepared, at whatever level its owner chose
 			if err := e.ensureBaseIndex(nil); err != nil {
@@ -129,23 +211,91 @@ func (e *entry) maybeAutoIndex() {
 // open opens the source backend and, when a cached text.db (and
 // media.db) exists for it, wraps it into the upgraded view.
 func (e *entry) open() (dict.Dictionary, error) {
-	e.once.Do(func() {
-		start := time.Now()
-		d, err := openUpgradedOrDirect(e.Path)
-		e.dMu.Lock()
-		e.d, e.err = d, err
-		e.dMu.Unlock()
-		if err != nil {
-			logx.V("open %s: FAILED: %v", e.Path, err)
-		} else {
-			m := d.Meta()
-			logx.V("open %s [%s] %d entries contains=%v (%s)",
-				m.Name, m.Format, m.EntryCount, d.Caps().Contains, time.Since(start).Round(time.Millisecond))
-		}
-	})
+	e.lastUse.Store(time.Now().UnixNano())
 	e.dMu.RLock()
-	defer e.dMu.RUnlock()
-	return e.d, e.err
+	d, err := e.d, e.err
+	e.dMu.RUnlock()
+	if d != nil || err != nil {
+		return d, err
+	}
+	// Not sync.Once: a preview backend can be evicted to reclaim its headword
+	// map, and must then be openable again. Double-checked under openMu so a
+	// burst of concurrent searches still opens the file only once.
+	e.openMu.Lock()
+	defer e.openMu.Unlock()
+	e.dMu.RLock()
+	d, err = e.d, e.err
+	e.dMu.RUnlock()
+	if d != nil || err != nil {
+		return d, err
+	}
+	start := time.Now()
+	d, err = openUpgradedOrDirect(e.Path)
+	e.dMu.Lock()
+	e.d, e.err = d, err
+	e.dMu.Unlock()
+	if err != nil {
+		logx.V("open %s: FAILED: %v", e.Path, err)
+		return d, err
+	}
+	m := d.Meta()
+	e.weight.Store(previewWeight(d, m))
+	logx.V("open %s [%s] %d entries contains=%v (%s)",
+		m.Name, m.Format, m.EntryCount, d.Caps().Contains, time.Since(start).Round(time.Millisecond))
+	return d, err
+}
+
+// previewWeight estimates the resident cost of an open backend. A PREPARED
+// dictionary answers from SQLite and costs a few MB whatever its size, so it
+// weighs nothing here. A direct ("preview", D15) backend builds an in-memory
+// headword index on first use — measured at 300–500 bytes per headword across
+// MDX and SLOB (docs/PERF.md §3.1) — and that is what eviction reclaims.
+func previewWeight(d dict.Dictionary, m dict.Meta) int64 {
+	if _, ok := d.(storeBacked); ok {
+		return 0 // answers from SQLite: the index lives on disk, not in RAM
+	}
+	if m.EntryCount <= 0 {
+		return 0
+	}
+	return int64(m.EntryCount) * previewBytesPerEntry
+}
+
+// storeBacked matches anything answering from a prepared database — the
+// `upgraded`/`native` wrappers, and the formats that embed a *store.Store
+// directly because they have no native index (DSL, BGL). Type-switching on the
+// wrappers alone missed those, and a self-prepared dictionary would have been
+// counted as if it held a headword map in RAM.
+type storeBacked interface{ SourcePath() string }
+
+// previewBytesPerEntry is the measured per-headword cost of a direct backend's
+// in-memory index (docs/PERF.md §3.1: 290–570 B across formats; 350 is the
+// middle of the measured range and errs neither way).
+const previewBytesPerEntry = 350
+
+// evict drops this entry's open backend so its memory can be reclaimed. It
+// refuses while the dictionary is being prepared, and closes after a grace so
+// requests already reading from it finish. The next open reopens the file.
+func (e *entry) evict() int64 {
+	if !e.ingestMu.TryLock() {
+		return 0 // being prepared right now: leave it alone
+	}
+	defer e.ingestMu.Unlock()
+	e.dMu.Lock()
+	d := e.d
+	w := e.weight.Load()
+	if d == nil || w == 0 {
+		e.dMu.Unlock()
+		return 0
+	}
+	e.d, e.err = nil, nil
+	e.weight.Store(0)
+	e.dMu.Unlock()
+	time.AfterFunc(closeGrace, func() {
+		d.Close()
+		debug.FreeOSMemory()
+	})
+	logx.V("evicted preview backend %s (~%d MB)", filepath.Base(e.Path), w>>20)
+	return w
 }
 
 // native is a standalone naturalized dictionary: a .text.db whose foreign
@@ -217,6 +367,11 @@ type Registry struct {
 	byID      map[string]*entry
 	fromLib   int    // how many entries came from the library, not a dict folder
 	roots     []Root // per-folder status, for the startup summary and setup page
+
+	// previewBudget caps the memory unprepared dictionaries may hold open
+	// (PREVIEW_MEMORY; 0 = unlimited). Prepared ones answer from disk and are
+	// never evicted — there would be nothing to reclaim.
+	previewBudget int64
 }
 
 // Root is one dictionary folder and what it contributed. A folder that is
@@ -235,6 +390,7 @@ func NewRegistry(dictDirs []string, useCached bool) (*Registry, error) {
 		return r, err
 	}
 	r.Warm()
+	r.startJanitor()
 	return r, nil
 }
 
@@ -385,16 +541,23 @@ func pathID(path string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-// Warm opens every discovered dictionary in the background (bounded
-// concurrency) so the first search does not pay the open cost on the
-// request path. Opens are memoized (sync.Once); ingested dictionaries
-// open cheaply, only non-ingested direct backends do real work here.
+// Warm pre-opens dictionaries in the background so the first search does not
+// pay the open cost. It opens only the ones that are PREPARED — a SQLite handle
+// costing a few MB — and deliberately leaves unprepared ones alone: opening
+// those builds an in-memory headword index (measured 300–500 B per headword),
+// and doing it for a whole library was several GB of resident memory for
+// dictionaries nobody had searched yet (docs/PERF.md M2). An unprepared
+// dictionary is opened when something actually needs it: a search, or the
+// background indexer that is about to replace it with a prepared one.
 func (r *Registry) Warm() {
 	entries := r.all()
 	go func() {
 		sem := make(chan struct{}, 4)
 		var wg sync.WaitGroup
 		for _, e := range entries {
+			if _, prepared := preparedFor(e.Path); !prepared {
+				continue
+			}
 			wg.Add(1)
 			sem <- struct{}{}
 			go func(e *entry) {
@@ -405,6 +568,121 @@ func (r *Registry) Warm() {
 		}
 		wg.Wait()
 	}()
+}
+
+// Preview backends are bounded by memory, not by count: dictionaries differ by
+// two orders of magnitude in headwords, so "keep 8 open" would mean 50 MB or
+// 3 GB depending on which 8 (docs/PERF.md §1).
+//
+// Eviction runs on a janitor, never on the request path, and never touches a
+// backend used in the last minEvictIdle. That is deliberate: a search that
+// fans out across a hundred dictionaries would otherwise evict the very
+// backends it is about to use again, and each reopen costs 0.2–1.1 s. So the
+// budget is enforced between bursts of activity, not during one.
+const (
+	minEvictIdle  = 45 * time.Second
+	janitorPeriod = 20 * time.Second
+)
+
+// SetPreviewBudget sets how much memory unprepared ("preview") dictionaries may
+// hold open (config PREVIEW_MEMORY; 0 = unlimited).
+func (r *Registry) SetPreviewBudget(bytes int64) {
+	r.mu.Lock()
+	r.previewBudget = bytes
+	r.mu.Unlock()
+}
+
+// reclaimable is one thing the janitor can close: an unprepared dictionary's
+// whole backend, or a prepared one's resource-fallback handle. Both hold an
+// in-memory headword index; both reopen on demand; they differ only in what
+// stops working meanwhile (everything, versus unpacked media).
+type reclaimable struct {
+	used  int64
+	bytes int64
+	free  func() int64
+	what  string
+}
+
+// reclaimables lists every releasable handle with its weight and last use.
+func (r *Registry) reclaimables() []reclaimable {
+	var out []reclaimable
+	for _, e := range r.all() {
+		if w := e.weight.Load(); w > 0 {
+			out = append(out, reclaimable{e.lastUse.Load(), w, e.evict, "backend"})
+		}
+		e.dMu.RLock()
+		d := e.d
+		e.dMu.RUnlock()
+		if es, ok := d.(evictableSource); ok {
+			if w := es.srcWeight(); w > 0 {
+				out = append(out, reclaimable{es.srcLastUse(), w, es.releaseSource, "resource handle"})
+			}
+		}
+	}
+	return out
+}
+
+// previewBytes totals what open direct backends currently hold, including the
+// resource-fallback handles of prepared dictionaries.
+func (r *Registry) previewBytes() int64 {
+	var n int64
+	for _, c := range r.reclaimables() {
+		n += c.bytes
+	}
+	return n
+}
+
+// sweep evicts least-recently-used preview backends until the total is back
+// under budget. Returns how many bytes it reclaimed.
+func (r *Registry) sweep() int64 {
+	r.mu.RLock()
+	budget := r.previewBudget
+	r.mu.RUnlock()
+	if budget <= 0 {
+		return 0
+	}
+	var total int64
+	var idle []reclaimable
+	cutoff := time.Now().Add(-minEvictIdle).UnixNano()
+	for _, c := range r.reclaimables() {
+		total += c.bytes
+		if c.used < cutoff {
+			idle = append(idle, c)
+		}
+	}
+	if total <= budget || len(idle) == 0 {
+		return 0
+	}
+	sort.Slice(idle, func(i, j int) bool { return idle[i].used < idle[j].used }) // oldest first
+	var freed int64
+	for _, c := range idle {
+		if total-freed <= budget {
+			break
+		}
+		freed += c.free()
+	}
+	if freed > 0 {
+		logx.V("preview budget: reclaimed %d MB (was %d MB, budget %d MB)",
+			freed>>20, total>>20, budget>>20)
+	}
+	return freed
+}
+
+// startJanitor keeps preview memory under the budget in the background.
+func (r *Registry) startJanitor() {
+	go func() {
+		for range time.Tick(janitorPeriod) {
+			r.sweep()
+		}
+	}()
+}
+
+// preparedFor reports whether a registry entry already has prepared data.
+func preparedFor(path string) (string, bool) {
+	if store.IsTextDB(path) {
+		return path, true
+	}
+	return store.PreparedFor(path)
 }
 
 func (r *Registry) all() []*entry {
@@ -447,6 +725,8 @@ type features struct {
 // dictionary whose source is gone carries the only copy of its own text, so
 // its features are locked rather than dangerous.
 func (e *entry) setFeatures(want features, progress store.Progress) error {
+	acquire(frontLimit) // the user is waiting: never queue behind background work
+	defer release(frontLimit)
 	e.ingestMu.Lock()
 	defer e.ingestMu.Unlock()
 
@@ -526,18 +806,39 @@ func (e *entry) rebuild(name, textDB string, plan store.Plan, progress store.Pro
 	return nil
 }
 
-// reopen swaps in a view of the freshly written data. The old handle stays
-// open for in-flight requests and is collected once idle.
+// reopen swaps in a view of the freshly written data and lets go of the old
+// one. The superseded handle is usually a DIRECT backend holding a headword map
+// worth hundreds of bytes per entry; leaving it for the garbage collector kept
+// that memory resident for the life of the process (docs/PERF.md M2). It is
+// closed after a grace period so requests already reading from it finish first.
 func (e *entry) reopen() error {
 	fresh, err := openUpgradedOrDirect(e.Path)
 	if err != nil {
 		return err
 	}
 	e.dMu.Lock()
+	old := e.d
 	e.d, e.err = fresh, nil
+	// the weight must follow the view, not the one it replaced: a prepared
+	// dictionary holds no headword map, so it weighs nothing and must never
+	// become an eviction candidate
+	e.weight.Store(previewWeight(fresh, fresh.Meta()))
 	e.dMu.Unlock()
+	if old != nil && old != fresh {
+		time.AfterFunc(closeGrace, func() {
+			old.Close()
+			// preparing is the memory high-water mark; hand the pages back
+			// rather than sitting on them until the next natural GC
+			debug.FreeOSMemory()
+		})
+	}
 	return nil
 }
+
+// closeGrace is how long a superseded backend stays open for in-flight reads.
+// Ten seconds is far beyond any article fetch; the memory it holds (hundreds of
+// bytes per headword) is worth reclaiming promptly.
+const closeGrace = 10 * time.Second
 
 // packMedia writes the media.db for a dictionary, from whichever backend can
 // enumerate its resources.
@@ -579,10 +880,6 @@ func (e *entry) ensureBaseIndex(progress store.Progress) error {
 	if store.IsTextDB(e.Path) {
 		return nil
 	}
-	cur, err := e.open()
-	if err != nil {
-		return err
-	}
 	if textDB, ok := store.PreparedFor(e.Path); ok && fileExists(textDB) {
 		return nil // already prepared, at whatever level the user chose
 	}
@@ -590,9 +887,30 @@ func (e *entry) ensureBaseIndex(progress store.Progress) error {
 	if err != nil {
 		return err
 	}
-	if err := e.rebuild(cur.Meta().Name, store.TextDBPath(dir), store.Plan{}, progress); err != nil {
+	// Deliberately NOT e.open(): the ingest reader parses the file itself, and
+	// holding the direct backend at the same time doubles the working set of
+	// the largest thing in the process (docs/PERF.md M3). The name comes from
+	// a header-only probe, or from the reader once it is open.
+	if err := e.rebuild(e.probeName(), store.TextDBPath(dir), store.Plan{}, progress); err != nil {
 		return err
 	}
 	_ = store.WriteInfo(dir)
 	return e.reopen()
+}
+
+// probeName is a display name for log lines, read from the file header when
+// the format has a prober and falling back to the file name.
+func (e *entry) probeName() string {
+	if dict.HasProber(e.Path) {
+		if m, err := dict.Probe(e.Path); err == nil && m.Name != "" {
+			return m.Name
+		}
+	}
+	e.dMu.RLock()
+	d := e.d
+	e.dMu.RUnlock()
+	if d != nil {
+		return d.Meta().Name
+	}
+	return filepath.Base(e.Path)
 }

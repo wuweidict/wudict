@@ -12,23 +12,28 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 )
 
 // Config holds all server settings.
 type Config struct {
-	DictDirs     []string // DICT_DIR: one or more folders scanned for dictionaries
-	DBDir        string   // DB_DIR: cache dir for generated .text.db/.media.db
-	IP           string   // SERVER_IP
-	Port         string   // SERVER_PORT
-	NoBrowser    bool     // NO_BROWSER=1: do not open a browser tab
-	Verbose      bool     // VERBOSE=1: verbose logging
-	Speexdec     string   // SPEEXDEC: path to the external speexdec binary (.spx audio)
-	SpeexBackend string   // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
-	AutoIndex    string   // AUTO_INDEX: on|off — prepare a dictionary's index on first search
-	UseCached    bool     // USE_CACHED=1: also list previously imported dictionaries from the db dir
-	NoCompress   bool     // NO_COMPRESS=1: store article text verbatim (bigger databases)
-	Source       string   // path of the config.toml that was loaded ("" if none)
+	DictDirs      []string // DICT_DIR: one or more folders scanned for dictionaries
+	DBDir         string   // DB_DIR: cache dir for generated .text.db/.media.db
+	IP            string   // SERVER_IP
+	Port          string   // SERVER_PORT
+	NoBrowser     bool     // NO_BROWSER=1: do not open a browser tab
+	Verbose       bool     // VERBOSE=1: verbose logging
+	Speexdec      string   // SPEEXDEC: path to the external speexdec binary (.spx audio)
+	SpeexBackend  string   // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
+	AutoIndex     string   // AUTO_INDEX: on|off — prepare a dictionary's index on first search
+	UseCached     bool     // USE_CACHED=1: also list previously imported dictionaries from the db dir
+	NoCompress    bool     // NO_COMPRESS=1: store article text verbatim (bigger databases)
+	IndexWorkers  int      // INDEX_WORKERS: how many dictionaries may be indexed at once
+	MemoryLimit   int64    // MEMORY_LIMIT: soft heap ceiling in bytes (0 = none)
+	PreviewMemory int64    // PREVIEW_MEMORY: cap on RAM held by unprepared dictionaries (0 = unlimited)
+	Source        string   // path of the config.toml that was loaded ("" if none)
 
 	// Origins records which layer supplied each key: "flag", "env", "file" or
 	// "default". With four layers, "I edited config.toml and nothing changed"
@@ -55,9 +60,11 @@ func defaults() Config {
 		Port:     "8808",
 		// Speexdec "" = auto-detect at launch (next to the executable, then
 		// $PATH); SPEEXDEC overrides. See resolveSpeexdec in the CLI.
-		Speexdec:     "",
-		SpeexBackend: "internal",  // in-process libspeex (cgo); "external" = speexdec binary
-		AutoIndex:    AutoIndexOn, // opt-out: prepare an index on first use
+		Speexdec:      "",
+		SpeexBackend:  "internal",  // in-process libspeex (cgo); "external" = speexdec binary
+		AutoIndex:     AutoIndexOn, // opt-out: prepare an index on first use
+		IndexWorkers:  1,           // one dictionary at a time: the machine has other work to do
+		PreviewMemory: 1 << 30,     // 1 GB of unprepared dictionaries kept open
 	}
 }
 
@@ -124,6 +131,15 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	if v := get("NO_COMPRESS"); v != "" && v != "0" && !strings.EqualFold(v, "false") {
 		cfg.NoCompress = true
 	}
+	if v := get("INDEX_WORKERS"); v != "" {
+		cfg.IndexWorkers = ParseWorkers(v)
+	}
+	if v := get("MEMORY_LIMIT"); v != "" {
+		cfg.MemoryLimit = ParseSize(v)
+	}
+	if v := get("PREVIEW_MEMORY"); v != "" {
+		cfg.PreviewMemory = ParseSize(v)
+	}
 	return cfg, nil
 }
 
@@ -178,6 +194,16 @@ const configTemplate = `# gonow-dict configuration
 # SPEEXDEC    = "/usr/bin/speexdec"   # external speexdec path; blank = auto-detect (next to the executable, then $PATH)
 # AUTO_INDEX  = "on"                  # "off" = never prepare an index on its own; searching then
 #                                     #         uses the dictionary's own format directly
+# INDEX_WORKERS = "1"                 # how many dictionaries may be prepared at once. Each one
+#                                     # saturates a core and holds a few hundred bytes per headword,
+#                                     # so the default is one — the machine stays usable.
+#                                     # "auto" (or 0) = every core.
+# PREVIEW_MEMORY = "1GB"              # how much RAM dictionaries that are NOT yet prepared may hold
+#                                     # open. Each costs ~350 bytes per headword; the least recently
+#                                     # used are closed above this. Prepared ones answer from disk and
+#                                     # are never evicted. "0" = no limit.
+# MEMORY_LIMIT  = "0"                 # soft ceiling, e.g. "4GB": Go collects harder rather than
+#                                     # growing past it. "0" = no ceiling.
 # NO_COMPRESS = "0"                   # "1" = store article text uncompressed (databases roughly 3x larger,
 #                                     #       marginally faster reads; only worth it with disk to spare)
 # USE_CACHED  = "0"                   # "1" = also list previously imported dictionaries kept in DB_DIR
@@ -345,6 +371,54 @@ func normalizeAutoIndex(v string) string {
 
 // AutoIndexEnabled reports whether dictionaries index themselves on first use.
 func (c Config) AutoIndexEnabled() bool { return c.AutoIndex != AutoIndexOff }
+
+// ParseWorkers reads INDEX_WORKERS: a count, or "auto"/"all"/"max"/"0"/"-1"
+// for every core. Preparing a dictionary saturates a core and allocates a few
+// hundred bytes per headword, so the default is ONE — a background convenience
+// must not take the machine away from the person using it. The result is
+// clamped to [1, NumCPU].
+func ParseWorkers(v string) int {
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch v {
+	case "auto", "all", "max", "cpu", "0", "-1":
+		return runtime.NumCPU()
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 1
+	}
+	if n < 1 {
+		return runtime.NumCPU()
+	}
+	if n > runtime.NumCPU() {
+		return runtime.NumCPU()
+	}
+	return n
+}
+
+// ParseSize reads a byte size: plain bytes, or with a K/M/G suffix
+// ("2GB", "1500MB", "512M"). Returns 0 for "off"/"none"/unparseable.
+func ParseSize(v string) int64 {
+	v = strings.ToLower(strings.TrimSpace(strings.ReplaceAll(v, " ", "")))
+	if v == "" || v == "off" || v == "none" || v == "0" {
+		return 0
+	}
+	v = strings.TrimSuffix(v, "b")
+	mult := int64(1)
+	switch {
+	case strings.HasSuffix(v, "k"):
+		mult, v = 1<<10, strings.TrimSuffix(v, "k")
+	case strings.HasSuffix(v, "m"):
+		mult, v = 1<<20, strings.TrimSuffix(v, "m")
+	case strings.HasSuffix(v, "g"):
+		mult, v = 1<<30, strings.TrimSuffix(v, "g")
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 0 {
+		return 0
+	}
+	return int64(f * float64(mult))
+}
 
 // Origin reports which layer supplied key ("default" when nothing did).
 func (c Config) Origin(key string) string {

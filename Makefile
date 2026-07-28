@@ -160,6 +160,10 @@ agent-status: ## Show the agent's launchd state (pid, exit status, ...)
 clean: ## Remove binary, dist/, coverage artifacts
 	rm -rf $(BINARY) $(BUILD_DIR) coverage.out
 
+.PHONY: purge
+purge: ## zap all local cached dictionaries in ~/.gonow-dict/db
+	rm -rf ~/.gonow-dict/db 
+
 .PHONY: version
 version: ## Print the version stamp used for builds
 	@echo $(VERSION)

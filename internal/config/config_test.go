@@ -7,6 +7,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -192,5 +193,30 @@ func TestAutoIndexValues(t *testing.T) {
 			t.Errorf("AUTO_INDEX=%q → %q (enabled=%v), want %q (%v)",
 				c.in, cfg.AutoIndex, cfg.AutoIndexEnabled(), c.want, c.on)
 		}
+	}
+}
+
+func TestParseWorkersAndSize(t *testing.T) {
+	cpu := runtime.NumCPU()
+	for in, want := range map[string]int{
+		"1": 1, "2": 2, "auto": cpu, "all": cpu, "max": cpu, "0": cpu, "-1": cpu,
+		"": 1, "nonsense": 1, "99999": cpu,
+	} {
+		if got := ParseWorkers(in); got != want {
+			t.Errorf("ParseWorkers(%q) = %d, want %d", in, got, want)
+		}
+	}
+	for in, want := range map[string]int64{
+		"4GB": 4 << 30, "512M": 512 << 20, "1500MB": 1500 << 20, "2048": 2048,
+		"1.5GB": int64(1.5 * float64(int64(1)<<30)), "0": 0, "off": 0, "": 0, "junk": 0,
+	} {
+		if got := ParseSize(in); got != want {
+			t.Errorf("ParseSize(%q) = %d, want %d", in, got, want)
+		}
+	}
+	// default is one dictionary at a time: background work must not take the machine
+	cfg, err := Load(filepath.Join(t.TempDir(), "none.toml"), nil)
+	if err == nil && cfg.IndexWorkers != 1 {
+		t.Errorf("default INDEX_WORKERS = %d, want 1", cfg.IndexWorkers)
 	}
 }

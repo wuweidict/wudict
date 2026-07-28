@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -106,6 +107,26 @@ SERVE FLAGS
                           stay per-dictionary choices either way.
                           env: AUTO_INDEX     toml: AUTO_INDEX
                           default: on
+
+  --index-workers <n>     How many dictionaries may be prepared at once. Preparing
+                          one saturates a core and holds a few hundred bytes per
+                          headword, so the default is 1 — background work must not
+                          take the machine away from you. "auto" (or 0) = every core.
+                          env: INDEX_WORKERS  toml: INDEX_WORKERS
+                          default: 1
+
+  (env/toml only)
+  PREVIEW_MEMORY = "1GB"  How much RAM dictionaries that are not yet prepared may
+                          hold open (~350 bytes per headword each). The least
+                          recently used are closed above this; prepared ones
+                          answer from disk and are never evicted. "0" = no limit.
+                          env: PREVIEW_MEMORY toml: PREVIEW_MEMORY
+                          default: 1GB
+
+  MEMORY_LIMIT = "4GB"    Soft heap ceiling: Go collects harder rather than growing
+                          past it. "0" = none.
+                          env: MEMORY_LIMIT   toml: MEMORY_LIMIT
+                          default: none
 
   --no-compress           Store article text uncompressed. Prepared databases are
                           roughly 3x larger; reads are marginally faster. Only
@@ -485,6 +506,7 @@ func cmdServe(args []string) error {
 	dbDir := fs.String("db-dir", "", "library dir for cached dictionaries (env/toml: DB_DIR)")
 	useCached := fs.Bool("use-cached", false, "also serve previously imported dictionaries from the library (env/toml: USE_CACHED)")
 	noCompress := fs.Bool("no-compress", false, "store article text uncompressed — larger databases (env/toml: NO_COMPRESS)")
+	indexWorkers := fs.String("index-workers", "", "dictionaries to prepare at once; \"auto\" = every core (env/toml: INDEX_WORKERS)")
 	ip := fs.String("ip", "", "listen IP (env/toml: SERVER_IP)")
 	port := fs.String("port", "", "listen port (env/toml: SERVER_PORT)")
 	configPath := fs.String("config", "", "path to config.toml (env: CONFIG_PATH)")
@@ -512,6 +534,9 @@ func cmdServe(args []string) error {
 	}
 	if *noCompress {
 		flagVals["NO_COMPRESS"] = "1"
+	}
+	if *indexWorkers != "" {
+		flagVals["INDEX_WORKERS"] = *indexWorkers
 	}
 	cfg, err := config.Load(*configPath, flagVals)
 	if err != nil {
@@ -596,9 +621,15 @@ Hint: pick another port with --port, e.g.:  gonow-dict --port %s
 	if err != nil {
 		return fmt.Errorf("scanning %s: %w", strings.Join(cfg.DictDirs, ", "), err)
 	}
+	reg.SetPreviewBudget(cfg.PreviewMemory)
 	srv := server.New(reg)
 	srv.ConfigPath = cfgFile
 	store.SetCompressBodies(!cfg.NoCompress)
+	server.SetIndexWorkers(cfg.IndexWorkers)
+	if cfg.MemoryLimit > 0 {
+		// a soft ceiling: Go collects harder instead of growing past it
+		debug.SetMemoryLimit(cfg.MemoryLimit)
+	}
 	srv.Version = version
 	srv.DictDirOrigin = cfg.Origin("DICT_DIR")
 	srv.DictDirEditable = cfg.EditableInFile("DICT_DIR")
@@ -818,6 +849,10 @@ func printStartup(cfg config.Config, in startupInfo) {
 		fmt.Fprintf(out, "  .spx audio    %s\n", in.speex)
 	}
 	fmt.Fprintf(out, "  indexing      %s\n", indexingSummary(cfg.AutoIndex))
+	fmt.Fprintf(out, "  index workers %s%s\n",
+		plural(cfg.IndexWorkers, "dictionary at a time", "dictionaries at a time"),
+		memLimitNote(cfg.MemoryLimit))
+	fmt.Fprintf(out, "  preview memory %s\n", budgetNote(cfg.PreviewMemory))
 	fmt.Fprintf(out, "  serving       %s\n", plural(in.total, "dictionary", "dictionaries"))
 
 	// what to do next, when there is something to do
@@ -853,6 +888,22 @@ func (m *multiFlag) String() string { return strings.Join(*m, string(os.PathList
 func (m *multiFlag) Set(v string) error {
 	*m = append(*m, v)
 	return nil
+}
+
+// budgetNote describes the preview-memory cap for the startup block.
+func budgetNote(b int64) string {
+	if b <= 0 {
+		return "unlimited — dictionaries stay open once used"
+	}
+	return fmt.Sprintf("%.1f GB for dictionaries that are not yet prepared", float64(b)/(1<<30))
+}
+
+// memLimitNote appends the soft heap ceiling to the startup line when set.
+func memLimitNote(limit int64) string {
+	if limit <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("  ·  memory limit %.1f GB", float64(limit)/(1<<30))
 }
 
 // plural renders a count with the right noun: "1 dictionary", "55 dictionaries".

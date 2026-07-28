@@ -5,12 +5,16 @@
 package server
 
 import (
+	"fmt"
+	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
 	"github.com/glowinthedark/gonow-dict/internal/store"
@@ -356,5 +360,231 @@ func TestFeatureTogglesBothWays(t *testing.T) {
 	e := reg2.all()[0]
 	if err := e.setFeatures(features{}, nil); err == nil {
 		t.Error("a source-less dictionary must refuse to have its data stripped")
+	}
+}
+
+// slowFormat is a dictionary whose ingest takes measurable time, so a test can
+// observe how many are being prepared at once.
+type slowReader struct{ n int }
+
+var (
+	liveIngests atomic.Int32
+	maxIngests  atomic.Int32
+)
+
+func (r *slowReader) Meta() dict.Meta { return dict.Meta{Name: "Slow", Format: "slow"} }
+func (r *slowReader) Close() error {
+	liveIngests.Add(-1)
+	return nil
+}
+func (r *slowReader) Next() (dict.Entry, error) {
+	if r.n == 0 {
+		if v := liveIngests.Add(1); v > maxIngests.Load() {
+			maxIngests.Store(v)
+		}
+	}
+	if r.n >= 40 {
+		return dict.Entry{}, io.EOF
+	}
+	r.n++
+	time.Sleep(3 * time.Millisecond) // long enough for overlap to be visible
+	return dict.Entry{Headwords: []string{fmt.Sprintf("w%d", r.n)}, Body: "<p>x</p>", Kind: dict.BodyHTML}, nil
+}
+
+func init() {
+	dict.RegisterFormat(".slow", func(p string) (dict.Dictionary, error) { return &fakeDict{words: []string{"w1"}, path: p}, nil })
+	dict.RegisterReader(".slow", func(p string) (dict.Reader, error) { return &slowReader{}, nil })
+}
+
+// Background indexing must respect INDEX_WORKERS. Before this bound existed, a
+// single "all dictionaries" search started one ingest per dictionary — measured
+// at 500 MB and 424 % CPU for four real dictionaries, extrapolating to 18 GB
+// for a 100-dictionary library (docs/PERF.md M1).
+func TestIndexingConcurrencyIsBounded(t *testing.T) {
+	isolatedDBDir(t)
+	dir := t.TempDir()
+	const dicts = 12
+	for i := 0; i < dicts; i++ {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("d%02d.slow", i)), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, workers := range []int{1, 3} {
+		liveIngests.Store(0)
+		maxIngests.Store(0)
+		SetIndexWorkers(workers)
+		isolatedDBDir(t) // a fresh library so every dictionary needs preparing
+		reg, err := NewRegistry([]string{dir}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := New(reg)
+		s.AutoIndex = true
+		searchStream(t, s, "/api/search?q=w&mode=prefix&dict=all")
+		deadline := time.Now().Add(20 * time.Second)
+		for time.Now().Before(deadline) {
+			var prepared int
+			for _, e := range reg.all() {
+				if _, ok := preparedFor(e.Path); ok {
+					prepared++
+				}
+			}
+			if prepared == dicts {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		got := int(maxIngests.Load())
+		if got == 0 {
+			t.Fatalf("workers=%d: no indexing observed", workers)
+		}
+		// the foreground slot may add one on top of the background limit
+		if got > workers+1 {
+			t.Errorf("INDEX_WORKERS=%d: %d dictionaries were indexed at once", workers, got)
+		}
+		t.Logf("INDEX_WORKERS=%d → peak concurrent ingests %d", workers, got)
+	}
+	SetIndexWorkers(1)
+}
+
+// Preview eviction: unprepared dictionaries hold an in-memory headword index
+// (~350 B per headword), so the registry caps how much of that may stay open
+// and closes the least recently used. Prepared dictionaries answer from disk
+// and must never be evicted — there is nothing to reclaim and reopening costs.
+func TestPreviewEviction(t *testing.T) {
+	isolatedDBDir(t)
+	dir := t.TempDir()
+	for i := 0; i < 4; i++ {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("p%d.fake", i)), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg, err := NewRegistry([]string{dir}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// open all four as preview backends
+	for _, e := range reg.all() {
+		if _, err := e.open(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := reg.previewBytes(); got == 0 {
+		t.Fatal("preview backends should be weighed")
+	}
+	// nothing is evicted while the backends are in use, whatever the budget
+	reg.SetPreviewBudget(1)
+	if freed := reg.sweep(); freed != 0 {
+		t.Errorf("recently-used backends must not be evicted (freed %d)", freed)
+	}
+	// age them past the idle threshold, then sweep
+	old := time.Now().Add(-2 * minEvictIdle).UnixNano()
+	for _, e := range reg.all() {
+		e.lastUse.Store(old)
+	}
+	if freed := reg.sweep(); freed == 0 {
+		t.Fatal("idle backends over budget should be evicted")
+	}
+	if got := reg.previewBytes(); got > 1 {
+		t.Errorf("still %d bytes of preview open after the sweep", got)
+	}
+	// an evicted dictionary reopens on next use and still answers
+	e := reg.all()[0]
+	d, err := e.open()
+	if err != nil || d == nil {
+		t.Fatalf("evicted dictionary must reopen: %v", err)
+	}
+	if res, err := d.Prefix("bet", 5); err != nil || len(res) == 0 {
+		t.Errorf("reopened dictionary should still search: %v %v", res, err)
+	}
+
+	// a PREPARED dictionary weighs nothing and is never a candidate
+	dsl := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dsl, "x.dsl"), []byte(sampleDSL), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg2, err := NewRegistry([]string{dsl}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2 := reg2.all()[0]
+	if _, err := e2.open(); err != nil {
+		t.Fatal(err)
+	}
+	if w := e2.weight.Load(); w != 0 {
+		t.Errorf("a prepared dictionary must weigh 0, got %d", w)
+	}
+	reg2.SetPreviewBudget(1)
+	for _, e := range reg2.all() {
+		e.lastUse.Store(old)
+	}
+	if freed := reg2.sweep(); freed != 0 {
+		t.Errorf("prepared dictionaries must never be evicted (freed %d)", freed)
+	}
+}
+
+// A PREPARED dictionary answers text from SQLite, but opens its source again
+// when a resource misses media.db — a full direct backend holding the same
+// ~350 B per headword. That handle must be budgeted and released like any
+// other, and releasing it must not break the dictionary: text keeps working,
+// and the next resource request reopens it.
+func TestResourceHandleIsEvictable(t *testing.T) {
+	isolatedDBDir(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "r.fake"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := NewRegistry([]string{dir}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := reg.all()[0]
+	// prepare it, so it is served through `upgraded` with a lazy source handle
+	if err := e.setFeatures(features{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	d, err := e.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, ok := d.(*upgraded)
+	if !ok {
+		t.Fatalf("a prepared dictionary should be served through upgraded, got %T", d)
+	}
+	if u.srcWeight() != 0 || reg.previewBytes() != 0 {
+		t.Fatal("nothing should be held before a resource is requested")
+	}
+
+	// a resource request misses the (absent) media.db and opens the source
+	_, _, _ = d.Resource("audio/x.mp3")
+	if u.srcWeight() == 0 {
+		t.Fatal("the resource handle should be weighed once opened")
+	}
+	if reg.previewBytes() == 0 {
+		t.Error("the registry must count the resource handle against the budget")
+	}
+
+	// in use → never released, whatever the budget
+	reg.SetPreviewBudget(1)
+	if freed := reg.sweep(); freed != 0 {
+		t.Errorf("a just-used resource handle must not be released (freed %d)", freed)
+	}
+	// idle and over budget → released
+	u.srcUse.Store(time.Now().Add(-2 * minEvictIdle).UnixNano())
+	if freed := reg.sweep(); freed == 0 {
+		t.Fatal("an idle resource handle over budget should be released")
+	}
+	if u.srcWeight() != 0 {
+		t.Error("weight should be zero once released")
+	}
+
+	// the dictionary still works — text comes from SQLite …
+	if res, err := d.Prefix("bet", 5); err != nil || len(res) == 0 {
+		t.Errorf("text lookup must survive releasing the resource handle: %v %v", res, err)
+	}
+	// … and the handle reopens on the next resource request
+	_, _, _ = d.Resource("audio/x.mp3")
+	if u.srcWeight() == 0 {
+		t.Error("the reopened handle should be weighed again")
 	}
 }
