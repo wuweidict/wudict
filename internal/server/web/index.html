@@ -458,7 +458,11 @@ function provenance(d){
     // away in the body (and in the tooltip), which is also the only place it is
     // copiable — the summary itself is the toggle.
     full=d.source;
-    head=`<span class="fmt">${esc(d.format||"?")}</span>: ${esc(base(d.source))}`+
+    // No format prefix here: the meta line above already says "mdx", and the
+    // file name that follows ends in ".mdx" — the label restated, two words
+    // later, what the thing it labels already says. The prepared branch below
+    // keeps its prefix because "prepared" is a state, not a format.
+    head=`${esc(base(d.source))}`+
       (n?` <span class="companions">+ ${n} ${mediaKind(ms)}</span>`:"");
     rows.push(label(d.source));
     if(d.folder)rows.push(label("db: "+d.folder+" ("+(d.mediaDB?"text.db + media.db + info.txt":"text.db + info.txt")+")"));
