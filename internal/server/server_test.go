@@ -205,9 +205,13 @@ func TestDictsAndSearch(t *testing.T) {
 	if len(dicts) != 1 || dicts[0].Name != "Server Test Dict" {
 		t.Fatalf("dicts: %+v", dicts)
 	}
-	// DSL auto-ingests: full caps + a shareable DBPath (D7)
-	if !dicts[0].Caps.FTS || dicts[0].DBPath == "" {
+	// a DSL prepares itself (it has no native index) — the cheap headword
+	// index only, plus a shareable DBPath (D7)
+	if !dicts[0].Caps.Prefix || dicts[0].DBPath == "" {
 		t.Errorf("caps/dbpath: %+v", dicts[0])
+	}
+	if dicts[0].Caps.FTS || dicts[0].Caps.Contains {
+		t.Errorf("preparing a DSL must not build the opt-in indexes: %+v", dicts[0].Caps)
 	}
 	id := dicts[0].ID
 
@@ -222,6 +226,7 @@ func TestDictsAndSearch(t *testing.T) {
 	if len(hits) != 1 || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "corazón" {
 		t.Fatalf("contains hits after enabling: %+v", hits)
 	}
+	sse(t, s, "/api/ingest?dict="+id+"&fts=1")
 	hits = searchStream(t, s, "/api/search?q=vivienda&mode=fts&dict=all")
 	if len(hits) != 1 || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "casa" {
 		t.Fatalf("fts hits: %+v", hits)

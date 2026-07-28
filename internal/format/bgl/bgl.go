@@ -57,7 +57,11 @@ func Open(path string) (*Dict, error) {
 		start := time.Now()
 		const format = "bgl"
 		logx.Status("%spreparing search index (%s, first open)…", logx.Dict(name), format)
-		rep, ierr := store.IngestLevelReport(r, dbPath, store.LevelText, func(done, _ int) {
+		// Headwords only, like every other format's automatic index (D24):
+		// bgl has no native index, so it must store its article text to be
+		// readable at all — but indexing that text for full-text search is
+		// the user's choice, not a toll for opening the file.
+		rep, ierr := store.IngestPlan(r, dbPath, store.Plan{}, func(done, _ int) {
 			logx.Progress("  %d entries", done)
 		})
 		if ierr != nil {

@@ -171,8 +171,14 @@ func TestOpenAutoIngestAndLookup(t *testing.T) {
 	}
 	defer d.Close()
 
-	if !d.Caps().FTS {
-		t.Error("bgl should be FTS-capable after auto-ingest")
+	// BGL prepares itself so it can be searched at all, but only the cheap
+	// headword index: full-text is the user's choice, not a toll for opening
+	// the file (D24). Finding must work; full-text must not be assumed.
+	if c := d.Caps(); !c.Exact || !c.Prefix {
+		t.Errorf("bgl must be searchable after auto-preparation: %+v", c)
+	}
+	if c := d.Caps(); c.FTS || c.Contains {
+		t.Errorf("bgl must not build the opt-in indexes by itself: %+v", c)
 	}
 	if res, err := d.Exact("apple", 5); err != nil || len(res) != 1 || res[0].Body != "<b>a fruit</b>" {
 		t.Fatalf("exact apple: %v %v", res, err)

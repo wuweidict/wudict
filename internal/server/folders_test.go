@@ -310,15 +310,20 @@ func TestFeatureTogglesBothWays(t *testing.T) {
 		getJSON(t, s, "/api/dicts", &d)
 		return d[0].Caps
 	}
-	// default: finds and full-text (DSL prepares itself), no trigram
-	if c := caps(); c.Contains {
-		t.Fatalf("contains must be off by default: %+v", c)
+	// default: a DSL prepares itself so it can be searched at all, but only
+	// the cheap headword index — both heavy indexes start off
+	if c := caps(); c.Contains || c.FTS {
+		t.Fatalf("neither heavy index may be built by default: %+v", c)
 	}
 	sse(t, s, "/api/ingest?dict="+id+"&contains=1")
-	if c := caps(); !c.Contains || !c.FTS {
-		t.Fatalf("after contains=1: %+v", c)
+	if c := caps(); !c.Contains || c.FTS {
+		t.Fatalf("contains=1 must add contains and nothing else: %+v", c)
 	}
 	// naming one feature leaves the other alone
+	sse(t, s, "/api/ingest?dict="+id+"&fts=1")
+	if c := caps(); !c.Contains || !c.FTS {
+		t.Fatalf("adding full-text must keep contains: %+v", c)
+	}
 	sse(t, s, "/api/ingest?dict="+id+"&fts=0")
 	if c := caps(); !c.Contains || c.FTS {
 		t.Fatalf("stripping full-text must keep contains: %+v", c)

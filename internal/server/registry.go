@@ -112,10 +112,11 @@ func (e *entry) noPackableMedia() bool {
 func (e *entry) maybeAutoIndex() {
 	e.autoOnce.Do(func() {
 		go func() {
-			d, err := e.open()
-			if err != nil || d.Caps().FTS {
-				return // unopenable, or already store-backed (prepared/DSL/BGL)
+			if _, err := e.open(); err != nil {
+				return // unopenable: nothing to index
 			}
+			// ensureBaseIndex is a no-op when this dictionary is already
+			// prepared, at whatever level its owner chose
 			if err := e.ensureBaseIndex(nil); err != nil {
 				logx.V("auto-index %s: %v", e.Path, err)
 			} else {
