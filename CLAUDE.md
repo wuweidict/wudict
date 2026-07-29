@@ -1,6 +1,6 @@
-# dict-go-web workspace
+# gonow-dict
 
-Go web dictionary app (working name **gonow-dict**) supporting MDX/MDD, StarDict, Aard2 Slob, Lingvo DSL. Dual-backend: direct native-format readers by default; opt-in ingest (`off|text|full`) into SQLite+FTS5 (`<slug>.text.db` + separate `<slug>.media.db`) unlocks fuzzy/full-text search.
+Go web dictionary app supporting MDX/MDD, StarDict, Aard2 Slob, Lingvo DSL, Babylon BGL. Dual-backend: a dictionary is searched through its own format ("preview", D15) until it is **prepared** into a library folder — `<db dir>/<name>/{text.db, media.db, info.txt}` (D20) — which is the primary mode. Preparation is automatic and cheap (headwords only, `AUTO_INDEX`); *contains* (trigram) and *full-text* are per-dictionary switches, and media packing a third (D24). Search modes are exact · prefix · contains · full-text (D16 — "fuzzy" is retired).
 
 ## Read this first (token discipline)
 - `docs/SPEC.md` — architecture, schema, query engine. Read before writing any code.
@@ -8,16 +8,24 @@ Go web dictionary app (working name **gonow-dict**) supporting MDX/MDD, StarDict
 - `docs/FORMATS.md` — per-format facts + exact reference-code pointers. Read the section for the format you touch, nothing more.
 - `docs/PHASES.md` — phase plan + running record. Update when a phase advances.
 - `docs/PERF.md` — measured RAM/CPU audit against the real 105-dictionary corpus (unit costs per headword, the first-run indexing storm, ranked fixes). Read before touching concurrency, caching or the open/ingest paths.
-- Do NOT bulk-read the reference projects below; they are large. Use the pointers in `docs/FORMATS.md` and read only the named files/functions.
+- `code-review.md` — standing optimization backlog (C1–C10), prioritized by D15.
 
 ## Layout
-- `gonow-dict/` — the NEW app (`github.com/glowinthedark/gonow-dict`). `cmd/gonow-dict` CLI; `internal/dict` core interfaces + format registry; `internal/format/<fmt>` backends; `internal/gomdict` inlined MDX parser. **The Makefile is the developer UI (D10): every action has a target, `make help` lists them, `make check` before declaring work done.**
-- `mdict-go-web/` — reference: working MDX/MDD server. Reusable: `internal/gomdict/` (MDX/MDD reader, ~2.5k LOC), parts of `main.go` (HTTP server, asset serving, speex audio), `web/mdict.html` (UI foundation).
-- `draego/` — reference: CGI SQLite dictionary server. Reusable: FTS5 schema/query logic in `drae.go` (audited; known bugs listed in SPEC §FTS-audit — do not port verbatim).
-- `pyglossary/` — reference ONLY (Python, do not run). Format parsers: `pyglossary/plugins/{octopus_mdict_new,stardict,aard2_slob,dsl}/` and `pyglossary/slob/`.
+
+This repository is the whole project (`github.com/glowinthedark/gonow-dict`); there is no enclosing workspace.
+
+- `cmd/gonow-dict` — CLI and server entry point.
+- `internal/dict` — core interfaces, format registry, discovery.
+- `internal/format/<fmt>` — mdx, stardict, slob, dsl, bgl backends.
+- `internal/store` — the prepared SQLite backend: schema, ingest, library folders, media.
+- `internal/server` — registry, HTTP API, embedded UI (`web/index.html`, `web/setup.html`, `web/frame.js`).
+- `internal/gomdict` — inlined MDX/MDD parser. `internal/speex` — in-process .spx decoder (D18).
+- **The Makefile is the developer UI (D10): every action has a target, `make help` lists them, `make check` before declaring work done.**
+
+The reference projects this was built from (`mdict-go-web`, `draego`, `pyglossary`, the speex sources) have been **removed from disk**. `docs/FORMATS.md` still cites their file and function names: read those as provenance for where a rule came from, not as paths you can open.
 
 ## Conventions
-- Go, modules, no cgo unless D4 decides otherwise. Table-driven tests. `make` targets per project.
+- Go, modules. cgo is the default build (sqlite FTS5 + built-in speex); `-tags purego` must keep building and passing (D4, D18). Table-driven tests.
 - Each format package implements both `Lookuper` (direct runtime lookup) and `Reader` (sequential ingest scan) — parsing logic written once, shared by both. Ingesters are one-shot batch paths.
 - Update `docs/PHASES.md` (record section) at the end of every working session; update `docs/DECISIONS.md` when a decision is taken.
 

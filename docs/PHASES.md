@@ -12,7 +12,7 @@ Each phase ends with: working code + tests, PHASES record entry (below), DECISIO
 - **P5 — HTTP server & API + full ingest.** Config layering from mdict-go-web; endpoints per SPEC §6; per-dict "Enable fuzzy & full-text search" flow with SSE progress; `ingest=full` media.db packing + uuid pairing + resolution order.
 - **P6 — UI.** draego chrome (sticky bar, accordion, vendored mark.js) + Shadow-DOM article sandboxing; per-dict CSS into shadow roots; φ-scale spacing; mobile; dark mode (mdict-go-web/notes/dark-mode.md).
 - **P7 — Polish & release.** Cross-platform builds, Makefile, README.md, stale-source handling UX, perf pass, error-path hardening.
-- **P8+ — user-directed batches** (no pre-written plan; each lands as a record entry below): P8/P8.1 performance & progressive UX, P9 audit fixes & URL/MIME correctness, P10 native-ingested overhaul (+BGL), P11 preview-cost & in-process Speex. Standing backlog: `gonow-dict/code-review.md`, prioritized by D15.
+- **P8+ — user-directed batches** (no pre-written plan; each lands as a record entry below): P8/P8.1 performance & progressive UX, P9 audit fixes & URL/MIME correctness, P10 native-ingested overhaul (+BGL), P11 preview-cost & in-process Speex. Standing backlog: `code-review.md`, prioritized by D15.
 
 ## Record
 

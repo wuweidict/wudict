@@ -1,6 +1,8 @@
 # Format notes & reference-code pointers
 
-Read only the section you are working on. Reference code paths are relative to workspace root.
+Read only the section you are working on.
+
+The reference projects cited below (`pyglossary/…`, `mdict-go-web/…`, `draego/…`) are **no longer on disk** — they were removed once the formats were implemented. Their file and function names are kept as provenance: they say where a parsing rule came from and what to search for upstream if a format ever misbehaves, not paths to open.
 
 ## MDX / MDD (Octopus MDict)
 - Binary, block-compressed (zlib/LZO), optionally encrypted (Salsa20/8 variant), v1.2–v3.0. Has built-in **headword index** (key blocks) — no full-text index. MDD = same container holding resources keyed by `\path\name`.
@@ -26,13 +28,13 @@ Read only the section you are working on. Reference code paths are relative to w
 - Syntax: headword line(s) at col 0 (multiple consecutive = same card; `{...}` unsorted parts; `(...)` optional-variant expansion; `~` = headword ref; `<<link>>`), body lines indented; tags `[b][i][c][p][m1..9][s]media[/s][ref][url]...`.
 - Reference: `pyglossary/pyglossary/plugins/dsl/` — `lex.py` (tag lexer), `transform.py` (→HTML), `title.py` (headword variant expansion), `reader.py` (encoding detect, .dz handling).
 - Go: write lexer/transformer fresh, port rules from the above. dictzip read = sequential gunzip (stdlib `compress/gzip` handles dictzip files sequentially). Resource resolver: `archive/zip` over `.files.zip`.
-- IMPLEMENTED (P4) in `gonow-dict/internal/format/dsl/`. Deviations from pyglossary: malformed/empty tags degrade to literal text instead of dropping the entry (real data contains raw `([ ])`); headword variants are stored raw, not XML-escaped. NOT yet supported: `#INCLUDE` directives, `_abrv.dsl` hover abbreviations, `.ann` annotations. Cache DB name embeds an 8-hex source hash → changed source re-ingests automatically; `GONOW_DB_DIR` overrides the cache dir.
+- IMPLEMENTED (P4) in `internal/format/dsl/`. Deviations from pyglossary: malformed/empty tags degrade to literal text instead of dropping the entry (real data contains raw `([ ])`); headword variants are stored raw, not XML-escaped. NOT yet supported: `#INCLUDE` directives, `_abrv.dsl` hover abbreviations, `.ann` annotations. Prepared into a library folder named after the source file (D20); a changed source is detected from the recorded size/mtime/hash and re-indexed in place. `GONOW_DB_DIR` overrides the library location.
 
 ## Babylon BGL (added P10)
 - Single `.bgl` file: 6-byte header (`\x12\x34\x00\x0{1,2}` + gzip payload offset), then a **gzip stream with an absent/zero CRC trailer** (treat `ErrChecksum`/short trailer as clean EOF). Payload = variable-length blocks: high nibble = type, low nibble = inline length or the byte-count of a multi-byte length; type 4 = end marker, type 2 = embedded resource, types 1/7/10/13 = standard entries, type 11 = 5-byte-length entry layout.
 - Encoding is a resolution chain, not a field: UTF-8 flag → charset code → source/target language code → cp1252 fallback; `<charset c=X>` tags switch encoding *within* a string (incl. Babylon hex references). Definitions carry `\x14`-delimited fields (part of speech, title, transcriptions). Codecs via `golang.org/x/text` (cp125x, cp874, ShiftJIS, GBK, Big5, EUC-KR), lenient decode.
 - Reference: `pyglossary/pyglossary/plugins/babylon_bgl/` (most complete parser); GoldenDict for the **streaming** model — never `io.ReadAll` a BGL.
-- IMPLEMENTED in `gonow-dict/internal/format/bgl/` (`reader.go` streaming core, `decode.go` key/definition processing, `text.go` cleanup helpers, `tables.go` charset/language/POS tables, `bgl.go` backend). No native index ⇒ DSL-style auto-ingest on first open; type-2 resources served from a lazily-scanned map (direct) or packed into `media.db` (native path).
+- IMPLEMENTED in `internal/format/bgl/` (`reader.go` streaming core, `decode.go` key/definition processing, `text.go` cleanup helpers, `tables.go` charset/language/POS tables, `bgl.go` backend). No native index ⇒ DSL-style auto-ingest on first open; type-2 resources served from a lazily-scanned map (direct) or packed into `media.db` (native path).
 
 ## draego SQLite (legacy, NOT a supported input)
 - `word(w TEXT, m TEXT)` + optional `word_fts`. If ever needed: one-off migration SQL into gonow-dict schema. Query-logic audit lives in SPEC §FTS-audit.
