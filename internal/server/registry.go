@@ -856,6 +856,29 @@ func (e *entry) packMedia(cur dict.Dictionary, textDB, mediaDB string, progress 
 	if lister != nil {
 		names = lister.Resources()
 	}
+	// Also pack the loose files beside the source that articles actually
+	// reference (a repack's stylesheet and scripts live there, not in the
+	// .mdd). Referenced-only, never the whole folder: dictionary folders
+	// commonly hold several dictionaries, and sweeping would pack a
+	// neighbour's assets. Resource() resolves each from wherever it lives, and
+	// IngestMedia skips whatever cannot be read.
+	if refs, rerr := store.ReferencedAssets(textDB); rerr == nil && len(refs) > 0 {
+		have := make(map[string]bool, len(names))
+		for _, n := range names {
+			have[strings.ToLower(n)] = true
+		}
+		var extra int
+		for _, n := range refs {
+			if !have[strings.ToLower(n)] {
+				names = append(names, n)
+				extra++
+			}
+		}
+		if extra > 0 {
+			logx.V("%s%d referenced files are not packed in the .mdd — packing them from beside it",
+				logx.Dict(cur.Meta().Name), extra)
+		}
+	}
 	if len(names) == 0 {
 		// nothing to pack (text-only dictionary, or a format with no
 		// resources): remember it so the panel stops offering media.

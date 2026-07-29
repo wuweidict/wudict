@@ -318,13 +318,60 @@ func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
 	}
 	hit, ok := d.resourceIndex()[norm]
 	if !ok {
-		return nil, "", dict.ErrNotFound
+		// Not packed: MDict also serves files sitting next to the .mdx, which
+		// is how repacks ship their stylesheet and scripts (LDOCE6 keeps
+		// LDOCE6.css and entry.js loose). Only reached on a MISS — the packed
+		// path never touches the disk — and a stat costs ~1 µs against a
+		// ~100 µs HTTP round trip, so this is free where it matters.
+		return d.looseFile(name)
 	}
 	data, err := hit.md.LocateByKeywordEntry(hit.entry)
 	if err != nil {
 		return nil, "", fmt.Errorf("mdx: locate resource %q: %w", name, err)
 	}
 	return io.NopCloser(bytes.NewReader(data)), mime.TypeByExtension(path.Ext(norm)), nil
+}
+
+// looseAssetExt is what may be served from beside the .mdx. An article is
+// third-party HTML: the traversal guard keeps a reference inside the
+// dictionary's own folder, and this keeps it to things a dictionary legitimately
+// loads, so a stray `href="secrets.env"` cannot turn the server into a file
+// browser for that directory.
+var looseAssetExt = map[string]bool{
+	".css": true, ".js": true, ".html": true, ".htm": true,
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
+	".svg": true, ".bmp": true, ".ico": true,
+	".mp3": true, ".ogg": true, ".wav": true, ".spx": true, ".m4a": true, ".opus": true,
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
+}
+
+// looseFile serves a resource from the .mdx's own directory. The ORIGINAL name
+// is used, not the lower-cased index key: on a case-sensitive filesystem
+// "LDOCE6.css" is not "ldoce6.css".
+func (d *Dict) looseFile(name string) (io.ReadCloser, string, error) {
+	rel := path.Clean("/" + strings.ReplaceAll(name, "\\", "/"))[1:]
+	if rel == "" || rel == "." {
+		return nil, "", dict.ErrNotFound
+	}
+	if !looseAssetExt[strings.ToLower(path.Ext(rel))] {
+		return nil, "", dict.ErrNotFound
+	}
+	dir := filepath.Dir(d.meta.Path)
+	p := filepath.Join(dir, filepath.FromSlash(rel))
+	// belt and braces: Clean above removes "..", this proves the result stayed
+	// inside the dictionary's folder even through symlinked spellings
+	if !strings.HasPrefix(p, dir+string(filepath.Separator)) {
+		return nil, "", dict.ErrNotFound
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, "", dict.ErrNotFound
+	}
+	if fi, err := f.Stat(); err != nil || fi.IsDir() {
+		f.Close()
+		return nil, "", dict.ErrNotFound
+	}
+	return f, mime.TypeByExtension(path.Ext(rel)), nil
 }
 
 // Resources lists all .mdd resource names (lowercased, forward-slash).

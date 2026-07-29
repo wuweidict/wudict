@@ -225,6 +225,22 @@ func (s *Store) Exact(word string, limit int) ([]dict.Result, error) {
 	return out, nil
 }
 
+// notSubEntry excludes MDict-style sub-entries from browsing results.
+//
+// Repacked dictionaries store expandable sections as ordinary headwords with an
+// "@" prefix — LDOCE6 No-Voice ships 95,162 of them against 65,382 real words,
+// so 59 % of its "entries" are `@collocations_woman`, `@examples_woman` and the
+// like. They exist to be fetched by a link inside an article, never to be
+// browsed: leaving them in makes a `contains` search for "woman" return five
+// sub-entries before the word itself, and inflates every entry count.
+//
+// They stay reachable by EXACT lookup, which is how an article's link fetches
+// one. A bare "@" (the symbol as a headword) is not hidden — only "@" followed
+// by something, which is what the convention produces.
+const notSubEntry = ` AND %s NOT LIKE '@_%%' `
+
+func subEntryFilter(col string) string { return fmt.Sprintf(notSubEntry, col) }
+
 // buildExactMatch is buildMatch without the prefix star: whole-token
 // phrase matching.
 func buildExactMatch(input, column string) string {
@@ -254,9 +270,9 @@ func (s *Store) Prefix(word string, limit int) ([]dict.Result, error) {
 	pat := escapeLike(word) + "%"
 	res, err := s.collect(s.db.Query(`
 		SELECT w, m FROM (
-			SELECT e.w AS w, e.m AS m FROM entry e WHERE e.w LIKE ?1 ESCAPE '\'
+			SELECT e.w AS w, e.m AS m FROM entry e WHERE e.w LIKE ?1 ESCAPE '\'`+subEntryFilter("e.w")+`
 			UNION
-			SELECT e.w AS w, e.m AS m FROM alias a JOIN entry e ON e.id = a.entry_id WHERE a.w LIKE ?1 ESCAPE '\'
+			SELECT e.w AS w, e.m AS m FROM alias a JOIN entry e ON e.id = a.entry_id WHERE a.w LIKE ?1 ESCAPE '\'`+subEntryFilter("a.w")+`
 		) ORDER BY w LIMIT ?2`, pat, n))
 	if err != nil || len(res) > 0 {
 		return res, err
@@ -279,7 +295,7 @@ func (s *Store) Fuzzy(word string, limit int) ([]dict.Result, error) {
 	}
 	return s.collect(s.db.Query(`
 		SELECT e.w, e.m FROM entry_fts f JOIN entry e ON e.id = f.rowid
-		WHERE entry_fts MATCH ?1 ORDER BY e.w LIMIT ?2`, match, clamp(limit)))
+		WHERE entry_fts MATCH ?1`+subEntryFilter("e.w")+`ORDER BY e.w LIMIT ?2`, match, clamp(limit)))
 }
 
 // Contains is the substring/typo-tolerant headword mode, backed by the FTS5
@@ -304,7 +320,7 @@ func (s *Store) Contains(word string, limit int) ([]dict.Result, error) {
 		phrase := `"` + strings.ReplaceAll(folded, `"`, `""`) + `"`
 		res, err := s.collect(s.db.Query(`
 			SELECT e.w, e.m FROM entry_trigram t JOIN entry e ON e.id = t.rowid
-			WHERE entry_trigram MATCH ?1 ORDER BY e.w LIMIT ?2`, phrase, n))
+			WHERE entry_trigram MATCH ?1`+subEntryFilter("e.w")+`ORDER BY e.w LIMIT ?2`, phrase, n))
 		if err != nil || len(res) > 0 {
 			return res, err
 		}
@@ -312,7 +328,7 @@ func (s *Store) Contains(word string, limit int) ([]dict.Result, error) {
 	// short query (< 3 chars) or trigram miss: LIKE substring on the raw
 	// headword (accent-sensitive — acceptable for the <3-char contains edge).
 	return s.collect(s.db.Query(`
-		SELECT e.w, e.m FROM entry e WHERE e.w LIKE ?1 ESCAPE '\' ORDER BY e.w LIMIT ?2`,
+		SELECT e.w, e.m FROM entry e WHERE e.w LIKE ?1 ESCAPE '\'`+subEntryFilter("e.w")+`ORDER BY e.w LIMIT ?2`,
 		"%"+escapeLike(word)+"%", n))
 }
 
@@ -327,14 +343,14 @@ func (s *Store) FullText(query string, limit int) ([]dict.Result, error) {
 	}
 	return s.collect(s.db.Query(`
 		SELECT e.w, e.m FROM entry_fts f JOIN entry e ON e.id = f.rowid
-		WHERE entry_fts MATCH ?1 ORDER BY f.rank LIMIT ?2`, match, clamp(limit)))
+		WHERE entry_fts MATCH ?1`+subEntryFilter("e.w")+`ORDER BY f.rank LIMIT ?2`, match, clamp(limit)))
 }
 
 func (s *Store) Keywords(offset, n int) []string {
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := s.db.Query("SELECT w FROM entry ORDER BY id LIMIT ? OFFSET ?", clamp(n), offset)
+	rows, err := s.db.Query("SELECT w FROM entry WHERE w NOT LIKE '@_%' ORDER BY id LIMIT ? OFFSET ?", clamp(n), offset)
 	if err != nil {
 		return nil
 	}

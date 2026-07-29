@@ -5,8 +5,10 @@
 package mdx
 
 import (
+	"github.com/glowinthedark/gonow-dict/internal/dict"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -168,5 +170,67 @@ func TestIntegrationResource(t *testing.T) {
 	}
 	if _, _, err := d.Resource("../../etc/passwd"); err == nil {
 		t.Error("path traversal must be rejected")
+	}
+}
+
+// MDict serves files sitting next to the .mdx — that is how repacks ship their
+// stylesheet and scripts (LDOCE6 keeps LDOCE6.css and entry.js loose, with no
+// .mdd at all). Packed resources still win; the disk is only consulted on a
+// miss, and only for things a dictionary legitimately loads.
+func TestLooseSiblingAssets(t *testing.T) {
+	dir := t.TempDir()
+	mdxPath := filepath.Join(dir, "d.mdx")
+	d := &Dict{meta: dict.Meta{Path: mdxPath}}
+
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("LDOCE6.css", "span{color:red}")
+	write("entry.js", "function toggle(){}")
+	write("secrets.env", "TOKEN=hunter2")
+	if err := os.MkdirAll(filepath.Join(dir, "img"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join("img", "a.png"), "PNG")
+
+	read := func(name string) (string, string, error) {
+		rc, mt, err := d.Resource(name)
+		if err != nil {
+			return "", "", err
+		}
+		defer rc.Close()
+		b, _ := io.ReadAll(rc)
+		return string(b), mt, nil
+	}
+
+	// served, with the case of the name preserved (a case-sensitive filesystem
+	// would not find "ldoce6.css")
+	if body, mt, err := read("LDOCE6.css"); err != nil || body != "span{color:red}" {
+		t.Fatalf("loose css: %q %q %v", body, mt, err)
+	} else if !strings.Contains(mt, "css") {
+		t.Errorf("mime = %q, want text/css", mt)
+	}
+	if body, _, err := read("entry.js"); err != nil || body != "function toggle(){}" {
+		t.Fatalf("loose js: %q %v", body, err)
+	}
+	if body, _, err := read("img/a.png"); err != nil || body != "PNG" {
+		t.Fatalf("loose file in a subfolder: %q %v", body, err)
+	}
+
+	// not an asset type a dictionary loads: never served, even though it exists
+	if _, _, err := read("secrets.env"); err == nil {
+		t.Error("a sibling file outside the asset allowlist must not be served")
+	}
+	// traversal stays blocked
+	for _, bad := range []string{"../outside.css", "../../etc/passwd", "/etc/passwd"} {
+		if _, _, err := read(bad); err == nil {
+			t.Errorf("traversal not blocked: %q", bad)
+		}
+	}
+	// a name that matches nothing is still a plain miss
+	if _, _, err := read("nope.css"); err == nil {
+		t.Error("a missing file must report not-found")
 	}
 }

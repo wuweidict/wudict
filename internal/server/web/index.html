@@ -190,6 +190,11 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
   text-underline-offset:2px;font-size:12px;margin-right:var(--sp-2)}
 .pd .path{color:var(--fg-faint);font-size:10.5px;word-break:break-all;cursor:pointer}
 .pd .err{color:#c0564f}
+/* an article's own section, pulled in beside the link that asked for it */
+.gonow-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid var(--accent);
+  background:color-mix(in srgb,var(--accent) 6%,transparent);border-radius:0 6px 6px 0}
+.gonow-sub-close{float:right;cursor:pointer;color:var(--fg-faint);font-size:12px;padding:0 .3em}
+.gonow-sub-close:hover{color:var(--accent)}
 /* Folders & configuration: a quiet disclosure under the dictionary cards.
    It answers "where is it looking?", "where did my prepared data go?" and
    "which config file is in effect?" — otherwise only visible on the terminal
@@ -733,17 +738,20 @@ function renderFrame(dd,body,dictID){
   ifr.className="article frame";ifr.dataset.dict=dictID;ifr.dataset.fid=fid;
   ifr.setAttribute("sandbox","allow-scripts allow-same-origin allow-popups");
   ifr.style.height="90px";
-  ifr.srcdoc=frameDoc(body,fid,themeIsDark());
+  ifr.srcdoc=frameDoc(body,fid,themeIsDark(),dictID);
   dd.appendChild(ifr);
   return null; // no shadow root: mark.js highlighting not applicable
 }
-function frameDoc(content,fid,dark){
+function frameDoc(content,fid,dark,dictID){
   return '<!DOCTYPE html><html class="'+(dark?'dark':'')+'"><head><meta charset="utf-8">'+
     '<style>html{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.618;color:#1a1a1a;background:#fff;overflow-y:hidden}'+
     'body{margin:8px;word-break:break-word}img,video,svg{max-width:100%;height:auto}'+
     'html.dark{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.92)}'+
     'html.dark :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){filter:invert(1) hue-rotate(180deg)}'+
-    '</style><script src="/assets/frame.js" data-fid="'+fid+'"><\/script></head><body>'+content+'</body></html>';
+    '.gonow-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid #e08600;background:rgba(224,134,0,.06);border-radius:0 6px 6px 0}'+
+    '.gonow-sub-close{float:right;cursor:pointer;color:#999;font-size:12px;padding:0 .3em}'+
+    '.gonow-sub-close:hover{color:#e08600}'+
+    '</style><script src="/assets/frame.js" data-fid="'+fid+'" data-dict="'+(dictID||"")+'"><\/script></head><body>'+content+'</body></html>';
 }
 /* bridge messages from article iframes */
 addEventListener("message",e=>{
@@ -959,6 +967,10 @@ document.addEventListener("click",e=>{
   const w=wordFromHref(href);
   if(w!==null){
     e.preventDefault();
+    // "@name" targets are an article's own expandable sections stored as
+    // headwords (MDict convention) — inline them here rather than searching
+    // for them, which would replace the article with a fragment of itself.
+    if(w.charAt(0)==="@"&&w.length>1){toggleSub(a,w,dictID);return}
     if(w)lookupWord(w); // "bword://#frag" carries no word: swallow the click
   }else if(/\.(mp3|ogg|wav|spx|m4a)(\?|#|$)/i.test(href)){
     e.preventDefault();playAudio(href.startsWith("/res/")||/^https?:/i.test(href)?href:resURL(dictID,href));
@@ -968,6 +980,30 @@ document.addEventListener("click",e=>{
     e.preventDefault();lookupWord(decodeURIComponent(href)); // bare-word link (slob)
   }
 });
+/* Sub-entry inlining for shadow-DOM (script-free) articles — the iframe path
+   does the same in frame.js. Inserted next to the link, toggled off by a second
+   click; nothing touches the search box, the URL or history. */
+async function toggleSub(link,word,dictID){
+  if(link._sub){link._sub.remove();link._sub=null;return}
+  const box=document.createElement("div");
+  box.className="gonow-sub";box.textContent="…";
+  link.parentNode.insertBefore(box,link.nextSibling);
+  link._sub=box;
+  try{
+    const r=await fetch("/api/search?mode=exact&n=1&dict="+encodeURIComponent(dictID||"")+
+      "&q="+encodeURIComponent(word));
+    let html=null;
+    for(const line of (await r.text()).split("\n")){
+      if(!line.trim())continue;
+      let m;try{m=JSON.parse(line)}catch(_){continue}
+      if(m.t==="hit"&&m.results?.length)html=m.results[0].Body;
+    }
+    if(html===null){box.textContent="(not in this dictionary)";return}
+    box.innerHTML=`<span class="gonow-sub-close" title="Close">✕</span>`+html.replace(/<link\b[^>]*>/gi,"");
+    box.querySelector(".gonow-sub-close").addEventListener("click",()=>toggleSub(link,word,dictID));
+  }catch(_){box.textContent="(could not load)"}
+}
+
 document.addEventListener("dblclick",e=>{
   const path=e.composedPath();
   if(!path.some(el=>el.classList?.contains("article")))return;

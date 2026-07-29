@@ -857,3 +857,171 @@ func TestDefaultPlanOmitsTrigram(t *testing.T) {
 		t.Errorf("contains-only plan: %+v", small.Caps())
 	}
 }
+
+// MDict repacks store expandable sections as "@"-prefixed headwords — 59 % of
+// LDOCE6 No-Voice is `@collocations_woman` and friends. They must be fetchable
+// by exact lookup (that is how an article's link pulls one in) and invisible
+// everywhere else, or a search for "woman" returns five sections before the
+// word.
+func TestSubEntriesHiddenFromBrowsing(t *testing.T) {
+	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	p := filepath.Join(t.TempDir(), "text.db")
+	r := &fakeReader{
+		meta: dict.Meta{Name: "L", Format: "mdx", Path: "/x.mdx"},
+		entries: []dict.Entry{
+			h("woman", "<p>an adult female person</p>"),
+			h("womanhood", "<p>the state of being a woman</p>"),
+			h("@examples_woman", "<p>EXAMPLES: women's clothes</p>"),
+			h("@collocations_woman", "<p>COLLOCATIONS: a young woman</p>"),
+			h("@entrymenu_chairwoman", "<p>MENU</p>"),
+			h("@", "<p>the at sign</p>"), // a bare @ IS a real headword: keep it
+		},
+	}
+	if _, err := IngestPlan(r, p, Plan{FullText: true, Contains: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// the count reports words, and records the hidden tally separately
+	if s.Meta().EntryCount != 3 {
+		t.Errorf("entry_count = %d, want 3 (woman, womanhood, @)", s.Meta().EntryCount)
+	}
+	if v, _ := ReadMetaValue(p, "sub_entries"); v != "3" {
+		t.Errorf("sub_entries = %q, want 3", v)
+	}
+
+	names := func(res []dict.Result) []string {
+		var out []string
+		for _, r := range res {
+			out = append(out, r.Headword)
+		}
+		return out
+	}
+	// contains: the mode where they used to drown everything
+	res, err := s.Contains("woman", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range names(res) {
+		if strings.HasPrefix(n, "@") {
+			t.Errorf("contains returned a sub-entry: %q (all: %v)", n, names(res))
+		}
+	}
+	if len(res) != 2 {
+		t.Errorf("contains woman = %v, want the two real words", names(res))
+	}
+	// prefix, full-text and the headword listing likewise
+	if res, _ := s.Prefix("wom", 20); len(res) != 2 {
+		t.Errorf("prefix wom = %v", names(res))
+	}
+	if res, _ := s.FullText("EXAMPLES", 20); len(res) != 0 {
+		t.Errorf("full-text reached a sub-entry: %v", names(res))
+	}
+	for _, k := range s.Keywords(0, 50) {
+		if strings.HasPrefix(k, "@") && len(k) > 1 {
+			t.Errorf("keyword listing exposed %q", k)
+		}
+	}
+	// …but an article's link can still fetch one by exact lookup
+	if res, err := s.Exact("@examples_woman", 1); err != nil || len(res) != 1 {
+		t.Fatalf("exact lookup of a sub-entry must work: %v %v", names(res), err)
+	}
+	// and a bare "@" headword is not collateral damage
+	if res, _ := s.Exact("@", 1); len(res) != 1 {
+		t.Error(`the headword "@" must remain searchable`)
+	}
+	if res, _ := s.Prefix("@", 5); len(res) != 1 {
+		t.Errorf(`prefix "@" should find the real entry only: %v`, names(res))
+	}
+}
+
+// Packing must include the files an article references that live BESIDE the
+// source rather than inside the .mdd — but only referenced ones: a dictionary
+// folder often holds several dictionaries, and sweeping it would pack a
+// neighbour's assets.
+func TestReferencedAssets(t *testing.T) {
+	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	p := filepath.Join(t.TempDir(), "text.db")
+	r := &fakeReader{
+		meta: dict.Meta{Name: "R", Format: "mdx", Path: "/x.mdx"},
+		entries: []dict.Entry{
+			h("one", `<link rel="stylesheet" href="LDOCE6.css"><script src="entry.js"></script><p>a</p>`),
+			h("two", `<img src="img/pic.png"><a href="bword://other">x</a><img src="https://example.com/x.png">`),
+			h("three", `<audio src="sound://beep.mp3"></audio><img src="data:image/png;base64,AAA">`),
+			h("four", `<img src="../outside.png"><a href="#frag">f</a><img src="LDOCE6.css">`), // dup + traversal
+		},
+	}
+	if err := Ingest(r, p, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReferencedAssets(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"LDOCE6.css": true, "entry.js": true, "img/pic.png": true}
+	for _, g := range got {
+		if !want[g] {
+			t.Errorf("unexpected asset %q (all: %v)", g, got)
+		}
+		delete(want, g)
+	}
+	if len(want) != 0 {
+		t.Errorf("missed %v (got %v)", want, got)
+	}
+}
+
+// A packed resource must be findable however the article spells it: MDD names
+// are indexed lower-cased while loose files keep their real name.
+func TestMediaLookupIsCaseInsensitive(t *testing.T) {
+	dir := t.TempDir()
+	textDB := filepath.Join(dir, "text.db")
+	r := &fakeReader{
+		meta:    dict.Meta{Name: "M", Format: "mdx", Path: "/x.mdx"},
+		entries: []dict.Entry{h("w", `<link href="LDOCE6.css">`)},
+	}
+	if err := Ingest(r, textDB, nil); err != nil {
+		t.Fatal(err)
+	}
+	uuid, _ := ReadMetaValue(textDB, "dict_uuid")
+	mediaDB := filepath.Join(dir, "media.db")
+	if err := IngestMedia(&assetDict{"LDOCE6.css": "span{color:red}"}, []string{"LDOCE6.css", "missing.png"},
+		mediaDB, uuid, nil); err != nil {
+		t.Fatal(err)
+	}
+	m, err := OpenMedia(mediaDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	for _, spelling := range []string{"LDOCE6.css", "ldoce6.css", "LDOCE6.CSS"} {
+		rc, _, err := m.Resource(spelling)
+		if err != nil {
+			t.Errorf("packed asset not found as %q: %v", spelling, err)
+			continue
+		}
+		rc.Close()
+	}
+	if _, _, err := m.Resource("missing.png"); err == nil {
+		t.Error("an unresolvable name must not be packed")
+	}
+}
+
+// assetDict serves a fixed set of resources, standing in for a format backend.
+type assetDict map[string]string
+
+func (a assetDict) Meta() dict.Meta                           { return dict.Meta{Name: "assets"} }
+func (a assetDict) Caps() dict.Caps                           { return dict.Caps{} }
+func (a assetDict) Close() error                              { return nil }
+func (a assetDict) Exact(string, int) ([]dict.Result, error)  { return nil, nil }
+func (a assetDict) Prefix(string, int) ([]dict.Result, error) { return nil, nil }
+func (a assetDict) Keywords(int, int) []string                { return nil }
+func (a assetDict) Resource(name string) (io.ReadCloser, string, error) {
+	if body, ok := a[name]; ok {
+		return io.NopCloser(strings.NewReader(body)), "text/css", nil
+	}
+	return nil, "", dict.ErrNotFound
+}

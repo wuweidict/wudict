@@ -155,7 +155,7 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 	var links []pendingLink
 	idByWord := map[string]int64{} // headword -> first entry id
 	idByFold := map[string]int64{} // lowercased headword -> first entry id
-	var id int64
+	var id, subEntries int64
 	total := srcMeta.EntryCount
 
 	for {
@@ -198,6 +198,9 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 			if _, err = insTrig.Exec(id, dict.Fold(hw)); err != nil {
 				return rep, err
 			}
+		}
+		if isSubEntry(hw) {
+			subEntries++
 		}
 		if _, ok := idByWord[hw]; !ok {
 			idByWord[hw] = id
@@ -242,7 +245,8 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 		"format":           srcMeta.Format,
 		"source_path":      srcMeta.Path,
 		"description":      srcMeta.Description,
-		"entry_count":      fmt.Sprint(id),
+		"entry_count":      fmt.Sprint(id - int64(subEntries)),
+		"sub_entries":      fmt.Sprint(subEntries), // @-prefixed, hidden from browsing
 		"ingest_level":     string(level),
 		"has_trigram":      boolMeta(plan.Contains), // cheap-list flag; Open feature-detects the table
 		"body_encoding":    bodyEncoding(),
@@ -297,6 +301,10 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 	}
 	return rep, nil
 }
+
+// isSubEntry reports an MDict-style expandable section stored as a headword
+// ("@examples_woman"). See notSubEntry in store.go for why they are hidden.
+func isSubEntry(hw string) bool { return len(hw) > 1 && hw[0] == '@' }
 
 func boolMeta(b bool) string {
 	if b {

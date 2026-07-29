@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/glowinthedark/gonow-dict/internal/dict"
@@ -52,6 +53,12 @@ func (m *Media) Resource(name string) (io.ReadCloser, string, error) {
 	var data []byte
 	err := m.db.QueryRow("SELECT mime, data FROM resource WHERE name = ?", name).Scan(&mime, &data)
 	if err == sql.ErrNoRows {
+		// MDD names are indexed lower-cased while an article may reference
+		// mixed case (and loose files are packed under their real name), so a
+		// miss retries case-insensitively rather than 404-ing on spelling.
+		err = m.db.QueryRow("SELECT mime, data FROM resource WHERE name = ? COLLATE NOCASE", name).Scan(&mime, &data)
+	}
+	if err == sql.ErrNoRows {
 		return nil, "", dict.ErrNotFound
 	}
 	if err != nil {
@@ -59,6 +66,73 @@ func (m *Media) Resource(name string) (io.ReadCloser, string, error) {
 	}
 	return io.NopCloser(bytes.NewReader(data)), mime, nil
 }
+
+// assetRef matches a resource reference in article HTML. Quoted forms only:
+// unquoted attributes are rare in dictionary markup and would drag in noise.
+var assetRef = regexp.MustCompile(`(?i)(?:href|src|data|poster)\s*=\s*["']([^"']+)["']`)
+
+// ReferencedAssets returns the relative resource names an already-prepared
+// dictionary's articles refer to. Packing uses it to include files that live
+// beside the .mdx rather than inside the .mdd (a repack's stylesheet and
+// scripts) — but only the ones actually referenced: dictionary folders often
+// hold several dictionaries, so sweeping the directory would pack a neighbour's
+// assets.
+//
+// Reads the prepared text.db rather than re-parsing the source: the bodies are
+// already there, and packing media is an explicit, minutes-long operation where
+// one decompression pass costs nothing.
+func ReferencedAssets(textDB string) ([]string, error) {
+	db, err := sql.Open(driverName, dsnRO(textDB))
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	rows, err := db.Query("SELECT m FROM entry")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	const maxDistinct = 20000 // a pathological article must not blow up memory
+	seen := map[string]bool{}
+	var out []string
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return out, err
+		}
+		for _, m := range assetRef.FindAllStringSubmatch(decodeBody(raw), -1) {
+			name := strings.TrimSpace(m[1])
+			if !isRelativeAsset(name) || seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
+			if len(out) >= maxDistinct {
+				return out, nil
+			}
+		}
+	}
+	return out, rows.Err()
+}
+
+// isRelativeAsset keeps references that name a file belonging to this
+// dictionary: no scheme (http:, data:, bword:, sound:…), no fragment or query
+// only, nothing climbing out of the folder.
+func isRelativeAsset(s string) bool {
+	if s == "" || strings.HasPrefix(s, "#") || strings.HasPrefix(s, "?") || strings.HasPrefix(s, "//") {
+		return false
+	}
+	if schemeRef.MatchString(s) {
+		return false
+	}
+	if strings.Contains(s, "..") {
+		return false
+	}
+	return true
+}
+
+// schemeRef matches a real URI scheme at the start of a reference.
+var schemeRef = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*:`)
 
 // IngestMedia packs every resource of d into a media.db at dbPath,
 // stamped with dictUUID (must be the paired text.db's dict_uuid).

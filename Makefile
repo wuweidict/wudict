@@ -66,7 +66,7 @@ install: ## go install into GOBIN
 
 .PHONY: run
 run: build open ## Build then run with ARGS, e.g. make run ARGS="lookup dict.mdx word"
-	./$(BINARY) $(ARGS)
+	./$(BINARY) --verbose $(ARGS)
 
 .PHONY: ingest
 ingest: build ## Ingest DICT=<path> into a text.db (OUT=<path> optional), e.g. make ingest DICT=~/Dicts/x.mdx
@@ -162,7 +162,7 @@ clean: ## Remove binary, dist/, coverage artifacts
 
 .PHONY: purge
 purge: ## zap all local cached dictionaries in ~/.gonow-dict/db
-	rm -rf ~/.gonow-dict/db 
+	rm -rfv ~/.gonow-dict/db
 
 .PHONY: version
 version: ## Print the version stamp used for builds
