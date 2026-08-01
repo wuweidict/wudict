@@ -1,4 +1,4 @@
-name: pureGo Build and Release
+name: Build+Release (pureGo)
 
 on:
   workflow_dispatch:
