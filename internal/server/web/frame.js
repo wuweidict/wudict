@@ -60,6 +60,17 @@
 		var w = wordFromHref(href);
 		if (w !== null) {
 			e.preventDefault();
+			// We own this click completely, so take it off the wire. preventDefault
+			// only cancels the browser's DEFAULT action; the dictionary's own
+			// handlers still run, and LDOCE6's entry.js navigates PROGRAMMATICALLY
+			// (assigning location from the anchor), which no preventDefault can
+			// stop — hence "Failed to launch 'entry:@…'". Stopping propagation
+			// during the document-level CAPTURE phase means the event never
+			// reaches the anchor or any ancestor inside the article, so those
+			// handlers never fire. Scoped to cross-reference links only: every
+			// other click in the article still belongs to the dictionary.
+			e.stopPropagation();
+			if (e.stopImmediatePropagation) e.stopImmediatePropagation();
 			// "@name" is not a word: MDict repacks store an article's expandable
 			// sections (Examples, Collocations, Word Origin…) as headwords with
 			// an "@" prefix. Following one as a search would replace the article

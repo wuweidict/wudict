@@ -972,6 +972,10 @@ function playAudio(url){
    the headword — before decoding, so an encoded %23 in a real headword is
    preserved. Returns null when the href is not a lookup link at all, "" when
    it is one but names no word.
+   Sub-entry links ("@name", D26) reach us as `entry:@name`, WITHOUT the
+   slashes: RewriteEntryHTML strips them server-side because "//" makes the
+   rest an authority, where "@" is the userinfo delimiter and is dropped by URL
+   normalization — see subEntryRef in rewrite.go. Do not "restore" the slashes.
    NOTE: frame.js carries the same logic for articles rendered inside the
    sandboxed iframe; keep the two in step. */
 function wordFromHref(href){

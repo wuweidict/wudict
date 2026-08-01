@@ -45,6 +45,24 @@ var schemeRef = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*:`)
 // bundled resources; these DO get rewritten.
 var soundOrFile = regexp.MustCompile(`(?i)^(?:sound|file)://`)
 
+// subEntryRef matches a cross-reference to an MDict sub-entry (D26): a headword
+// beginning with "@", addressed through an authority — `entry://@examples_woman`.
+//
+// That spelling is unsafe and we rewrite it to the slash-less `entry:@…`.
+// With "//" the browser parses an AUTHORITY, in which "@" is the userinfo
+// delimiter: `entry://@examples_woman` has empty userinfo and host
+// "examples_woman", and re-serializing drops the "@" entirely. getAttribute()
+// still returns the raw string, but anything that reads the .href *property*
+// gets the mangled form — the status bar on hover, and, decisively, dictionary
+// scripts that round-trip their own anchors (LDOCE6's entry.js does). Once the
+// attribute has been rewritten in the DOM, our "@" test fails and the click
+// falls through to lookupWord, replacing the article with a fragment of itself
+// — exactly the navigation D26 set out to prevent.
+//
+// Without "//" the rest is an opaque path: no authority, no userinfo, so "@"
+// survives every normalization. Idempotent (the output no longer matches).
+var subEntryRef = regexp.MustCompile(`(?i)^(bword|entry)://@`)
+
 // RewriteEntryHTML rewrites resource references inside one article's HTML so
 // the browser fetches them from /res/{dictID}/…. It handles:
 //
@@ -105,6 +123,9 @@ func RewriteEntryHTML(html, dictID string) string {
 			strings.HasPrefix(ref, absPrefix),
 			strings.HasPrefix(ref, relPrefix):
 			return ref, false
+		case subEntryRef.MatchString(ref):
+			// Must precede the scheme case, which would pass it through.
+			return subEntryRef.ReplaceAllString(ref, "$1:@"), true
 		case schemeRef.MatchString(ref) && !soundOrFile.MatchString(ref):
 			return ref, false
 		}
