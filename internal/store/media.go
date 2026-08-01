@@ -14,7 +14,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 // Media is one opened `media.db` (SPEC §3): binary resources
@@ -36,7 +36,7 @@ func OpenMedia(path string) (*Media, error) {
 	}
 	if ver != schemaVersion {
 		db.Close()
-		return nil, fmt.Errorf("%s: not a gonow-dict media database", path)
+		return nil, fmt.Errorf("%s: not a wudict media database", path)
 	}
 	m, err := readMeta(db)
 	if err != nil {
@@ -218,7 +218,7 @@ func IngestMedia(d dict.Dictionary, names []string, dbPath, dictUUID string, pro
 	return nil
 }
 
-// ReadMetaValue reads one meta value from a gonow database file.
+// ReadMetaValue reads one meta value from a wudict database file.
 func ReadMetaValue(dbPath, key string) (string, error) {
 	db, err := sql.Open(driverName, dsnRO(dbPath))
 	if err != nil {

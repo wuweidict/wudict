@@ -1,12 +1,18 @@
-# gonow-dict — developer UI & manifest (Decision D10)
+# wudict — developer UI & manifest (Decision D10)
 # Every meaningful action lives here; `make` alone shows this menu.
 # New capabilities MUST land with a target.
 
-BINARY     := gonow-dict
-CMD        := ./cmd/gonow-dict
+# Two binaries, one program (internal/cli). Go names an installed binary after
+# the last element of its package path, so `go install <module>@latest` can only
+# ever produce "wuweidict" — CMD_LONG exists solely to make that work. CMD is
+# the canonical short name and the one every target below builds.
+BINARY     := wudict
+CMD        := ./cmd/wudict
+BINARY_LONG := wuweidict
+CMD_LONG   := .
 BUILD_DIR  := dist
 # ---- build flavours -----------------------------------------------------
-# gonow-dict builds in two flavours; `build`/`install`/`check` use cgo:
+# wudict builds in two flavours; `build`/`install`/`check` use cgo:
 #
 #   cgo  (default, `make build`): CGO_ENABLED=1 -tags sqlite_fts5
 #     * mattn/go-sqlite3 — fast FTS5 (D4)
@@ -23,18 +29,20 @@ GO_TAGS      := sqlite_fts5
 GOFLAGS      := -tags $(GO_TAGS) -trimpath
 PUREGO_FLAGS := -tags purego -trimpath
 # VERSION must be defined BEFORE LDFLAGS: `:=` expands immediately, so the
-# other order stamped -X main.version= with an empty string (the binary then
-# printed a blank version, overriding main.go's "dev" default).
+# other order stamped the version with an empty string (the binary then printed
+# a blank version, overriding cli.Version's "dev" default).
+# The stamp targets internal/cli, not main: both binaries share that package.
 VERSION    := $(shell git -C . describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS    := -s -w -X main.version=$(VERSION)
+VERSION_PKG := github.com/legbehindneck/wuweidict/internal/cli
+LDFLAGS    := -s -w -X $(VERSION_PKG).Version=$(VERSION)
 
 # Integration tests need real dictionaries; point these at files you have
 # (tests skip silently when a path is unset/missing).
-GONOW_TEST_MDX      ?= $(HOME)/Downloads/Language/mdict/es-es-Espasa-Calpe-2016.mdx
-GONOW_TEST_STARDICT ?= $(HOME)/Downloads/Language/stardict/eng-eng-stanford-ep.ifo
-GONOW_TEST_SLOB     ?= $(HOME)/Downloads/Language/aard/es-es-Espasa-Calpe-2016.slob
-GONOW_TEST_DSL      ?= $(HOME)/Downloads/Language/DSL/es-es-Espasa-Calpe-2016/es-es-Espasa-Calpe-2016.dsl
-TEST_ENV = GONOW_TEST_MDX="$(GONOW_TEST_MDX)" GONOW_TEST_STARDICT="$(GONOW_TEST_STARDICT)" GONOW_TEST_SLOB="$(GONOW_TEST_SLOB)" GONOW_TEST_DSL="$(GONOW_TEST_DSL)"
+WUDICT_TEST_MDX      ?= $(HOME)/Downloads/Language/mdict/es-es-Espasa-Calpe-2016.mdx
+WUDICT_TEST_STARDICT ?= $(HOME)/Downloads/Language/stardict/eng-eng-stanford-ep.ifo
+WUDICT_TEST_SLOB     ?= $(HOME)/Downloads/Language/aard/es-es-Espasa-Calpe-2016.slob
+WUDICT_TEST_DSL      ?= $(HOME)/Downloads/Language/DSL/es-es-Espasa-Calpe-2016/es-es-Espasa-Calpe-2016.dsl
+TEST_ENV = WUDICT_TEST_MDX="$(WUDICT_TEST_MDX)" WUDICT_TEST_STARDICT="$(WUDICT_TEST_STARDICT)" WUDICT_TEST_SLOB="$(WUDICT_TEST_SLOB)" WUDICT_TEST_DSL="$(WUDICT_TEST_DSL)"
 
 # Args for `make run-*` targets, e.g.: make run ARGS="list ~/Dictionaries"
 ARGS ?=
@@ -45,10 +53,10 @@ ARGS ?=
 
 .PHONY: help
 help: ## Show this help
-	@echo "gonow-dict make targets:"; echo
-	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z0-9_.-]+:.*##/{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo "wudict make targets:"; echo
+	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z0-9_.-]+:.*##/{printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo
-	@echo "Vars: ARGS=<cli args>  GONOW_TEST_MDX|_STARDICT|_SLOB|_DSL=<integration fixtures>"
+	@echo "Vars: ARGS=<cli args>  WUDICT_TEST_MDX|_STARDICT|_SLOB|_DSL=<integration fixtures>"
 
 # ---- build & run --------------------------------------------------------
 
@@ -57,12 +65,12 @@ build: ## Build the host binary — cgo flavour (built-in sqlite FTS5 + built-in
 	CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
 
 .PHONY: build-purego
-build-purego: ## Build the host binary — purego flavour (pure-Go sqlite, external speexdec)
+build-purego: ## Build the host binary — purego flavour (*slower* pure-Go sqlite, external speexdec)
 	CGO_ENABLED=0 go build $(PUREGO_FLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
 
 .PHONY: install
-install: ## go install into GOBIN
-	go install $(GOFLAGS) -ldflags "$(LDFLAGS)" $(CMD)
+install: ## go install BOTH binaries (wudict + wuweidict) into GOBIN
+	go install $(GOFLAGS) -ldflags "$(LDFLAGS)" $(CMD) $(CMD_LONG)
 
 .PHONY: run
 run: build open ## Build then run with ARGS, e.g. make run ARGS="lookup dict.mdx word"
@@ -96,7 +104,7 @@ test-purego: ## Run store tests against the pure-Go sqlite driver (release parit
 # ---- quality ------------------------------------------------------------
 
 .PHONY: test
-test: ## Unit tests (integration tests skip unless GONOW_TEST_MDX exists)
+test: ## Unit tests (integration tests skip unless WUDICT_TEST_MDX exists)
 	$(TEST_ENV) go test $(GOFLAGS) ./...
 
 .PHONY: test-v
@@ -133,36 +141,122 @@ check: tidy vet test ## Pre-commit gate: tidy + vet + test
 
 # ---- launchd agent (macOS) ----------------------------------------------
 # Modern launchctl syntax (bootstrap/bootout/kickstart), GUI domain.
+#
+# The plist is GENERATED, never committed: launchd expands nothing in
+# ProgramArguments (no ~, no $HOME, no PATH lookup), so argv[0] must be a
+# literal absolute path — a checked-in plist is only correct on the machine
+# that wrote it. launchctl/*.plist.in is the template.
 
-LABEL := com.glowinthedark.gonow-dict
-PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
-GUI   := gui/$(shell id -u)
+LABEL    := com.legbehindneck.wudict
+PLIST_IN := launchctl/$(LABEL).plist.in
+PLIST    := $(HOME)/Library/LaunchAgents/$(LABEL).plist
+GUI      := gui/$(shell id -u)
+LOGDIR   := $(HOME)/Library/Logs
+# Which binary the agent runs. Defaults to THIS checkout's build, so that
+# `make mac-agent-restart` (rebuild + kickstart) is coherent. Point it at the
+# installed copy to survive moving/renaming the checkout:
+#   make mac-agent-install AGENT_BIN="$$(go env GOPATH)/bin/wudict"
+AGENT_BIN ?= $(abspath $(BINARY))
 
-.PHONY: agent-start
-agent-start: ## Load and start the launchd agent
+.PHONY: mac-agent-install
+mac-agent-install: build ## Generate + install the LaunchAgent plist (override AGENT_BIN=<path>)
+	@mkdir -p $(dir $(PLIST)) $(LOGDIR)
+	@sed -e '/<!-- TEMPLATE/,/^-->$$/d' \
+	     -e 's|@LABEL@|$(LABEL)|g' -e 's|@BIN@|$(AGENT_BIN)|g' -e 's|@LOGDIR@|$(LOGDIR)|g' \
+	   $(PLIST_IN) > $(PLIST)
+	@plutil -lint $(PLIST) >/dev/null || { rm -f $(PLIST); echo "generated plist is invalid"; exit 1; }
+	@echo "installed $(PLIST)"
+	@echo "       -> $(AGENT_BIN) serve --no-browser"
+	@echo "       -> log: $(LOGDIR)/wudict.log"
+	@echo "next: make mac-agent-start"
+
+.PHONY: mac-agent-uninstall
+mac-agent-uninstall: ## Stop the agent and remove its plist
+	-launchctl bootout $(GUI)/$(LABEL) 2>/dev/null
+	rm -f $(PLIST)
+
+.PHONY: mac-agent-start
+mac-agent-start: ## Load and start the launchd agent
+	@test -f $(PLIST) || { echo "no plist at $(PLIST) — run: make mac-agent-install"; exit 2; }
 	launchctl bootstrap $(GUI) $(PLIST)
 
-.PHONY: agent-stop
-agent-stop: ## Stop and unload the launchd agent
+.PHONY: mac-agent-stop
+mac-agent-stop: ## Stop and unload the launchd agent
 	launchctl bootout $(GUI)/$(LABEL)
 
-.PHONY: agent-restart
-agent-restart: build ## Rebuild the binary, then restart the running agent
+.PHONY: mac-agent-restart
+mac-agent-restart: build ## Rebuild the binary, then restart the running agent
 	launchctl kickstart -k $(GUI)/$(LABEL)
 
-.PHONY: agent-status
-agent-status: ## Show the agent's launchd state (pid, exit status, ...)
+.PHONY: mac-agent-status
+mac-agent-status: ## Show the agent's launchd state (pid, exit status, ...)
 	launchctl print $(GUI)/$(LABEL)
+
+# ---- systemd service (Linux) --------------------------------------------
+# A USER unit (systemctl --user): WuWeiDict reads ~/Dictionaries, writes
+# ~/.wudict and binds 127.0.0.1, so it belongs to the user's session, not to
+# root. Only copying the binary into $(PREFIX)/bin needs sudo.
+#
+# The unit file *must* be generated — ExecStart must be an absolute
+# path and systemd doesn't do ~ expansion.
+
+PREFIX      ?= /usr/local
+SERVICE_BIN := $(PREFIX)/bin/$(BINARY)
+UNIT_NAME   := wudict.service
+UNIT_IN     := systemd/$(UNIT_NAME).in
+UNIT_DIR    := $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)/systemd/user
+UNIT        := $(UNIT_DIR)/$(UNIT_NAME)
+
+.PHONY: linux-install
+linux-install: build ## Install the binary into $(PREFIX)/bin (asks for sudo)
+	sudo install -D -m 0755 $(BINARY) $(SERVICE_BIN)
+	@echo "installed $(SERVICE_BIN)"
+
+.PHONY: linux-uninstall
+linux-uninstall: ## Remove the binary from $(PREFIX)/bin (asks for sudo)
+	sudo rm -f $(SERVICE_BIN)
+
+.PHONY: linux-service-install
+linux-service-install: linux-install ## Install binary + generate the systemd user unit
+	@mkdir -p $(UNIT_DIR)
+	@sed -e '/^#!/d' -e 's|@BIN@|$(SERVICE_BIN)|g' $(UNIT_IN) > $(UNIT)
+	systemctl --user daemon-reload
+	@echo "installed $(UNIT)"
+	@echo "       -> $(SERVICE_BIN) serve --no-browser"
+	@echo "next: make linux-service-start   (and 'sudo loginctl enable-linger $$(id -un)' to run without a login session)"
+
+.PHONY: linux-service-uninstall
+linux-service-uninstall: ## Stop/disable the service and remove its unit (keeps the binary)
+	-systemctl --user disable --now $(UNIT_NAME)
+	rm -f $(UNIT)
+	systemctl --user daemon-reload
+
+.PHONY: linux-service-start
+linux-service-start: ## Enable and start the service now
+	@test -f $(UNIT) || { echo "no unit at $(UNIT) — run: make linux-service-install"; exit 2; }
+	systemctl --user enable --now $(UNIT_NAME)
+
+.PHONY: linux-service-stop
+linux-service-stop: ## Stop the service
+	systemctl --user stop $(UNIT_NAME)
+
+.PHONY: linux-service-restart
+linux-service-restart: linux-install ## Rebuild, reinstall the binary, then restart the service
+	systemctl --user restart $(UNIT_NAME)
+
+.PHONY: linux-service-status
+linux-service-status: ## Show service state (add 'journalctl --user -u wudict -f' for logs)
+	systemctl --user status $(UNIT_NAME) --no-pager
 
 # ---- housekeeping -------------------------------------------------------
 
 .PHONY: clean
-clean: ## Remove binary, dist/, coverage artifacts
-	rm -rf $(BINARY) $(BUILD_DIR) coverage.out
+clean: ## Remove binaries, dist/, coverage artifacts
+	rm -rf $(BINARY) $(BINARY_LONG) $(BUILD_DIR) coverage.out
 
 .PHONY: purge
-purge: ## zap all local cached dictionaries in ~/.gonow-dict/db
-	rm -rfv ~/.gonow-dict/db
+purge: ## zap all local cached dictionaries in ~/.wudict/db
+	rm -rfv ~/.wudict/db
 
 .PHONY: version
 version: ## Print the version stamp used for builds

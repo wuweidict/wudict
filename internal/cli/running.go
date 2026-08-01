@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package cli
 
 import (
 	"encoding/json"
@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
-	"github.com/glowinthedark/gonow-dict/internal/server"
+	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/server"
 )
 
-// runningInstance describes a gonow-dict already serving on the address this
+// runningInstance describes a wudict already serving on the address this
 // launch wanted. Only what the banner needs.
 type runningInstance struct {
 	Version string
@@ -34,7 +34,7 @@ type runningInstance struct {
 	ConfigPath string `json:"configPath"`
 }
 
-// probeRunning asks whatever holds addr whether it is a gonow-dict, and if so
+// probeRunning asks whatever holds addr whether it is a wudict, and if so
 // what it is serving.
 //
 // The identity check is the whole point: a port can be held by anything, and
@@ -93,11 +93,11 @@ func announceRunning(inst *runningInstance, url string, wantDirs []string, willO
 	out := os.Stderr
 	const bar = "========================================================================"
 	fmt.Fprintf(out, "\n%s\n", bar)
-	fmt.Fprintf(out, "  gonow-dict IS ALREADY RUNNING  --  this launch is doing nothing\n")
+	fmt.Fprintf(out, "  wudict IS ALREADY RUNNING  --  this launch is doing nothing\n")
 	fmt.Fprintf(out, "%s\n\n", bar)
 
-	if inst.Version != "" && inst.Version != version {
-		fmt.Fprintf(out, "  running version   %s   (you launched %s)\n", inst.Version, version)
+	if inst.Version != "" && inst.Version != Version {
+		fmt.Fprintf(out, "  running version   %s   (you launched %s)\n", inst.Version, Version)
 	}
 	fmt.Fprintf(out, "  already serving   %s\n", url)
 	if inst.Total > 0 {

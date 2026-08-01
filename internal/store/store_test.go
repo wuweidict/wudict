@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 // prepare ingests a minimal real dictionary into a library folder for srcPath.
@@ -65,7 +65,7 @@ func TestFolderName(t *testing.T) {
 // must keep resolving to its own folder afterwards.
 func TestClaimDirCollision(t *testing.T) {
 	db := t.TempDir()
-	t.Setenv("GONOW_DB_DIR", db)
+	t.Setenv("WUDICT_DB_DIR", db)
 	srcDir := t.TempDir()
 	slob := writeSrc(t, filepath.Join(srcDir, "AHD5-2017.slob"), "s")
 	mdx := writeSrc(t, filepath.Join(srcDir, "AHD5-2017.mdx"), "m")
@@ -96,7 +96,7 @@ func TestClaimDirCollision(t *testing.T) {
 }
 
 func TestSourceChanged(t *testing.T) {
-	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	t.Setenv("WUDICT_DB_DIR", t.TempDir())
 	srcDir := t.TempDir()
 	src := writeSrc(t, filepath.Join(srcDir, "d.mdx"), "first content")
 	dir := prepare(t, src, "D")
@@ -128,7 +128,7 @@ func TestSourceChanged(t *testing.T) {
 
 func TestLibraryListingAndReceipt(t *testing.T) {
 	db := t.TempDir()
-	t.Setenv("GONOW_DB_DIR", db)
+	t.Setenv("WUDICT_DB_DIR", db)
 	srcDir := t.TempDir()
 	live := writeSrc(t, filepath.Join(srcDir, "live.mdx"), "x")
 	prepare(t, live, "Live")
@@ -180,7 +180,7 @@ func TestLibraryListingAndReceipt(t *testing.T) {
 // from — the claim written at allocation time is the ownership record — or the
 // prepared dictionary is orphaned from its source and silently rebuilt forever.
 func TestOwnershipSurvivesBogusReaderPath(t *testing.T) {
-	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	t.Setenv("WUDICT_DB_DIR", t.TempDir())
 	srcDir := t.TempDir()
 	src := writeSrc(t, filepath.Join(srcDir, "real.mdx"), "content")
 
@@ -211,7 +211,7 @@ func TestOwnershipSurvivesBogusReaderPath(t *testing.T) {
 
 func TestFindOrphansSemantics(t *testing.T) {
 	db := t.TempDir()
-	t.Setenv("GONOW_DB_DIR", db)
+	t.Setenv("WUDICT_DB_DIR", db)
 	srcDir := t.TempDir()
 
 	// 1. prepared dictionary whose source vanished: MUST NOT be an orphan
@@ -306,7 +306,7 @@ func testStore(t *testing.T) *Store {
 func TestIngestAndMeta(t *testing.T) {
 	s := testStore(t)
 	m := s.Meta()
-	if m.Name != "Test Diccionario" || m.Format != "gonow:mdx" {
+	if m.Name != "Test Diccionario" || m.Format != "wudict:mdx" {
 		t.Errorf("bad meta: %+v", m)
 	}
 	if m.EntryCount != 6 { // 8 raw - 2 pure links
@@ -616,7 +616,7 @@ func TestBodyTextNormalization(t *testing.T) {
 // overwrite a folder that already holds the same dictionary.
 func TestAdoptLoose(t *testing.T) {
 	db := t.TempDir()
-	t.Setenv("GONOW_DB_DIR", db)
+	t.Setenv("WUDICT_DB_DIR", db)
 	srcDir := t.TempDir()
 	src := writeSrc(t, filepath.Join(srcDir, "Espasa.mdx"), "content")
 
@@ -694,7 +694,7 @@ func TestAdoptLoose(t *testing.T) {
 // duplicate: left in place by adoption, and only then reported as removable.
 func TestAdoptLooseKeepsExistingFolder(t *testing.T) {
 	db := t.TempDir()
-	t.Setenv("GONOW_DB_DIR", db)
+	t.Setenv("WUDICT_DB_DIR", db)
 	srcDir := t.TempDir()
 	src := writeSrc(t, filepath.Join(srcDir, "Dup.mdx"), "content")
 	dir := prepare(t, src, "Dup") // current-layout folder
@@ -762,7 +762,7 @@ func TestBodyCompressionRoundTrip(t *testing.T) {
 // End to end: the same dictionary ingested with and without compression must
 // answer every mode identically.
 func TestSearchIdenticalWithAndWithoutCompression(t *testing.T) {
-	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	t.Setenv("WUDICT_DB_DIR", t.TempDir())
 	body := func(w string) string {
 		return "<p>" + strings.Repeat(w+" definición de ejemplo con texto repetido. ", 12) + "</p>"
 	}
@@ -818,7 +818,7 @@ func TestSearchIdenticalWithAndWithoutCompression(t *testing.T) {
 // The default plan builds only what finding a headword needs. Contains costs
 // as much again as the whole rest of the index, so it is asked for or absent.
 func TestDefaultPlanOmitsTrigram(t *testing.T) {
-	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	t.Setenv("WUDICT_DB_DIR", t.TempDir())
 	mk := func(plan Plan) *Store {
 		p := filepath.Join(t.TempDir(), "text.db")
 		r := &fakeReader{
@@ -864,7 +864,7 @@ func TestDefaultPlanOmitsTrigram(t *testing.T) {
 // everywhere else, or a search for "woman" returns five sections before the
 // word.
 func TestSubEntriesHiddenFromBrowsing(t *testing.T) {
-	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	t.Setenv("WUDICT_DB_DIR", t.TempDir())
 	p := filepath.Join(t.TempDir(), "text.db")
 	r := &fakeReader{
 		meta: dict.Meta{Name: "L", Format: "mdx", Path: "/x.mdx"},
@@ -944,7 +944,7 @@ func TestSubEntriesHiddenFromBrowsing(t *testing.T) {
 // folder often holds several dictionaries, and sweeping it would pack a
 // neighbour's assets.
 func TestReferencedAssets(t *testing.T) {
-	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	t.Setenv("WUDICT_DB_DIR", t.TempDir())
 	p := filepath.Join(t.TempDir(), "text.db")
 	r := &fakeReader{
 		meta: dict.Meta{Name: "R", Format: "mdx", Path: "/x.mdx"},

@@ -62,7 +62,7 @@ func TextDBPath(dir string) string  { return filepath.Join(dir, TextDBName) }
 func MediaDBPath(dir string) string { return filepath.Join(dir, MediaDBName) }
 func InfoPath(dir string) string    { return filepath.Join(dir, InfoName) }
 
-// IsTextDB reports whether path names a gonow text database: the bundle main
+// IsTextDB reports whether path names a wudict text database: the bundle main
 // file (`text.db`) or a loose `<name>.text.db` copied out of its folder.
 func IsTextDB(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
@@ -252,7 +252,7 @@ func claimFrom(candidates []string, claim string) (string, error) {
 // writeClaim stamps a minimal receipt so the folder's owner is knowable before
 // its text.db exists. WriteInfo replaces it with the full receipt after ingest.
 func writeClaim(dir, srcPath string) error {
-	body := fmt.Sprintf("# gonow-dict — preparing this dictionary…\nsource = %s\nclaimed = %s\n",
+	body := fmt.Sprintf("# wudict — preparing this dictionary…\nsource = %s\nclaimed = %s\n",
 		srcPath, time.Now().UTC().Format(time.RFC3339))
 	return os.WriteFile(InfoPath(dir), []byte(body), 0o644)
 }
@@ -433,7 +433,7 @@ func WriteInfo(dir string) error {
 		src += "  [no longer on disk — this folder is now the only copy]"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# gonow-dict — prepared dictionary\n")
+	fmt.Fprintf(&b, "# wudict — prepared dictionary\n")
 	fmt.Fprintf(&b, "# This folder is one dictionary. Copy, move or zip it as a unit;\n")
 	fmt.Fprintf(&b, "# drop it into your dictionary folder to use it on another machine.\n")
 	fmt.Fprintf(&b, "# Regenerated automatically — edits are overwritten.\n\n")

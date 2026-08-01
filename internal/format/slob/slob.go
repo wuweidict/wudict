@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 func init() {

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package store is the ingested backend: the gonow-dict canonical SQLite
+// Package store is the ingested backend: the wudict canonical SQLite
 // format (docs/SPEC.md §2). One `text.db` per dictionary — inside its library
 // folder, see library.go — holds headwords, aliases, article HTML, and the
 // FTS5 indexes powering the contains and full-text modes the direct backends
@@ -19,7 +19,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 func init() {
@@ -49,7 +49,7 @@ type Store struct {
 	media      *Media // sibling .media.db, when present and uuid-paired
 }
 
-// Open opens and validates a gonow-dict text database.
+// Open opens and validates a wudict text database.
 func Open(path string) (*Store, error) {
 	db, err := sql.Open(driverName, dsnRO(path))
 	if err != nil {
@@ -63,7 +63,7 @@ func Open(path string) (*Store, error) {
 	}
 	if ver != schemaVersion {
 		db.Close()
-		return nil, fmt.Errorf("%s: not a gonow-dict database (user_version=%d, want %d)", path, ver, schemaVersion)
+		return nil, fmt.Errorf("%s: not a wudict database (user_version=%d, want %d)", path, ver, schemaVersion)
 	}
 	m, err := readMeta(db)
 	if err != nil {
@@ -72,7 +72,7 @@ func Open(path string) (*Store, error) {
 	}
 	s.meta = dict.Meta{
 		Name:        m["name"],
-		Format:      "gonow:" + m["format"],
+		Format:      "wudict:" + m["format"],
 		Path:        path,
 		Description: m["description"],
 	}
@@ -116,7 +116,7 @@ func readMeta(db *sql.DB) (map[string]string, error) {
 	return m, rows.Err()
 }
 
-// ReadMeta opens a gonow database read-only and returns its whole meta
+// ReadMeta opens a wudict database read-only and returns its whole meta
 // table. Used by the cheap dictionary-list path to read name/entry_count/
 // ingest_level without opening the heavy direct backend.
 func ReadMeta(dbPath string) (map[string]string, error) {

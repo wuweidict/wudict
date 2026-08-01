@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// gonow-dict iframe bridge: runs inside sandboxed article iframes
+// wudict iframe bridge: runs inside sandboxed article iframes
 // (script-bearing dictionaries). Reports content height, forwards
 // bword:// lookups and double-click word lookups to the app, follows
 // theme changes.
@@ -83,18 +83,18 @@
 	// already loaded here, so the fragment styles itself and its ►/▼ accordions
 	// work with no extra plumbing.
 	function toggleSub(link, word) {
-		var existing = link.gonowSub;
+		var existing = link.wudictSub;
 		if (existing) { // second click closes it
 			if (existing.parentNode) existing.parentNode.removeChild(existing);
-			link.gonowSub = null;
+			link.wudictSub = null;
 			post();
 			return;
 		}
 		var box = document.createElement("div");
-		box.className = "gonow-sub";
+		box.className = "wudict-sub";
 		box.textContent = "…";
 		link.parentNode.insertBefore(box, link.nextSibling);
-		link.gonowSub = box;
+		link.wudictSub = box;
 		post();
 		fetch("/api/search?mode=exact&n=1&dict=" + encodeURIComponent(dictID) +
 			"&q=" + encodeURIComponent(word))
@@ -109,9 +109,9 @@
 				});
 				if (html === null) { box.textContent = "(not in this dictionary)"; post(); return; }
 				// the fragment repeats the article's stylesheet link; one is enough
-				box.innerHTML = '<span class="gonow-sub-close" title="Close">✕</span>' +
+				box.innerHTML = '<span class="wudict-sub-close" title="Close">✕</span>' +
 					html.replace(/<link\b[^>]*>/gi, "");
-				box.querySelector(".gonow-sub-close").addEventListener("click", function () {
+				box.querySelector(".wudict-sub-close").addEventListener("click", function () {
 					toggleSub(link, word);
 				});
 				post();

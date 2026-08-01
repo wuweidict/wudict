@@ -2,9 +2,9 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// gonow-dict CLI — Phase 1 surface: inspect and query dictionaries via
+// wudict CLI — Phase 1 surface: inspect and query dictionaries via
 // the direct backends. The HTTP server arrives in a later phase.
-package main
+package cli
 
 import (
 	"context"
@@ -25,32 +25,45 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/glowinthedark/gonow-dict/internal/config"
-	"github.com/glowinthedark/gonow-dict/internal/dict"
-	"github.com/glowinthedark/gonow-dict/internal/logx"
-	"github.com/glowinthedark/gonow-dict/internal/search"
-	"github.com/glowinthedark/gonow-dict/internal/server"
-	"github.com/glowinthedark/gonow-dict/internal/speex"
-	"github.com/glowinthedark/gonow-dict/internal/store"
+	"github.com/legbehindneck/wuweidict/internal/config"
+	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/logx"
+	"github.com/legbehindneck/wuweidict/internal/search"
+	"github.com/legbehindneck/wuweidict/internal/server"
+	"github.com/legbehindneck/wuweidict/internal/speex"
+	"github.com/legbehindneck/wuweidict/internal/store"
 
-	_ "github.com/glowinthedark/gonow-dict/internal/format/bgl"      // register .bgl
-	_ "github.com/glowinthedark/gonow-dict/internal/format/dsl"      // register .dsl(.dz)
-	_ "github.com/glowinthedark/gonow-dict/internal/format/mdx"      // register .mdx
-	_ "github.com/glowinthedark/gonow-dict/internal/format/slob"     // register .slob
-	_ "github.com/glowinthedark/gonow-dict/internal/format/stardict" // register .ifo
+	_ "github.com/legbehindneck/wuweidict/internal/format/bgl"      // register .bgl
+	_ "github.com/legbehindneck/wuweidict/internal/format/dsl"      // register .dsl(.dz)
+	_ "github.com/legbehindneck/wuweidict/internal/format/mdx"      // register .mdx
+	_ "github.com/legbehindneck/wuweidict/internal/format/slob"     // register .slob
+	_ "github.com/legbehindneck/wuweidict/internal/format/stardict" // register .ifo
 )
 
-// version is stamped by the Makefile via -ldflags "-X main.version=…".
-var version = "dev"
+// Version is stamped by the Makefile via
+// -ldflags "-X github.com/legbehindneck/wuweidict/internal/cli.Version=…".
+// It lives here rather than in a main package because two binaries are built
+// from this code (wuweidict and wudict) and both must carry the same stamp.
+var Version = "dev"
+
+// Product identity, in one place. The binary is `wudict` (and `wuweidict`);
+// the name people read is WuWeiDict. Anything user-facing — CLI banner, web UI
+// About box, setup page — sources its wording from here or mirrors it.
+const (
+	ProductName = "WuWeiDict"
+	Tagline     = "Search every dictionary you own, from one browser tab."
+	SiteURL     = "https://legbehindneck.github.io/wuweidict"
+	RepoURL     = "https://github.com/legbehindneck/wuweidict"
+)
 
 func usage() string {
-	return fmt.Sprintf(`gonow-dict %s — multi-format dictionary server
-MDict (.mdx/.mdd) · StarDict (.ifo) · Aard2 (.slob) · Lingvo DSL (.dsl/.dsl.dz) · gonow (.text.db)
+	return fmt.Sprintf(`WuWeiDict %s — multi-format dictionary server
+MDict (.mdx/.mdd) · StarDict (.ifo) · Aard2 (.slob) · Lingvo DSL (.dsl/.dsl.dz) · WuWeiDict (.text.db)
 
 USAGE
-  gonow-dict [command] [flags] [args]
+  wudict [command] [flags] [args]
 
-  Running gonow-dict with no arguments (or with only flags) starts the
+  Running wudict with no arguments (or with only flags) starts the
   HTTP server — the same as the "serve" command.
 
 COMMANDS
@@ -97,7 +110,7 @@ SERVE FLAGS
                           holding text.db (+ media.db, info.txt). Must not be the
                           same folder as --dict-dir.
                           env: DB_DIR         toml: DB_DIR
-                          default: ~/.gonow-dict/db
+                          default: ~/.wudict/db
 
   (env/toml only)
   AUTO_INDEX = "on"       On first search, a dictionary prepares its own headword
@@ -170,11 +183,11 @@ SERVE FLAGS
 CONFIG FILE SEARCH ORDER
   1. --config flag / CONFIG_PATH env var
   2. <executable-dir>/config.toml
-  3. ~/.gonow-dict/config.toml
-  4. /etc/gonow-dict/config.toml
+  3. ~/.wudict/config.toml
+  4. /etc/wudict/config.toml
   5. ./config.toml
   On the first "serve" run a fully commented config.toml is generated
-  next to the executable (or in ~/.gonow-dict/ if that is not writable).
+  next to the executable (or in ~/.wudict/ if that is not writable).
 
 PRIORITY (highest → lowest)
   CLI flag  >  environment variable  >  config.toml  >  built-in default
@@ -186,21 +199,27 @@ FIRST RUN
 
 EXAMPLE config.toml
   DICT_DIR    = "/data/dicts"
-  DB_DIR      = "~/.gonow-dict/db"
+  DB_DIR      = "~/.wudict/db"
   SERVER_IP   = "0.0.0.0"
   SERVER_PORT = "9000"
   NO_BROWSER  = "1"
 
 EXAMPLES
-  gonow-dict
-  gonow-dict --dict-dir ~/Books/Dicts --port 9090 --no-browser
-  gonow-dict lookup ~/Dicts/Oxford.mdx serendipity
-  gonow-dict ingest -full ~/Dicts/Oxford.mdx
-  SERVER_PORT=9000 gonow-dict
-`, version)
+  wudict
+  wudict --dict-dir ~/Books/Dicts --port 9090 --no-browser
+  wudict lookup ~/Dicts/Oxford.mdx serendipity
+  wudict ingest -full ~/Dicts/Oxford.mdx
+  SERVER_PORT=9000 wudict
+
+ABOUT
+  %s — %s
+  %s
+`, Version, ProductName, Tagline, RepoURL)
 }
 
-func main() {
+// Main is the CLI entry point, shared by both installed binaries
+// (wuweidict at the module root and wudict under cmd/).
+func Main() {
 	if len(os.Args) < 2 {
 		// no arguments: start the server (documented default)
 		if err := cmdServe(nil); err != nil {
@@ -233,7 +252,8 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usage())
 	case "-v", "--version", "version":
-		fmt.Println("gonow-dict", version)
+		fmt.Println(ProductName, Version)
+		fmt.Println(RepoURL)
 	default:
 		if strings.HasPrefix(cmd, "-") {
 			// bare flags (mdict-go-web style): treat as serve flags
@@ -252,7 +272,7 @@ func main() {
 func cmdList(args []string) error {
 	dirs := folderArgs(args)
 	if len(dirs) == 0 {
-		return fmt.Errorf("usage: gonow-dict list <dir> [dir…]")
+		return fmt.Errorf("usage: wudict list <dir> [dir…]")
 	}
 	paths, _, err := dict.DiscoverAll(dirs)
 	if err != nil {
@@ -280,7 +300,7 @@ func folderArgs(args []string) []string {
 
 func cmdInfo(args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: gonow-dict info <dictfile>")
+		return fmt.Errorf("usage: wudict info <dictfile>")
 	}
 	d, err := dict.Open(args[0])
 	if err != nil {
@@ -301,7 +321,7 @@ func cmdQuery(mode string, args []string) error {
 	n := fs.Int("n", 20, "max results")
 	fs.Parse(args)
 	if fs.NArg() != 2 {
-		return fmt.Errorf("usage: gonow-dict %s [-n max] <dictfile> <word>", mode)
+		return fmt.Errorf("usage: wudict %s [-n max] <dictfile> <word>", mode)
 	}
 	d, err := dict.Open(fs.Arg(0))
 	if err != nil {
@@ -345,7 +365,7 @@ func cmdKeys(args []string) error {
 	n := fs.Int("n", 50, "max headwords")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: gonow-dict keys [-offset N] [-n max] <dictfile>")
+		return fmt.Errorf("usage: wudict keys [-offset N] [-n max] <dictfile>")
 	}
 	d, err := dict.Open(fs.Arg(0))
 	if err != nil {
@@ -368,7 +388,7 @@ func cmdIngest(args []string) error {
 	contains := fs.Bool("contains", false, "also build the substring (contains) index — roughly doubles a headword-only index")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: gonow-dict ingest [-o out.db] [-full] [-headwords] [-contains] <dictfile|folder…>")
+		return fmt.Errorf("usage: wudict ingest [-o out.db] [-full] [-headwords] [-contains] <dictfile|folder…>")
 	}
 	level := store.LevelText
 	if *headwords || *fuzzyOnly {
@@ -548,10 +568,10 @@ func cmdServe(args []string) error {
 	logx.V("config: source=%q dictDirs=%v dbDir=%q addr=%s speexdec=%s",
 		cfg.Source, cfg.DictDirs, cfg.DBDir, cfg.Addr(), cfg.Speexdec)
 	if cfg.DBDir != "" {
-		os.Setenv("GONOW_DB_DIR", cfg.DBDir) // store + auto-ingest honor this
+		os.Setenv("WUDICT_DB_DIR", cfg.DBDir) // store + auto-ingest honor this
 	}
 
-	// The library (DB_DIR) is gonow-dict's own working area, never a folder of
+	// The library (DB_DIR) is wudict's own working area, never a folder of
 	// user dictionaries. Using it as DICT_DIR is a
 	// hard error; and wherever it lives, discovery skips it — which also covers
 	// the subtler case of a DB_DIR nested inside the dictionary folder.
@@ -587,8 +607,8 @@ func cmdServe(args []string) error {
 			}
 			return nil
 		}
-		return fmt.Errorf(`%s is already in use — another server (not gonow-dict) is running.
-Hint: pick another port with --port, e.g.:  gonow-dict --port %s
+		return fmt.Errorf(`%s is already in use — another server (not wudict) is running.
+Hint: pick another port with --port, e.g.:  wudict --port %s
       or find the process using it:        lsof -i :%s`, cfg.Addr(), nextPort(cfg.Port), cfg.Port)
 	}
 	defer ln.Close()
@@ -630,7 +650,7 @@ Hint: pick another port with --port, e.g.:  gonow-dict --port %s
 		// a soft ceiling: Go collects harder instead of growing past it
 		debug.SetMemoryLimit(cfg.MemoryLimit)
 	}
-	srv.Version = version
+	srv.Version = Version
 	srv.DictDirOrigin = cfg.Origin("DICT_DIR")
 	srv.DictDirEditable = cfg.EditableInFile("DICT_DIR")
 	useExternalSpeex := cfg.SpeexBackend == "external"
@@ -691,8 +711,8 @@ Hint: pick another port with --port, e.g.:  gonow-dict --port %s
 }
 
 // applyLibrarySettings gives the subcommands that touch the library the same
-// settings the server uses. They previously read only the raw GONOW_DB_DIR
-// environment variable, so `gonow-dict ingest` ignored a DB_DIR set in
+// settings the server uses. They previously read only the raw WUDICT_DB_DIR
+// environment variable, so `wudict ingest` ignored a DB_DIR set in
 // config.toml and wrote somewhere the server would never look.
 func applyLibrarySettings() {
 	cfg, err := config.Load("", nil)
@@ -700,7 +720,7 @@ func applyLibrarySettings() {
 		return // a broken config must not stop a local command
 	}
 	if cfg.DBDir != "" {
-		os.Setenv("GONOW_DB_DIR", cfg.DBDir)
+		os.Setenv("WUDICT_DB_DIR", cfg.DBDir)
 	}
 	store.SetCompressBodies(!cfg.NoCompress)
 	if cfg.Verbose {
@@ -723,7 +743,7 @@ func dirExists(p string) bool {
 
 // resolveSpeexdec locates the speexdec binary ONCE at startup (never at .spx
 // playback time). Precedence: an explicit SPEEXDEC override, then a binary
-// sitting next to the gonow-dict executable, then $PATH. Returns the resolved
+// sitting next to the wudict executable, then $PATH. Returns the resolved
 // path ("" if none found) and a short human-readable source label.
 func resolveSpeexdec(override string) (path, source string) {
 	name := "speexdec"
@@ -803,7 +823,7 @@ type startupInfo struct {
 
 func printStartup(cfg config.Config, in startupInfo) {
 	out := os.Stderr
-	fmt.Fprintf(out, "gonow-dict %s\n", version)
+	fmt.Fprintf(out, "%s %s\n", ProductName, Version)
 
 	// one line per folder, aligned in a single column, each with its own
 	// status — an unmounted drive must be visible, not silently absent
@@ -945,7 +965,7 @@ func cmdSearchAll(args []string) error {
 	n := fs.Int("n", 10, "max results per dictionary")
 	fs.Parse(args)
 	if fs.NArg() != 2 {
-		return fmt.Errorf("usage: gonow-dict searchall [-mode m] [-n perDict] <dir> <term>")
+		return fmt.Errorf("usage: wudict searchall [-mode m] [-n perDict] <dir> <term>")
 	}
 	var mode search.Mode
 	switch *modeStr {
@@ -1042,7 +1062,7 @@ func cmdRes(args []string) error {
 	out := fs.String("o", "", "output file (default stdout)")
 	fs.Parse(args)
 	if fs.NArg() != 2 {
-		return fmt.Errorf("usage: gonow-dict res [-o out] <dictfile> <name>")
+		return fmt.Errorf("usage: wudict res [-o out] <dictfile> <name>")
 	}
 	d, err := dict.Open(fs.Arg(0))
 	if err != nil {

@@ -6,7 +6,7 @@
 
 package speex
 
-import "github.com/glowinthedark/gonow-dict/internal/speex/clib"
+import "github.com/legbehindneck/wuweidict/internal/speex/clib"
 
 func init() {
 	Available = true

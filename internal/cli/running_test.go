@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package cli
 
 import (
 	"fmt"
@@ -28,16 +28,16 @@ func hostOf(t *testing.T, url string) string {
 // whatever holds the port. It must be certain: pointing a browser at an
 // unknown local service would be worse than the plain "port in use" error.
 func TestProbeRunningIdentifiesOnlyUs(t *testing.T) {
-	// a real gonow-dict answers with its Server header and /api/config
+	// a real wudict answers with its Server header and /api/config
 	ours := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Server", "gonow-dict/v1.2.3")
+		w.Header().Set("Server", "wudict/v1.2.3")
 		fmt.Fprint(w, `{"roots":[{"path":"/a","count":3,"total":3,"exists":true}],
 			"libDir":"/lib","prepared":7,"useCached":true,"total":3,"configPath":"/c.toml"}`)
 	}))
 	defer ours.Close()
 	inst, ok := probeRunning(hostOf(t, ours.URL))
 	if !ok {
-		t.Fatal("a gonow-dict server must be recognised")
+		t.Fatal("a wudict server must be recognised")
 	}
 	if inst.Version != "v1.2.3" || inst.Total != 3 || inst.Prepared != 7 || !inst.UseCached {
 		t.Errorf("details not parsed: %+v", inst)
@@ -52,7 +52,7 @@ func TestProbeRunningIdentifiesOnlyUs(t *testing.T) {
 	}))
 	defer foreign.Close()
 	if _, ok := probeRunning(hostOf(t, foreign.URL)); ok {
-		t.Error("a foreign server must NOT be mistaken for gonow-dict")
+		t.Error("a foreign server must NOT be mistaken for wudict")
 	}
 
 	// a lookalike header is not enough of a prefix match to fool us
@@ -61,7 +61,7 @@ func TestProbeRunningIdentifiesOnlyUs(t *testing.T) {
 	}))
 	defer impostor.Close()
 	if _, ok := probeRunning(hostOf(t, impostor.URL)); ok {
-		t.Error("nginx must not be mistaken for gonow-dict")
+		t.Error("nginx must not be mistaken for wudict")
 	}
 
 	// nothing listening at all: fails fast, no claim

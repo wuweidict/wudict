@@ -18,9 +18,9 @@ import (
 
 	"time"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
-	"github.com/glowinthedark/gonow-dict/internal/logx"
-	"github.com/glowinthedark/gonow-dict/internal/store"
+	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/logx"
+	"github.com/legbehindneck/wuweidict/internal/store"
 )
 
 func init() {

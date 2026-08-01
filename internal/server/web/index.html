@@ -9,7 +9,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>gonow-dict</title>
+<title>wudict</title>
 <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
 <script src="/assets/mark.min.js"></script>
 <style>
@@ -68,7 +68,9 @@ body.wide .container{max-width:min(1280px,96vw)}
   justify-content:center;max-width:800px;margin:0 auto}
 .brand{font-weight:700;color:var(--accent);font-size:15px;letter-spacing:.02em;
   margin-right:var(--sp-1);user-select:none;white-space:nowrap}
-.brand small{color:var(--fg-faint);font-weight:400}
+/* Wordmark: "WuWei" carries the accent, "Dict" recedes to normal weight — one
+   colour, one weight step, no second font. */
+.brand small{font-size:1em;color:var(--fg-soft);font-weight:400}
 input[type=search]{flex:1;min-width:130px;max-width:300px;font-size:16px;
   color:var(--fg);background:var(--bg-card);border:1px solid var(--line);
   border-radius:8px;padding:.35em .7em;outline:none;appearance:none}
@@ -191,10 +193,10 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 .pd .path{color:var(--fg-faint);font-size:10.5px;word-break:break-all;cursor:pointer}
 .pd .err{color:#c0564f}
 /* an article's own section, pulled in beside the link that asked for it */
-.gonow-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid var(--accent);
+.wudict-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid var(--accent);
   background:color-mix(in srgb,var(--accent) 6%,transparent);border-radius:0 6px 6px 0}
-.gonow-sub-close{float:right;cursor:pointer;color:var(--fg-faint);font-size:12px;padding:0 .3em}
-.gonow-sub-close:hover{color:var(--accent)}
+.wudict-sub-close{float:right;cursor:pointer;color:var(--fg-faint);font-size:12px;padding:0 .3em}
+.wudict-sub-close:hover{color:var(--accent)}
 /* Folders & configuration: a quiet disclosure under the dictionary cards.
    It answers "where is it looking?", "where did my prepared data go?" and
    "which config file is in effect?" — otherwise only visible on the terminal
@@ -231,6 +233,15 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 #folders .facts #rescanBtn{color:var(--fg-soft);text-decoration:none;font-size:11.5px}
 #folders .facts #rescanBtn:hover{color:var(--link);text-decoration:underline}
 #folders .warn{color:#c0564f;font-size:11.5px;margin:.3em 0}
+/* About: quiet by construction — one accent word, everything else the muted
+   text colour, separated from the controls above by a hairline rather than a
+   heading. It is an identity card, not a call to action. */
+#folders .about{margin-top:.9em;padding-top:.7em;border-top:1px solid var(--line-soft)}
+#folders .about .brand{font-size:13px;margin-right:.4em}
+#folders .about .ver{font-size:10.5px;color:var(--fg-faint);font-variant-numeric:tabular-nums}
+#folders .about p{margin:.35em 0 0;font-size:11.5px;color:var(--fg-faint);line-height:1.45}
+#folders .about a{color:var(--fg-soft);text-decoration:none;border-bottom:1px solid var(--line)}
+#folders .about a:hover{color:var(--link);border-bottom-color:currentColor}
 .pd .prov,.pd .prov1{font-size:10.5px;color:var(--fg-faint);word-break:break-all;margin-top:.15em}
 /* The whole summary toggles, so the whole summary is the affordance: hover
    the row, not a fragment of it. Nothing in here is underlined — on the web an
@@ -256,7 +267,9 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 @media (max-width:600px){
   body{padding-top:5.6em}
   .container{width:auto;padding:0 var(--sp-2) var(--sp-4)}
-  .brand{display:none}
+  /* Scoped to the top bar: the About wordmark inside the panel must survive
+     on narrow screens — that is where the app says what it is. */
+  .bar .brand{display:none}
   input[type=search]{font-size:16px;min-width:100px}
   select{max-width:130px}
 }
@@ -265,7 +278,7 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 <body>
 <header class="bar" id="bar">
 <form id="frm" role="search">
-<span class="brand">gonow<small>·dict</small></span>
+<span class="brand">WuWei<small>Dict</small></span>
 <input type="search" id="q" placeholder="Search…" autocomplete="off" autofocus aria-label="Search term">
 <select id="mode" aria-label="Search mode">
 <option value="prefix">starts with</option>
@@ -302,6 +315,15 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
     <a class="act" id="editFolders" href="/setup">Edit folders…</a>
     <span class="act" id="rescanBtn" title="Re-scan every folder and re-open the dictionaries found (takes a moment)">Rescan folders</span>
   </div>
+  <!-- About: last row of the only chrome panel the app has. Users already open
+       this for their folder paths, so the identity/version/links live where
+       they will be looked for, without spending room in the search UI. -->
+  <div class="about">
+    <span class="brand">WuWei<small>Dict</small></span> <span class="ver">{{VERSION}}</span>
+    <p>Search every dictionary you own, from one browser tab.</p>
+    <p><a href="https://legbehindneck.github.io/wuweidict" target="_blank" rel="noopener">Website</a>
+       · <a href="https://github.com/legbehindneck/wuweidict" target="_blank" rel="noopener">Source</a></p>
+  </div>
 </details>
 <div id="panelList"></div>
 </div>
@@ -316,10 +338,10 @@ let dicts=[],lastQuery=null,searchSeq=0,searchAC=null;
 /* preference order (ids) + disabled set, persisted. New dictionaries not
    yet in the saved order fall in alphabetically after the ordered ones. */
 function loadJSON(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}}
-let prefOrder=loadJSON("gonow_order",[]);
-let disabled=new Set(loadJSON("gonow_disabled",[]));
-function saveOrder(){localStorage.setItem("gonow_order",JSON.stringify(prefOrder))}
-function saveDisabled(){localStorage.setItem("gonow_disabled",JSON.stringify([...disabled]))}
+let prefOrder=loadJSON("wudict_order",[]);
+let disabled=new Set(loadJSON("wudict_disabled",[]));
+function saveOrder(){localStorage.setItem("wudict_order",JSON.stringify(prefOrder))}
+function saveDisabled(){localStorage.setItem("wudict_disabled",JSON.stringify([...disabled]))}
 /* dictionaries in preference order: saved ones first, then unseen ones A→Z */
 const mb=b=>b>=1e9?(b/1e9).toFixed(1)+" GB":b>=1e6?Math.round(b/1e6)+" MB":Math.max(1,Math.round(b/1e3))+" kB";
 function orderedDicts(){
@@ -342,7 +364,7 @@ function applyTheme(t){
   syncAutoDark();
 }
 function themeIsDark(){
-  const t=localStorage.getItem("gonow_theme")||"auto";
+  const t=localStorage.getItem("wudict_theme")||"auto";
   if(t==="dark")return true;
   if(t==="light")return false;
   return matchMedia("(prefers-color-scheme: dark)").matches;
@@ -363,17 +385,17 @@ function syncAutoDark(){
 function applyWide(on){document.body.classList.toggle("wide",on);$("wideBtn").style.color=on?"var(--accent)":""}
 $("wideBtn").onclick=()=>{
   const on=!document.body.classList.contains("wide");
-  localStorage.setItem("gonow_wide",on?"1":"");applyWide(on);
+  localStorage.setItem("wudict_wide",on?"1":"");applyWide(on);
 };
-applyWide(localStorage.getItem("gonow_wide")==="1");
+applyWide(localStorage.getItem("wudict_wide")==="1");
 
 $("themeBtn").onclick=()=>{
-  const cur=localStorage.getItem("gonow_theme")||"auto";
+  const cur=localStorage.getItem("wudict_theme")||"auto";
   const next=THEMES[(THEMES.indexOf(cur)+1)%THEMES.length];
-  localStorage.setItem("gonow_theme",next);applyTheme(next);
+  localStorage.setItem("wudict_theme",next);applyTheme(next);
 };
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change",syncAutoDark);
-applyTheme(localStorage.getItem("gonow_theme")||"auto");
+applyTheme(localStorage.getItem("wudict_theme")||"auto");
 
 /* ── dictionaries ──────────────────────────────────────────────────── */
 function dictLabel(d){return d.name||d.path.split("/").pop()}
@@ -388,7 +410,7 @@ async function loadDicts(rescan){
   // normalize the saved preference order to the current dictionary set
   // (appends newly-added dicts A→Z, drops removed ones)
   prefOrder=orderedIds();saveOrder();
-  const sel=$("dict"),prev=sel.value||localStorage.getItem("gonow_dict")||"all";
+  const sel=$("dict"),prev=sel.value||localStorage.getItem("wudict_dict")||"all";
   sel.innerHTML='<option value="all">All dictionaries</option>';
   for(const d of dicts){ // dropdown stays alphabetical for quick name lookup
     const o=document.createElement("option");
@@ -437,7 +459,7 @@ function syncPanelHeader(){
 // clicking an indeterminate checkbox sets checked=true, so "mixed → all"
 // needs no special case.
 $("enAll").addEventListener("change",e=>setAllEnabled(e.target.checked));
-$("dict").onchange=e=>{localStorage.setItem("gonow_dict",e.target.value);if($("q").value.trim())doSearch()};
+$("dict").onchange=e=>{localStorage.setItem("wudict_dict",e.target.value);if($("q").value.trim())doSearch()};
 
 /* provenance: the collapsed line says where the dictionary came from (its
    foreign source + a media companion count); expanding reveals the library
@@ -748,9 +770,9 @@ function frameDoc(content,fid,dark,dictID){
     'body{margin:8px;word-break:break-word}img,video,svg{max-width:100%;height:auto}'+
     'html.dark{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.92)}'+
     'html.dark :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){filter:invert(1) hue-rotate(180deg)}'+
-    '.gonow-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid #e08600;background:rgba(224,134,0,.06);border-radius:0 6px 6px 0}'+
-    '.gonow-sub-close{float:right;cursor:pointer;color:#999;font-size:12px;padding:0 .3em}'+
-    '.gonow-sub-close:hover{color:#e08600}'+
+    '.wudict-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid #e08600;background:rgba(224,134,0,.06);border-radius:0 6px 6px 0}'+
+    '.wudict-sub-close{float:right;cursor:pointer;color:#999;font-size:12px;padding:0 .3em}'+
+    '.wudict-sub-close:hover{color:#e08600}'+
     '</style><script src="/assets/frame.js" data-fid="'+fid+'" data-dict="'+(dictID||"")+'"><\/script></head><body>'+content+'</body></html>';
 }
 /* bridge messages from article iframes */
@@ -986,7 +1008,7 @@ document.addEventListener("click",e=>{
 async function toggleSub(link,word,dictID){
   if(link._sub){link._sub.remove();link._sub=null;return}
   const box=document.createElement("div");
-  box.className="gonow-sub";box.textContent="…";
+  box.className="wudict-sub";box.textContent="…";
   link.parentNode.insertBefore(box,link.nextSibling);
   link._sub=box;
   try{
@@ -999,8 +1021,8 @@ async function toggleSub(link,word,dictID){
       if(m.t==="hit"&&m.results?.length)html=m.results[0].Body;
     }
     if(html===null){box.textContent="(not in this dictionary)";return}
-    box.innerHTML=`<span class="gonow-sub-close" title="Close">✕</span>`+html.replace(/<link\b[^>]*>/gi,"");
-    box.querySelector(".gonow-sub-close").addEventListener("click",()=>toggleSub(link,word,dictID));
+    box.innerHTML=`<span class="wudict-sub-close" title="Close">✕</span>`+html.replace(/<link\b[^>]*>/gi,"");
+    box.querySelector(".wudict-sub-close").addEventListener("click",()=>toggleSub(link,word,dictID));
   }catch(_){box.textContent="(could not load)"}
 }
 
@@ -1038,7 +1060,7 @@ addEventListener("scroll",()=>{
 let navRecord="replace"; // how the NEXT doSearch should record itself
 function applyURL(){
   const p=new URLSearchParams(location.search);
-  if(p.get("theme")){localStorage.setItem("gonow_theme",p.get("theme"));applyTheme(p.get("theme"))}
+  if(p.get("theme")){localStorage.setItem("wudict_theme",p.get("theme"));applyTheme(p.get("theme"))}
   if(p.get("mode"))$("mode").value=p.get("mode");
   if(p.get("dict"))$("dict").value=p.get("dict");
   if(p.get("q")){$("q").value=p.get("q");doSearch()}

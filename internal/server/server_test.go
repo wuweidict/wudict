@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
-	_ "github.com/glowinthedark/gonow-dict/internal/format/dsl" // register .dsl
-	"github.com/glowinthedark/gonow-dict/internal/store"
+	"github.com/legbehindneck/wuweidict/internal/dict"
+	_ "github.com/legbehindneck/wuweidict/internal/format/dsl" // register .dsl
+	"github.com/legbehindneck/wuweidict/internal/store"
 )
 
 // stubReader ingests a single entry; used to fabricate a native .text.db.
@@ -60,7 +60,7 @@ func TestDictProvenance(t *testing.T) {
 
 // TestLibraryIsOptIn: the library is never a discovery root by default — that
 // is what kept the setup page hidden — and USE_CACHED turns it on. A prepared
-// dictionary whose source is gone then opens with the gonow: prefix stripped.
+// dictionary whose source is gone then opens with the wudict: prefix stripped.
 func TestLibraryIsOptIn(t *testing.T) {
 	isolatedDBDir(t)
 	src := "/gone/x.mdx"
@@ -103,7 +103,7 @@ func TestLibraryIsOptIn(t *testing.T) {
 		t.Errorf("name=%q, want Naturalized", m.Name)
 	}
 	if m.Format != "mdx" {
-		t.Errorf("format=%q, want mdx (gonow: prefix stripped)", m.Format)
+		t.Errorf("format=%q, want mdx (wudict: prefix stripped)", m.Format)
 	}
 	if m.Path != dbPath {
 		t.Errorf("path=%q, want the .text.db path %q", m.Path, dbPath)
@@ -393,7 +393,7 @@ func TestResourceAndIndex(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "gonow-dict") {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "wudict") {
 		t.Errorf("index: %d", rec.Code)
 	}
 }
@@ -425,7 +425,7 @@ func TestIngestSSEAndMedia(t *testing.T) {
 	}
 
 	// media.db must exist and hold the resource
-	matches, _ := filepath.Glob(filepath.Join(os.Getenv("GONOW_DB_DIR"), "*", store.MediaDBName))
+	matches, _ := filepath.Glob(filepath.Join(os.Getenv("WUDICT_DB_DIR"), "*", store.MediaDBName))
 	if len(matches) != 1 {
 		t.Fatalf("media.db: %v", matches)
 	}
@@ -451,7 +451,7 @@ func TestSetupFlow(t *testing.T) {
 	// missing folder → setup page, not the app
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Point gonow at your dictionaries") {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Point WuWeiDict at your dictionaries") {
 		t.Fatalf("expected setup page, got %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "does not exist") {
@@ -514,7 +514,7 @@ func TestUnknownDict(t *testing.T) {
 // TestMediaDBIsNeverADictionary: the reported bug, end to end. A full ingest
 // leaves a media.db beside the text.db in the library folder; with the library
 // opted in, the dictionary must be listed exactly once — never a second,
-// phantom "gonow:…" row for the sidecar.
+// phantom "wudict:…" row for the sidecar.
 func TestMediaDBIsNeverADictionary(t *testing.T) {
 	isolatedDBDir(t)
 	src := "/gone/AHD5-2017.slob"
@@ -543,15 +543,15 @@ func TestMediaDBIsNeverADictionary(t *testing.T) {
 	s := New(reg)
 	var dicts []dictInfo
 	getJSON(t, s, "/api/dicts", &dicts)
-	// (other tests share this process and the GONOW_DB_DIR env var, so assert
+	// (other tests share this process and the WUDICT_DB_DIR env var, so assert
 	// on this dictionary specifically rather than on the total row count)
 	var ahd []dictInfo
 	for _, d := range dicts {
 		if strings.HasSuffix(strings.ToLower(d.Path), store.MediaDBName) {
 			t.Errorf("a media.db was listed as a dictionary: %+v", d)
 		}
-		if strings.HasPrefix(d.Format, "gonow") {
-			t.Errorf("internal gonow format leaked into the list: %+v", d)
+		if strings.HasPrefix(d.Format, "wudict") {
+			t.Errorf("internal wudict format leaked into the list: %+v", d)
 		}
 		if d.Name == "AHD5" {
 			ahd = append(ahd, d)
@@ -606,7 +606,7 @@ func TestSetupConsentFlow(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-	if !strings.Contains(rec.Body.String(), "Point gonow at your dictionaries") {
+	if !strings.Contains(rec.Body.String(), "Point WuWeiDict at your dictionaries") {
 		t.Fatal("prepared dictionaries must not suppress the setup page")
 	}
 
@@ -639,38 +639,38 @@ func TestSetupConsentFlow(t *testing.T) {
 	// and the app page is served now that dictionaries are in use
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-	if strings.Contains(rec.Body.String(), "Point gonow at your dictionaries") {
+	if strings.Contains(rec.Body.String(), "Point WuWeiDict at your dictionaries") {
 		t.Error("setup page still shown after dictionaries were enrolled")
 	}
 }
 
-// isolatedDBDir points GONOW_DB_DIR at a temp dir that is deliberately NOT
+// isolatedDBDir points WUDICT_DB_DIR at a temp dir that is deliberately NOT
 // t.TempDir(): background work started by the test (Registry.Warm, and with it
 // DSL/BGL auto-preparation) can still be writing when the test ends, and
 // t.TempDir's cleanup FAILS the test if the directory grows while it is being
 // removed. Removal here is best-effort for exactly the same reason.
 func isolatedDBDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "gonow-db")
+	dir, err := os.MkdirTemp("", "wudict-db")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GONOW_DB_DIR", dir)
+	t.Setenv("WUDICT_DB_DIR", dir)
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
 }
 
 // TestMain isolates the whole package from the user's real library. Tests set
-// GONOW_DB_DIR per-test, but background work started by a test (Registry.Warm,
+// WUDICT_DB_DIR per-test, but background work started by a test (Registry.Warm,
 // auto-index, DSL auto-preparation) can outlive it and read the variable after
 // t.Setenv has restored it — which would prepare dictionaries into the real
-// ~/.gonow-dict/db. Setting it for the process makes that fallback a temp dir.
+// ~/.wudict/db. Setting it for the process makes that fallback a temp dir.
 func TestMain(m *testing.M) {
-	tmp, err := os.MkdirTemp("", "gonow-server-tests")
+	tmp, err := os.MkdirTemp("", "wudict-server-tests")
 	if err != nil {
 		panic(err)
 	}
-	os.Setenv("GONOW_DB_DIR", tmp)
+	os.Setenv("WUDICT_DB_DIR", tmp)
 	code := m.Run()
 	os.RemoveAll(tmp)
 	os.Exit(code)

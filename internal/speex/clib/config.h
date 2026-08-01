@@ -3,11 +3,11 @@
  * Hand-written replacement for the autotools-generated config.h: no SIMD
  * (works identically on amd64/arm64/all), floating-point arithmetic, the
  * self-contained smallft FFT, and C99 variable-length arrays for scratch
- * buffers (portable across gcc/clang; avoids alloca.h). gonow-dict compiles
+ * buffers (portable across gcc/clang; avoids alloca.h). wudict compiles
  * these .c files directly via cgo — see ../ (backend_cgo.go). */
 
-#ifndef GONOW_SPEEX_CONFIG_H
-#define GONOW_SPEEX_CONFIG_H
+#ifndef WUDICT_SPEEX_CONFIG_H
+#define WUDICT_SPEEX_CONFIG_H
 
 /* Floating point, no fixed-point/SIMD paths. */
 #ifndef FIXED_POINT
@@ -25,4 +25,4 @@
 #define HAVE_STDINT_H 1
 #define HAVE_STRING_H 1
 
-#endif /* GONOW_SPEEX_CONFIG_H */
+#endif /* WUDICT_SPEEX_CONFIG_H */

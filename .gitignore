@@ -1,4 +1,6 @@
-/gonow-dict
+/wudict
+/wuweidict
 dist/
 coverage.out
 /config.toml
+.DS_Store

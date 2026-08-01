@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
-	"github.com/glowinthedark/gonow-dict/internal/store"
+	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/store"
 )
 
 // Reveal hands a path to the OS file manager, so it must never accept a path
@@ -39,8 +39,8 @@ func TestRevealAuthorization(t *testing.T) {
 	allowed := []string{
 		dicts,                         // a dictionary folder
 		filepath.Join(dicts, "x.dsl"), // something inside it
-		os.Getenv("GONOW_DB_DIR"),     // the library
-		filepath.Join(os.Getenv("GONOW_DB_DIR"), "Espasa", "text.db"), // inside the library
+		os.Getenv("WUDICT_DB_DIR"),    // the library
+		filepath.Join(os.Getenv("WUDICT_DB_DIR"), "Espasa", "text.db"), // inside the library
 		s.ConfigPath, // the config file itself
 	}
 	for _, p := range allowed {
@@ -157,7 +157,7 @@ func TestConfigEndpointAndSetupPage(t *testing.T) {
 	// the setup page is served on demand, not only while the registry is empty
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/setup", nil))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Point gonow at your dictionaries") {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Point WuWeiDict at your dictionaries") {
 		t.Fatalf("/setup not served: %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "Serving 1 dictionary from 2 folders") {
@@ -166,7 +166,7 @@ func TestConfigEndpointAndSetupPage(t *testing.T) {
 	// "/" still serves the app, not setup, while dictionaries are in use
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-	if strings.Contains(rec.Body.String(), "Point gonow at your dictionaries") {
+	if strings.Contains(rec.Body.String(), "Point WuWeiDict at your dictionaries") {
 		t.Error("/ should serve the app once dictionaries are in use")
 	}
 }
@@ -269,7 +269,7 @@ func TestUseCachedIsTwoWay(t *testing.T) {
 }
 
 // Every response carries the Server header a second launch looks for; without
-// it, "the port is busy" cannot tell gonow-dict from anything else.
+// it, "the port is busy" cannot tell wudict from anything else.
 func TestServerIdentityHeader(t *testing.T) {
 	isolatedDBDir(t)
 	reg, err := NewRegistry([]string{t.TempDir()}, false)
@@ -280,13 +280,13 @@ func TestServerIdentityHeader(t *testing.T) {
 	s.Version = "v9.9"
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/api/config", nil))
-	if got := rec.Header().Get("Server"); got != "gonow-dict/v9.9" {
-		t.Errorf("Server header = %q, want gonow-dict/v9.9", got)
+	if got := rec.Header().Get("Server"); got != "wudict/v9.9" {
+		t.Errorf("Server header = %q, want wudict/v9.9", got)
 	}
 	// and it is present even on a 404, so any endpoint identifies the app
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/nope", nil))
-	if got := rec.Header().Get("Server"); got != "gonow-dict/v9.9" {
+	if got := rec.Header().Get("Server"); got != "wudict/v9.9" {
 		t.Errorf("404 Server header = %q", got)
 	}
 }

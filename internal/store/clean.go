@@ -79,7 +79,7 @@ func FindOrphans() ([]Orphan, error) {
 
 // judgeFolder decides whether a library folder is garbage: no text.db at all
 // (an interrupted claim, or a media.db with nothing to pair with) or one that
-// cannot be read as a gonow database.
+// cannot be read as a wudict database.
 func judgeFolder(dir string) (Orphan, bool) {
 	textDB := TextDBPath(dir)
 	fi, err := os.Stat(textDB)

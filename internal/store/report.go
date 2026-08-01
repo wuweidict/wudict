@@ -7,7 +7,7 @@ package store
 import (
 	"time"
 
-	"github.com/glowinthedark/gonow-dict/internal/logx"
+	"github.com/legbehindneck/wuweidict/internal/logx"
 )
 
 // ReportPrepared prints the one line that closes a "preparing search index…"

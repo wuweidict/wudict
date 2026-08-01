@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 // Progress is called during ingest with entries processed so far and the
@@ -403,14 +403,14 @@ func Slug(name string) string {
 }
 
 // DefaultDBDir is the cache directory for generated databases (D7).
-// GONOW_DB_DIR overrides it.
+// WUDICT_DB_DIR overrides it.
 func DefaultDBDir() string {
-	if dir := os.Getenv("GONOW_DB_DIR"); dir != "" {
+	if dir := os.Getenv("WUDICT_DB_DIR"); dir != "" {
 		return dir
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".gonow-dict/db"
+		return ".wudict/db"
 	}
-	return filepath.Join(home, ".gonow-dict", "db")
+	return filepath.Join(home, ".wudict", "db")
 }

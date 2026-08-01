@@ -27,7 +27,7 @@ import (
 )
 
 // Enabled turns V output on. Set from the CLI flag or environment.
-var Enabled = os.Getenv("GONOW_VERBOSE") != "" || os.Getenv("VERBOSE") != ""
+var Enabled = os.Getenv("WUDICT_VERBOSE") != "" || os.Getenv("VERBOSE") != ""
 
 var logger = log.New(os.Stderr, "", log.Ltime|log.Lmicroseconds)
 

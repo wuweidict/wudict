@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 // buildSlob writes a minimal valid .slob file: 2 content types, refs with
@@ -49,7 +49,7 @@ func buildSlob(t *testing.T) string {
 	tiny("label")
 	editableTiny("Test Slob Diccionario")
 	tiny("created.by")
-	editableTiny("gonow-test")
+	editableTiny("wudict-test")
 	w(uint8(2)) // content types
 	text("text/html; charset=utf-8")
 	text("image/png")
@@ -215,11 +215,11 @@ func TestOpenRejectsGarbage(t *testing.T) {
 	}
 }
 
-// Integration against a real slob; skips unless GONOW_TEST_SLOB is set.
+// Integration against a real slob; skips unless WUDICT_TEST_SLOB is set.
 func TestIntegrationRealSlob(t *testing.T) {
-	p := os.Getenv("GONOW_TEST_SLOB")
+	p := os.Getenv("WUDICT_TEST_SLOB")
 	if p == "" {
-		t.Skip("GONOW_TEST_SLOB not set")
+		t.Skip("WUDICT_TEST_SLOB not set")
 	}
 	if _, err := os.Stat(p); err != nil {
 		t.Skipf("%s not readable", p)

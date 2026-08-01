@@ -11,10 +11,10 @@ import (
 
 // pkgLogger is a minimal stand-in for the go-logging dependency of the
 // original go-mdict code: errors go to stderr, info/debug are dropped
-// unless GONOW_DEBUG is set.
+// unless WUDICT_DEBUG is set.
 type pkgLogger struct{ name string }
 
-var debugEnabled = os.Getenv("GONOW_DEBUG") != ""
+var debugEnabled = os.Getenv("WUDICT_DEBUG") != ""
 
 func (l pkgLogger) Infof(format string, args ...any) {
 	if debugEnabled {

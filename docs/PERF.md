@@ -299,7 +299,7 @@ costs nothing to keep. Weight now follows the view at every assignment.
 
 ```sh
 # unit cost of one ingest
-scratchpad/perf/peak.sh gonow-dict ingest -headwords <file>
+scratchpad/perf/peak.sh wudict ingest -headwords <file>
 # server scenarios
 python3 scratchpad/perf/bench.py unprepared    # A
 python3 scratchpad/perf/bench.py prepared      # B

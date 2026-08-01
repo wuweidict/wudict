@@ -14,12 +14,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 
-	_ "github.com/glowinthedark/gonow-dict/internal/format/dsl"
-	_ "github.com/glowinthedark/gonow-dict/internal/format/mdx"
-	_ "github.com/glowinthedark/gonow-dict/internal/format/slob"
-	_ "github.com/glowinthedark/gonow-dict/internal/format/stardict"
+	_ "github.com/legbehindneck/wuweidict/internal/format/dsl"
+	_ "github.com/legbehindneck/wuweidict/internal/format/mdx"
+	_ "github.com/legbehindneck/wuweidict/internal/format/slob"
+	_ "github.com/legbehindneck/wuweidict/internal/format/stardict"
 )
 
 func TestCorruptDictionariesErrorCleanly(t *testing.T) {

@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 // block encodes one BGL block using the 4-byte explicit-length header form
@@ -162,7 +162,7 @@ func TestReaderParsesEntriesAndResources(t *testing.T) {
 // serving must work.
 func TestOpenAutoIngestAndLookup(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("GONOW_DB_DIR", t.TempDir())
+	t.Setenv("WUDICT_DB_DIR", t.TempDir())
 	p := writeBGL(t, dir)
 
 	d, err := Open(p)

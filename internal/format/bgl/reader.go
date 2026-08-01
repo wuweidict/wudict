@@ -26,7 +26,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 // entryTypes are the block types carrying word/definition entries.

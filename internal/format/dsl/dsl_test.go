@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 func TestTransformBody(t *testing.T) {
@@ -221,7 +221,7 @@ func TestResourceZip(t *testing.T) {
 	zw.Close()
 	zf.Close()
 
-	t.Setenv("GONOW_DB_DIR", t.TempDir()) // keep auto-ingest out of the user cache
+	t.Setenv("WUDICT_DB_DIR", t.TempDir()) // keep auto-ingest out of the user cache
 	d, err := Open(dslPath)
 	if err != nil {
 		t.Fatal(err)
@@ -250,14 +250,14 @@ func TestResourceZip(t *testing.T) {
 	}
 }
 
-// Integration against the real DSL; skips unless GONOW_TEST_DSL is set.
+// Integration against the real DSL; skips unless WUDICT_TEST_DSL is set.
 func TestIntegrationRealDSL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short mode")
 	}
-	p := os.Getenv("GONOW_TEST_DSL")
+	p := os.Getenv("WUDICT_TEST_DSL")
 	if p == "" {
-		t.Skip("GONOW_TEST_DSL not set")
+		t.Skip("WUDICT_TEST_DSL not set")
 	}
 	if _, err := os.Stat(p); err != nil {
 		t.Skipf("%s not readable", p)

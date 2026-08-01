@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package config implements gonow-dict's configuration with the layering
+// Package config implements wudict's configuration with the layering
 // borrowed from mdict-go-web: CLI flag > environment variable >
 // config.toml > built-in default.
 package config
@@ -144,16 +144,16 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 }
 
 // candidates returns the config.toml search order (mdict-go-web parity):
-// <exe-dir>, ~/.gonow-dict, /etc/gonow-dict, ./ .
+// <exe-dir>, ~/.wudict, /etc/wudict, ./ .
 func candidates() []string {
 	var out []string
 	if exe, err := os.Executable(); err == nil {
 		out = append(out, filepath.Join(filepath.Dir(exe), "config.toml"))
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		out = append(out, filepath.Join(home, ".gonow-dict", "config.toml"))
+		out = append(out, filepath.Join(home, ".wudict", "config.toml"))
 	}
-	out = append(out, "/etc/gonow-dict/config.toml", "config.toml")
+	out = append(out, "/etc/wudict/config.toml", "config.toml")
 	return out
 }
 
@@ -177,7 +177,7 @@ func loadFile(explicit string) (map[string]string, string, error) {
 	return map[string]string{}, "", nil
 }
 
-const configTemplate = `# gonow-dict configuration
+const configTemplate = `# wudict configuration
 # Priority: CLI flag > environment variable > this file > built-in default.
 # All keys are optional — uncomment a line to override its default.
 
@@ -185,7 +185,7 @@ const configTemplate = `# gonow-dict configuration
 #                                     # several folders: ["~/Dictionaries", "/Volumes/Ext/Dicts"]
 #                                     # (in the environment separate them with ":", ";" on Windows)
 #                                     # none of them may be the DB_DIR folder
-# DB_DIR      = "~/.gonow-dict/db"    # library of prepared dictionaries (one folder each)
+# DB_DIR      = "~/.wudict/db"    # library of prepared dictionaries (one folder each)
 # SERVER_IP   = "127.0.0.1"           # listen address (0.0.0.0 = all interfaces)
 # SERVER_PORT = "8808"
 # NO_BROWSER  = "0"                   # "1" = do not open a browser tab on startup
@@ -213,7 +213,7 @@ const configTemplate = `# gonow-dict configuration
 // EnsureConfigFile makes sure a config.toml exists somewhere in the
 // search order, generating a fully commented template on first run.
 // Preferred location is next to the executable; if that is not writable
-// (Homebrew, /usr/local/bin, …) it falls back to ~/.gonow-dict/.
+// (Homebrew, /usr/local/bin, …) it falls back to ~/.wudict/.
 // Returns the path and whether it was created now.
 func EnsureConfigFile() (path string, created bool, err error) {
 	for _, p := range candidates() {
@@ -226,7 +226,7 @@ func EnsureConfigFile() (path string, created bool, err error) {
 		targets = append(targets, filepath.Join(filepath.Dir(exe), "config.toml"))
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		targets = append(targets, filepath.Join(home, ".gonow-dict", "config.toml"))
+		targets = append(targets, filepath.Join(home, ".wudict", "config.toml"))
 	}
 	var lastErr error
 	for _, p := range targets {

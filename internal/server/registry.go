@@ -21,9 +21,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
-	"github.com/glowinthedark/gonow-dict/internal/logx"
-	"github.com/glowinthedark/gonow-dict/internal/store"
+	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/logx"
+	"github.com/legbehindneck/wuweidict/internal/store"
 )
 
 // upgraded serves queries from an ingested text.db while resolving
@@ -100,7 +100,7 @@ func (u *upgraded) Meta() dict.Meta {
 	// derived entirely from the text.db meta (name/description/entry_count
 	// were captured at ingest) so no direct open is needed for the list.
 	m := u.Store.Meta()
-	m.Format = strings.TrimPrefix(m.Format, "gonow:")
+	m.Format = strings.TrimPrefix(m.Format, "wudict:")
 	m.Path = u.srcPath
 	return m
 }
@@ -300,7 +300,7 @@ func (e *entry) evict() int64 {
 
 // native is a standalone naturalized dictionary: a .text.db whose foreign
 // source is gone (the db dir is the native dictionary root). It presents like
-// `upgraded` — the internal gonow: format prefix stripped, Path set to the db
+// `upgraded` — the internal wudict: format prefix stripped, Path set to the db
 // file — but has no source to fall back to, so resources come only from its
 // attached media.db when present.
 type native struct {
@@ -310,7 +310,7 @@ type native struct {
 
 func (n *native) Meta() dict.Meta {
 	m := n.Store.Meta()
-	m.Format = strings.TrimPrefix(m.Format, "gonow:")
+	m.Format = strings.TrimPrefix(m.Format, "wudict:")
 	m.Path = n.path
 	return m
 }

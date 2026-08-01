@@ -9,7 +9,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>gonow-dict — setup</title>
+<title>wudict Setup</title>
 <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
 <style>
 :root{--bg:#fbfaf8;--card:#fff;--fg:#2b2a28;--soft:#6d6a64;--faint:#a5a19a;
@@ -51,6 +51,11 @@ button:disabled{opacity:.45;cursor:default}
 #save+#cancel{margin-left:.5em}
 .warn{font-size:12.5px;color:var(--err);margin:.2em 0}
 .formats{color:var(--faint);font-size:12px;margin-top:1em}
+/* Same wordmark rule as the app: "WuWei" accented, "Dict" plain. */
+.about{color:var(--faint);font-size:11.5px;margin-top:.6em}
+.about b{color:var(--accent);font-weight:700}
+.about a{color:var(--soft);text-decoration:none;border-bottom:1px solid var(--line)}
+.about a:hover{color:var(--accent);border-bottom-color:currentColor}
 .sep{border:none;border-top:1px solid var(--line);margin:1.618em 0 1em}
 h2{margin:0 0 .2em;font-size:16px}
 label.keep{display:flex;gap:.5em;align-items:flex-start;font-size:13.5px;color:var(--soft);margin-top:.618em}
@@ -72,10 +77,10 @@ label.keep em{font-style:normal;color:var(--faint);font-size:12.5px}
 </head>
 <body>
 <div class="card">
-<h1><b>gonow</b>·dict — set up</h1>
+<h1><b>WuWei</b>Dict — set up</h1>
 <p>{{INTRO}}</p>
 
-<h2>Point gonow at your dictionaries</h2>
+<h2>Point WuWeiDict at your dictionaries</h2>
 <p>Paste the full path of a folder that holds your dictionary files (subfolders are scanned too).
    You can add more than one — an external drive, a shared folder:</p>
 <div id="rows"></div>
@@ -99,6 +104,11 @@ label.keep em{font-style:normal;color:var(--faint);font-size:12.5px}
 <a id="cancel" class="btn ghost hidden" href="/">Back to dictionaries</a>
 
 <p class="formats">Supported: MDict (.mdx + .mdd) · StarDict (.ifo) · Aard2 (.slob) · Lingvo DSL (.dsl, .dsl.dz) · Babylon (.bgl) · prepared dictionary folders</p>
+<!-- First run is the one moment the app has the user's full attention and
+     nothing else to say; one line is the whole budget. -->
+<p class="about"><b>WuWei</b>Dict — search every dictionary you own, from one browser tab.
+  <a href="https://legbehindneck.github.io/wuweidict" target="_blank" rel="noopener">Website</a>
+  · <a href="https://github.com/legbehindneck/wuweidict" target="_blank" rel="noopener">Source</a></p>
 </div>
 <script>
 "use strict";

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package dict defines the format-agnostic core of gonow-dict: the
+// Package dict defines the format-agnostic core of wudict: the
 // Dictionary interface every backend (direct native readers, ingested
 // SQLite) implements, plus the ingest-side Reader contract shared by all
 // format packages. See docs/SPEC.md in the workspace root.
@@ -33,7 +33,7 @@ type Caps struct {
 // Meta describes one opened dictionary.
 type Meta struct {
 	Name        string // display name (dictionary title, else file stem)
-	Format      string // "mdx" | "stardict" | "slob" | "dsl" | "gonow"
+	Format      string // "mdx" | "stardict" | "slob" | "dsl" | "wudict"
 	Path        string // source path (or .text.db path for ingested)
 	Description string
 	EntryCount  int

@@ -226,11 +226,11 @@ func TestXdxfToHTML(t *testing.T) {
 	}
 }
 
-// Integration against a real StarDict; skips unless GONOW_TEST_STARDICT set.
+// Integration against a real StarDict; skips unless WUDICT_TEST_STARDICT set.
 func TestIntegrationRealStarDict(t *testing.T) {
-	p := os.Getenv("GONOW_TEST_STARDICT")
+	p := os.Getenv("WUDICT_TEST_STARDICT")
 	if p == "" {
-		t.Skip("GONOW_TEST_STARDICT not set")
+		t.Skip("WUDICT_TEST_STARDICT not set")
 	}
 	if _, err := os.Stat(p); err != nil {
 		t.Skipf("%s not readable", p)

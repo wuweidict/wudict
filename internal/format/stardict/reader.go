@@ -7,7 +7,7 @@ package stardict
 import (
 	"io"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 // Reader is the sequential ingest scan: idx entries in order, with .syn

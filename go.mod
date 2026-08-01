@@ -1,4 +1,4 @@
-module github.com/glowinthedark/gonow-dict
+module github.com/legbehindneck/wuweidict
 
 go 1.26.5
 

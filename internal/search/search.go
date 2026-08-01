@@ -11,7 +11,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 // Mode selects the query type; dictionaries lacking the capability are

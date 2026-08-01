@@ -1,4 +1,4 @@
-# gonow-dict — Comprehensive Code Review & Performance Audit
+# wudict — Comprehensive Code Review & Performance Audit
 
 **Scope:** full codebase audit (backends, store, search fan-out, HTTP layer, frontend) with
 empirical measurements on real dictionaries.

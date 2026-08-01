@@ -5,7 +5,7 @@
 package mdx
 
 import (
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 	"io"
 	"os"
 	"path/filepath"
@@ -57,15 +57,15 @@ func TestSubstituteStylesheet(t *testing.T) {
 }
 
 // testMdx returns the integration-test dictionary path, skipping when the
-// GONOW_TEST_MDX env var is unset or the file is missing.
+// WUDICT_TEST_MDX env var is unset or the file is missing.
 func testMdx(t *testing.T) string {
 	t.Helper()
-	p := os.Getenv("GONOW_TEST_MDX")
+	p := os.Getenv("WUDICT_TEST_MDX")
 	if p == "" {
-		t.Skip("GONOW_TEST_MDX not set; skipping integration test")
+		t.Skip("WUDICT_TEST_MDX not set; skipping integration test")
 	}
 	if _, err := os.Stat(p); err != nil {
-		t.Skipf("GONOW_TEST_MDX=%s not readable: %v", p, err)
+		t.Skipf("WUDICT_TEST_MDX=%s not readable: %v", p, err)
 	}
 	return p
 }
@@ -74,9 +74,9 @@ func testMdx(t *testing.T) string {
 // block cache this should be microseconds; without it, each op re-opened the
 // file and re-decompressed the whole record block (~1 ms, per the audit).
 func BenchmarkExactWarm(b *testing.B) {
-	p := os.Getenv("GONOW_TEST_MDX")
+	p := os.Getenv("WUDICT_TEST_MDX")
 	if p == "" {
-		b.Skip("GONOW_TEST_MDX not set")
+		b.Skip("WUDICT_TEST_MDX not set")
 	}
 	d, err := Open(p)
 	if err != nil {

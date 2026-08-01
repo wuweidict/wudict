@@ -57,12 +57,12 @@ jobs:
           CGO_ENABLED: "1"
           CC: ${{ matrix.cc }} # empty ⇒ Go's default compiler for the host
         run: |
-          BINARY="gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo${{ matrix.ext }}"
+          BINARY="wudict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo${{ matrix.ext }}"
           VERSION="${{ inputs.tag }}"
           [ -z "$VERSION" ] && VERSION="$(git describe --abbrev=0 2>/dev/null || echo dev)"
           go build -trimpath -tags sqlite_fts5 \
-            -ldflags="-s -w -X main.version=${VERSION}" \
-            -o "${BINARY}" ./cmd/gonow-dict
+            -ldflags="-s -w -X github.com/legbehindneck/wuweidict/internal/cli.Version=${VERSION}" \
+            -o "${BINARY}" ./cmd/wudict
 
       - name: Warn on experimental build failure
         if: failure() && matrix.experimental
@@ -73,8 +73,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo
-          path: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo${{ matrix.ext }}
+          name: wudict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo
+          path: wudict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo${{ matrix.ext }}
 
   release:
     needs: build

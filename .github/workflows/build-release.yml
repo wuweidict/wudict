@@ -50,16 +50,16 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           SUFFIX="${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('-v{0}', matrix.goarm) || '' }}"
-          BINARY="gonow-dict-${SUFFIX}-purego${{ matrix.ext }}"
+          BINARY="wudict-${SUFFIX}-purego${{ matrix.ext }}"
           VERSION="${{ inputs.tag }}"
           [ -z "$VERSION" ] && VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
-          go build -trimpath -tags purego -ldflags="-s -w -X main.version=${VERSION}" -o "${BINARY}" ./cmd/gonow-dict
+          go build -trimpath -tags purego -ldflags="-s -w -X github.com/legbehindneck/wuweidict/internal/cli.Version=${VERSION}" -o "${BINARY}" ./cmd/wudict
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('-v{0}', matrix.goarm) || '' }}-purego
-          path: gonow-dict-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('-v{0}', matrix.goarm) || '' }}-purego${{ matrix.ext }}
+          name: wudict-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('-v{0}', matrix.goarm) || '' }}-purego
+          path: wudict-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('-v{0}', matrix.goarm) || '' }}-purego${{ matrix.ext }}
 
   release:
     needs: build

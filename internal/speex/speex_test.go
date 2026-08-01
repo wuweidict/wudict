@@ -12,12 +12,12 @@ import (
 	"testing"
 )
 
-// TestDecodeRealSpx decodes a real Ogg-Speex file (GONOW_TEST_SPX) and reports
+// TestDecodeRealSpx decodes a real Ogg-Speex file (WUDICT_TEST_SPX) and reports
 // the WAV rate/sample-count so it can be compared against the speexdec CLI.
 func TestDecodeRealSpx(t *testing.T) {
-	p := os.Getenv("GONOW_TEST_SPX")
+	p := os.Getenv("WUDICT_TEST_SPX")
 	if p == "" {
-		t.Skip("GONOW_TEST_SPX not set")
+		t.Skip("WUDICT_TEST_SPX not set")
 	}
 	f, err := os.Open(p)
 	if err != nil {
@@ -29,7 +29,7 @@ func TestDecodeRealSpx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out := os.Getenv("GONOW_TEST_SPX_OUT"); out != "" {
+	if out := os.Getenv("WUDICT_TEST_SPX_OUT"); out != "" {
 		_ = os.WriteFile(out, wav, 0o644)
 	}
 	if string(wav[0:4]) != "RIFF" || string(wav[8:12]) != "WAVE" {

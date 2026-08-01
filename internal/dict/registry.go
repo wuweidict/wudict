@@ -165,7 +165,7 @@ func ExcludeDir(dir string) {
 }
 
 // CanonPath resolves dir to an absolute, symlink-free, cleaned path so that
-// "~/.gonow-dict/db" and "/Users/x/.gonow-dict/db" compare equal.
+// "~/.wudict/db" and "/Users/x/.wudict/db" compare equal.
 func CanonPath(dir string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {

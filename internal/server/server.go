@@ -22,12 +22,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/glowinthedark/gonow-dict/internal/config"
-	"github.com/glowinthedark/gonow-dict/internal/dict"
-	"github.com/glowinthedark/gonow-dict/internal/logx"
-	"github.com/glowinthedark/gonow-dict/internal/search"
-	"github.com/glowinthedark/gonow-dict/internal/speex"
-	"github.com/glowinthedark/gonow-dict/internal/store"
+	"github.com/legbehindneck/wuweidict/internal/config"
+	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/logx"
+	"github.com/legbehindneck/wuweidict/internal/search"
+	"github.com/legbehindneck/wuweidict/internal/speex"
+	"github.com/legbehindneck/wuweidict/internal/store"
 )
 
 //go:embed web/index.html
@@ -56,11 +56,18 @@ type Server struct {
 	ConfigPath string
 
 	// Version identifies this build in the Server response header. A second
-	// launch uses that header to recognise an already-running gonow-dict on
+	// launch uses that header to recognise an already-running wudict on
 	// the port — without it, "the port is busy" says nothing about WHO holds
 	// it, and sending the user's browser to an unknown local service would be
 	// worse than an error message.
 	Version string
+
+	// indexOnce caches the one substitution index.html needs ({{VERSION}} in
+	// the About box). Version is assigned after the Server is built, so this
+	// cannot be done at embed time; doing it per request would re-copy the
+	// whole page on every load.
+	indexOnce sync.Once
+	indexPage []byte
 
 	// DictDirOrigin / DictDirEditable describe where the dictionary folders
 	// came from (config layering), so the UI can warn that a flag or an
@@ -127,9 +134,9 @@ func New(reg *Registry) *Server {
 	return s
 }
 
-// ServerHeader is the value gonow-dict answers with (plus its version), and
+// ServerHeader is the value wudict answers with (plus its version), and
 // the token a second launch looks for.
-const ServerHeader = "gonow-dict"
+const ServerHeader = "wudict"
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
@@ -179,7 +186,19 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, setupPage(s.reg.Dirs(), 0))
 		return
 	}
-	_, _ = w.Write(indexHTML)
+	_, _ = w.Write(s.page())
+}
+
+// page returns index.html with the build version stamped into the About box.
+func (s *Server) page() []byte {
+	s.indexOnce.Do(func() {
+		v := s.Version
+		if v == "" {
+			v = "dev"
+		}
+		s.indexPage = []byte(strings.ReplaceAll(string(indexHTML), "{{VERSION}}", v))
+	})
+	return s.indexPage
 }
 
 // handleSetupPage serves the folder editor on demand (the same page first run
@@ -370,7 +389,7 @@ func (s *Server) resolveDirs(raw []string) ([]string, int, error) {
 			p = abs
 		}
 		if dict.SameDir(p, store.DefaultDBDir()) {
-			return nil, 0, fmt.Errorf("%s is gonow-dict's own library folder — choose the folder holding your dictionary files", p)
+			return nil, 0, fmt.Errorf("%s is wudict's own library folder — choose the folder holding your dictionary files", p)
 		}
 		dirs = append(dirs, p)
 	}
@@ -777,7 +796,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 // registered font types (font/woff, font/ttf, … — RFC 8081), text/javascript
 // (RFC 9239, not the obsolete application/javascript), and
 // image/vnd.microsoft.icon — not the legacy application/x-font-* variants.
-// Exception: .spx is mapped to audio/wav because gonow-dict transcodes Speex
+// Exception: .spx is mapped to audio/wav because wudict transcodes Speex
 // to WAV on the way out (see handleResource), so that is what the client
 // actually receives.
 var webMIME = map[string]string{
@@ -947,7 +966,7 @@ func (s *Server) externalSpxToWav(raw []byte) ([]byte, error) {
 	if s.Speexdec == "" {
 		return nil, fmt.Errorf("no speex decoder available")
 	}
-	tmp, err := os.MkdirTemp("", "gonow-spx")
+	tmp, err := os.MkdirTemp("", "wudict-spx")
 	if err != nil {
 		return nil, err
 	}

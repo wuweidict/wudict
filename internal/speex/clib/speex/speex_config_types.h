@@ -1,6 +1,6 @@
 /* Hand-written replacement for the autotools-generated speex_config_types.h
  * (normally produced from speex_config_types.h.in). Uses <stdint.h>, portable
- * across all platforms gonow-dict targets. */
+ * across all platforms wudict targets. */
 #ifndef __SPEEX_TYPES_H__
 #define __SPEEX_TYPES_H__
 

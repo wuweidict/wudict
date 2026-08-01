@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glowinthedark/gonow-dict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/dict"
 )
 
 // fake is a minimal Dictionary; fuzzy support is toggled per instance.

@@ -1,4 +1,6 @@
-# gonow-dict
+# WuWeiDict
+
+**Naming (D27).** The product is **WuWeiDict** in anything a user reads; the technical name is **`wudict`** everywhere else — binary, env prefix (`WUDICT_*`), config dir (`~/.wudict`), db format prefix (`wudict:`), localStorage keys, CSS classes. The module path is `github.com/legbehindneck/wuweidict` because the repo is `wuweidict`.
 
 Go web dictionary app supporting MDX/MDD, StarDict, Aard2 Slob, Lingvo DSL, Babylon BGL. Dual-backend: a dictionary is searched through its own format ("preview", D15) until it is **prepared** into a library folder — `<db dir>/<name>/{text.db, media.db, info.txt}` (D20) — which is the primary mode. Preparation is automatic and cheap (headwords only, `AUTO_INDEX`); *contains* (trigram) and *full-text* are per-dictionary switches, and media packing a third (D24). Search modes are exact · prefix · contains · full-text (D16 — "fuzzy" is retired).
 
@@ -12,9 +14,9 @@ Go web dictionary app supporting MDX/MDD, StarDict, Aard2 Slob, Lingvo DSL, Baby
 
 ## Layout
 
-This repository is the whole project (`github.com/glowinthedark/gonow-dict`); there is no enclosing workspace.
+This repository is the whole project (`github.com/legbehindneck/wuweidict`); there is no enclosing workspace.
 
-- `cmd/gonow-dict` — CLI and server entry point.
+- `internal/cli` — the CLI and server entry point (all of it). Two `package main` shims build from it: `./main.go` → `wuweidict` (so `go install <module>@latest` works) and `cmd/wudict` → `wudict` (canonical). The version stamp targets `internal/cli.Version`, not `main.version`.
 - `internal/dict` — core interfaces, format registry, discovery.
 - `internal/format/<fmt>` — mdx, stardict, slob, dsl, bgl backends.
 - `internal/store` — the prepared SQLite backend: schema, ingest, library folders, media.

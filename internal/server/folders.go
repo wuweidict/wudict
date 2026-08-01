@@ -14,9 +14,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/glowinthedark/gonow-dict/internal/config"
-	"github.com/glowinthedark/gonow-dict/internal/dict"
-	"github.com/glowinthedark/gonow-dict/internal/store"
+	"github.com/legbehindneck/wuweidict/internal/config"
+	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wuweidict/internal/store"
 )
 
 // configInfo is what the panel's "Folders & configuration" section shows: the
@@ -98,7 +98,7 @@ func isLoopback(r *http.Request) bool {
 // desktop's file manager.
 func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
 	if !isLoopback(r) {
-		httpErr(w, 403, "only available from the machine running gonow-dict")
+		httpErr(w, 403, "only available from the machine running wudict")
 		return
 	}
 	path := strings.TrimSpace(r.URL.Query().Get("path"))
@@ -109,7 +109,7 @@ func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
 	if !s.revealAllowed(path) {
 		// never hand an arbitrary path to the shell: only the folders and
 		// files this app is already showing may be opened.
-		httpErr(w, 403, "not a gonow-dict folder")
+		httpErr(w, 403, "not a wudict folder")
 		return
 	}
 	if err := reveal(path); err != nil {

@@ -56,7 +56,7 @@ var soundOrFile = regexp.MustCompile(`(?i)^(?:sound|file)://`)
 // sound:// and file:// pseudo-URLs, server-absolute paths ("/img/x.png"), and
 // bare relative paths ("spkr.png", "./a") all map to /res/{dictID}/….
 //
-// The result is a root-absolute URL (/res/{dictID}/…). gonow-dict is served
+// The result is a root-absolute URL (/res/{dictID}/…). wudict is served
 // at the site root by design, so an absolute /res/ path resolves to the same
 // origin-rooted URL in EVERY rendering context — the main page, a Shadow-DOM
 // article, and (critically) a srcdoc iframe, whose base URL differs and inside
