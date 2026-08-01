@@ -1,4 +1,4 @@
-name: Build Native (cgo)
+name: Build+Release (cgo)
 
 # Performance-optimized builds using the cgo mattn/go-sqlite3 driver
 # (-tags sqlite_fts5, CGO_ENABLED=1). Unlike build-release.yml (pure-Go
