@@ -271,6 +271,14 @@ push:  ## sync remotes
 	git push iq
 	git push od
 
+.PHONY: push-tags
+push-tags:  ## push tags
+	git push origin --tags
+	git push hz --tags
+	git push leg --tags
+	git push iq --tags
+	git push od --tags
+
 .PHONY: remotes
 remotes: ## git git remotes
 	git remote -v
