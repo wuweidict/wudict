@@ -249,6 +249,7 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 		"sub_entries":      fmt.Sprint(subEntries), // @-prefixed, hidden from browsing
 		"ingest_level":     string(level),
 		"has_trigram":      boolMeta(plan.Contains), // cheap-list flag; Open feature-detects the table
+		"fold_version":     fmt.Sprint(dict.FoldVersion), // which text folding built the trigram index
 		"body_encoding":    bodyEncoding(),
 		"created":          time.Now().UTC().Format(time.RFC3339),
 		"source_sha256_1M": sourceHash(srcMeta.Path),

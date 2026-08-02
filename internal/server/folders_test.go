@@ -5,6 +5,7 @@
 package server
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"net/http/httptest"
@@ -584,4 +585,72 @@ func TestResourceHandleIsEvictable(t *testing.T) {
 	if u.srcWeight() == 0 {
 		t.Error("the reopened handle should be weighed again")
 	}
+}
+
+// O1: a trigram index built by an older dict.FoldVersion is reported through
+// /api/dicts, keeps working, and is repaired by re-requesting the same
+// feature — the panel's "click to rebuild".
+func TestStaleFoldIsReportedAndRebuildable(t *testing.T) {
+	isolatedDBDir(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.dsl"), []byte(sampleDSL), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := NewRegistry([]string{dir}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(reg)
+	id := getDicts(t, s, "/api/dicts")[0].ID
+	sse(t, s, "/api/ingest?dict="+id+"&contains=1")
+
+	row := getDicts(t, s, "/api/dicts")[0]
+	if !row.Caps.Contains || row.ContainsStale {
+		t.Fatalf("a freshly built index must be usable and not stale: %+v", row)
+	}
+
+	// rewrite the recorded folding version, as a future dict.Fold change would
+	textDB := row.DBPath
+	if textDB == "" {
+		t.Fatal("no prepared database to age")
+	}
+	db, err := sql.Open(sqliteDriver(), "file:"+textDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE meta SET value = '0' WHERE key = 'fold_version'"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	row = getDicts(t, s, "/api/dicts")[0]
+	if !row.ContainsStale {
+		t.Fatal("an index folded by another version was not reported as stale")
+	}
+	if !row.Caps.Contains {
+		t.Error("contains was withdrawn: a stale index is marked, not disabled")
+	}
+
+	// the panel re-requests the feature it already has; that is the repair
+	sse(t, s, "/api/ingest?dict="+id+"&contains=1")
+	row = getDicts(t, s, "/api/dicts")[0]
+	if row.ContainsStale {
+		t.Error("re-requesting contains did not rebuild the stale index")
+	}
+	if !row.Caps.Contains {
+		t.Errorf("the rebuild lost the index: %+v", row.Caps)
+	}
+}
+
+// sqliteDriver names whichever SQLite driver this build registered — mattn
+// under cgo, modernc under purego (D29). The store package picks it at compile
+// time and keeps the name private, so a test that needs to write to a
+// text.db asks the sql package what got registered.
+func sqliteDriver() string {
+	for _, d := range sql.Drivers() {
+		if d == "sqlite3" || d == "sqlite" {
+			return d
+		}
+	}
+	return "sqlite"
 }

@@ -17,6 +17,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/legbehindneck/wudict/internal/dict"
@@ -46,7 +47,37 @@ type Store struct {
 	ftsOK      bool   // article text indexed (ingest_level != "headwords")
 	srcPath    string // source_path recorded at ingest ("" if unknown)
 	hasTrigram bool   // entry_trigram present → "contains" substring search
+	staleFold  bool   // trigram built by a different dict.FoldVersion
 	media      *Media // sibling .media.db, when present and uuid-paired
+}
+
+// foldVersionOf reads the folding version a database records.
+//
+// A database written before versioning existed carries no key, and was
+// necessarily built by version 1 — the folding in force when the key was
+// introduced. Defaulting to 1 rather than 0 is the whole reason this does not
+// declare every existing library stale on the day it ships.
+func foldVersionOf(m map[string]string) int {
+	if s := m["fold_version"]; s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			return n
+		}
+	}
+	return 1
+}
+
+// FoldStale reports that a prepared database's trigram index was built by a
+// different text folding than the one running now, so "contains" may miss
+// words whose folding changed. Only the trigram index is affected — see
+// dict.FoldVersion for why nothing else is.
+//
+// It is a fact ABOUT the data, not a verdict on it: a folding change usually
+// affects one narrow class of characters, so a stale index is still correct
+// for every dictionary that contains none of them. Callers report it and offer
+// a rebuild; nobody disables the mode or re-indexes a hundred dictionaries on
+// the strength of it.
+func FoldStale(m map[string]string) bool {
+	return m["has_trigram"] == "1" && foldVersionOf(m) != dict.FoldVersion
 }
 
 // Open opens and validates a wudict text database.
@@ -84,6 +115,9 @@ func Open(path string) (*Store, error) {
 	var trig int
 	db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='entry_trigram'`).Scan(&trig)
 	s.hasTrigram = trig > 0
+	// keyed on the table actually present, not on the has_trigram flag, so a
+	// database whose meta and schema disagree is judged by its schema
+	s.staleFold = s.hasTrigram && foldVersionOf(m) != dict.FoldVersion
 	fmt.Sscanf(m["entry_count"], "%d", &s.meta.EntryCount)
 	// standalone use: attach the sibling media.db so a copied folder works
 	// without the original source (D2/D9); uuid mismatch = not our pair
@@ -138,6 +172,10 @@ func (s *Store) SourcePath() string { return s.srcPath }
 func (s *Store) Caps() dict.Caps {
 	return dict.Caps{Exact: true, Prefix: true, Contains: s.hasTrigram, FTS: s.ftsOK}
 }
+
+// ContainsStale reports that the trigram index was built by a different text
+// folding than the running one. Contains stays enabled — see FoldStale.
+func (s *Store) ContainsStale() bool { return s.staleFold }
 
 func (s *Store) Close() error {
 	if s.media != nil {

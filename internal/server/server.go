@@ -432,6 +432,11 @@ type dictInfo struct {
 	DBPath  string    `json:"dbPath,omitempty"` // exposed per D7: users share these files
 	Error   string    `json:"error,omitempty"`
 
+	// ContainsStale: the trigram index was built by an older text folding, so
+	// substring search may miss words whose folding changed. Reported, not
+	// acted on — the mode keeps working, and the panel offers a rebuild.
+	ContainsStale bool `json:"containsStale,omitempty"`
+
 	// provenance (panel display): where the dictionary came from and what
 	// derived files exist. All optional and filesystem-cheap.
 	Source   string   `json:"source,omitempty"`    // foreign source file, if still on disk
@@ -534,8 +539,9 @@ func (s *Server) baseDictInfo(e *entry) dictInfo {
 			ec, _ := strconv.Atoi(meta["entry_count"])
 			return dictInfo{
 				ID: e.ID, Path: e.Path, Name: meta["name"], Format: meta["format"], Entries: ec,
-				Caps:   dict.Caps{Exact: true, Prefix: true, Contains: meta["has_trigram"] == "1", FTS: meta["ingest_level"] != string(store.LevelHeadwords)},
-				DBPath: textDB,
+				Caps:          dict.Caps{Exact: true, Prefix: true, Contains: meta["has_trigram"] == "1", FTS: meta["ingest_level"] != string(store.LevelHeadwords)},
+				DBPath:        textDB,
+				ContainsStale: store.FoldStale(meta),
 			}
 		}
 	}
@@ -559,6 +565,9 @@ func (s *Server) baseDictInfo(e *entry) dictInfo {
 	}
 	m := d.Meta()
 	info.Name, info.Format, info.Entries, info.Caps = m.Name, m.Format, m.EntryCount, d.Caps()
+	if cs, ok := d.(interface{ ContainsStale() bool }); ok {
+		info.ContainsStale = cs.ContainsStale()
+	}
 	if textDB, ok := preparedTextDB(e.Path); ok {
 		info.DBPath = textDB
 	}

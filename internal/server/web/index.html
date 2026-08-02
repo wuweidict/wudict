@@ -193,6 +193,9 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 .pd .feat.locked:hover{border-color:var(--line);color:var(--fg-faint)}
 .pd .feat.on.locked:hover{border-color:var(--accent);color:#fff;opacity:.5}
 .pd .feat.busy{border-style:dashed;cursor:default}
+/* stale: still on, still working, but rebuildable — a dotted edge reads as
+   "provisional" without the alarm of an error colour */
+.pd .feat.on.stale{border-style:dotted;border-color:var(--fg-faint)}
 .pd .tag{display:inline-block;border:1px solid var(--line);border-radius:5px;
   padding:0 .4em;font-size:10.5px;color:var(--fg-soft);margin-right:.25em}
 .pd .tag.on{color:var(--accent);border-color:var(--accent)}
@@ -721,9 +724,16 @@ function renderPanel(){
     for(const[key,label,on,bytes]of feats){
       if(key==="media"&&!on&&!d.hasMedia)continue; // nothing to pack
       const size=on&&bytes?" "+mb(bytes):"";
-      caps+=`<span class="feat${on?" on":""}${canToggle?"":" locked"}" data-feat="${key}" data-on="${on?1:0}"`+
-        ` title="${canToggle?(on?"Click to remove":"Click to add"):"The original files are gone — this is the only copy, so it cannot be changed"}"`+
-        `>${label}${size}</span>`;
+      /* A stale index still works — it was built with older text-folding
+         rules, so it can only miss words whose folding changed. So it is
+         marked, not disabled, and the click rebuilds instead of removing. */
+      const stale=key==="contains"&&on&&d.containsStale;
+      const tip=!canToggle?"The original files are gone — this is the only copy, so it cannot be changed":
+        stale?"Built with older text-folding rules — click to rebuild":
+        on?"Click to remove":"Click to add";
+      caps+=`<span class="feat${on?" on":""}${stale?" stale":""}${canToggle?"":" locked"}"`+
+        ` data-feat="${key}" data-on="${on?1:0}"${stale?' data-stale="1"':""}`+
+        ` title="${tip}">${label}${size}${stale?" ⟳":""}</span>`;
     }
     // the contains index is built automatically on first use, so the only
     // manual action offered is full-text (which also covers contains).
@@ -910,7 +920,9 @@ $("panelList").addEventListener("click",e=>{
   const feat=e.target.closest(".feat");
   if(feat){
     if(feat.classList.contains("locked")||feat.classList.contains("busy"))return;
-    const on=feat.dataset.on==="1";
+    // a stale index is re-requested, not removed: same switch, still "on",
+    // which setFeatures reads as "rebuild this"
+    const on=feat.dataset.on==="1"&&feat.dataset.stale!=="1";
     runIngest(feat.closest(".pd").dataset.id,{[feat.dataset.feat]:on?0:1},feat);
     return;
   }

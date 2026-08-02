@@ -11,6 +11,7 @@ Go web dictionary app supporting MDX/MDD, StarDict, Aard2 Slob, Lingvo DSL, Baby
 - `docs/PHASES.md` — phase plan + running record. Update when a phase advances.
 - `docs/PERF.md` — measured RAM/CPU audit against the real 105-dictionary corpus (unit costs per headword, the first-run indexing storm, ranked fixes). Read before touching concurrency, caching or the open/ingest paths.
 - `code-review.md` — standing optimization backlog (C1–C10), prioritized by D15.
+- `docs/OPEN.md` — researched but **unscheduled** items (O-numbers). Check before proposing morphology, stemming or Unicode-folding work; do not start anything in it without being asked.
 
 ## Layout
 

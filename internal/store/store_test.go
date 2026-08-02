@@ -5,6 +5,8 @@
 package store
 
 import (
+	"database/sql"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -1024,4 +1026,85 @@ func (a assetDict) Resource(name string) (io.ReadCloser, string, error) {
 		return io.NopCloser(strings.NewReader(body)), "text/css", nil
 	}
 	return nil, "", dict.ErrNotFound
+}
+
+// A folding version is recorded so a later change to dict.Fold can be
+// detected instead of silently invalidating every trigram index (O1).
+func TestFoldVersionRecorded(t *testing.T) {
+	s := testStore(t)
+	m, err := ReadMeta(s.meta.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := m["fold_version"], fmt.Sprint(dict.FoldVersion); got != want {
+		t.Errorf("fold_version = %q, want %q", got, want)
+	}
+	if s.ContainsStale() {
+		t.Error("a database just written by this build reports a stale folding")
+	}
+}
+
+func TestFoldStale(t *testing.T) {
+	cur := fmt.Sprint(dict.FoldVersion)
+	cases := []struct {
+		name string
+		meta map[string]string
+		want bool
+	}{
+		{"current version, trigram present", map[string]string{"has_trigram": "1", "fold_version": cur}, false},
+		{"older version, trigram present", map[string]string{"has_trigram": "1", "fold_version": "0"}, true},
+		{"newer version, trigram present", map[string]string{"has_trigram": "1", "fold_version": "999"}, true},
+		// grandfathering: everything written before the key existed was folded
+		// by version 1, so a missing key must NOT read as stale
+		{"no version key, trigram present", map[string]string{"has_trigram": "1"}, dict.FoldVersion != 1},
+		// nothing but the trigram index persists a folded value, so a
+		// dictionary without one can never be stale
+		{"older version, no trigram", map[string]string{"fold_version": "0"}, false},
+		{"no version key, no trigram", map[string]string{}, false},
+		{"unparseable version", map[string]string{"has_trigram": "1", "fold_version": "banana"}, dict.FoldVersion != 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FoldStale(tc.meta); got != tc.want {
+				t.Errorf("FoldStale(%v) = %v, want %v", tc.meta, got, tc.want)
+			}
+		})
+	}
+}
+
+// The whole point of O1: a database folded by different rules must be
+// recognisable on open, and must keep answering — a stale index is inaccurate
+// for one class of characters, not broken.
+func TestStaleFoldDetectedOnOpen(t *testing.T) {
+	s := testStore(t)
+	path := s.meta.Path
+	s.Close()
+
+	db, err := sql.Open(driverName, dsnIngest(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE meta SET value = '0' WHERE key = 'fold_version'"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	if !s2.ContainsStale() {
+		t.Fatal("a trigram index built by another folding version was not detected")
+	}
+	if !s2.Caps().Contains {
+		t.Error("contains was disabled: a stale index still answers, it is only offered a rebuild")
+	}
+	got, err := s2.Contains("razon", 10)
+	if err != nil {
+		t.Fatalf("contains search on a stale index: %v", err)
+	}
+	if len(got) == 0 {
+		t.Error("a stale index stopped answering entirely")
+	}
 }

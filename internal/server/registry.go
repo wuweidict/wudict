@@ -107,6 +107,10 @@ func (u *upgraded) Meta() dict.Meta {
 
 func (u *upgraded) Caps() dict.Caps { return u.Store.Caps() }
 
+// ContainsStale delegates so the panel can offer a rebuild on a dictionary
+// reached through the upgraded view, not only through a bare Store.
+func (u *upgraded) ContainsStale() bool { return u.Store.ContainsStale() }
+
 func (u *upgraded) Resource(name string) (io.ReadCloser, string, error) {
 	// the embedded Store serves from its auto-attached sibling media.db
 	// (D2/D9); only fall back to the original source when that misses.
@@ -778,10 +782,12 @@ func (e *entry) setFeatures(want features, progress store.Progress) error {
 	mediaDB := store.MediaDBPath(dir)
 
 	have := features{}
+	staleFold := false
 	if fileExists(textDB) {
 		if m, err := store.ReadMeta(textDB); err == nil {
 			have.FullText = m["ingest_level"] != string(store.LevelHeadwords)
 			have.Contains = m["has_trigram"] == "1"
+			staleFold = store.FoldStale(m)
 		}
 	}
 	have.Media = fileExists(mediaDB)
@@ -794,6 +800,11 @@ func (e *entry) setFeatures(want features, progress store.Progress) error {
 		logx.V("%ssource changed since it was prepared — re-indexing", logx.Dict(name))
 		err = e.rebuild(name, textDB, plan, progress)
 	case have.FullText != want.FullText || have.Contains != want.Contains:
+		err = e.rebuild(name, textDB, plan, progress)
+	case want.Contains && staleFold:
+		// asking for contains that is already "on" is how the panel requests a
+		// repair: the index is intact but was folded by older rules
+		logx.V("%stext folding changed since it was indexed — re-indexing", logx.Dict(name))
 		err = e.rebuild(name, textDB, plan, progress)
 	}
 	if err != nil {
