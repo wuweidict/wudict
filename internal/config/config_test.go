@@ -14,7 +14,7 @@ import (
 
 func TestLayering(t *testing.T) {
 	dir := t.TempDir()
-	toml := filepath.Join(dir, "config.toml")
+	toml := filepath.Join(dir, Name)
 	os.WriteFile(toml, []byte(`
 # comment
 DICT_DIR = "/from/toml"
@@ -45,6 +45,7 @@ NO_BROWSER = "1"
 }
 
 func TestDefaultsAndMissingFile(t *testing.T) {
+	isolate(t) // no real ~/.wudict/wudict.toml may leak into the defaults
 	t.Setenv("SERVER_PORT", "")
 	t.Setenv("DICT_DIR", "")
 	cfg, err := Load("", nil) // no explicit file; defaults apply
@@ -60,7 +61,7 @@ func TestDefaultsAndMissingFile(t *testing.T) {
 }
 
 func TestSaveKey(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "config.toml")
+	p := filepath.Join(t.TempDir(), Name)
 	os.WriteFile(p, []byte("# header\n# DICT_DIR    = \"~/Dictionaries\"      # comment\n# SERVER_PORT = \"6888\"\n"), 0o644)
 	if err := SaveKey(p, "DICT_DIR", "/data/dicts"); err != nil {
 		t.Fatal(err)
@@ -83,9 +84,9 @@ func TestSaveKey(t *testing.T) {
 		t.Errorf("append failed: %q", s)
 	}
 	// round-trip: parse sees the saved value
-	vals, src, err := loadFile(p)
-	if err != nil || src != p || vals["DICT_DIR"] != "/data/dicts" {
-		t.Errorf("round-trip: %v %q %v", vals, src, err)
+	r, err := loadFile(p)
+	if err != nil || r.path != p || r.vals["DICT_DIR"] != "/data/dicts" {
+		t.Errorf("round-trip: %v %q %v", r.vals, r.path, err)
 	}
 }
 
@@ -131,7 +132,7 @@ func TestDictDirList(t *testing.T) {
 	// and it round-trips through the config file in both shapes
 	dir := t.TempDir()
 	for _, dirs := range [][]string{{"/only"}, {"/a", "/b b"}} {
-		p := filepath.Join(dir, "config.toml")
+		p := filepath.Join(dir, Name)
 		if err := os.WriteFile(p, []byte("# DICT_DIR = \"~/Dictionaries\"\nSERVER_PORT = \"1\"\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -157,7 +158,7 @@ func TestDictDirList(t *testing.T) {
 }
 
 // AUTO_INDEX is on|off since the "fuzzy" search mode it was named after was
-// retired — but an existing config.toml saying "fuzzy" must keep working.
+// retired — but an existing wudict.toml saying "fuzzy" must keep working.
 func TestAutoIndexValues(t *testing.T) {
 	for _, c := range []struct {
 		in   string
@@ -177,7 +178,7 @@ func TestAutoIndexValues(t *testing.T) {
 		{"no", AutoIndexOff, false},
 	} {
 		dir := t.TempDir()
-		p := filepath.Join(dir, "config.toml")
+		p := filepath.Join(dir, Name)
 		body := ""
 		if c.in != "" {
 			body = "AUTO_INDEX = \"" + c.in + "\"\n"
@@ -219,4 +220,134 @@ func TestParseWorkersAndSize(t *testing.T) {
 	if err == nil && cfg.IndexWorkers != 1 {
 		t.Errorf("default INDEX_WORKERS = %d, want 1", cfg.IndexWorkers)
 	}
+}
+
+// isolate points the three search anchors at empty temporary directories, so a
+// test sees only the files it creates — never the developer's real ~/.wudict
+// or /etc. Returns the executable and home directories, in search order.
+func isolate(t *testing.T) (exe, home string) {
+	t.Helper()
+	root := t.TempDir()
+	exe, home, etc := filepath.Join(root, "bin"), filepath.Join(root, "home"), filepath.Join(root, "etc")
+	for _, d := range []string{exe, home, etc} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldExe, oldHome, oldSys := exeDir, homeDir, systemDir
+	exeDir = func() string { return exe }
+	homeDir = func() string { return home }
+	systemDir = etc
+	t.Cleanup(func() { exeDir, homeDir, systemDir = oldExe, oldHome, oldSys })
+	return exe, home
+}
+
+// Where the config file is looked for, which one wins, and — the point of D32 —
+// where a new one is written.
+func TestConfigLocation(t *testing.T) {
+	write := func(t *testing.T, path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("created in the home directory, never beside the executable", func(t *testing.T) {
+		exe, home := isolate(t)
+		p, created, err := EnsureConfigFile()
+		if err != nil || !created {
+			t.Fatalf("EnsureConfigFile() = %q, %v, %v", p, created, err)
+		}
+		if want := filepath.Join(home, ".wudict", Name); p != want {
+			t.Errorf("created %q, want %q", p, want)
+		}
+		// the executable's directory belongs to whoever installed us
+		if _, err := os.Stat(filepath.Join(exe, Name)); !os.IsNotExist(err) {
+			t.Errorf("wrote next to the executable: %v", err)
+		}
+		// idempotent: the second run finds the first one
+		p2, created2, err := EnsureConfigFile()
+		if err != nil || created2 || p2 != p {
+			t.Errorf("second call = %q, %v, %v; want %q, false", p2, created2, err, p)
+		}
+	})
+
+	t.Run("an existing file is never overwritten", func(t *testing.T) {
+		exe, _ := isolate(t)
+		portable := filepath.Join(exe, Name)
+		write(t, portable, `SERVER_PORT = "1234"`)
+		p, created, err := EnsureConfigFile()
+		if err != nil || created || p != portable {
+			t.Fatalf("EnsureConfigFile() = %q, %v, %v; want %q, false", p, created, err, portable)
+		}
+	})
+
+	t.Run("portable beats home, and says so", func(t *testing.T) {
+		exe, home := isolate(t)
+		write(t, filepath.Join(exe, Name), `SERVER_PORT = "1111"`)
+		write(t, filepath.Join(home, ".wudict", Name), `SERVER_PORT = "2222"`)
+		cfg, err := Load("", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Port != "1111" {
+			t.Errorf("port = %q, want the portable file's 1111", cfg.Port)
+		}
+		if !cfg.Portable {
+			t.Error("Portable not reported for a file beside the executable")
+		}
+		if len(cfg.Shadowed) != 1 || cfg.Shadowed[0] != filepath.Join(home, ".wudict", Name) {
+			t.Errorf("Shadowed = %q, want the home file", cfg.Shadowed)
+		}
+	})
+
+	t.Run("home beats system and is not portable", func(t *testing.T) {
+		_, home := isolate(t)
+		write(t, filepath.Join(home, ".wudict", Name), `SERVER_PORT = "2222"`)
+		write(t, filepath.Join(systemDir, Name), `SERVER_PORT = "3333"`)
+		cfg, err := Load("", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Port != "2222" || cfg.Portable {
+			t.Errorf("port = %q portable = %v, want 2222 and not portable", cfg.Port, cfg.Portable)
+		}
+		if len(cfg.Shadowed) != 1 {
+			t.Errorf("Shadowed = %q, want the system file", cfg.Shadowed)
+		}
+	})
+
+	t.Run("the working directory is not searched", func(t *testing.T) {
+		isolate(t)
+		dir := t.TempDir()
+		write(t, filepath.Join(dir, Name), `SERVER_PORT = "9999"`)
+		write(t, filepath.Join(dir, "config.toml"), `SERVER_PORT = "9999"`)
+		wd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chdir(wd) })
+		cfg, err := Load("", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Source != "" || cfg.Port == "9999" {
+			t.Errorf("picked up a file from the working directory: %q", cfg.Source)
+		}
+	})
+
+	t.Run("an explicit path must exist", func(t *testing.T) {
+		exe, _ := isolate(t)
+		write(t, filepath.Join(exe, Name), `SERVER_PORT = "1111"`)
+		// silently falling back to the portable file would hide the typo
+		if _, err := Load(filepath.Join(t.TempDir(), "typo.toml"), nil); err == nil {
+			t.Error("explicit missing config must error")
+		}
+	})
 }

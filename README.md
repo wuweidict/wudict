@@ -129,9 +129,9 @@ sudo loginctl enable-linger "$(id -un)"
 
 ## Configuration
 
-Priority: **CLI flag > environment variable > config.toml > default**.
-A commented `config.toml` is generated next to the binary on first run
-(or in `~/.wudict/` if that location is read-only).
+Priority: **CLI flag > environment variable > wudict.toml > default**.
+A commented `~/.wudict/wudict.toml` is generated on first run, and the
+file in effect is printed at every startup.
 
 | Flag | env / toml key | Default |
 |---|---|---|
@@ -161,14 +161,25 @@ DICT_DIR = ["~/Dictionaries", "/Volumes/Ext/Dicts"]
 ```
 
 The setup page has an **+ add another folder** row for the same thing, and
-saves your list back to `config.toml`. Folders may overlap freely: a
+saves your list back to `wudict.toml`. Folders may overlap freely: a
 dictionary reachable from two of them is listed once (the folder listed
 first wins), and a folder that is missing — an unplugged drive — is
 reported at startup while the rest keep working.
 
 Config file search order: `--config` / `CONFIG_PATH`, then
-`<exe-dir>/config.toml`, `~/.wudict/config.toml`,
-`/etc/wudict/config.toml`, `./config.toml`.
+`<exe-dir>/wudict.toml`, `~/.wudict/wudict.toml`,
+`/etc/wudict/wudict.toml`.
+
+**Portable mode.** A `wudict.toml` placed next to the executable wins, and
+is where the setup page saves — for a USB stick or a self-contained folder.
+WuWeiDict never creates that file itself: an executable's directory is
+usually somebody else's (`~/go/bin`, `/opt/homebrew/bin`), not its own.
+
+**`state.json`.** Which dictionaries are searched and in what order is kept
+in a `state.json` beside the `wudict.toml` in effect (so it travels with a
+portable install), not in the browser: it is a fact about your collection,
+and every browser that reaches the server should see the same one. Theme,
+wide mode and the dictionary dropdown stay per-browser.
 
 ## Command line
 
@@ -220,7 +231,7 @@ Click any path to copy.
 
 At the foot of the panel, **Folders & configuration** shows which folders
 are being scanned (with per-folder counts), where prepared dictionaries
-live, and which `config.toml` is in effect — with *Reveal in Finder* /
+live, and which `wudict.toml` is in effect — with *Reveal in Finder* /
 *Show in File Explorer* / *Open Containing Folder*, depending on your
 system. **Edit folders…** opens the folder editor (also at `/setup`) at
 any time. If a folder came from `--dict-dir` or `DICT_DIR`, the editor

@@ -1,5 +1,6 @@
 /wudict
 dist/
 coverage.out
-/config.toml
+/wudict.toml
+/state.json
 .DS_Store

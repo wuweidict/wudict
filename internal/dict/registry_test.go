@@ -231,7 +231,7 @@ func TestDiscoverFollowsSymlinkedRoot(t *testing.T) {
 
 // The same folder reached by a different spelling must collapse to one entry:
 // otherwise it shows as several rows, is walked several times, and is written
-// several times into config.toml. Discovery already guarantees the
+// several times into wudict.toml. Discovery already guarantees the
 // dictionaries themselves are never listed twice — this is about the folders.
 func TestDedupeDirs(t *testing.T) {
 	real := t.TempDir()

@@ -34,7 +34,7 @@ func TestRevealAuthorization(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(reg)
-	s.ConfigPath = filepath.Join(t.TempDir(), "config.toml")
+	s.ConfigPath = filepath.Join(t.TempDir(), "wudict.toml")
 
 	allowed := []string{
 		dicts,                         // a dictionary folder
@@ -207,7 +207,7 @@ func TestRegistryDedupesFolders(t *testing.T) {
 
 	// and through the setup save path, which also persists the list
 	s := New(reg)
-	s.ConfigPath = filepath.Join(t.TempDir(), "config.toml")
+	s.ConfigPath = filepath.Join(t.TempDir(), "wudict.toml")
 	var v map[string]any
 	getJSON(t, s, "/api/setup?path="+dicts+"&path="+link+"&path="+dicts+"&save=1", &v)
 	if v["saved"] != true {
@@ -237,7 +237,7 @@ func TestUseCachedIsTwoWay(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(reg)
-	s.ConfigPath = filepath.Join(t.TempDir(), "config.toml")
+	s.ConfigPath = filepath.Join(t.TempDir(), "wudict.toml")
 
 	var v map[string]any
 	// checked → on, and persisted
@@ -306,13 +306,10 @@ func TestFeatureTogglesBothWays(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(reg)
-	var dicts []dictInfo
-	getJSON(t, s, "/api/dicts", &dicts)
+	dicts := getDicts(t, s, "/api/dicts")
 	id := dicts[0].ID
 	caps := func() dict.Caps {
-		var d []dictInfo
-		getJSON(t, s, "/api/dicts", &d)
-		return d[0].Caps
+		return getDicts(t, s, "/api/dicts")[0].Caps
 	}
 	// default: a DSL prepares itself so it can be searched at all, but only
 	// the cheap headword index — both heavy indexes start off

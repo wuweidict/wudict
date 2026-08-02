@@ -162,7 +162,7 @@ SERVE FLAGS
                           env: SERVER_PORT    toml: SERVER_PORT
                           default: 6888
 
-  --config       <path>   Path to config.toml (overrides auto-detect)
+  --config       <path>   Path to wudict.toml (overrides auto-detect)
                           env: CONFIG_PATH
 
   --no-browser            Do not open a browser tab on startup
@@ -182,22 +182,27 @@ SERVE FLAGS
 
 CONFIG FILE SEARCH ORDER
   1. --config flag / CONFIG_PATH env var
-  2. <executable-dir>/config.toml
-  3. ~/.wudict/config.toml
-  4. /etc/wudict/config.toml
-  5. ./config.toml
-  On the first "serve" run a fully commented config.toml is generated
-  next to the executable (or in ~/.wudict/ if that is not writable).
+  2. <executable-dir>/wudict.toml   (portable mode — see below)
+  3. ~/.wudict/wudict.toml
+  4. /etc/wudict/wudict.toml
+  On the first "serve" run a fully commented ~/.wudict/wudict.toml is
+  generated, and the file in effect is printed at every startup.
+
+PORTABLE MODE
+  Put a wudict.toml next to the executable and it wins, and is where
+  settings are saved — for a USB stick or a self-contained folder.
+  wudict never creates that file on its own: an executable directory is
+  usually somebody else's (~/go/bin, /opt/homebrew/bin), not ours.
 
 PRIORITY (highest → lowest)
-  CLI flag  >  environment variable  >  config.toml  >  built-in default
+  CLI flag  >  environment variable  >  wudict.toml  >  built-in default
 
 FIRST RUN
   If the dictionary folder is missing or empty, the web UI shows a setup
   page: paste a folder path, it is validated live, and the choice is
-  saved to config.toml — no restart needed.
+  saved to wudict.toml — no restart needed.
 
-EXAMPLE config.toml
+EXAMPLE wudict.toml
   DICT_DIR    = "/data/dicts"
   DB_DIR      = "~/.wudict/db"
   SERVER_IP   = "0.0.0.0"
@@ -528,7 +533,7 @@ func cmdServe(args []string) error {
 	indexWorkers := fs.String("index-workers", "", "dictionaries to prepare at once; \"auto\" = every core (env/toml: INDEX_WORKERS)")
 	ip := fs.String("ip", "", "listen IP (env/toml: SERVER_IP)")
 	port := fs.String("port", "", "listen port (env/toml: SERVER_PORT)")
-	configPath := fs.String("config", "", "path to config.toml (env: CONFIG_PATH)")
+	configPath := fs.String("config", "", "path to wudict.toml (env: CONFIG_PATH)")
 	noBrowser := fs.Bool("no-browser", false, "do not open a browser tab (env/toml: NO_BROWSER)")
 	verbose := fs.Bool("verbose", false, "verbose logging (env/toml: VERBOSE)")
 	speexdec := fs.String("speexdec", "", "path to speexdec for .spx audio (env/toml: SPEEXDEC)")
@@ -621,22 +626,29 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		}
 	}
 
-	// first run: generate a commented config.toml containing defaults
-	// an existing file anywhere in the search order wins
+	// first run: generate the commented ~/.wudict/wudict.toml containing
+	// defaults; an existing file anywhere in the search order wins. cfg.Source
+	// is updated so the startup summary names the file that is now in effect
+	// rather than reporting "none" on the very run that created it.
 	cfgFile := cfg.Source
 	if cfgFile == "" && *configPath == "" {
 		p, created, err := config.EnsureConfigFile()
 		if err != nil {
-			logx.Warn("could not create config.toml: %v", err)
+			logx.Warn("could not create %s: %v", config.Name, err)
 		} else {
-			cfgFile = p
+			cfgFile, cfg.Source = p, p
 			if created {
-				fmt.Fprintf(os.Stderr, "created default config: %s\n", p)
+				fmt.Fprintf(os.Stderr, "config: created %s\n", p)
 			}
 		}
 	}
 
-	reg, err := server.NewRegistry(cfg.DictDirs, cfg.UseCached)
+	// The UI state (which dictionaries are searched, in what order) lives
+	// beside the config file in effect, so a portable install carries both and
+	// --config re-points both. Loaded BEFORE the registry: Warm skips disabled
+	// dictionaries, and it starts inside NewRegistry.
+	reg, err := server.NewRegistry(cfg.DictDirs, cfg.UseCached,
+		server.WithPrefs(server.LoadPrefs(statePath(cfgFile))))
 	if err != nil {
 		return fmt.Errorf("scanning %s: %w", strings.Join(cfg.DictDirs, ", "), err)
 	}
@@ -712,7 +724,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 // applyLibrarySettings gives the subcommands that touch the library the same
 // settings the server uses. They previously read only the raw WUDICT_DB_DIR
 // environment variable, so `wudict ingest` ignored a DB_DIR set in
-// config.toml and wrote somewhere the server would never look.
+// wudict.toml and wrote somewhere the server would never look.
 func applyLibrarySettings() {
 	cfg, err := config.Load("", nil)
 	if err != nil {
@@ -805,7 +817,7 @@ func speexSummary(useExternal bool, path, source string) string {
 }
 
 // printStartup shows the *resolved* configuration that is in effect. All values
-// are listed with the origin, i.e. flag, env, config.toml, default.
+// are listed with the origin, i.e. flag, env, wudict.toml, default.
 // startupInfo is what the startup summary describes: each folder counted by
 // what IT contributed (a blended total next to the dictionary folder made an
 // empty folder look full when the library was in use).
@@ -818,6 +830,21 @@ type startupInfo struct {
 	libDir      string
 	url         string
 	speex       string
+}
+
+// statePath places state.json next to the wudict.toml that is in effect. When
+// no config file exists at all it falls back to the home location — the same
+// directory EnsureConfigFile would have used — and when even the home
+// directory is unknown it returns "", which makes the state in-memory rather
+// than scattering a file somewhere nobody asked for.
+func statePath(cfgFile string) string {
+	if cfgFile != "" {
+		return filepath.Join(filepath.Dir(cfgFile), server.StateFile)
+	}
+	if p := config.HomeConfig(); p != "" {
+		return filepath.Join(filepath.Dir(p), server.StateFile)
+	}
+	return ""
 }
 
 func printStartup(cfg config.Config, in startupInfo) {
@@ -858,11 +885,20 @@ func printStartup(cfg config.Config, in startupInfo) {
 	}
 	fmt.Fprintf(out, "  library       %s  (%s)\n", in.libDir, libNote)
 
-	cfgSrc := cfg.Source
-	if cfgSrc == "" {
-		cfgSrc = "(none — built-in defaults)"
+	// The three paths a user has to know — dictionaries, library, config — are
+	// printed on every start, not just the first: a config file in the wrong
+	// place is invisible otherwise, and that was the whole bug behind D32.
+	switch cfgSrc := cfg.Source; {
+	case cfgSrc == "":
+		fmt.Fprintf(out, "  config        (none — built-in defaults)\n")
+	case cfg.Portable:
+		fmt.Fprintf(out, "  config        %s  (portable — beside the executable)\n", cfgSrc)
+	default:
+		fmt.Fprintf(out, "  config        %s\n", cfgSrc)
 	}
-	fmt.Fprintf(out, "  config        %s\n", cfgSrc)
+	for _, p := range cfg.Shadowed {
+		fmt.Fprintf(out, "                %s  (ignored — lower priority)\n", p)
+	}
 	fmt.Fprintf(out, "  address       %s\n", in.url)
 	if in.speex != "" {
 		fmt.Fprintf(out, "  .spx audio    %s\n", in.speex)

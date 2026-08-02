@@ -372,6 +372,26 @@ type Registry struct {
 	// (PREVIEW_MEMORY; 0 = unlimited). Prepared ones answer from disk and are
 	// never evicted — there would be nothing to reclaim.
 	previewBudget int64
+
+	// prefs is the user's enabled set and order (state.json). Never nil: an
+	// in-memory Prefs answers "nothing is disabled", which is the right
+	// default everywhere the caller supplied no file.
+	prefs *Prefs
+}
+
+// Option configures a Registry at construction. Prefs must be in place BEFORE
+// the first Warm, which is why this is an option and not a setter — a warm-up
+// that pre-opened everything and only then learned what to skip would have
+// already paid the memory it was told to save.
+type Option func(*Registry)
+
+// WithPrefs attaches the persisted enabled/disabled state.
+func WithPrefs(p *Prefs) Option {
+	return func(r *Registry) {
+		if p != nil {
+			r.prefs = p
+		}
+	}
 }
 
 // Root is one dictionary folder and what it contributed. A folder that is
@@ -384,8 +404,11 @@ type Root struct {
 	Exists bool   `json:"exists"`
 }
 
-func NewRegistry(dictDirs []string, useCached bool) (*Registry, error) {
-	r := &Registry{dictDirs: dict.DedupeDirs(dictDirs), useCached: useCached, byID: map[string]*entry{}}
+func NewRegistry(dictDirs []string, useCached bool, opts ...Option) (*Registry, error) {
+	r := &Registry{dictDirs: dict.DedupeDirs(dictDirs), useCached: useCached, byID: map[string]*entry{}, prefs: LoadPrefs("")}
+	for _, o := range opts {
+		o(r)
+	}
 	if err := r.Rescan(); err != nil {
 		return r, err
 	}
@@ -440,7 +463,7 @@ func (r *Registry) Count() int {
 func (r *Registry) SetDirs(dirs []string) error {
 	r.mu.Lock()
 	// one folder listed twice (a repeat, a trailing slash, a symlink) must not
-	// become two rows, two walks and two lines in config.toml
+	// become two rows, two walks and two lines in wudict.toml
 	r.dictDirs = dict.DedupeDirs(dirs)
 	r.mu.Unlock()
 	if err := r.Rescan(); err != nil {
@@ -549,13 +572,22 @@ func pathID(path string) string {
 // dictionaries nobody had searched yet (docs/PERF.md M2). An unprepared
 // dictionary is opened when something actually needs it: a search, or the
 // background indexer that is about to replace it with a prepared one.
+//
+// Disabled dictionaries are skipped. Turning one off is the user asking us to
+// stop spending on it, and a few MB of SQLite handle each is exactly the kind
+// of spending they meant; opening them anyway would have made the switch a
+// decoration. One that is turned back on opens on its next search.
 func (r *Registry) Warm() {
 	entries := r.all()
+	prefs := r.prefs
 	go func() {
 		sem := make(chan struct{}, 4)
 		var wg sync.WaitGroup
 		for _, e := range entries {
 			if _, prepared := preparedFor(e.Path); !prepared {
+				continue
+			}
+			if prefs.Off(e.ID, e.Path) {
 				continue
 			}
 			wg.Add(1)

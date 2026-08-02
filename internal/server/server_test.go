@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -41,8 +42,7 @@ func (s *stubReader) Next() (dict.Entry, error) {
 // companion, and flags packable media (the DSL fixture ships a .files.zip).
 func TestDictProvenance(t *testing.T) {
 	s := newTestServer(t)
-	var dicts []dictInfo
-	getJSON(t, s, "/api/dicts", &dicts)
+	dicts := getDicts(t, s, "/api/dicts")
 	if len(dicts) != 1 {
 		t.Fatalf("want 1 dict, got %d", len(dicts))
 	}
@@ -157,6 +157,50 @@ func getJSON(t *testing.T, s *Server, path string, into any) *httptest.ResponseR
 	return rec
 }
 
+// getDicts drives the NDJSON /api/dicts (or /api/rescan) stream to completion
+// and returns its rows. The server emits them in completion order, so they are
+// sorted by id here to keep assertions deterministic.
+func getDicts(t *testing.T, s *Server, path string) []dictInfo {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+	if rec.Code != 200 {
+		t.Fatalf("GET %s: status %d: %s", path, rec.Code, rec.Body.String())
+	}
+	var out []dictInfo
+	var begin, end bool
+	sc := bufio.NewScanner(strings.NewReader(rec.Body.String()))
+	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var m dictMsg
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("GET %s: bad NDJSON line (%v): %s", path, err, line)
+		}
+		switch m.T {
+		case "begin":
+			begin = true
+		case "dict":
+			if m.Dict == nil {
+				t.Fatalf("GET %s: dict line without a row: %s", path, line)
+			}
+			out = append(out, *m.Dict)
+		case "end":
+			end = true
+		}
+	}
+	// the client unblocks on "begin" and stops waiting on "end"; a stream
+	// missing either one leaves it stuck, so both are part of the contract
+	if !begin || !end {
+		t.Fatalf("GET %s: incomplete stream (begin=%v end=%v): %s", path, begin, end, rec.Body.String())
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 // searchStream parses the NDJSON /api/search response into per-slot hits
 // (only "hit" lines with results), ordered by slot index.
 // sse drives an SSE endpoint to completion (the ingest/feature-toggle flow)
@@ -197,11 +241,47 @@ func searchStream(t *testing.T, s *Server, path string) []streamMsg {
 	return out
 }
 
+// TestDictsStreamShape: the client blocks its search form until it knows how
+// many dictionaries are coming and unblocks on the first row (D30), so the
+// order and content of the NDJSON frames is a contract, not an implementation
+// detail: "begin" carries the registry count and must precede every row.
+func TestDictsStreamShape(t *testing.T) {
+	s := newTestServer(t)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/api/dicts", nil))
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/x-ndjson") {
+		t.Fatalf("content-type = %q, want application/x-ndjson", ct)
+	}
+	var kinds []string
+	var total, rows int
+	for _, line := range strings.Split(strings.TrimSpace(rec.Body.String()), "\n") {
+		var m dictMsg
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("bad NDJSON line (%v): %s", err, line)
+		}
+		kinds = append(kinds, m.T)
+		switch m.T {
+		case "begin":
+			total = m.Total
+		case "dict":
+			rows++
+		}
+	}
+	if len(kinds) < 2 || kinds[0] != "begin" || kinds[len(kinds)-1] != "end" {
+		t.Fatalf("frame order = %v, want begin … end", kinds)
+	}
+	if want := s.reg.Count(); total != want {
+		t.Errorf("begin.total = %d, want the registry count %d", total, want)
+	}
+	if rows != total {
+		t.Errorf("got %d dict rows, want %d (one per registry entry)", rows, total)
+	}
+}
+
 func TestDictsAndSearch(t *testing.T) {
 	s := newTestServer(t)
 
-	var dicts []dictInfo
-	getJSON(t, s, "/api/dicts", &dicts)
+	dicts := getDicts(t, s, "/api/dicts")
 	if len(dicts) != 1 || dicts[0].Name != "Server Test Dict" {
 		t.Fatalf("dicts: %+v", dicts)
 	}
@@ -312,8 +392,7 @@ func TestAutoIndexOnFirstSearch(t *testing.T) {
 	s := New(reg)
 	s.AutoIndex = true
 
-	var dicts []dictInfo
-	getJSON(t, s, "/api/dicts", &dicts)
+	dicts := getDicts(t, s, "/api/dicts")
 	id := dicts[0].ID
 	if dicts[0].Caps.Contains {
 		t.Fatalf("fake dict should start without contains: %+v", dicts[0])
@@ -337,8 +416,7 @@ func TestAutoIndexOnFirstSearch(t *testing.T) {
 		t.Fatalf("auto-index did not become available: %+v", hits)
 	}
 	// and it built the cheap index only — contains stays off until asked for
-	var dicts2 []dictInfo
-	getJSON(t, s, "/api/dicts", &dicts2)
+	dicts2 := getDicts(t, s, "/api/dicts")
 	if dicts2[0].Caps.Contains {
 		t.Error("auto-index must not build a trigram index")
 	}
@@ -364,8 +442,7 @@ func TestFullIngestNoResourcesFlagsEmpty(t *testing.T) {
 	if !e.noPackableMedia() {
 		t.Error("a resource-less full ingest should flag the entry as having no packable media")
 	}
-	var dicts []dictInfo
-	getJSON(t, New(reg), "/api/dicts", &dicts)
+	dicts := getDicts(t, New(reg), "/api/dicts")
 	if dicts[0].HasMedia {
 		t.Error("HasMedia must be false after a resource-less full ingest")
 	}
@@ -373,8 +450,7 @@ func TestFullIngestNoResourcesFlagsEmpty(t *testing.T) {
 
 func TestResourceAndIndex(t *testing.T) {
 	s := newTestServer(t)
-	var dicts []dictInfo
-	getJSON(t, s, "/api/dicts", &dicts)
+	dicts := getDicts(t, s, "/api/dicts")
 	id := dicts[0].ID
 
 	rec := httptest.NewRecorder()
@@ -400,8 +476,7 @@ func TestResourceAndIndex(t *testing.T) {
 
 func TestIngestSSEAndMedia(t *testing.T) {
 	s := newTestServer(t)
-	var dicts []dictInfo
-	getJSON(t, s, "/api/dicts", &dicts)
+	dicts := getDicts(t, s, "/api/dicts")
 	id := dicts[0].ID
 
 	rec := httptest.NewRecorder()
@@ -446,7 +521,7 @@ func TestSetupFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(reg)
-	s.ConfigPath = filepath.Join(t.TempDir(), "config.toml")
+	s.ConfigPath = filepath.Join(t.TempDir(), "wudict.toml")
 
 	// missing folder → setup page, not the app
 	rec := httptest.NewRecorder()
@@ -541,8 +616,7 @@ func TestMediaDBIsNeverADictionary(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(reg)
-	var dicts []dictInfo
-	getJSON(t, s, "/api/dicts", &dicts)
+	dicts := getDicts(t, s, "/api/dicts")
 	// (other tests share this process and the WUDICT_DB_DIR env var, so assert
 	// on this dictionary specifically rather than on the total row count)
 	var ahd []dictInfo
@@ -601,7 +675,7 @@ func TestSetupConsentFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(reg)
-	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	cfgPath := filepath.Join(t.TempDir(), "wudict.toml")
 	s.ConfigPath = cfgPath
 
 	rec := httptest.NewRecorder()
@@ -696,7 +770,7 @@ func TestSetupMultipleFolders(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(reg)
-	s.ConfigPath = filepath.Join(t.TempDir(), "config.toml")
+	s.ConfigPath = filepath.Join(t.TempDir(), "wudict.toml")
 
 	// a + b + (a/sub, already covered by a) + a repeated
 	q := "path=" + a + "&path=" + b + "&path=" + nested + "&path=" + a + "&save=1"

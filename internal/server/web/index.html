@@ -86,9 +86,13 @@ select{font-size:13px;color:var(--fg-soft);background:var(--bg-card);
 #status{color:var(--fg-soft);font-size:13px;padding:var(--sp-2) 0;min-height:1.4em;
   opacity:0;transition:opacity .35s ease}
 #status.show{opacity:1}
-#status .spin{display:inline-block;width:1em;height:1em;border:2px solid var(--line);
+/* one spinner, two homes: inline in #status, and large in the startup
+   panel below (.empty) while the dictionary list is still arriving */
+.spin{display:inline-block;width:1em;height:1em;border:2px solid var(--line);
   border-top-color:var(--accent);border-radius:50%;vertical-align:-.15em;
   animation:spin .7s linear infinite;margin-right:.4em}
+.spin.big{display:block;width:30px;height:30px;border-width:3px;
+  margin:0 auto var(--sp-2)}
 @keyframes spin{to{transform:rotate(360deg)}}
 details.dict{margin-top:var(--sp-2);background:var(--bg-card);border:1px solid var(--line);
   border-radius:10px;box-shadow:var(--shadow);overflow:hidden}
@@ -123,6 +127,8 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 
 .empty{padding-top:var(--sp-5);text-align:center;color:var(--fg-faint)}
 .empty svg path{fill:var(--line)}
+/* the search bar is inert until at least one dictionary is usable */
+input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 
 /* ── dictionaries panel ────────────────────────────────────────────── */
 #panel{position:fixed;inset:0;z-index:200;display:none;background:color-mix(in srgb,var(--fg) 24%,transparent)}
@@ -133,9 +139,11 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 .panel-card h2{margin:0 0 var(--sp-2);font-size:16px;color:var(--fg);
   display:flex;align-items:center}
 .panel-card h2 .btn{margin-left:auto}
-/* the title, the bulk actions and the master switch stay put while a long
-   list scrolls under them — with 55 dictionaries the close button and the
-   "enable all" control must not be somewhere up the page */
+/* the title and the master switch stay put while a long list scrolls under
+   them — with 55 dictionaries the close button and the "enable all" control
+   must not be somewhere up the page. Nothing that spends disk or CPU belongs
+   in this strip: sticky + top-right is the most-clicked real estate in the
+   panel, which is exactly why bulk full-text was moved out of it (D31). */
 .panel-head{position:sticky;top:0;z-index:1;background:var(--bg);
   padding:var(--sp-3) 0 0}
 /* the master switch sits in the same right-hand column as the per-card ones,
@@ -229,9 +237,20 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 #folders .rv{color:var(--fg-faint);font-size:11px;cursor:pointer;white-space:nowrap}
 #folders .rv:hover{color:var(--link);text-decoration:underline}
 #folders .frow:hover .rv{color:var(--fg-soft)}
-#folders .facts{display:flex;gap:1.2em;align-items:baseline;margin-top:.7em}
-#folders .facts #rescanBtn{color:var(--fg-soft);text-decoration:none;font-size:11.5px}
-#folders .facts #rescanBtn:hover{color:var(--link);text-decoration:underline}
+#folders .facts{display:flex;flex-wrap:wrap;gap:.4em 1.2em;align-items:baseline;margin-top:.7em}
+#folders .facts #rescanBtn,#folders .facts #ftsAllBtn{
+  color:var(--fg-soft);text-decoration:none;font-size:11.5px}
+#folders .facts #rescanBtn:hover,#folders .facts #ftsAllBtn:hover{
+  color:var(--link);text-decoration:underline}
+/* An action that spends disk and CPU states its price where it is triggered,
+   in the same breath as the trigger — not in a tooltip, and not after the
+   fact (D31). Quiet by design: this is an extra, never a repair. */
+.bulkbox{margin-top:.6em;padding:.6em .7em;border:1px solid var(--line);border-radius:8px;
+  background:var(--bg-card);font-size:11.5px;color:var(--fg-soft);line-height:1.5}
+.bulkbox p{margin:0 0 .5em}
+.bulkbox p:last-child{margin-bottom:0}
+.bulkbox .cost{color:var(--fg-faint)}
+.bulkbox .btn{font-size:11.5px;padding:.25em .6em;margin-right:.4em}
 #folders .warn{color:#c0564f;font-size:11.5px;margin:.3em 0}
 /* About: quiet by construction — one accent word, everything else the muted
    text colour, separated from the controls above by a hairline rather than a
@@ -277,16 +296,21 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 </head>
 <body>
 <header class="bar" id="bar">
-<form id="frm" role="search">
+<!-- The search controls start disabled and are released by setPhase() as soon
+     as one dictionary is usable. Disabling in the markup (not from script)
+     closes the window between first paint and the script running, which is
+     exactly when an eager "type and hit Enter" used to reach the search path
+     with an empty dictionary list. -->
+<form id="frm" role="search" aria-busy="true">
 <span class="brand">WuWei<small>Dict</small></span>
-<input type="search" id="q" placeholder="Search…" autocomplete="off" autofocus aria-label="Search term">
-<select id="mode" aria-label="Search mode">
+<input type="search" id="q" placeholder="Search…" autocomplete="off" autofocus aria-label="Search term" disabled>
+<select id="mode" aria-label="Search mode" disabled>
 <option value="prefix">starts with</option>
 <option value="exact">exact</option>
 <option value="contains">contains</option>
 <option value="fts">full-text</option>
 </select>
-<select id="dict" aria-label="Dictionary"><option value="all">All dictionaries</option></select>
+<select id="dict" aria-label="Dictionary" disabled><option value="all">All dictionaries</option></select>
 <button type="submit" class="btn" title="Search" aria-label="Search">🔍</button>
 <button type="button" class="btn" id="themeBtn" title="Theme" aria-label="Toggle theme">◐</button>
 <button type="button" class="btn" id="wideBtn" title="Toggle wide layout" aria-label="Toggle wide layout">⇔</button>
@@ -302,7 +326,6 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 <div id="panel" role="dialog" aria-label="Dictionaries">
 <div class="panel-card">
 <div class="panel-head"><h2>Dictionaries
-<button class="btn" id="ingestAllBtn" title="Add full-text search to every dictionary that lacks it (does not pack media)">⚡ index all</button>
 <button class="btn" id="closePanel" aria-label="Close">✕</button></h2>
 <div class="allrow"><label for="enAll" id="enAllLabel">Enable all</label>
 <input type="checkbox" class="en" id="enAll" aria-label="Enable all dictionaries"></div></div>
@@ -312,9 +335,12 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
     <span class="fsum" id="folderSummary"></span></summary>
   <div id="folderBody"></div>
   <div class="facts">
-    <a class="act" id="editFolders" href="/setup">Edit folders…</a>
-    <span class="act" id="rescanBtn" title="Re-scan every folder and re-open the dictionaries found (takes a moment)">Rescan folders</span>
+    <a class="act" id="editFolders" href="/setup">✏️ Edit folders…</a>
+    <span class="act" id="rescanBtn" title="Re-scan every folder and re-open the dictionaries found (takes a moment)">♻️ Rescan folders</span>
+    <span class="act" id="ftsAllBtn" role="button" tabindex="0" aria-expanded="false" aria-controls="ftsAllBox"
+      title="Optional. Every dictionary is already searchable by headword; clicking this enables searching in article bodies &mdash; can take SIGNIFICANTLY more disk space!">⚡️⚠️ ENABLE Full-text search for ALL (hover for WARNINGS)</span>
   </div>
+  <div id="ftsAllBox" class="bulkbox" hidden></div>
   <!-- About: last row of the only chrome panel the app has. Users already open
        this for their folder paths, so the identity/version/links live where
        they will be looked for, without spending room in the search UI. -->
@@ -335,13 +361,64 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
 let dicts=[],lastQuery=null,searchSeq=0,searchAC=null;
 
-/* preference order (ids) + disabled set, persisted. New dictionaries not
-   yet in the saved order fall in alphabetically after the ordered ones. */
+/* Preference order (ids) + disabled set. New dictionaries not yet in the saved
+   order fall in alphabetically after the ordered ones.
+
+   These two live on the SERVER (~/.wudict/state.json), unlike the theme, the
+   wide toggle and the dropdown selection, which stay in localStorage. The line
+   is "does this describe the collection, or the browser looking at it?".
+   localStorage is keyed by scheme://host:port, so a different port, 127.0.0.1
+   instead of localhost, or a phone on the LAN each silently reset a curated
+   list of a hundred dictionaries — and the server, which owns the
+   dictionaries, is also the only thing that can act on the answer (it skips
+   disabled ones when warming up). */
+let prefOrder=[],disabled=new Set();
 function loadJSON(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}}
-let prefOrder=loadJSON("wudict_order",[]);
-let disabled=new Set(loadJSON("wudict_disabled",[]));
-function saveOrder(){localStorage.setItem("wudict_order",JSON.stringify(prefOrder))}
-function saveDisabled(){localStorage.setItem("wudict_disabled",JSON.stringify([...disabled]))}
+/* One-time adoption of a pre-server build's localStorage, so upgrading does
+   not silently throw away someone's curation. Self-erasing: the keys are
+   removed as they are read, and the server file is authoritative from then on. */
+function adoptLocalPrefs(){
+  const o=loadJSON("wudict_order",null),d=loadJSON("wudict_disabled",null);
+  if(!o&&!d)return false;
+  if(Array.isArray(o))prefOrder=o;
+  if(Array.isArray(d))disabled=new Set(d);
+  localStorage.removeItem("wudict_order");localStorage.removeItem("wudict_disabled");
+  return true;
+}
+let prefsReady=false;
+async function loadPrefs(){
+  try{
+    const r=await fetch("/api/prefs");
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const st=await r.json(),rows=st.dicts||[];
+    prefsReady=true;
+    if(!st.exists){adoptLocalPrefs();return} // first run: keep whatever we had
+    prefOrder=rows.map(d=>d.id);
+    disabled=new Set(rows.filter(d=>d.off).map(d=>d.id));
+  }catch(e){
+    // A page that cannot read its settings must still search: fall back to
+    // "everything enabled, alphabetical" rather than refusing to start.
+    console.warn("could not load settings:",e);
+  }
+}
+/* Debounced, and silent when nothing actually changed — dragging a card emits
+   a move per hovered row, and startup normalisation re-sends a list that is
+   usually identical to the one we just read. */
+let prefsTimer=null,prefsSent=null;
+function savePrefs(now){
+  clearTimeout(prefsTimer);
+  // Never write a baseline we could not read: if the load failed, "nothing is
+  // disabled, no order" is our ignorance, not the user's setting, and saving
+  // it would destroy the real one.
+  if(!prefsReady){setStatus("⚠ settings are not being saved — reload the page");return}
+  if(!now){prefsTimer=setTimeout(()=>savePrefs(true),400);return}
+  const body=JSON.stringify({dicts:orderedDicts().map(d=>({id:d.id,name:dictLabel(d),off:disabled.has(d.id)}))});
+  if(body===prefsSent)return;
+  prefsSent=body;
+  fetch("/api/prefs",{method:"PUT",headers:{"Content-Type":"application/json"},body})
+    .then(r=>{if(!r.ok)throw new Error("HTTP "+r.status)})
+    .catch(e=>{prefsSent=null;setStatus("⚠ could not save dictionary settings: "+esc(e.message))});
+}
 /* dictionaries in preference order: saved ones first, then unseen ones A→Z */
 const mb=b=>b>=1e9?(b/1e9).toFixed(1)+" GB":b>=1e6?Math.round(b/1e6)+" MB":Math.max(1,Math.round(b/1e3))+" kB";
 function orderedDicts(){
@@ -399,17 +476,79 @@ applyTheme(localStorage.getItem("wudict_theme")||"auto");
 
 /* ── dictionaries ──────────────────────────────────────────────────── */
 function dictLabel(d){return d.name||d.path.split("/").pop()}
-async function loadDicts(rescan){
-  setStatus('<span class="spin"></span>Loading dictionaries…');
-  try{
-    dicts=await (await fetch(rescan?"/api/rescan":"/api/dicts")).json();
-  }finally{
-    if(!lastQuery)setStatus("");
-  }
+
+/* Readiness (D30). An empty `dicts` used to mean two different things —
+   "still loading" and "you disabled them all" — and the search path could not
+   tell them apart, so a slow startup accused the user of disabling a list that
+   was merely late. It cannot happen now: the server serves this page only when
+   the registry is non-empty (handleIndex falls back to /setup otherwise), so
+   here an empty list ALWAYS means "not ready yet".
+     boot    — nothing usable: form inert, spinner, no warnings of any kind
+     partial — ≥1 dictionary in: fully interactive, more still arriving
+     ready   — the list is complete
+     failed  — the stream broke: interactive anyway, with a retry
+   Only partial/ready may say anything about what the user has disabled. */
+let phase="boot",dictTotal=0,staleSearch=false;
+function setPhase(p){
+  if(phase===p)return;
+  const wasBoot=phase==="boot";
+  phase=p;
+  const busy=p==="boot";
+  for(const id of["q","mode","dict"])$(id).disabled=busy;
+  $("frm").setAttribute("aria-busy",busy?"true":"false");
+  if(busy){startBootScreen();return}
+  stopBootScreen();
+  // a disabled input cannot hold focus (autofocus no-ops), so hand it back
+  // the moment it can take it — the user should be able to just type
+  if(wasBoot&&document.activeElement===document.body)$("q").focus();
+}
+
+/* Waiting messages. Cook Ding (庖丁解牛) — the cook whose blade never dulls
+   because he cuts with the grain — is the canonical wúwéi parable, so the
+   kitchen is this app's own metaphor rather than borrowed whimsy. Fixed
+   order, so repeat launches feel the same, and nothing here promises
+   imminence: the honest progress signal is the "N of M ready" counter beside
+   it. The spinner is deliberately indeterminate — per-dictionary cost varies
+   by orders of magnitude (cold MDX ~180 ms, cold SLOB ~1 s), so a progress
+   bar would be guessing while the counter cannot. */
+const BOOT_MSGS=["Warming up the wok…","Stir-frying the dictionaries…",
+  "Chopping headwords, with the grain…","Letting the definitions marinate…",
+  "Tasting for seasoning…"];
+let bootTimer=null,bootIdx=0;
+function paintBoot(){
+  $("out").innerHTML=`<div class="empty boot"><span class="spin big"></span><p>${BOOT_MSGS[bootIdx]}</p></div>`;
+}
+function startBootScreen(){
+  if(bootTimer)return;
+  bootIdx=0;paintBoot();
+  bootTimer=setInterval(()=>{bootIdx=(bootIdx+1)%BOOT_MSGS.length;paintBoot()},3500);
+}
+function stopBootScreen(){
+  if(bootTimer){clearInterval(bootTimer);bootTimer=null}
+  if($("out").querySelector(".boot"))$("out").innerHTML="";
+}
+/* the honest progress line: a count, never a percentage */
+function readyCount(){
+  return dictTotal?`Loading dictionaries — ${dicts.length} of ${dictTotal} ready…`
+                  :"Looking for dictionaries…";
+}
+function bootFailed(msg){
+  setPhase("failed");
+  clearStatus("load");
+  $("out").innerHTML=`<div class="empty"><p>⚠ Could not load your dictionaries.</p>`+
+    `<p>${esc(msg||"unknown error")}</p>`+
+    `<p><button type="button" class="btn" id="retryBtn">Try again</button></p></div>`;
+}
+$("out").addEventListener("click",e=>{if(e.target.id==="retryBtn")loadDicts()});
+
+/* Rebuilding the dropdown and the panel is O(all dictionaries) — renderPanel
+   throws its whole list away and rebuilds it — so streamed rows coalesce into
+   one repaint instead of ~100 of them. */
+let refreshTimer=null;
+function refreshDictUI(now){
+  clearTimeout(refreshTimer);
+  if(!now){refreshTimer=setTimeout(()=>refreshDictUI(true),120);return}
   dicts.sort((a,b)=>dictLabel(a).localeCompare(dictLabel(b),undefined,{sensitivity:"base"}));
-  // normalize the saved preference order to the current dictionary set
-  // (appends newly-added dicts A→Z, drops removed ones)
-  prefOrder=orderedIds();saveOrder();
   const sel=$("dict"),prev=sel.value||localStorage.getItem("wudict_dict")||"all";
   sel.innerHTML='<option value="all">All dictionaries</option>';
   for(const d of dicts){ // dropdown stays alphabetical for quick name lookup
@@ -420,6 +559,57 @@ async function loadDicts(rescan){
   if([...sel.options].some(o=>o.value===prev))sel.value=prev;
   renderPanel();
 }
+
+/* Consumes the /api/dicts NDJSON stream, so search unblocks on the FIRST
+   dictionary rather than the last one. Never throws: a failure here must
+   still leave the user with a usable page. */
+async function loadDicts(rescan){
+  // A rescan happens in an app that already works — it must not black the UI
+  // out. Only the first load (or a retry after a failure) blocks.
+  const blocking=phase==="boot"||phase==="failed";
+  if(blocking){setPhase("boot");startBootScreen();dictTotal=0;setStatus(esc(readyCount()),"load")}
+  else setStatus('<span class="spin"></span>Loading dictionaries…',"load");
+  const rows=[];
+  let published=false,sawBegin=false;
+  // "begin" costs the server no opens at all, so its absence means the server
+  // is not answering — never leave the form inert waiting on a hang.
+  const watchdog=blocking?setTimeout(()=>{if(!sawBegin)bootFailed("the server is not responding")},20000):null;
+  try{
+    await fetchStream(rescan?"/api/rescan":"/api/dicts",msg=>{
+      if(msg.t==="begin"){
+        sawBegin=true;dictTotal=msg.total||0;
+        if(blocking)setStatus(esc(readyCount()),"load");
+      }else if(msg.t==="dict"&&msg.dict){
+        rows.push(msg.dict);
+        if(!published){
+          // swap the old list out only now: a rescan keeps showing the
+          // previous dictionaries until replacements start arriving
+          published=true;dicts=rows;
+          if(phase==="failed")$("out").innerHTML=""; // a slow stream beat the watchdog
+          setPhase("partial");
+        }
+        if(blocking)setStatus(esc(readyCount()),"load");
+        refreshDictUI();
+      }
+    });
+  }catch(err){
+    if(blocking)bootFailed(err.message);
+    else setStatus("⚠ "+esc(err.message));
+    return;
+  }finally{
+    clearTimeout(watchdog);
+  }
+  dicts=rows;dictTotal=rows.length;
+  // normalize the saved preference order to the current dictionary set
+  // (appends newly-added dicts A→Z, drops removed ones). ONLY on the complete
+  // set — doing it mid-stream would drop the ids that had not arrived yet.
+  prefOrder=orderedIds();savePrefs(true);
+  refreshDictUI(true);
+  setPhase("ready");
+  clearStatus("load");
+  // a search run against a half-loaded list is now answerable in full
+  if(staleSearch&&lastQuery){staleSearch=false;doSearch()}
+}
 /* reorder helpers operate on the preference-ordered id list */
 function moveDict(id,where){
   const ids=orderedIds(),i=ids.indexOf(id);
@@ -429,11 +619,11 @@ function moveDict(id,where){
   else if(where==="down")ids.splice(Math.min(ids.length,i+1),0,id);
   else if(where==="top")ids.unshift(id);
   else ids.push(id); // bottom
-  prefOrder=ids;saveOrder();renderPanel();
+  prefOrder=ids;savePrefs();renderPanel();
 }
 function toggleDict(id){
   disabled.has(id)?disabled.delete(id):disabled.add(id);
-  saveDisabled();renderPanel();
+  savePrefs();renderPanel();
 }
 /* Master switch: mixed → all, all → none, none → all (the Finder/Gmail
    convention — from a mixed state the useful move is always "select all").
@@ -442,7 +632,7 @@ function toggleDict(id){
 function setAllEnabled(on){
   disabled.clear();
   if(!on)for(const d of dicts)disabled.add(d.id);
-  saveDisabled();renderPanel();
+  savePrefs();renderPanel();
 }
 function syncPanelHeader(){
   const total=dicts.length,on=dicts.filter(d=>!disabled.has(d.id)).length;
@@ -452,7 +642,10 @@ function syncPanelHeader(){
   box.disabled=total===0;
   const label=on===total?"All dictionaries are searched":
     on===0?"No dictionaries are searched":`${on} of ${total} dictionaries are searched`;
-  $("enAllLabel").textContent=!total?"No dictionaries":
+  // an empty list before the stream finishes is "not here yet", not "none" —
+  // the panel must not contradict the boot screen (D30)
+  $("enAllLabel").textContent=!total?
+      (phase==="boot"?"Still loading…":phase==="failed"?"Could not load":"No dictionaries"):
     on===total?"All enabled":on===0?"None enabled":`${on} of ${total} enabled`;
   box.title=label;
 }
@@ -578,7 +771,7 @@ $("panelList").addEventListener("drop",e=>{
   const r=pd.getBoundingClientRect(),after=e.clientY>r.top+r.height/2;
   const ids=orderedIds(),from=ids.indexOf(dragId);ids.splice(from,1);
   let to=ids.indexOf(pd.dataset.id);if(after)to++;
-  ids.splice(to,0,dragId);prefOrder=ids;saveOrder();clearDrop();dragId=null;renderPanel();
+  ids.splice(to,0,dragId);prefOrder=ids;savePrefs();clearDrop();dragId=null;renderPanel();
 });
 $("panelBtn").onclick=()=>{$("panel").classList.add("show");loadFolders()};
 $("closePanel").onclick=()=>$("panel").classList.remove("show");
@@ -633,22 +826,82 @@ $("folderBody").addEventListener("click",e=>{
   navigator.clipboard?.writeText(p.textContent);
   p.style.color="var(--accent)";setTimeout(()=>{p.style.color=""},900);
 });
-$("ingestAllBtn").onclick=async()=>{
-  const btn=$("ingestAllBtn");
-  if(btn.disabled)return;
-  const todo=dicts.filter(d=>!d.error&&!d.caps?.FTS);
-  if(!todo.length){btn.textContent="✓ all indexed";setTimeout(()=>btn.textContent="⚡ index all",1500);return}
-  btn.disabled=true;
+/* Bulk full-text (D31). This used to be "⚡ index all", a prominent button in
+   the panel header — which was wrong twice over. It named our mechanism, not
+   the user's outcome, and it was a lie: every dictionary is *already* indexed
+   by headword on first open, so "index all" read as the button that repairs a
+   half-configured app. And the top-right of a sticky header is where a user
+   clicks to explore, while this is the one action that spends gigabytes of
+   disk and a long single-file CPU pass. Prominence must track value, not cost.
+   It now lives in the configuration drawer as quiet text, names what the user
+   gets, and prices itself before it can fire. The good discovery path is
+   elsewhere and already exists: a full-text search that meets a dictionary
+   lacking the index offers to add just that one, in context and motivated. */
+function ftsCandidates(){
+  // a dictionary whose source file is gone cannot be re-indexed at all — the
+  // prepared data is the only copy (same rule the per-card chips enforce, and
+  // which "index all" ignored: it queued dictionaries guaranteed to fail)
+  return dicts.filter(d=>!d.error&&!d.caps?.FTS&&d.source);
+}
+/* Size estimate calibrated on the user's OWN corpus: bytes-per-entry observed
+   across the dictionaries that already have full text. Article length varies
+   far too much between dictionaries for a hard-coded multiplier to be honest,
+   and when there is nothing to calibrate against this says nothing rather
+   than inventing a number — the exact figures below carry the warning fine. */
+function ftsAddedBytes(todo){
+  let bytes=0,entries=0;
+  for(const d of dicts)if(d.caps?.FTS&&d.dbSize&&d.entries){bytes+=d.dbSize;entries+=d.entries}
+  const want=todo.reduce((n,d)=>n+(d.entries||0),0);
+  if(!entries||!want)return 0;
+  const grown=want*(bytes/entries),have=todo.reduce((n,d)=>n+(d.dbSize||0),0);
+  return grown>have?grown-have:0;
+}
+function closeFtsAll(){
+  $("ftsAllBox").hidden=true;
+  $("ftsAllBtn").setAttribute("aria-expanded","false");
+}
+function openFtsAll(){
+  const box=$("ftsAllBox"),todo=ftsCandidates(),plural=n=>n===1?"dictionary":"dictionaries";
+  if(!todo.length){
+    box.innerHTML="<p>Every dictionary that can be indexed already has full-text search.</p>";
+  }else{
+    const entries=todo.reduce((n,d)=>n+(d.entries||0),0);
+    const now=dicts.reduce((n,d)=>n+(d.dbSize||0),0),added=ftsAddedBytes(todo);
+    box.innerHTML=
+      "<p>Full-text search finds words <em>inside</em> article text. Every dictionary "+
+      "is already searchable by headword without it — this is an extra, not a fix.</p>"+
+      `<p class="cost">Indexes <b>${todo.length}</b> ${plural(todo.length)}`+
+        (entries?` (${entries.toLocaleString()} entries)`:"")+
+        ", one at a time — on a large collection that takes a long while."+
+        (now?` Prepared data uses ${mb(now)} today`+(added?`; expect roughly ${mb(added)} more`:"")+".":"")+
+        " You can remove it from any dictionary afterwards.</p>"+
+      `<p><button type="button" class="btn" id="ftsAllGo">Index ${todo.length} ${plural(todo.length)}</button>`+
+      '<button type="button" class="btn" id="ftsAllNo">Cancel</button></p>';
+  }
+  box.hidden=false;
+  $("ftsAllBtn").setAttribute("aria-expanded","true");
+}
+$("ftsAllBtn").onclick=()=>{$("ftsAllBox").hidden?openFtsAll():closeFtsAll()};
+$("ftsAllBtn").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();$("ftsAllBtn").onclick()}};
+$("ftsAllBox").addEventListener("click",async e=>{
+  if(e.target.id==="ftsAllNo"){closeFtsAll();return}
+  if(e.target.id!=="ftsAllGo")return;
+  const go=e.target,todo=ftsCandidates();
+  go.disabled=true;
   let n=0;
   for(const d of todo){
-    n++;btn.textContent=`⚡ ${n}/${todo.length}…`;
-    const label=document.querySelector(`.pd[data-id="${d.id}"] .feat[data-feat="fts"]`)||btn;
+    n++;go.textContent=`${n} / ${todo.length}…`;
+    // the card's own chip shows per-dictionary progress where the user will
+    // look for it; a fresh detached node otherwise, because runIngest marks
+    // its label busy for good and would refuse every dictionary after the first
+    const label=document.querySelector(`.pd[data-id="${d.id}"] .feat[data-feat="fts"]`)
+      ||document.createElement("span");
     await runIngest(d.id,{fts:1,quiet:true,statusPrefix:`${n}/${todo.length} · `},label);
   }
-  btn.disabled=false;btn.textContent="⚡ index all";
-  setStatus("✓ all dictionaries indexed");
+  closeFtsAll();
+  setStatus(`✓ full-text search enabled on ${todo.length} ${todo.length===1?"dictionary":"dictionaries"}`);
   await loadDicts();if(lastQuery)doSearch();
-};
+});
 $("panelList").addEventListener("click",e=>{
   const mv=e.target.closest("[data-mv]");
   if(mv){moveDict(mv.closest(".pd").dataset.id,mv.dataset.mv);return}
@@ -790,9 +1043,13 @@ addEventListener("message",e=>{
    current one immediately, but clearing waits until the message has been
    readable for STATUS_MIN ms */
 const STATUS_MIN=1200;
-let statusTs=0,statusTimer=null,statusPending;
-function setStatus(html){
+let statusTs=0,statusTimer=null,statusPending,statusOwner=null;
+/* `owner` lets a long-running writer retract its own message without
+   clobbering whatever spoke after it — the dictionary loader used to key that
+   on `lastQuery`, which is why a stale warning could sit there unretracted. */
+function setStatus(html,owner){
   statusPending=html;
+  statusOwner=html?(owner??""):null;
   clearTimeout(statusTimer);
   const el=$("status");
   const apply=()=>{
@@ -805,6 +1062,7 @@ function setStatus(html){
   if(el.classList.contains("show")&&left>0){statusTimer=setTimeout(apply,left);return}
   apply();
 }
+function clearStatus(owner){if(statusOwner===owner)setStatus("")}
 
 /* read a newline-delimited JSON response, invoking onMsg per record as it
    arrives — this is what lets each dictionary render the instant it is
@@ -884,7 +1142,19 @@ async function doSearch(ev){
   let dictParam,perDict;
   if(dictSel==="all"){
     const ids=enabledOrderedIds();
-    if(!ids.length){setStatus("⚠ All dictionaries are disabled — enable some in the ☰ panel");return}
+    if(!ids.length){
+      // "You disabled them all" is only knowable once the list is complete:
+      // mid-stream, the dictionaries that arrived may all be disabled while
+      // dozens still on their way are not. So the accusation waits for a
+      // settled, non-empty list, and until then this reads as what it is —
+      // still loading — and re-runs itself when the rest lands (D30).
+      const settled=(phase==="ready"||phase==="failed")&&dicts.length>0;
+      setStatus(settled
+        ?"⚠ All dictionaries are disabled — enable some in the ☰ panel"
+        :'<span class="spin"></span>'+esc(readyCount()));
+      if(!settled)staleSearch=true;
+      return;
+    }
     dictParam=ids.join(",");perDict=5;
   }else{dictParam=dictSel;perDict=25}
   const out=$("out");
@@ -909,8 +1179,14 @@ async function doSearch(ev){
             det.open=true;openedIdx=msg.i;
           }
         }
-      }else if(msg.t==="end"&&!anyShown){
-        out.innerHTML=`<div class="empty">${noResultsSVG}<p>No results for “${esc(q)}”</p></div>`;
+      }else if(msg.t==="end"){
+        if(!anyShown)out.innerHTML=`<div class="empty">${noResultsSVG}<p>No results for “${esc(q)}”</p></div>`;
+        // Searched a list that is still filling up: say so rather than let an
+        // incomplete answer look complete, and re-run when the rest lands.
+        if(phase==="partial"){
+          staleSearch=true;
+          setStatus(`searched ${dicts.length} of ${dictTotal||dicts.length} dictionaries — still loading…`);
+        }
       }
     },signal);
   }catch(err){if(err.name==="AbortError")return;if(seq===searchSeq)setStatus("⚠ "+esc(err.message))}
@@ -1105,7 +1381,10 @@ window.addEventListener("popstate",()=>{
 $("frm").removeEventListener("submit",_doSearch);
 $("frm").addEventListener("submit",e=>doSearch(e));
 
-loadDicts().then(applyURL);
+// settings first: they decide the panel's order and the search set, and the
+// fetch is a local file read — a millisecond, not a stall worth splitting the
+// boot screen over
+loadPrefs().then(loadDicts).then(applyURL);
 </script>
 </body>
 </html>

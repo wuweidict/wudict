@@ -183,7 +183,7 @@ func CanonPath(dir string) string {
 // Discovery already guarantees a dictionary is never listed twice, so this is
 // not about correctness of results — it is about not showing the user four
 // rows for one folder, not walking that folder four times, and not writing
-// duplicates into config.toml.
+// duplicates into wudict.toml.
 //
 // Identity is os.SameFile where both paths exist: that catches a symlink, a
 // case-variant spelling on a case-insensitive filesystem, a hard link and a

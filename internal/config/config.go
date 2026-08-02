@@ -4,7 +4,7 @@
 
 // Package config implements wudict's configuration with the layering
 // borrowed from mdict-go-web: CLI flag > environment variable >
-// config.toml > built-in default.
+// wudict.toml > built-in default.
 package config
 
 import (
@@ -33,10 +33,19 @@ type Config struct {
 	IndexWorkers  int      // INDEX_WORKERS: how many dictionaries may be indexed at once
 	MemoryLimit   int64    // MEMORY_LIMIT: soft heap ceiling in bytes (0 = none)
 	PreviewMemory int64    // PREVIEW_MEMORY: cap on RAM held by unprepared dictionaries (0 = unlimited)
-	Source        string   // path of the config.toml that was loaded ("" if none)
+	Source        string   // path of the wudict.toml that was loaded ("" if none)
+
+	// Portable reports that Source sits next to the executable: the user put
+	// it there, so that is where saves go too (D32).
+	Portable bool
+
+	// Shadowed lists config files that exist further down the search order and
+	// therefore did nothing. Saying so out loud is the whole cure for "I
+	// edited it and nothing changed" — two binaries, two files, one silent winner.
+	Shadowed []string
 
 	// Origins records which layer supplied each key: "flag", "env", "file" or
-	// "default". With four layers, "I edited config.toml and nothing changed"
+	// "default". With four layers, "I edited wudict.toml and nothing changed"
 	// is the classic confusion — a flag or an environment variable outranks
 	// the file — so the UI can say where a value actually came from, and
 	// refuse to pretend that saving it will take effect.
@@ -70,15 +79,16 @@ func defaults() Config {
 
 // Load builds the effective config. flags maps key -> value for
 // CLI-provided values (highest priority); configPath overrides the
-// config.toml search order when non-empty.
+// wudict.toml search order when non-empty.
 func Load(configPath string, flags map[string]string) (Config, error) {
 	cfg := defaults()
 
-	fileVals, source, err := loadFile(configPath)
+	r, err := loadFile(configPath)
 	if err != nil {
 		return cfg, err
 	}
-	cfg.Source = source
+	fileVals := r.vals
+	cfg.Source, cfg.Portable, cfg.Shadowed = r.path, r.portable, r.shadowed
 	cfg.Origins = map[string]string{}
 	get := func(key string) string {
 		if v, ok := flags[key]; ok && v != "" {
@@ -143,41 +153,101 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	return cfg, nil
 }
 
-// candidates returns the config.toml search order (mdict-go-web parity):
-// <exe-dir>, ~/.wudict, /etc/wudict, ./ .
+// Name is the configuration file, spelled the same in every location. It used
+// to be "config.toml" — the most generic filename there is, shared with Rust,
+// Hugo and half the checkouts on a developer's disk. The old bare "./config.toml"
+// candidate turned that collision into a live defect: running wudict from such
+// a directory parsed a stranger's file, suppressed creation of our own, and
+// pointed the setup page's SaveKey at it. A name nobody else uses cannot be
+// mistaken for anything, wherever it is copied to (D32).
+const Name = "wudict.toml"
+
+// systemDir is the machine-wide location; a variable so tests can point it
+// somewhere harmless rather than depend on what is really in /etc.
+var systemDir = filepath.Join("/etc", "wudict")
+
+// Seams for the two directories the search is anchored to. Tests replace them;
+// both return "" when the OS cannot say, which simply drops that candidate.
+var (
+	exeDir = func() string {
+		p, err := os.Executable()
+		if err != nil {
+			return ""
+		}
+		return filepath.Dir(p)
+	}
+	homeDir = func() string {
+		p, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		return p
+	}
+)
+
+// HomeConfig is the only file wudict ever creates: ~/.wudict/wudict.toml,
+// beside the library that directory already holds.
+func HomeConfig() string {
+	if h := homeDir(); h != "" {
+		return filepath.Join(h, ".wudict", Name)
+	}
+	return ""
+}
+
+// candidates returns the search order: next to the executable (portable mode,
+// see EnsureConfigFile), then the user's own directory, then the machine's.
 func candidates() []string {
 	var out []string
-	if exe, err := os.Executable(); err == nil {
-		out = append(out, filepath.Join(filepath.Dir(exe), "config.toml"))
+	if d := exeDir(); d != "" {
+		out = append(out, filepath.Join(d, Name))
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		out = append(out, filepath.Join(home, ".wudict", "config.toml"))
+	if p := HomeConfig(); p != "" {
+		out = append(out, p)
 	}
-	out = append(out, "/etc/wudict/config.toml", "config.toml")
-	return out
+	return append(out, filepath.Join(systemDir, Name))
 }
 
-// loadFile reads the first config.toml found (explicit path first when
-// given). Missing files are not an error; it reports which file loaded.
-func loadFile(explicit string) (map[string]string, string, error) {
-	paths := candidates()
+// resolved is the outcome of the search: the file that was read, whether it is
+// the portable one next to the executable, and which lower-priority candidates
+// exist but lost — reported so a shadowed file can be named instead of silently
+// ignored.
+type resolved struct {
+	vals     map[string]string
+	path     string
+	portable bool
+	shadowed []string
+}
+
+// loadFile reads the first wudict.toml found. An explicit path is taken as
+// given and must exist — a typo there must fail loudly rather than fall back to
+// a different file. Missing candidates are not an error.
+func loadFile(explicit string) (resolved, error) {
 	if explicit != "" {
-		paths = []string{explicit}
+		data, err := os.ReadFile(explicit)
+		if err != nil {
+			return resolved{}, fmt.Errorf("config %s: %w", explicit, err)
+		}
+		return resolved{vals: parseTOML(string(data)), path: explicit}, nil
 	}
-	for _, p := range paths {
+	r := resolved{vals: map[string]string{}}
+	for _, p := range candidates() {
 		data, err := os.ReadFile(p)
 		if err != nil {
-			if explicit != "" {
-				return nil, "", fmt.Errorf("config %s: %w", p, err)
-			}
 			continue
 		}
-		return parseTOML(string(data)), p, nil
+		if r.path != "" {
+			r.shadowed = append(r.shadowed, p)
+			continue
+		}
+		r.vals, r.path = parseTOML(string(data)), p
 	}
-	return map[string]string{}, "", nil
+	if d := exeDir(); d != "" && r.path != "" && r.path == filepath.Join(d, Name) {
+		r.portable = true
+	}
+	return r, nil
 }
 
-const configTemplate = `# wudict configuration
+const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 # Priority: CLI flag > environment variable > this file > built-in default.
 # All keys are optional — uncomment a line to override its default.
 
@@ -210,10 +280,23 @@ const configTemplate = `# wudict configuration
 #                                     #       (set from the setup page: "Use these dictionaries")
 `
 
-// EnsureConfigFile makes sure a config.toml exists somewhere in the
-// search order, generating a fully commented template on first run.
-// Preferred location is next to the executable; if that is not writable
-// (Homebrew, /usr/local/bin, …) it falls back to ~/.wudict/.
+// EnsureConfigFile makes sure a config file exists, generating the fully
+// commented template on first run. It writes exactly one place —
+// ~/.wudict/wudict.toml — and never beside the executable.
+//
+// It used to prefer the executable's directory and fall back to the home
+// directory "if that is not writable". Writability was answering a question it
+// cannot answer: it was being read as "this directory is ours". It is not.
+// `go install` lands in ~/go/bin and Homebrew in /opt/homebrew/bin — both
+// user-writable, both shared with every other program on the machine — so the
+// probe succeeded exactly where it should have failed, and the fallback never
+// fired on the two most common installs. Guessing harder (matching /opt, /usr,
+// …) only lengthens a denylist that is incomplete by construction.
+//
+// So the rule is inverted, and now complete: portable mode is something the
+// user DECLARES, by putting a wudict.toml next to the binary. When they have,
+// this function is never reached — the search found it and saves go there (D32).
+//
 // Returns the path and whether it was created now.
 func EnsureConfigFile() (path string, created bool, err error) {
 	for _, p := range candidates() {
@@ -221,26 +304,17 @@ func EnsureConfigFile() (path string, created bool, err error) {
 			return p, false, nil
 		}
 	}
-	var targets []string
-	if exe, err := os.Executable(); err == nil {
-		targets = append(targets, filepath.Join(filepath.Dir(exe), "config.toml"))
+	p := HomeConfig()
+	if p == "" {
+		return "", false, fmt.Errorf("no home directory to create %s in", Name)
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		targets = append(targets, filepath.Join(home, ".wudict", "config.toml"))
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return "", false, err
 	}
-	var lastErr error
-	for _, p := range targets {
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			lastErr = err
-			continue
-		}
-		if err := os.WriteFile(p, []byte(configTemplate), 0o644); err != nil {
-			lastErr = err
-			continue
-		}
-		return p, true, nil
+	if err := os.WriteFile(p, []byte(configTemplate), 0o644); err != nil {
+		return "", false, err
 	}
-	return "", false, lastErr
+	return p, true, nil
 }
 
 // SaveKey sets key = "value" in the config file at path, uncommenting or
@@ -300,7 +374,7 @@ func parseTOML(s string) map[string]string {
 
 // ParseList reads a DICT_DIR value in any of the forms the layers produce:
 //
-//	["~/Dicts", "/Volumes/Ext/Dicts"]   config.toml array
+//	["~/Dicts", "/Volumes/Ext/Dicts"]   wudict.toml array
 //	~/Dicts:/Volumes/Ext/Dicts          environment (os.PathListSeparator,
 //	                                    ';' on Windows — ':' would collide
 //	                                    with drive letters, and this is a path
@@ -328,7 +402,7 @@ func ParseList(v string) []string {
 	return out
 }
 
-// FormatList renders folders back into config.toml syntax: a bare string for
+// FormatList renders folders back into wudict.toml syntax: a bare string for
 // one folder (the common case stays readable), an array for several.
 func FormatList(dirs []string) string {
 	if len(dirs) == 1 {
@@ -353,7 +427,7 @@ func ExpandHome(p string) string {
 
 // AUTO_INDEX values. "fuzzy" is the pre-D16 spelling of "on" — the mode it
 // named was retired, the setting was not — and is still accepted so an
-// existing config.toml keeps working.
+// existing wudict.toml keeps working.
 const (
 	AutoIndexOn  = "on"
 	AutoIndexOff = "off"
@@ -428,7 +502,7 @@ func (c Config) Origin(key string) string {
 	return OriginDefault
 }
 
-// EditableInFile reports whether saving key to config.toml would actually take
+// EditableInFile reports whether saving key to wudict.toml would actually take
 // effect, i.e. no higher-priority layer is currently setting it.
 func (c Config) EditableInFile(key string) bool {
 	o := c.Origin(key)

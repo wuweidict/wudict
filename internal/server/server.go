@@ -107,6 +107,8 @@ func New(reg *Registry) *Server {
 	s.mux.HandleFunc("GET /api/setup", s.handleSetup)
 	s.mux.HandleFunc("GET /api/library", s.handleLibrary)
 	s.mux.HandleFunc("GET /api/config", s.handleConfig)
+	s.mux.HandleFunc("GET /api/prefs", s.handlePrefs)
+	s.mux.HandleFunc("PUT /api/prefs", s.handleSavePrefs)
 	s.mux.HandleFunc("GET /api/reveal", s.handleReveal)
 	// the setup page stays reachable after first run: it is where folders are
 	// edited, not just where they are first chosen
@@ -442,26 +444,70 @@ type dictInfo struct {
 	HasMedia bool     `json:"hasMedia,omitempty"`  // packable binary resources exist (drives "pack media")
 }
 
+// dictMsg is one NDJSON line of /api/dicts:
+//
+//	{"t":"begin","total":N}   how many rows follow — known from the registry alone
+//	{"t":"dict","dict":{…}}   one resolved row, in completion order
+//	{"t":"end"}               every row sent
+type dictMsg struct {
+	T     string    `json:"t"`
+	Total int       `json:"total,omitempty"`
+	Dict  *dictInfo `json:"dict,omitempty"`
+}
+
+// handleDicts streams the dictionary list as newline-delimited JSON, for the
+// same reason handleSearch does (D12): the fan-out below resolves metadata in
+// parallel, but delivering it as one array made time-to-first-row the *sum* of
+// every dictionary's resolution instead of the slowest single one. With ~100
+// dictionaries that gap is the entire startup wait, during which the client
+// knew nothing at all — not even how many dictionaries were coming.
+//
+// So `total` goes out first, from cheap entry ids with no opens at all: the
+// client can say "0 of 105" immediately and unblock search the instant the
+// first row lands, rather than guessing from an empty list (D30).
+//
+// The cheap path per row (header-only probe + text.db meta read) avoids
+// building the heavy in-memory index; only non-probeable formats fall back
+// to a full open.
 func (s *Server) handleDicts(w http.ResponseWriter, r *http.Request) {
 	entries := s.reg.all()
-	out := make([]dictInfo, len(entries))
-	// resolve metadata in parallel. The cheap path (header-only probe +
-	// text.db meta read) avoids building the heavy in-memory index, so the
-	// list loads fast even for dozens of dictionaries; only non-probeable
-	// formats fall back to a full open.
+
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		httpErr(w, 500, "streaming unsupported")
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering (Caddy/nginx)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	// unlike handleSearch, whose callback is serialized by StreamOpen, the
+	// workers below write concurrently — so this one needs the mutex.
+	var mu sync.Mutex
+	writeLine := func(m dictMsg) {
+		mu.Lock()
+		defer mu.Unlock()
+		_ = enc.Encode(m) // Encode appends '\n' → one NDJSON record
+		fl.Flush()
+	}
+
+	writeLine(dictMsg{T: "begin", Total: len(entries)})
+
 	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
-	for i, e := range entries {
+	for _, e := range entries {
 		wg.Add(1)
-		go func(i int, e *entry) {
+		go func(e *entry) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			out[i] = s.dictInfoFor(e)
-		}(i, e)
+			info := s.dictInfoFor(e)
+			writeLine(dictMsg{T: "dict", Dict: &info})
+		}(e)
 	}
 	wg.Wait()
-	writeJSON(w, out)
+	writeLine(dictMsg{T: "end"})
 }
 
 // dictInfoFor resolves one dictionary's list row cheaply when possible:
