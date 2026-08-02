@@ -2,13 +2,24 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//go:build !purego
+//go:build sqlite_fts5 && cgo
 
 package store
 
-// Default driver: mattn/go-sqlite3 (cgo, fastest — decision D4). Build
-// with -tags sqlite_fts5. Release cross-builds use -tags purego instead
-// (see driver_purego.go) so the GitHub workflow needs no C toolchains.
+// The fast driver: mattn/go-sqlite3 (cgo — decision D4), selected by
+// -tags sqlite_fts5 as `make build` and `make install` pass.
+//
+// BOTH conditions are required, and neither is optional (D29). mattn
+// compiles SQLite *without* FTS5 unless the sqlite_fts5 tag sets
+// -DSQLITE_ENABLE_FTS5 in its own cgo CFLAGS, and store's base schema
+// always creates an FTS5 table (see ingest.go) — so a mattn build
+// missing that tag fails at runtime with "no such module: fts5". The
+// && cgo half keeps CGO_ENABLED=0 away from mattn's !cgo stub, whose
+// registered driver refuses every Open.
+//
+// Anything this constraint rejects lands on driver_purego.go, which is
+// always correct if slower. The two constraints are exhaustive by
+// construction, so no flag combination can produce a binary without FTS5.
 
 import _ "github.com/mattn/go-sqlite3"
 

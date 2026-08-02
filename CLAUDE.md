@@ -27,7 +27,7 @@ This repository is the whole project (`github.com/legbehindneck/wudict`); there 
 The reference projects this was built from (`mdict-go-web`, `draego`, `pyglossary`, the speex sources) have been **removed from disk**. `docs/FORMATS.md` still cites their file and function names: read those as provenance for where a rule came from, not as paths you can open.
 
 ## Conventions
-- Go, modules. cgo is the default build (sqlite FTS5 + built-in speex); `-tags purego` must keep building and passing (D4, D18). Table-driven tests.
+- Go, modules. `make build` uses cgo (`-tags sqlite_fts5` → mattn sqlite + built-in speex); a **tag-less** `go build`/`go install` gets the pure-Go driver and must keep working, because FTS5 is mandatory (D29). `-tags purego` must keep building and passing (D4, D18). Table-driven tests.
 - Each format package implements both `Lookuper` (direct runtime lookup) and `Reader` (sequential ingest scan) — parsing logic written once, shared by both. Ingesters are one-shot batch paths.
 - Update `docs/PHASES.md` (record section) at the end of every working session; update `docs/DECISIONS.md` when a decision is taken.
 

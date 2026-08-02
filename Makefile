@@ -11,7 +11,7 @@ BUILD_DIR  := dist
 # ---- build flavours -----------------------------------------------------
 # wudict builds in two flavours; `build`/`install`/`check` use cgo:
 #
-#   cgo  (default, `make build`): CGO_ENABLED=1 -tags sqlite_fts5
+#   cgo  (what `make build` does): CGO_ENABLED=1 -tags sqlite_fts5
 #     * mattn/go-sqlite3 — fast FTS5 (D4)
 #     * built-in libspeex .spx decoder (internal/speex + internal/speex/clib)
 #     Requires a C compiler.
@@ -21,7 +21,11 @@ BUILD_DIR  := dist
 #     * NO built-in speex; .spx audio falls back to the external `speexdec`
 #       binary (SPEEX_BACKEND=external has the same effect on a cgo build)
 #
-# The sqlite_fts5 tag must never be dropped from the cgo flavour (D4).
+# The sqlite_fts5 tag IS the cgo selector (D29): store/driver_cgo.go is
+# `sqlite_fts5 && cgo`, so dropping the tag no longer yields a mattn build
+# without FTS5 — it yields the pure-Go driver, which always has FTS5. The
+# purego flavour's tag is now redundant but kept: it lands in the same place.
+# A tag-less `go build`/`go install` therefore always works.
 GO_TAGS      := sqlite_fts5
 GOFLAGS      := -tags $(GO_TAGS) -trimpath
 PUREGO_FLAGS := -tags purego -trimpath
@@ -263,6 +267,7 @@ version: ## Print the version stamp used for builds
 push:  ## sync remotes
 	git push origin
 	git push hz
+	git push leg
 	git push iq
 	git push od
 

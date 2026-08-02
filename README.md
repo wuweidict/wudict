@@ -270,8 +270,16 @@ make help           # every available target
 Or with the Go toolchain alone:
 
 ```sh
-go install github.com/legbehindneck/wudict@latest   # → wudict
+# recommended — fastest (cgo sqlite + built-in speex), needs a C compiler
+go install -tags sqlite_fts5 github.com/legbehindneck/wudict@latest
+
+# no C compiler? drop the tag — pure-Go sqlite, .spx audio via external speexdec
+go install github.com/legbehindneck/wudict@latest
 ```
+
+Both produce a working `wudict`; the tag only chooses the SQLite driver.
+Passing `-tags sqlite_fts5` on a machine without a C toolchain quietly
+falls back to the pure-Go build rather than failing.
 
 CI builds are generated with github actions — `.github/workflows/build-cgo.yml`
 for the cgo flavour with internal speex decoder and optimized sqlite3, and

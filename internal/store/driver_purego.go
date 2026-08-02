@@ -2,13 +2,20 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//go:build purego
+//go:build !sqlite_fts5 || !cgo
 
 package store
 
-// Pure-Go driver: modernc.org/sqlite (FTS5 included, CGO_ENABLED=0).
-// Used by release cross-builds so a single ubuntu runner can build every
-// platform; local/native builds default to mattn (driver_cgo.go, D4).
+// The default driver: modernc.org/sqlite (pure Go, FTS5 always compiled
+// in, no C toolchain). This is what a plain `go build` / `go install`
+// with no tags gets, and what release cross-builds use so a single ubuntu
+// runner can build every platform.
+//
+// It is the default because it cannot be wrong (D29): FTS5 is mandatory
+// for store's schema, and this driver always has it. Opt into the faster
+// cgo driver with -tags sqlite_fts5 (driver_cgo.go, D4) — passing that tag
+// on a machine without a C compiler falls back here rather than breaking.
+// The legacy -tags purego also lands here, which is what it always meant.
 
 import _ "modernc.org/sqlite"
 

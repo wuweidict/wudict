@@ -155,3 +155,17 @@ Naming per D27 is untouched — the product a user reads is still **WuWeiDict**,
 **Consequences.** The GitHub repo must be renamed `wuweidict` → `wudict`, because Go resolves a module path to that repo and then requires the `module` line in `go.mod` to match: GitHub's rename redirect fetches the code but the path mismatch is a hard error, so **`go install github.com/legbehindneck/wuweidict@latest` breaks permanently**. Acceptable pre-1.0 and on the same "one release where it's free" logic as D27's no-migration rule. Pages moves to `legbehindneck.github.io/wudict`; `SiteURL`/`RepoURL`, the systemd unit's `Documentation=`, the web About/setup footers and the README release links all follow. Local git remotes need re-pointing.
 
 **Standing rule:** a second artifact built from identical source is a smell, not a solution. Fix the input that forced it.
+
+## D29 — FTS5 is mandatory, so the tag-less build must be the safe one — **ACCEPTED 2026-08-02 (user-directed)**
+`go install github.com/legbehindneck/wudict@latest` produced a binary that died on first search with **`no such module: fts5`**. Root cause: driver selection keyed on `!purego`, so *absent tags ⇒ mattn/go-sqlite3*, and mattn compiles SQLite without FTS5 unless `-tags sqlite_fts5` sets `-DSQLITE_ENABLE_FTS5` in its own cgo CFLAGS (`sqlite3_opt_fts5.go`). That tag is a **third-party** tag — nothing in this repo reads it — and it only ever arrived via the Makefile's `GO_TAGS`. Meanwhile `store`'s base schema creates `entry_fts` **unconditionally** (`ingest.go`), because that FTS5 table *is* the accent-insensitive headword index — so FTS5 is required by every build, including the cheap `AUTO_INDEX` headwords-only pass, not just opt-in full text. D4 specified the two flagged builds and never considered the tag-less one; every release path (`make build`, `make cross`, both workflows) passes a tag, so CI could never see it. A second, host-dependent failure hid behind the same gap: with `CGO_ENABLED=0` and no `purego`, mattn's `!cgo` stub (`static_mock.go`) registered a `sqlite3` driver that refuses every `Open`.
+
+Fixed by making the constraints exhaustive and mutually exclusive rather than by documenting a required flag:
+
+    driver_cgo.go     //go:build sqlite_fts5 && cgo     → mattn/go-sqlite3
+    driver_purego.go  //go:build !sqlite_fts5 || !cgo   → modernc.org/sqlite
+
+`(A∧B)` vs `¬(A∧B)` covers the space, so **no flag combination can produce a binary without FTS5**, and mattn can never be selected without cgo. The default is now pure Go *because it cannot be wrong*; cgo is an explicit opt-in for speed. Passing `-tags sqlite_fts5` without a C toolchain degrades to the pure-Go driver instead of breaking. Legacy `-tags purego` still lands on the pure-Go driver — now redundant, kept for the Makefile and workflows. Verified across all seven tag/CGO combinations (exactly one driver file each) plus tests green tag-less, under `-tags sqlite_fts5`, and under `-tags purego`.
+
+README now lists `go install -tags sqlite_fts5 …@latest` as the recommended command with the bare form as the no-C-compiler fallback, per user direction.
+
+**Generalizes D28's rule:** the configuration you get by typing nothing must be the one that works. A correctness-critical dependency (FTS5) may not hang off an optional flag — encode it in the build constraints so the invariant cannot be violated.
