@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/dict"
 )
 
 func init() {

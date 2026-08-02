@@ -19,7 +19,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/dict"
 )
 
 func init() {

@@ -1,7 +1,7 @@
 # WuWeiDict
 
 Fast, zero-effort, self-contained, multi-format dictionary server that runs in your
-browser at [http://localhost:8808](http://localhost:8808). One binary, no
+browser at [http://localhost:6888](http://localhost:6888). One binary, no
 dependencies; drop your dictionaries in a folder and search them all at
 once.
 
@@ -23,7 +23,7 @@ way.
 ## Quick start
 
 1. Download the binary for your platform from
-   [releases](https://github.com/legbehindneck/wuweidict/releases),
+   [releases](https://github.com/legbehindneck/wudict/releases),
    `chmod +x` it (macOS/Linux).
 2. Put some dictionaries in `~/Dictionaries` (or anywhere — subfolders
    are scanned too).
@@ -138,7 +138,7 @@ A commented `config.toml` is generated next to the binary on first run
 | `--dict-dir` | `DICT_DIR` | `~/Dictionaries` |
 | `--db-dir` | `DB_DIR` | `~/.wudict/db` |
 | `--ip` | `SERVER_IP` | `127.0.0.1` |
-| `--port` | `SERVER_PORT` | `8808` |
+| `--port` | `SERVER_PORT` | `6888` |
 | `--config` | `CONFIG_PATH` | auto-detect |
 | `--no-browser` | `NO_BROWSER=1` | open browser |
 | `--verbose` | `VERBOSE=1` | quiet |
@@ -261,25 +261,21 @@ default build):
 
 ```sh
 make build          # native build (cgo sqlite, fastest) → ./wudict
-make install        # install both binaries into GOBIN
+make install        # install the binary into GOBIN
 make check          # tidy + vet + tests
 make cross          # all release platforms (pure-Go sqlite, no C toolchain)
 make help           # every available target
 ```
 
-Or with the Go toolchain alone. Go names an installed binary after the
-last element of its package path, so there are two:
+Or with the Go toolchain alone:
 
 ```sh
-go install github.com/legbehindneck/wuweidict@latest             # → wuweidict
-go install github.com/legbehindneck/wuweidict/cmd/wudict@latest  # → wudict
+go install github.com/legbehindneck/wudict@latest   # → wudict
 ```
 
-Same program either way; `wudict` is the canonical, short name.
-
-CI builts are generated with github actions — `.github/workflows/build-release.yml` 
-for the cgo flavour with internal speex decoder and optimized sqlite3 and 
-`.github/workflows/build-release.yml` for purego builds.
+CI builds are generated with github actions — `.github/workflows/build-cgo.yml`
+for the cgo flavour with internal speex decoder and optimized sqlite3, and
+`.github/workflows/build-purego.yml` for purego builds.
 Supported OS's: macOS (arm64/amd64), Linux (amd64/arm64/armv7/armv6) and Windows
 (amd64/arm64).
 

@@ -22,12 +22,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/legbehindneck/wuweidict/internal/config"
-	"github.com/legbehindneck/wuweidict/internal/dict"
-	"github.com/legbehindneck/wuweidict/internal/logx"
-	"github.com/legbehindneck/wuweidict/internal/search"
-	"github.com/legbehindneck/wuweidict/internal/speex"
-	"github.com/legbehindneck/wuweidict/internal/store"
+	"github.com/legbehindneck/wudict/internal/config"
+	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/logx"
+	"github.com/legbehindneck/wudict/internal/search"
+	"github.com/legbehindneck/wudict/internal/speex"
+	"github.com/legbehindneck/wudict/internal/store"
 )
 
 //go:embed web/index.html

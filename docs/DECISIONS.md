@@ -19,8 +19,8 @@ cgo driver, build with `-tags sqlite_fts5` (as draego does), for native/dev buil
 ## D5 — UX wording for ingestion: "Enable fuzzy & full-text search" — **ACCEPTED 2026-07-24**
 Per-dict/all action; progress "Preparing search index…"; full-ingest variant "…and pack media". Ingest is a feature upgrade, not onboarding — adding a dictionary = dropping files in the dict dir.
 
-## D6 — Project/module name — **ACCEPTED 2026-07-24**
-`github.com/legbehindneck/wuweidict`, code in `wudict/` subdir of the workspace.
+## D6 — Project/module name — **SUPERSEDED 2026-08-02 by D28**
+`github.com/legbehindneck/wuweidict`, code in `wudict/` subdir of the workspace. The module path is now `github.com/legbehindneck/wudict` and there is no enclosing workspace.
 
 ## D11 — License: GPL-3.0-or-later — **ACCEPTED 2026-07-25**
 Required by the inlined GPL-3 go-mdict code. LICENSE file + SPDX headers via `addlicense` (© 2026 glowinthedark); pre-existing third-party headers (gomdict, mark.js) left untouched.
@@ -85,7 +85,7 @@ Launching wudict while it is already running now opens the **running** instance 
 - **Loud, because the launch is a lie otherwise.** The banner states that the options just passed were NOT applied, prints what the running instance is actually serving, and — when the requested folders differ from the running ones — says so explicitly. Silently opening an old instance is exactly how someone spends ten minutes wondering why their new `--dict-dir` did nothing.
 - **Bind before working.** The listener is now claimed *before* adopting library folders, scanning dictionaries or auto-preparing indexes. Binding last meant a duplicate launch printed a full startup summary and built a search index before discovering it had nothing to do.
 - `--no-browser` is honoured (banner only), and the handoff exits **0**: the user's intent ("open wudict") was satisfied. Scripts that relied on a non-zero exit for "could not start" see 0 in this one case.
-**Rejected: an HTTP `/exit` endpoint to kill the running instance** (user's option B). Any web page could fire `GET http://127.0.0.1:8808/exit` with an `<img>` tag — no CORS, no user action — so a random site could kill the app; it would also discard work in flight (a long ingest), might not be the user's instance to kill on a shared machine, and races `TIME_WAIT` on rebind. If takeover is ever wanted, the safe mechanism is a PID lockfile plus `SIGTERM` behind an explicit `--replace` flag: a signal requires the same OS user and cannot be sent by a web page.
+**Rejected: an HTTP `/exit` endpoint to kill the running instance** (user's option B). Any web page could fire `GET http://127.0.0.1:6888/exit` with an `<img>` tag — no CORS, no user action — so a random site could kill the app; it would also discard work in flight (a long ingest), might not be the user's instance to kill on a shared machine, and races `TIME_WAIT` on rebind. If takeover is ever wanted, the safe mechanism is a PID lockfile plus `SIGTERM` behind an explicit `--replace` flag: a signal requires the same OS user and cannot be sent by a web page.
 
 ## D24 — Cheap by default, enriched by one click — **ACCEPTED 2026-07-28 (user-directed)**
 A prepared dictionary could take several times the disk of the file it came from. Measured on a 40k-entry dictionary (45.6 MB source, 5.1 MB gzipped): the "headwords only" database was **72.4 MB**, of which **69.1 MB (95%) was article text** — every search index together came to 2 MB. So the disk problem was never the indexes.
@@ -133,7 +133,7 @@ P6.6 rejected cgo Speex and shelled out to `speexdec`; that made dictionary audi
 
 Two names because a project name and a command name optimize for different things — distinctiveness versus ≤6 typo-proof characters. `wuwei` alone types badly (`ei` is the most transposed English digraph; `w…w` repeats a finger), which the short form fixes. Rejected: `wwdict` (doubled same-finger bigram, reads as a `www` typo, five spoken syllables) and plain `dict` (already `/usr/bin/dict`, the RFC 2229 client).
 
-**Two binaries.** Go names an installed binary after the last element of its package path, so `go install github.com/legbehindneck/wuweidict@latest` can only produce `wuweidict`. Rather than accept a name nobody should type, all CLI code moved to `internal/cli` and two `package main` shims build from it: `./main.go` → `wuweidict`, `cmd/wudict` → `wudict`. Consequence: the version stamp targets `internal/cli.Version`, **not** `main.version` — Makefile and both workflows.
+**Two binaries** — ~~Go names an installed binary after the last element of its package path, so `go install github.com/legbehindneck/wuweidict@latest` can only produce `wuweidict`. Rather than accept a name nobody should type, all CLI code moved to `internal/cli` and two `package main` shims build from it: `./main.go` → `wuweidict`, `cmd/wudict` → `wudict`.~~ **SUPERSEDED 2026-08-02 by D28**: one binary, one entry point. The rest of D27 (the two *names*, the no-migration rule, the About surfaces) stands unchanged, as does the consequence that the version stamp targets `internal/cli.Version`, **not** `main.version`.
 
 **No migration**, user-directed: `~/.gonow-dict` is not read, `GONOW_*` is not honoured, `gonow:`-prefixed meta is not accepted, and the old localStorage keys are not carried over. Everything is rebuilt and re-indexed from scratch. This is the one release where that is free; a later rename would not be.
 
@@ -144,3 +144,14 @@ The inlining broke for exactly the dictionary it was built for. `entry://@entrym
 
 ### D26 amendment 2 — cross-reference clicks are taken off the wire — 2026-08-01
 `preventDefault()` was not enough. It cancels only the browser's *default* action; the dictionary's own handlers still run, and LDOCE6's `entry.js` navigates **programmatically** from the anchor — which no `preventDefault` can stop, surfacing as `Failed to launch 'entry:@thesaurus_m_woman' because the scheme does not have a registered handler`. `frame.js` now also calls `stopPropagation`/`stopImmediatePropagation` for links it fully handles. Because the listener is on `document` in the **capture** phase, the event is killed on the way down and never reaches the anchor or anything inside the article, so no third-party handler fires. Deliberately scoped to the `wordFromHref` branch: every other click in an article still belongs to the dictionary (the speaker `<img>`, accordion toggles), which is why the audio branch is left alone.
+
+## D28 — Module renamed to `github.com/legbehindneck/wudict`; one entry point — **ACCEPTED 2026-08-02 (user-directed)**
+D27 solved "the install command must not produce a binary called `wuweidict`" at the wrong layer: it kept the long module path and papered over it with a second `package main` shim, so the repo built **two identical binaries** from one `internal/cli`. That is duplication as a workaround for a naming choice — every build surface (Makefile `CMD`/`CMD_LONG`, `clean`, `install`, both workflows, `.gitignore`, the README install block) had to carry the pair, and the only thing distinguishing the two artifacts was their filename.
+
+Fixed at the source: the **module path is now `github.com/legbehindneck/wudict`**, matching the binary. `go install github.com/legbehindneck/wudict@latest` yields `wudict` with a single module-root `main.go`; `cmd/wudict/` is deleted. `CMD := .` everywhere.
+
+Naming per D27 is untouched — the product a user reads is still **WuWeiDict**, the technical name is still `wudict`. The module path is a technical surface, so it takes the technical name; the long form was never load-bearing for identity, which lives in `internal/cli` (`ProductName`, `SiteURL`, `RepoURL`).
+
+**Consequences.** The GitHub repo must be renamed `wuweidict` → `wudict`, because Go resolves a module path to that repo and then requires the `module` line in `go.mod` to match: GitHub's rename redirect fetches the code but the path mismatch is a hard error, so **`go install github.com/legbehindneck/wuweidict@latest` breaks permanently**. Acceptable pre-1.0 and on the same "one release where it's free" logic as D27's no-migration rule. Pages moves to `legbehindneck.github.io/wudict`; `SiteURL`/`RepoURL`, the systemd unit's `Documentation=`, the web About/setup footers and the README release links all follow. Local git remotes need re-pointing.
+
+**Standing rule:** a second artifact built from identical source is a smell, not a solution. Fix the input that forced it.

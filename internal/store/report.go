@@ -7,7 +7,7 @@ package store
 import (
 	"time"
 
-	"github.com/legbehindneck/wuweidict/internal/logx"
+	"github.com/legbehindneck/wudict/internal/logx"
 )
 
 // ReportPrepared prints the one line that closes a "preparing search index…"

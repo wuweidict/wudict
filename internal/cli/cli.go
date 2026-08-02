@@ -25,35 +25,35 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/legbehindneck/wuweidict/internal/config"
-	"github.com/legbehindneck/wuweidict/internal/dict"
-	"github.com/legbehindneck/wuweidict/internal/logx"
-	"github.com/legbehindneck/wuweidict/internal/search"
-	"github.com/legbehindneck/wuweidict/internal/server"
-	"github.com/legbehindneck/wuweidict/internal/speex"
-	"github.com/legbehindneck/wuweidict/internal/store"
+	"github.com/legbehindneck/wudict/internal/config"
+	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/logx"
+	"github.com/legbehindneck/wudict/internal/search"
+	"github.com/legbehindneck/wudict/internal/server"
+	"github.com/legbehindneck/wudict/internal/speex"
+	"github.com/legbehindneck/wudict/internal/store"
 
-	_ "github.com/legbehindneck/wuweidict/internal/format/bgl"      // register .bgl
-	_ "github.com/legbehindneck/wuweidict/internal/format/dsl"      // register .dsl(.dz)
-	_ "github.com/legbehindneck/wuweidict/internal/format/mdx"      // register .mdx
-	_ "github.com/legbehindneck/wuweidict/internal/format/slob"     // register .slob
-	_ "github.com/legbehindneck/wuweidict/internal/format/stardict" // register .ifo
+	_ "github.com/legbehindneck/wudict/internal/format/bgl"      // register .bgl
+	_ "github.com/legbehindneck/wudict/internal/format/dsl"      // register .dsl(.dz)
+	_ "github.com/legbehindneck/wudict/internal/format/mdx"      // register .mdx
+	_ "github.com/legbehindneck/wudict/internal/format/slob"     // register .slob
+	_ "github.com/legbehindneck/wudict/internal/format/stardict" // register .ifo
 )
 
 // Version is stamped by the Makefile via
-// -ldflags "-X github.com/legbehindneck/wuweidict/internal/cli.Version=…".
-// It lives here rather than in a main package because two binaries are built
-// from this code (wuweidict and wudict) and both must carry the same stamp.
+// -ldflags "-X github.com/legbehindneck/wudict/internal/cli.Version=…".
+// It lives here rather than in main because this package, not the one-line
+// shim at the module root, is where the program is.
 var Version = "dev"
 
-// Product identity, in one place. The binary is `wudict` (and `wuweidict`);
-// the name people read is WuWeiDict. Anything user-facing — CLI banner, web UI
+// Product identity, in one place. The binary is `wudict`; the name people
+// read is WuWeiDict. Anything user-facing — CLI banner, web UI
 // About box, setup page — sources its wording from here or mirrors it.
 const (
 	ProductName = "WuWeiDict"
 	Tagline     = "Search every dictionary you own, from one browser tab."
-	SiteURL     = "https://legbehindneck.github.io/wuweidict"
-	RepoURL     = "https://github.com/legbehindneck/wuweidict"
+	SiteURL     = "https://legbehindneck.github.io/wudict"
+	RepoURL     = "https://github.com/legbehindneck/wudict"
 )
 
 func usage() string {
@@ -160,7 +160,7 @@ SERVE FLAGS
 
   --port         <port>   Listen port
                           env: SERVER_PORT    toml: SERVER_PORT
-                          default: 8808
+                          default: 6888
 
   --config       <path>   Path to config.toml (overrides auto-detect)
                           env: CONFIG_PATH
@@ -217,8 +217,7 @@ ABOUT
 `, Version, ProductName, Tagline, RepoURL)
 }
 
-// Main is the CLI entry point, shared by both installed binaries
-// (wuweidict at the module root and wudict under cmd/).
+// Main is the CLI entry point, called by the module-root main package.
 func Main() {
 	if len(os.Args) < 2 {
 		// no arguments: start the server (documented default)

@@ -14,7 +14,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/dict"
 )
 
 // Media is one opened `media.db` (SPEC §3): binary resources

@@ -14,9 +14,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/legbehindneck/wuweidict/internal/config"
-	"github.com/legbehindneck/wuweidict/internal/dict"
-	"github.com/legbehindneck/wuweidict/internal/store"
+	"github.com/legbehindneck/wudict/internal/config"
+	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/store"
 )
 
 // configInfo is what the panel's "Folders & configuration" section shows: the

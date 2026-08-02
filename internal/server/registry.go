@@ -21,9 +21,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/legbehindneck/wuweidict/internal/dict"
-	"github.com/legbehindneck/wuweidict/internal/logx"
-	"github.com/legbehindneck/wuweidict/internal/store"
+	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/logx"
+	"github.com/legbehindneck/wudict/internal/store"
 )
 
 // upgraded serves queries from an ingested text.db while resolving

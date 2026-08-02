@@ -53,7 +53,7 @@ jobs:
           BINARY="wudict-${SUFFIX}-purego${{ matrix.ext }}"
           VERSION="${{ inputs.tag }}"
           [ -z "$VERSION" ] && VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
-          go build -trimpath -tags purego -ldflags="-s -w -X github.com/legbehindneck/wuweidict/internal/cli.Version=${VERSION}" -o "${BINARY}" ./cmd/wudict
+          go build -trimpath -tags purego -ldflags="-s -w -X github.com/legbehindneck/wudict/internal/cli.Version=${VERSION}" -o "${BINARY}" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

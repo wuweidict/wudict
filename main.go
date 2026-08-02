@@ -2,17 +2,17 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Command wuweidict is WuWeiDict's module-root entry point.
+// Command wudict is WuWeiDict's entry point — the only one.
 //
 // Go names an installed binary after the last element of its package path, so
-// this package exists purely so that
+// the module path github.com/legbehindneck/wudict makes
 //
-//	go install github.com/legbehindneck/wuweidict@latest
+//	go install github.com/legbehindneck/wudict@latest
 //
-// yields a binary called "wuweidict". The short, canonical name is built from
-// cmd/wudict; both are the same program (see internal/cli).
+// yield "wudict" directly, with no second shim package (D28). Everything the
+// program actually does lives in internal/cli.
 package main
 
-import "github.com/legbehindneck/wuweidict/internal/cli"
+import "github.com/legbehindneck/wudict/internal/cli"
 
 func main() { cli.Main() }

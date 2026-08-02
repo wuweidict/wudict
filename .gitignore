@@ -1,5 +1,4 @@
 /wudict
-/wuweidict
 dist/
 coverage.out
 /config.toml

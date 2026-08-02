@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/dict"
 )
 
 // prepare ingests a minimal real dictionary into a library folder for srcPath.

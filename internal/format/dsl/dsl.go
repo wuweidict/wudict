@@ -18,9 +18,9 @@ import (
 
 	"time"
 
-	"github.com/legbehindneck/wuweidict/internal/dict"
-	"github.com/legbehindneck/wuweidict/internal/logx"
-	"github.com/legbehindneck/wuweidict/internal/store"
+	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/logx"
+	"github.com/legbehindneck/wudict/internal/store"
 )
 
 func init() {

@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/legbehindneck/wuweidict/internal/dict"
-	"github.com/legbehindneck/wuweidict/internal/store"
+	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/store"
 )
 
 // Reveal hands a path to the OS file manager, so it must never accept a path

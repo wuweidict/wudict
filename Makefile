@@ -2,14 +2,11 @@
 # Every meaningful action lives here; `make` alone shows this menu.
 # New capabilities MUST land with a target.
 
-# Two binaries, one program (internal/cli). Go names an installed binary after
-# the last element of its package path, so `go install <module>@latest` can only
-# ever produce "wuweidict" — CMD_LONG exists solely to make that work. CMD is
-# the canonical short name and the one every target below builds.
+# One binary, one entry point (D28). Go names an installed binary after the
+# last element of its package path, and the module is .../wudict, so the
+# module-root main package is all that's needed to get "wudict".
 BINARY     := wudict
-CMD        := ./cmd/wudict
-BINARY_LONG := wuweidict
-CMD_LONG   := .
+CMD        := .
 BUILD_DIR  := dist
 # ---- build flavours -----------------------------------------------------
 # wudict builds in two flavours; `build`/`install`/`check` use cgo:
@@ -31,9 +28,9 @@ PUREGO_FLAGS := -tags purego -trimpath
 # VERSION must be defined BEFORE LDFLAGS: `:=` expands immediately, so the
 # other order stamped the version with an empty string (the binary then printed
 # a blank version, overriding cli.Version's "dev" default).
-# The stamp targets internal/cli, not main: both binaries share that package.
+# The stamp targets internal/cli, not main: main is a one-line shim (D28).
 VERSION    := $(shell git -C . describe --tags --always --dirty 2>/dev/null || echo dev)
-VERSION_PKG := github.com/legbehindneck/wuweidict/internal/cli
+VERSION_PKG := github.com/legbehindneck/wudict/internal/cli
 LDFLAGS    := -s -w -X $(VERSION_PKG).Version=$(VERSION)
 
 # Integration tests need real dictionaries; point these at files you have
@@ -69,8 +66,8 @@ build-purego: ## Build the host binary — purego flavour (*slower* pure-Go sqli
 	CGO_ENABLED=0 go build $(PUREGO_FLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
 
 .PHONY: install
-install: ## go install BOTH binaries (wudict + wuweidict) into GOBIN
-	go install $(GOFLAGS) -ldflags "$(LDFLAGS)" $(CMD) $(CMD_LONG)
+install: ## go install the wudict binary into GOBIN
+	go install $(GOFLAGS) -ldflags "$(LDFLAGS)" $(CMD)
 
 .PHONY: run
 run: build open ## Build then run with ARGS, e.g. make run ARGS="lookup dict.mdx word"
@@ -252,7 +249,7 @@ linux-service-status: ## Show service state (add 'journalctl --user -u wudict -f
 
 .PHONY: clean
 clean: ## Remove binaries, dist/, coverage artifacts
-	rm -rf $(BINARY) $(BINARY_LONG) $(BUILD_DIR) coverage.out
+	rm -rf $(BINARY) $(BUILD_DIR) coverage.out
 
 .PHONY: purge
 purge: ## zap all local cached dictionaries in ~/.wudict/db
@@ -277,4 +274,4 @@ remotes: ## git git remotes
 
 .PHONY: open
 open: build  ## run browser
-	open http://localhost:8808
+	open http://localhost:6888

@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/legbehindneck/wuweidict/internal/dict"
-	_ "github.com/legbehindneck/wuweidict/internal/format/dsl" // register .dsl
-	"github.com/legbehindneck/wuweidict/internal/store"
+	"github.com/legbehindneck/wudict/internal/dict"
+	_ "github.com/legbehindneck/wudict/internal/format/dsl" // register .dsl
+	"github.com/legbehindneck/wudict/internal/store"
 )
 
 // stubReader ingests a single entry; used to fabricate a native .text.db.

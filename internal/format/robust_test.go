@@ -14,12 +14,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/legbehindneck/wuweidict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/dict"
 
-	_ "github.com/legbehindneck/wuweidict/internal/format/dsl"
-	_ "github.com/legbehindneck/wuweidict/internal/format/mdx"
-	_ "github.com/legbehindneck/wuweidict/internal/format/slob"
-	_ "github.com/legbehindneck/wuweidict/internal/format/stardict"
+	_ "github.com/legbehindneck/wudict/internal/format/dsl"
+	_ "github.com/legbehindneck/wudict/internal/format/mdx"
+	_ "github.com/legbehindneck/wudict/internal/format/slob"
+	_ "github.com/legbehindneck/wudict/internal/format/stardict"
 )
 
 func TestCorruptDictionariesErrorCleanly(t *testing.T) {
