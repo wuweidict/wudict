@@ -51,7 +51,7 @@ func TestDefaultsAndMissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Port != "8808" || cfg.IP != "127.0.0.1" {
+	if cfg.Port != "6888" || cfg.IP != "127.0.0.1" {
 		t.Errorf("defaults: %+v", cfg)
 	}
 	if _, err := Load(filepath.Join(t.TempDir(), "nope.toml"), nil); err == nil {
@@ -61,7 +61,7 @@ func TestDefaultsAndMissingFile(t *testing.T) {
 
 func TestSaveKey(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.toml")
-	os.WriteFile(p, []byte("# header\n# DICT_DIR    = \"~/Dictionaries\"      # comment\n# SERVER_PORT = \"8808\"\n"), 0o644)
+	os.WriteFile(p, []byte("# header\n# DICT_DIR    = \"~/Dictionaries\"      # comment\n# SERVER_PORT = \"6888\"\n"), 0o644)
 	if err := SaveKey(p, "DICT_DIR", "/data/dicts"); err != nil {
 		t.Fatal(err)
 	}

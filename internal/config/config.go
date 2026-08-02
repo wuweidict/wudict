@@ -57,7 +57,7 @@ func defaults() Config {
 		DictDirs: []string{filepath.Join(home, "Dictionaries")},
 		DBDir:    "", // empty = store.DefaultDBDir()
 		IP:       "127.0.0.1",
-		Port:     "8808",
+		Port:     "6888",
 		// Speexdec "" = auto-detect at launch (next to the executable, then
 		// $PATH); SPEEXDEC overrides. See resolveSpeexdec in the CLI.
 		Speexdec:      "",
@@ -187,7 +187,7 @@ const configTemplate = `# wudict configuration
 #                                     # none of them may be the DB_DIR folder
 # DB_DIR      = "~/.wudict/db"    # library of prepared dictionaries (one folder each)
 # SERVER_IP   = "127.0.0.1"           # listen address (0.0.0.0 = all interfaces)
-# SERVER_PORT = "8808"
+# SERVER_PORT = "6888"
 # NO_BROWSER  = "0"                   # "1" = do not open a browser tab on startup
 # VERBOSE     = "0"                   # "1" = verbose logging for debugging
 # SPEEX_BACKEND = "internal"          # ".spx" audio decoder: "internal" (built-in libspeex) or "external" (speexdec)
