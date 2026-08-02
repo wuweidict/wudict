@@ -250,3 +250,69 @@ Unauthenticated LAN writes are not a new exposure: `/api/setup` already lets any
 No logging was added in `store`: it is a library that returns diagnostics rather than printing them (D13). The `logx.V` line lives in `setFeatures`, where it reports the *action*, not the state.
 
 **Standing rule:** any function whose output is written to disk owns a version constant, bumped in the same commit as the behaviour. The alternative is not "we will remember" — it is a silent, undetectable divergence between what was indexed and what is queried.
+
+## D35 — Expand-all is a page-lifetime toggle, remembered nowhere — **ACCEPTED 2026-08-02 (user-directed)**
+Results render as one `<details class="dict">` per dictionary, and exactly one — the highest-preference dictionary with hits — opens automatically. Comparing a word across a whole collection therefore meant opening sections by hand. A `⊞`/`⊟` button now opens and closes all of them.
+
+The interesting decision was where the state lives, and the answer is **nowhere**.
+
+**Not on the server.** D33's rule ends *"a switch the server cannot see is a switch that does nothing"* — that clause was written about disabling a dictionary, which was a decoration until `Warm()` could act on it. Expand-all is the mirror case: it has **no server-side consequence at all**. The same NDJSON is streamed, `perDict` is unchanged, nothing is opened, indexed or skipped differently. The switch does its entire job in the browser, so putting it in `state.json` would have bought a `UIPrefs` struct, a schema change, merge semantics and tests for a value the server would never read.
+
+**Not in localStorage either**, which is where `wudict_theme` and `wudict_wide` live. The sharper discriminator behind D33's look/meaning heuristic is **how expensive the state is to recreate**: a curated order and enabled set across a hundred dictionaries is minutes of work, so losing it to a port change (localStorage is origin-scoped) is a real injury. Expand-all is one click. Persisting it only buys the failure mode where a user enables it once on a wide screen and meets an inexplicably different app on a laptop weeks later, with nothing on screen to explain why.
+
+**Page lifetime is the sweet spot, and it is self-clearing.** One `let expandAll=false`. Reload returns to the default; there is no tomorrow in which it surprises anyone. It survives searches *within* the page, which is the point — the people who want this are comparing term after term, and a click-scoped action would charge them a click per query, penalising exactly the workflow it exists for.
+
+**A toggle, not a one-shot action, because the two directions are symmetric.** VS Code's explorer offers *Collapse All* with no inverse, and that works only because the directions are asymmetric there: collapsing is bounded, expanding a file tree is unbounded. Here both directions are bounded and equal — N dictionaries, all open or all shut — and expanding by one click while collapsing costs one click per dictionary would be a one-way door. Symmetric operations want a toggle.
+
+The default is untouched: auto-open the top-preference dictionary, which gets the user reading with no scrolling and is right for almost every search.
+
+Two implementation notes. The auto-open block is skipped entirely while expand-all is on, and `openedIdx` stays `null` — otherwise a lower-index dictionary arriving late would close a section being read. And `content-visibility:auto` on open sections hands back the cost: articles are built eagerly either way (`renderSlot` appends them all; the accordion only hides them), so opening pays layout and paint, which the browser can now skip for anything not scrolled to.
+
+**Standing rule:** before choosing where a setting lives, ask what breaks if it is lost. State that is expensive to recreate earns durable storage; state that is one click away earns none, and storing it anyway only buys a way to confuse the user later.
+
+## D36 — One `.col` geometry for the toolbar and the content — **ACCEPTED 2026-08-02**
+Adding the expand-all button (D35) made the toolbar visibly wider than the result cards. The button was not the cause; it was the first thing to touch a boundary that had been in the wrong place all along.
+
+**The measurement.** `.container` was `width:92%; max-width:800px; padding:0 var(--sp-2) var(--sp-5)` under a global `box-sizing:border-box`, so the cards sit `--sp-2` (`.618em` — φ⁻¹, from the project's own golden-ratio spacing ladder) inside their 800px box. `.bar form` was `max-width:800px; margin:0 auto` with **no gutter of its own**. Below the cap, `.bar`'s horizontal padding stood in for one and the two happened to line up; above it, nothing did, and the bar ran ~9.9px wider on each side. The misalignment therefore existed at every viewport over 600px, in a varying amount — invisible only because `justify-content:center` kept a content-sized cluster of controls away from its own edge. Five buttons filled the row, the cluster reached the boundary, and the boundary was wrong.
+
+**The naive fix was wrong in the other direction.** Simply adding `padding:0 var(--sp-2)` to the form corrects widths above the cap and *breaks* the ≤600px case, where the form would then be inset twice — once by `.bar`, once by itself — while the cards are inset once. Two elements described by two rules that have to agree at three breakpoints (`auto` / `92%` / `800px`), in two modes (normal / wide), is six chances to drift and no mechanism preventing it.
+
+**So the geometry is named once and worn by both.** A `.col` class carries width, cap, centring and gutter; `<main class="col container">` and `<form id="frm" class="col">` wear it, `.container` keeps only its bottom padding, and `.bar form` keeps only the flex arrangement of what is inside it. `.bar` drops its horizontal padding — it is full-bleed anyway, and the gutter now belongs to the column. The wide-mode override and the ≤600px `width:auto` are each stated once, for both. The two boxes are no longer *equal*; they are the *same*, which is the only version of this that stays true.
+
+**Ends anchored, not centred.** `.bar form .tools{margin-left:auto}` on the first view toggle splits the row at its real semantic seam — query controls (`input`, mode, dictionary, 🔍) against view controls (`◐ ⇔ ⊞ ☰`) — so free space is absorbed in the middle and both ends stay pinned to the column. Content no longer determines width; width determines layout, and a sixth button costs nothing. It is inert at 800px, where the controls already fill the row, and does its work in wide mode.
+
+The 🔍 button was considered for removal (Enter submits, the input is `autofocus`, `/` focuses it, and mobile keyboards render a Search key for `type=search` in a form) and **kept** by decision: it is the one control that names the app's primary verb.
+
+**Standing rule:** when two elements must line up, do not give them matching values — give them the same rule. Matching values are a coincidence maintained by hand, and every breakpoint doubles the number of hands.
+
+## D37 — Sticky section headers, sized by `[open]` — **ACCEPTED 2026-08-02**
+Scrolling a long article lost all trace of which dictionary it came from: the `<summary>` naming it had scrolled off, and the top bar auto-hides on scroll-down, so nothing on screen answered the question.
+
+**The header was already there; it just did not stay.** The alternatives considered all proposed *adding* something — a breadcrumb in the bar, a transient pill that fades in while scrolling, a per-dictionary colour. Each was rejected on its own terms. The breadcrumb is disqualified by our own scroll handler (`cur>80&&cur>prevScroll` hides the bar exactly while you are reading, so the information would be absent precisely when wanted). The fading pill is the worst option available: every appearance is peripheral motion, the one stimulus the visual system is built to interrupt on, spent to tell the reader something they only sometimes want. Per-dictionary hues have the best theory — colour resolves pre-attentively, before foveation — and fail in practice at 105 dictionaries, where hues stop identifying anything, and against a deliberately calm one-accent palette they would cost more composure than they buy recognition. Colour is a good redundant cue and a bad primary one.
+
+So: `position:sticky` on the existing summary. Nothing new to learn, nothing new to render, and a second benefit that turns out to matter more than the first — **the collapse control is now permanently within reach**, so a dictionary can be closed from anywhere inside it rather than by scrolling back to find its top. With expand-all (D35) that becomes the primary way of navigating results.
+
+**`overflow:hidden` → `overflow:clip` is what makes it work at all.** `hidden` establishes a scroll container, and a sticky element sticks to its nearest scrollport — which would have been a box that never scrolls, so the header would simply not have moved. `clip` clips to the same border-radius and creates no scrollport. One word, and the difference between working and mysteriously not.
+
+**Two jobs, two sizes, and `[open]` already distinguishes them.** A *closed* header is a row in a list scanned across a hundred dictionaries: it wants presence. An *open* one is a context label consulted occasionally while reading: it wants to disappear. That maps exactly onto a state CSS already has, so the compact size (~39px → ~25px) needs **no sentinel element, no IntersectionObserver and no scroll handler** — and, better than any of those, the resize is triggered by a click the user just made instead of arriving as a surprise in their peripheral vision. Detecting *stuck* would have been more precise and worse: it would animate on scroll, which is the motion this design is trying not to spend. Horizontal padding moved from `em` to `rem` so the type change moves the header's height and never the name's left edge.
+
+**`--stick` is measured, not guessed.** The bar wraps to two rows on narrow screens, so a hard-coded offset would either hide headers under it or float them below a gap; a `ResizeObserver` publishes the real height (a `resize` listener would miss the reflow caused by the dictionary `<select>` growing as names load). `body.barhidden` drops it to `0` when the bar slides away, on the bar's own `.28s`, so the two read as one piece of chrome moving rather than two things reacting to each other.
+
+**Standing rule:** when the interface has to answer "where am I", look first for the element that already says so and ask why it left. Adding an indicator is the second-best answer to a question a persisting label answers for free.
+
+## D38 — Section scroll corrections: two rules, both conditional — **ACCEPTED 2026-08-02**
+Should clicking an accordion section scroll it into view? **Not unconditionally**, and the two directions fail differently enough that they need different rules.
+
+**Scrolling every opened section to the top is wrong here, for a reason specific to this app.** The top-preference dictionary is already open when results arrive, so clicking a *second* summary is nearly always an act of **comparison** — "and what does Chambers say?". Moving the page to put the new section at the top takes the one being read off screen and turns comparison into replacement. Two further objections: expanding a section pushes only what is *below* it, so the summary the user clicked never moves and their visual anchor is already perfect; and under expand-all (D35) the behaviour would fire once per dictionary.
+
+**Open needs help only when it revealed nothing.** Click a summary sitting near the bottom of the viewport and the content unfolds entirely below the fold — the user asked to see something and saw nothing. So: if the section's top is below half the viewport, bring it up to the bar; otherwise do nothing. Silence in the common case.
+
+**Close needs help not to vanish, and that need is one D37 created.** Before sticky headers, collapsing a section meant scrolling back to its top first, so closing could never disorient. Now it can be collapsed from 3000px inside itself, after which the document shrinks, the browser clamps the scroll position, and the user lands somewhere arbitrary — often the end of the page. Returning them to the row they just closed is not taking control away; it is honouring the position they still implicitly occupy. Firefox and Chrome's scroll anchoring hides some of this. Safari does not.
+
+That asymmetry is not the usual smell of a wrong rule, because the two cases have different causes: open occasionally fails to *reveal*, close fails to *stay*.
+
+**Three implementation traps, all avoided.** (1) The `toggle` event fires for programmatic opens too — `renderSlot` sets `det.open = expandAll` on every arriving row, so a `toggle` handler would make the page jump while results stream in. Listening for a **click on the summary** is inherently user-initiated (and sidesteps `toggle` not bubbling). (2) The new height must be laid out before it is measured, so the decision happens in a `requestAnimationFrame` after the browser has applied the toggle. (3) Both corrections scroll **up**, which brings the auto-hidden bar back — so they must aim at the bar's real height and not at `--stick`, which is momentarily `0` while the bar is away. `--barh` and `--stick` were split for exactly this, and `scroll-margin-top:var(--barh)` on the section lets `scrollIntoView` land correctly with no arithmetic and no re-derivation when the bar rewraps.
+
+`prefers-reduced-motion` downgrades both to an instant jump — mandatory for anything that moves the viewport without being asked.
+
+**Standing rule:** never move the viewport to express a state change. Move it only when the alternative is the user losing their place — and then by the smallest amount that fixes it.

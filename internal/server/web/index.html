@@ -26,6 +26,13 @@
   --hl:#fff0b3; --hl-fg:#5c4a00;
   --focus:#7aa7d1;
   --shadow:0 1px 3px rgba(60,50,30,.07),0 4px 14px rgba(60,50,30,.05);
+  /* --barh is the real bar height, measured at runtime (this value is only the
+     pre-script fallback). --stick is where a stuck section header comes to
+     rest; it collapses to 0 when the bar slides away, which is why the two are
+     separate: a scroll correction always ends with the bar back on screen, so
+     it must aim at --barh, never at a --stick that is momentarily 0. */
+  --barh:3.1em;
+  --stick:var(--barh);
 }
 html[data-theme="dark"]{
   --bg:#191a1c; --bg-card:#212327; --bg-bar:rgba(25,26,28,.92);
@@ -55,17 +62,42 @@ html[data-theme="dark"]{
 html{color-scheme:light dark}
 body{margin:0;padding-top:4.236em;background:var(--bg);color:var(--fg);
   font-family:var(--font);line-height:var(--fi)}
-.container{margin:0 auto;width:92%;max-width:800px;padding:0 var(--sp-2) var(--sp-5);
-  transition:max-width .25s ease}
-body.wide .container{max-width:min(1280px,96vw)}
+/* ── the content column ─────────────────────────────────────────────
+   One geometry, worn by the toolbar and the results alike, so their edges
+   cannot drift apart. They used to be described separately: both capped at
+   800px, but the cards sit φ⁻¹em inside that box (their own gutter) while the
+   toolbar had no gutter of its own — below the cap .bar's padding stood in for
+   one, above it nothing did. So the bar was wider than the content at every
+   width over 600px, and invisibly so for as long as justify-content kept the
+   controls away from their own boundary. Add a button, the cluster reaches the
+   boundary, and the boundary turns out to be in the wrong place. */
+.col{width:92%;max-width:800px;margin:0 auto;
+  padding-left:var(--sp-2);padding-right:var(--sp-2);
+  transition:max-width .25s ease} /* on .col so the bar eases with the cards */
+body.wide .col{max-width:min(1280px,96vw)}
+.container{padding-bottom:var(--sp-5)}
 
 .bar{position:fixed;top:0;left:0;right:0;z-index:100;background:var(--bg-bar);
   backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  border-bottom:1px solid var(--line);padding:var(--sp-1) var(--sp-2);
+  /* no horizontal padding: the bar is full-bleed and the gutter belongs to
+     .col, which the form wears. Two insets would inset the form twice. */
+  border-bottom:1px solid var(--line);padding:var(--sp-1) 0;
   transition:transform .28s ease}
 .bar.hidden{transform:translateY(-100%)}
+/* When the bar slides away, the stuck header takes the space it vacated
+   instead of leaving a hole. Same .28s as the bar, so the two read as one
+   piece of chrome moving rather than two things reacting to each other. */
+body.barhidden{--stick:0px}
+/* geometry comes from .col; this rule only arranges what is inside it */
 .bar form{display:flex;align-items:center;gap:var(--sp-1);flex-wrap:wrap;
-  justify-content:center;max-width:800px;margin:0 auto}
+  justify-content:center}
+/* The seam between "what am I searching" and "how am I viewing it". Pushing
+   the view toggles to the right edge anchors both ends of the bar to the
+   content column, so slack is absorbed in the middle instead of shoving the
+   ends outward — a sixth button then costs nothing. Inert at 800px, where the
+   controls already fill the row; it does its work in wide mode and any time a
+   control is removed. Move this class if the button order ever changes. */
+.bar form .tools{margin-left:auto}
 .brand{font-weight:700;color:var(--accent);font-size:15px;letter-spacing:.02em;
   margin-right:var(--sp-1);user-select:none;white-space:nowrap}
 /* Wordmark: "WuWei" carries the accent, "Dict" recedes to normal weight — one
@@ -94,15 +126,46 @@ select{font-size:13px;color:var(--fg-soft);background:var(--bg-card);
 .spin.big{display:block;width:30px;height:30px;border-width:3px;
   margin:0 auto var(--sp-2)}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* overflow:CLIP, not hidden. Both clip to the border-radius identically, but
+   `hidden` establishes a scroll container — which would silently defeat the
+   sticky summary below, since a sticky element sticks to its nearest scrollport
+   and this one would never scroll. `clip` creates no scrollport, so the summary
+   sticks to the viewport while staying bounded by its own section. */
 details.dict{margin-top:var(--sp-2);background:var(--bg-card);border:1px solid var(--line);
-  border-radius:10px;box-shadow:var(--shadow);overflow:hidden}
-details.dict>summary{cursor:pointer;padding:var(--sp-1) var(--sp-2);font-weight:600;
-  color:var(--fg-soft);list-style:none;display:flex;align-items:center;gap:var(--sp-1)}
+  border-radius:10px;box-shadow:var(--shadow);overflow:clip;
+  /* so scrollIntoView lands the section below the bar instead of under it,
+     with no arithmetic and no re-derivation when the bar rewraps */
+  scroll-margin-top:var(--barh)}
+/* The section header stays put while you read inside it, so "which dictionary
+   am I looking at" never has to be remembered — or scrolled back for. It is
+   also the collapse control, which now stays within reach of a long article.
+   The horizontal padding is in rem, not em, so shrinking the type below moves
+   only the header's height and never the name's left edge. */
+details.dict>summary{position:sticky;top:var(--stick);z-index:2;
+  background:var(--bg-card);
+  cursor:pointer;padding:var(--sp-1) .62rem;font-weight:600;
+  color:var(--fg-soft);list-style:none;display:flex;align-items:center;gap:var(--sp-1);
+  transition:font-size .16s ease,line-height .16s ease,padding .16s ease,top .28s ease}
+/* Two jobs, two sizes. CLOSED, the header is a row in a list you scan across a
+   hundred dictionaries — it wants presence. OPEN, you are reading the section
+   and it has become a context label you consult occasionally — it wants to get
+   out of the way. `[open]` is a free CSS state, so this needs no sentinel, no
+   observer and no scroll handler, and the resize happens on a click the user
+   made rather than as a surprise in their peripheral vision. ~39px → ~25px. */
+details.dict[open]>summary{font-size:.8125rem;line-height:1.25;
+  padding-top:.25rem;padding-bottom:.25rem}
+details.dict[open]>summary .count{font-size:11px}
 details.dict>summary::-webkit-details-marker{display:none}
 details.dict>summary::before{content:"›";color:var(--fg-faint);
   transition:transform .18s ease;font-weight:400}
 details.dict[open]>summary::before{transform:rotate(90deg)}
 details.dict[open]>summary{border-bottom:1px solid var(--line-soft)}
+/* Expand-all can put a hundred dictionaries' articles on screen at once.
+   Articles are built eagerly either way (renderSlot appends them all; the
+   accordion only hides them), so the cost of opening is layout and paint —
+   which this hands back by skipping both for sections nobody has scrolled to.
+   The size hint keeps the scrollbar from jumping as they are rendered. */
+details.dict[open]>dl{content-visibility:auto;contain-intrinsic-size:0 400px}
 summary .count{margin-left:auto;font-weight:400;color:var(--fg-faint);font-size:12px}
 summary .more{font-weight:400;font-size:12px;color:var(--link);cursor:pointer;
   text-decoration:underline;text-underline-offset:2px;margin-left:var(--sp-2)}
@@ -288,7 +351,8 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 /* ── responsive ────────────────────────────────────────────────────── */
 @media (max-width:600px){
   body{padding-top:5.6em}
-  .container{width:auto;padding:0 var(--sp-2) var(--sp-4)}
+  .col{width:auto} /* both of them, or the bar and the cards part company */
+  .container{padding-bottom:var(--sp-4)}
   /* Scoped to the top bar: the About wordmark inside the panel must survive
      on narrow screens — that is where the app says what it is. */
   .bar .brand{display:none}
@@ -304,7 +368,7 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
      closes the window between first paint and the script running, which is
      exactly when an eager "type and hit Enter" used to reach the search path
      with an empty dictionary list. -->
-<form id="frm" role="search" aria-busy="true">
+<form id="frm" class="col" role="search" aria-busy="true">
 <span class="brand">WuWei<small>Dict</small></span>
 <input type="search" id="q" placeholder="Search…" autocomplete="off" autofocus aria-label="Search term" disabled>
 <select id="mode" aria-label="Search mode" disabled>
@@ -315,13 +379,14 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 </select>
 <select id="dict" aria-label="Dictionary" disabled><option value="all">All dictionaries</option></select>
 <button type="submit" class="btn" title="Search" aria-label="Search">🔍</button>
-<button type="button" class="btn" id="themeBtn" title="Theme" aria-label="Toggle theme">◐</button>
+<button type="button" class="btn tools" id="themeBtn" title="Theme" aria-label="Toggle theme">◐</button>
 <button type="button" class="btn" id="wideBtn" title="Toggle wide layout" aria-label="Toggle wide layout">⇔</button>
+<button type="button" class="btn" id="expandBtn" title="Expand all results" aria-label="Expand all results" aria-pressed="false">⊞</button>
 <button type="button" class="btn" id="panelBtn" title="Dictionaries" aria-label="Manage dictionaries">☰</button>
 </form>
 </header>
 
-<main class="container">
+<main class="col container">
 <div id="status" role="status" aria-live="polite"></div>
 <div id="out"></div>
 </main>
@@ -469,6 +534,34 @@ $("wideBtn").onclick=()=>{
 };
 applyWide(localStorage.getItem("wudict_wide")==="1");
 
+/* Expand all results — a view toggle that is deliberately NOT remembered.
+   It lives for the page and nothing else: no localStorage, no state.json.
+   Persisting it would mean enabling it once on a wide screen and meeting an
+   inexplicably different app on a laptop three weeks later, with nothing on
+   screen to explain why. Reloading always returns to the default, which stays
+   "open the top-preference dictionary" — that is what gets you reading with no
+   scrolling, and it is right for almost every search.
+   A toggle rather than a one-shot action because the two directions are
+   symmetric: expanding is one click, and collapsing again by hand would be
+   one click per dictionary. */
+let expandAll=false;
+function applyExpand(){
+  const b=$("expandBtn");
+  b.textContent=expandAll?"⊟":"⊞";
+  b.title=expandAll?"Collapse all results":"Expand all results";
+  b.setAttribute("aria-label",b.title);
+  b.setAttribute("aria-pressed",expandAll?"true":"false");
+  b.style.color=expandAll?"var(--accent)":"";
+}
+applyExpand(); // markup ships the default; this keeps JS the single authority
+$("expandBtn").onclick=()=>{
+  expandAll=!expandAll;
+  applyExpand();
+  // act on what is already on screen: re-running the search would throw away
+  // the results the user is looking at to fetch the same ones again
+  for(const d of $("out").querySelectorAll("details.dict"))d.open=expandAll;
+};
+
 $("themeBtn").onclick=()=>{
   const cur=localStorage.getItem("wudict_theme")||"auto";
   const next=THEMES[(THEMES.indexOf(cur)+1)%THEMES.length];
@@ -543,6 +636,40 @@ function bootFailed(msg){
     `<p><button type="button" class="btn" id="retryBtn">Try again</button></p></div>`;
 }
 $("out").addEventListener("click",e=>{if(e.target.id==="retryBtn")loadDicts()});
+
+/* Two asymmetric corrections, because opening and closing fail differently.
+   Scrolling every opened section to the top would be wrong: the summary you
+   clicked does not move when a section expands, so your eye's anchor is
+   already perfect, and opening a SECOND dictionary is nearly always an act of
+   comparison — yanking the page would take the one you were reading off screen
+   and turn comparison into replacement. It would also fire once per dictionary
+   under expand-all (D35).
+
+   OPEN needs help only when the section sits so low that its content unfolds
+   entirely below the fold: you asked to see something and saw nothing.
+   CLOSE needs help not to vanish, and that need is new — D37's sticky header
+   means a section can be collapsed from 3000px inside it, after which the
+   document shrinks, the browser clamps the scroll position, and you land
+   somewhere arbitrary. Returning to the row you just closed is not taking
+   control away, it is honouring the place you were still standing in.
+
+   Both corrections scroll UP, which brings the auto-hidden bar back, so they
+   aim at --barh (via scroll-margin-top) rather than the momentarily-zero
+   --stick. */
+const lessMotion=matchMedia("(prefers-reduced-motion: reduce)");
+$("out").addEventListener("click",e=>{
+  const sum=e.target.closest("details.dict>summary");
+  if(!sum)return;
+  // these live inside the summary, run their own handlers and preventDefault
+  // the toggle — but not before this listener, which is nearer the target
+  if(e.target.closest(".more,.upgrade"))return;
+  const det=sum.parentElement,opening=!det.open; // the toggle lands after us
+  requestAnimationFrame(()=>{  // measure the section at its new height
+    const top=det.getBoundingClientRect().top;
+    const need=opening?top>innerHeight*0.5:top<$("bar").offsetHeight;
+    if(need)det.scrollIntoView({block:"start",behavior:lessMotion.matches?"auto":"smooth"});
+  });
+});
 
 /* Rebuilding the dropdown and the panel is O(all dictionaries) — renderPanel
    throws its whole list away and rebuilds it — so streamed rows coalesce into
@@ -1132,6 +1259,7 @@ function renderSlot(box,h,mode,q,perDict){
     roots.push(renderArticle(dd,r.Body,h.dict));
     dl.appendChild(dt);dl.appendChild(dd);
   }
+  det.open=expandAll;
   det.appendChild(dl);box.appendChild(det);
   highlight(roots,mode,q);
   return{shown:true,results:true};
@@ -1183,8 +1311,10 @@ async function doSearch(ev){
         const res=renderSlot(box,msg,mode,q,perDict);
         if(res.shown)anyShown=true;
         // auto-open the highest-preference (lowest index) dict with results,
-        // even if a later-preference dict finished first
-        if(res.results&&(openedIdx===null||msg.i<openedIdx)){
+        // even if a later-preference dict finished first. Skipped entirely
+        // while expand-all is on: openedIdx must stay null, or a lower-index
+        // dictionary arriving late would close a section being read.
+        if(!expandAll&&res.results&&(openedIdx===null||msg.i<openedIdx)){
           const det=box.querySelector("details.dict");
           if(det){
             if(openedIdx!==null){const p=boxes[openedIdx]?.querySelector("details.dict");if(p)p.open=false}
@@ -1334,10 +1464,24 @@ document.addEventListener("click",e=>{
 });
 
 /* auto-hide bar on scroll down */
+/* The bar's real height, published as --barh so sticky section headers rest
+   just below it. Measured rather than hard-coded: the bar wraps to two rows on
+   narrow screens, and a guessed offset would either hide a header under the bar
+   or float it below a visible gap. */
+function measureBar(){
+  document.documentElement.style.setProperty("--barh",$("bar").offsetHeight+"px");
+}
+measureBar();
+// ResizeObserver rather than a resize listener: the bar also changes height
+// when the dictionary <select> grows with the loaded names and wraps the row,
+// which fires no resize event at all.
+new ResizeObserver(measureBar).observe($("bar"));
 let prevScroll=window.pageYOffset;
 addEventListener("scroll",()=>{
   const cur=window.pageYOffset;
-  $("bar").classList.toggle("hidden",cur>80&&cur>prevScroll);
+  const hide=cur>80&&cur>prevScroll;
+  $("bar").classList.toggle("hidden",hide);
+  document.body.classList.toggle("barhidden",hide);
   prevScroll=cur;
 });
 

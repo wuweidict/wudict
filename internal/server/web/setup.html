@@ -77,12 +77,12 @@ label.keep em{font-style:normal;color:var(--faint);font-size:12.5px}
 </head>
 <body>
 <div class="card">
-<h1><b>WuWei</b>Dict — set up</h1>
+<h1><b>WuWei</b>Dict Configuration</h1>
 <p>{{INTRO}}</p>
 
 <h2>Point WuWeiDict at your dictionaries</h2>
 <p>Paste the full path of a folder that holds your dictionary files (subfolders are scanned too).
-   You can add more than one — an external drive, a shared folder:</p>
+   Click ➕ to add more folders</p>
 <div id="rows"></div>
 <button type="button" id="addRow" class="link">+ add another folder</button>
 <div id="origin" class="warn hidden"></div>
@@ -91,7 +91,7 @@ label.keep em{font-style:normal;color:var(--faint);font-size:12.5px}
   <hr class="sep">
   <h2>Previously imported dictionaries</h2>
   <p><b id="libN">0</b> prepared earlier and kept in <code id="libDir"></code>.
-     They work right now, even without their original files.</p>
+     They work even if the original files are removed.</p>
   <label class="keep" id="keepWrap"><input type="checkbox" id="keep" checked>
     <span>Keep using them
     <em id="keepHint">— unchecking only hides them; nothing is deleted</em></span></label>

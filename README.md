@@ -1,13 +1,9 @@
 # WuWeiDict
 
-Fast, zero-effort, self-contained, multi-format dictionary server that runs in your
+Fast, self-contained, multi-format dictionary server that runs in your
 browser at [http://localhost:6888](http://localhost:6888). One binary, no
 dependencies; drop your dictionaries in a folder and search them all at
 once.
-
-The command is **`wudict`**. 無為 *wúwéi* — effortless action: preparation
-happens in the background, on one thread by default, and gets out of your
-way.
 
 **Supported formats**
 
@@ -23,12 +19,35 @@ way.
 ## Quick start
 
 1. Download the binary for your platform from
-   [releases](https://github.com/legbehindneck/wudict/releases),
-   `chmod +x` it (macOS/Linux).
+   [releases](https://github.com/legbehindneck/wudict/releases), rename to `wudict`, 
+   `chmod +x wudict` (macOS/Linux) and move to a folder in `$PATH`, e.g. `/usr/local/bin`.
 2. Put some dictionaries in `~/Dictionaries` (or anywhere — subfolders
    are scanned too).
-3. Run `wudict`. A browser tab opens; if the folder is missing or
+3. Run `wudict` or `./wudict` if the file is in the current folder. 
+A browser tab opens; if the dictionary folder is missing or
    empty, a setup page lets you pick one or more folders with dictionaries.
+
+## Adding dictionaries 
+Dictionary folders can be configured in the browser via the [browser setup page](http://localhost:6888/setup). 
+
+### Several dictionary folders
+
+`DICT_DIR` accepts more than one folder:
+
+```sh
+# as one or more CLI args:
+wudict --dict-dir ~/Dictionaries --dict-dir /Volumes/Ext/Dicts   # repeat the flag
+
+# or via an env var:
+DICT_DIR="~/Dictionaries:/Volumes/Ext/Dicts" wudict              # ":" — ";" on Windows
+```
+
+in `wudict.toml`:
+```toml
+DICT_DIR = ["~/Dictionaries", "/Volumes/Ext/Dicts"]
+```
+
+
 
 ## Searching
 
@@ -40,15 +59,14 @@ way.
 | **full-text** | search inside article text, ranked by relevance | yes |
 
 Every dictionary works immediately for starts-with/exact lookups using
-its native index. The first time you search **a small headword index
+the native index. The first time you search **a small headword index
 is prepared in the background** — a couple of MB — so accent-insensitive
-lookups (*corazon* → *corazón*) work from the next query on (disable with
-`AUTO_INDEX=off`).
+lookups (*corazon* → *corazón*) work seamlessly (disable with `AUTO_INDEX=off`).
 
 ***Full-text*** (searching inside article text) and ***contains*** 
  (substring search) are not enabled by default as they consume more disk space. 
 Click the ☰ button and enable them as needed.
-Each shows its actual size; *⚡ index all* adds full-text everywhere
+Each shows its actual size; *⚡ index all* adds full-text for all dictionaries
 at once, and `wudict ingest [-contains] <file-or-folder>` does the
 same from the command line.
 
@@ -56,19 +74,19 @@ Results stream in as each dictionary responds — the top one opens
 automatically. In the ☰ panel you can **reorder** dictionaries (drag the
 ⠿ handle or use the ▲▼⏫⏬ buttons) to set your preferred result order, and
 **enable/disable** each one (the switch) to include or exclude it from
-*All dictionaries* searches; both are remembered for the current browser. Searching *All* shows a
+*All dictionaries* searches; both are remembered. Searching *All* shows a
 few hits per dictionary with a **more…** link to expand any one.
 
 Tips: `/` focuses the search box; double-click any word in an article to
 look it up; click links inside articles to follow cross-references;
-audio plays on click; ⇔ toggles a wide layout; ◐ cycles auto/light/dark
-theme. Searches produce shareable URLs.
+audio plays on click; ⊞ opens every dictionary's results at once (⊟ closes
+them again — for the current page only, never remembered);
+⇔ toggles a wide layout; ◐ cycles auto/light/dark
+theme. Search URLs are bookmarkable.
 
 ## Run as a service (macOS)
 
-With a LaunchAgent at
-`~/Library/LaunchAgents/com.legbehindneck.wudict.plist`
-(modern `launchctl` syntax, wrapped as Makefile targets):
+`wudict` can be installed as a `launchctl` LaunchAgent using Makefile targets:
 
 ```sh
 make mac-agent-install   # generate the plist from launchctl/*.plist.in, then:
@@ -79,31 +97,13 @@ make mac-agent-status    # launchctl print    gui/$UID/<label>
 make mac-agent-uninstall # stop it and delete the plist
 ```
 
-The plist is **generated, not shipped**: launchd expands nothing in
-`ProgramArguments` — no `~`, no `$HOME`, no `PATH` lookup — so it needs a
-literal absolute path to the binary, and any committed plist would be
-correct only on the machine that wrote it. `mac-agent-install` points the
-agent at this checkout's `./wudict` so that `make mac-agent-restart` rebuilds
-and relaunches the thing you are working on. To pin the installed copy
-instead, so that moving or renaming the checkout doesn't break the agent:
-
-```sh
-make mac-agent-install AGENT_BIN="$(go env GOPATH)/bin/wudict"
-```
-
-Logs go to `~/Library/Logs/wudict.log`. `KeepAlive` restarts the agent
-only after a *failed* exit — see the template for why an unconditional
-`KeepAlive` and the handover behaviour would fight each other.
-
 ## Run as a service (Linux)
 
-A **systemd user unit** — the analogue of the LaunchAgent above. WuWeiDict
-reads `~/Dictionaries`, writes `~/.wudict` and binds `127.0.0.1`, so it
-belongs to your session, not to root; only copying the binary into
-`/usr/local/bin` needs sudo.
+On linux `wudict` can be installed as a **systemd user unit** — only copying the binary into
+`/usr/local/bin` needs sudo, the service itself runs with user permissions and start/stop does not require sudo.
 
 ```sh
-make linux-service-install   # sudo-installs /usr/local/bin/wudict, then writes the unit
+make linux-service-install   # sudo-installs /usr/local/bin/wudict, then writes the user unit
 make linux-service-start     # systemctl --user enable --now wudict.service
 make linux-service-stop
 make linux-service-restart   # rebuild, reinstall the binary, restart
@@ -114,14 +114,9 @@ make linux-install     # just the binary  (PREFIX=/opt/foo to relocate)
 make linux-uninstall
 ```
 
-The unit runs `/usr/local/bin/wudict` — the installed copy, never the one
-in your checkout — and is generated for the same reason as the plist:
-`ExecStart` needs an absolute path and systemd expands no `~` there. It is
-written to `${XDG_CONFIG_HOME:-~/.config}/systemd/user/wudict.service`.
+The ststemd unit expects the executable to be at `/usr/local/bin/wudict`.
 
-Logs go to the journal: `journalctl --user -u wudict -f`. `Restart=on-failure`
-(not `always`) for the same reason macOS uses `SuccessfulExit=false`. To keep
-the service running when you are not logged in:
+To keep  the service running when you are not logged in:
 
 ```sh
 sudo loginctl enable-linger "$(id -un)"
@@ -131,55 +126,31 @@ sudo loginctl enable-linger "$(id -un)"
 
 Priority: **CLI flag > environment variable > wudict.toml > default**.
 A commented `~/.wudict/wudict.toml` is generated on first run, and the
-file in effect is printed at every startup.
+config file path is printed on startup.
 
-| Flag | env / toml key | Default |
-|---|---|---|
-| `--dict-dir` | `DICT_DIR` | `~/Dictionaries` |
-| `--db-dir` | `DB_DIR` | `~/.wudict/db` |
-| `--ip` | `SERVER_IP` | `127.0.0.1` |
-| `--port` | `SERVER_PORT` | `6888` |
-| `--config` | `CONFIG_PATH` | auto-detect |
-| `--no-browser` | `NO_BROWSER=1` | open browser |
-| `--verbose` | `VERBOSE=1` | quiet |
-| `--speexdec` | `SPEEXDEC` | found on `PATH` |
-| `--use-cached` | `USE_CACHED` | off |
-| — | `AUTO_INDEX` | `on` (`off` to disable) |
+| Flag | env / toml key | Default                       |
+|---|---|-------------------------------|
+| `--dict-dir` | `DICT_DIR` | `~/Dictionaries`              |
+| `--db-dir` | `DB_DIR` | `~/.wudict/db`                |
+| `--ip` | `SERVER_IP` | `127.0.0.1`                   |
+| `--port` | `SERVER_PORT` | `6888`                        |
+| `--config` | `CONFIG_PATH` | auto-detect                   |
+| `--no-browser` | `NO_BROWSER=1` | open browser                  |
+| `--verbose` | `VERBOSE=1` | detailed logging              |
+| `--speexdec` | `SPEEXDEC` | found on `PATH`               |
+| `--use-cached` | `USE_CACHED` | off                           |
+| — | `AUTO_INDEX` | `on` (`off` to disable)       |
 | `--no-compress` | `NO_COMPRESS` | off (article text compressed) |
 
-### Several dictionary folders
 
-`DICT_DIR` takes more than one folder — an external drive, a shared
-folder, a second collection:
-
-```sh
-wudict --dict-dir ~/Dictionaries --dict-dir /Volumes/Ext/Dicts   # repeat the flag
-DICT_DIR="~/Dictionaries:/Volumes/Ext/Dicts" wudict              # ":" — ";" on Windows
-```
-```toml
-DICT_DIR = ["~/Dictionaries", "/Volumes/Ext/Dicts"]
-```
-
-The setup page has an **+ add another folder** row for the same thing, and
-saves your list back to `wudict.toml`. Folders may overlap freely: a
-dictionary reachable from two of them is listed once (the folder listed
-first wins), and a folder that is missing — an unplugged drive — is
-reported at startup while the rest keep working.
 
 Config file search order: `--config` / `CONFIG_PATH`, then
 `<exe-dir>/wudict.toml`, `~/.wudict/wudict.toml`,
 `/etc/wudict/wudict.toml`.
 
-**Portable mode.** A `wudict.toml` placed next to the executable wins, and
-is where the setup page saves — for a USB stick or a self-contained folder.
-WuWeiDict never creates that file itself: an executable's directory is
-usually somebody else's (`~/go/bin`, `/opt/homebrew/bin`), not its own.
+**Portable mode.** A `wudict.toml` can also be placed in the same folder as the executable.
 
-**`state.json`.** Which dictionaries are searched and in what order is kept
-in a `state.json` beside the `wudict.toml` in effect (so it travels with a
-portable install), not in the browser: it is a fact about your collection,
-and every browser that reaches the server should see the same one. Theme,
-wide mode and the dictionary dropdown stay per-browser.
+**`~/.wudict/state.json`** stores dictionary search order and enabled/disable state. 
 
 ## Command line
 
