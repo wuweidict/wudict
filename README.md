@@ -78,7 +78,9 @@ automatically. In the ☰ panel you can **reorder** dictionaries (drag the
 few hits per dictionary with a **more…** link to expand any one.
 
 Tips: `/` focuses the search box; double-click any word in an article to
-look it up; click links inside articles to follow cross-references;
+look it up; click links inside articles to follow cross-references —
+these stay inside the dictionary you are reading, and widen to all of them
+only if that dictionary has no such entry;
 audio plays on click; ⊞ opens every dictionary's results at once (⊟ closes
 them again — for the current page only, never remembered);
 ⇔ toggles a wide layout; ◐ cycles auto/light/dark

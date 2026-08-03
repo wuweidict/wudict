@@ -12,6 +12,9 @@
 	"use strict";
 	var fid = document.currentScript.dataset.fid;
 	var dictID = document.currentScript.dataset.dict;
+	// a #fragment the incoming cross-reference asked for, jumped to once the
+	// article has reported its height (see the load handler)
+	var wantFrag = document.currentScript.dataset.frag || "";
 	var audioEl = null; // reused across clicks so playback isn't GC'd mid-load
 
 	function post() {
@@ -33,18 +36,52 @@
 			new ResizeObserver(post).observe(document.body);
 		}
 		post();
+		// after post(), never before: the parent sizes this iframe from that
+		// message, and a scroll target beyond an unsized 90px frame would be
+		// clamped by a document that has not grown yet.
+		if (wantFrag) { jumpToFragment(wantFrag); wantFrag = ""; }
 		// late reflows: webfonts, MathJax typesetting, lazy images
 		setTimeout(post, 600);
 		setTimeout(post, 2500);
 	});
 
-	// Same accepted forms as the main page (bword:/entry: with or without the
-	// slashes, d:/x:, trailing #fragment dropped). Kept in step with
-	// wordFromHref in index.html.
-	function wordFromHref(href) {
-		if (!/^(bword|entry):(\/\/)?/i.test(href) && !/^[dx]:/i.test(href)) return null;
-		var raw = href.replace(/^(bword|entry):(\/\/)?/i, "").replace(/^[dx]:/i, "").replace(/#.*$/, "");
-		try { return decodeURIComponent(raw).trim(); } catch (_) { return raw.trim(); }
+	// The reference parser, mirroring parseRef in index.html — keep the two in
+	// step. `bword://Some Headword#frag` is NOT a URL: "//" promises an
+	// authority, which cannot hold the spaces that headwords are full of, so
+	// this works by string position and never touches URL().
+	var REF_SCHEME = /^(?:(?:bword|entry):(?:\/\/)?|[dx]:)/i;
+	function decodeRef(s) { try { return decodeURIComponent(s); } catch (_) { return s; } }
+	function parseRef(href) {
+		var m = REF_SCHEME.exec(href || "");
+		if (!m) return null;
+		// split before decoding: a "#" inside a headword arrives as %23
+		var rest = href.slice(m[0].length), frag = "";
+		var h = rest.indexOf("#");
+		if (h >= 0) { frag = rest.slice(h + 1); rest = rest.slice(0, h); }
+		var word = decodeRef(rest).trim();
+		frag = decodeRef(frag);
+		if (word.charAt(0) === "@" && word.length > 1) return { kind: "sub", word: word, frag: frag };
+		return { kind: word ? "lookup" : "anchor", word: word, frag: frag };
+	}
+	// A lookup-scheme link carrying only a fragment (`bword://#HistAI`) is the
+	// article's own table of contents, not a cross-reference. We cannot scroll
+	// to it here: the iframe is sized to its content and so never scrolls
+	// itself. Report the target's offset and let the page move, where the fixed
+	// bar and the section's sticky header are known.
+	function jumpToFragment(frag) {
+		if (!frag) return;
+		var el = document.getElementById(frag);
+		if (!el) {
+			var named = document.querySelectorAll("a[name]");
+			for (var i = 0; i < named.length && !el; i++) {
+				if (named[i].getAttribute("name") === frag) el = named[i];
+			}
+		}
+		if (!el) return;
+		parent.postMessage({
+			t: "anchor", fid: fid,
+			y: el.getBoundingClientRect().top + (window.pageYOffset || 0)
+		}, "*");
 	}
 
 	// CAPTURE phase, deliberately. Dictionary scripts attach their own click
@@ -57,8 +94,8 @@
 		var a = e.target && e.target.closest ? e.target.closest("a") : null;
 		if (!a) return;
 		var href = a.getAttribute("href") || "";
-		var w = wordFromHref(href);
-		if (w !== null) {
+		var ref = parseRef(href);
+		if (ref) {
 			e.preventDefault();
 			// We own this click completely, so take it off the wire. preventDefault
 			// only cancels the browser's DEFAULT action; the dictionary's own
@@ -76,8 +113,15 @@
 			// an "@" prefix. Following one as a search would replace the article
 			// the user is reading with a fragment of it. Inline it instead,
 			// where the link is — no search, no URL, no history.
-			if (w.charAt(0) === "@" && w.length > 1) { toggleSub(a, w); return; }
-			if (w) parent.postMessage({ t: "lookup", w: w }, "*");
+			if (ref.kind === "sub") { toggleSub(a, ref.word); return; }
+			if (ref.kind === "lookup") {
+				// "ref", not "pick": an author's link is an exact headword and
+				// carries where it was written, so the app searches that
+				// dictionary and leaves the term untouched.
+				parent.postMessage({ t: "ref", w: ref.word, dict: dictID, frag: ref.frag }, "*");
+				return;
+			}
+			jumpToFragment(ref.frag); // "anchor": a place in this same article
 		} else if (/\.(mp3|ogg|wav|spx|m4a)([?#]|$)/i.test(href)) {
 			e.preventDefault();
 			// reuse one referenced element so it can't be GC'd during the
@@ -131,8 +175,11 @@
 			.catch(function () { box.textContent = "(could not load)"; post(); });
 	}
 
+	// "pick", not "ref": a double-clicked word is the user asking what
+	// something means, not following the author's reference. The app tidies it
+	// (trailing punctuation, footnote digits) and searches everywhere.
 	document.addEventListener("dblclick", function () {
 		var sel = String(document.getSelection() || "").trim();
-		if (sel) parent.postMessage({ t: "lookup", w: sel }, "*");
+		if (sel) parent.postMessage({ t: "pick", w: sel }, "*");
 	});
 })();

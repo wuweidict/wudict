@@ -316,3 +316,54 @@ That asymmetry is not the usual smell of a wrong rule, because the two cases hav
 `prefers-reduced-motion` downgrades both to an instant jump — mandatory for anything that moves the viewport without being asked.
 
 **Standing rule:** never move the viewport to express a state change. Move it only when the alternative is the user losing their place — and then by the smallest amount that fixes it.
+
+## D39 — `bword://#fragment` is an in-article jump, not a lookup — **ACCEPTED 2026-08-03**
+Reported against `eng-eng-stanford-ep.mdx`: links like `bword://#HistAI` did nothing. Dogfooded with `wudict lookup` — the Stanford Encyclopedia articles carry their own tables of contents as `<a href="bword://#HistAI">` pointing at an `id="HistAI"` **in the same article**, and the "Artificial Intelligence" entry alone has sixteen of them.
+
+`wordFromHref` strips the fragment and returns `""`, and both click handlers then did `preventDefault()` and stopped — the code even said so: *"bword://#frag carries no word: swallow the click"*. Swallowing was right as far as it went (searching for an empty word would be worse) but it treated a two-part address as if only the first part existed. **The fragment is the whole message.** A lookup-scheme link with no word is not a broken cross-reference; it is the article navigating itself.
+
+Both renderers needed it, and they need it differently. Shadow-DOM articles resolve the target through `a.getRootNode()` — a `ShadowRoot`, which has `getElementById` via `DocumentFragment` — and scroll directly. **Iframe articles cannot scroll themselves at all**: `renderFrame` sizes the iframe to its content, so its own document has nothing to scroll and `scrollIntoView` there is a no-op. `frame.js` therefore reports the target's offset and the page moves. That distinction is invisible until you try it, and this dictionary lands on the iframe path because its articles carry `<script>` (MathJax).
+
+`getElementById` rather than a `querySelector("#"+id)`: dictionary HTML is hand-authored and its ids routinely break the CSS identifier grammar (leading digits, dots, colons), so a selector would need escaping that `getElementById` makes unnecessary. Legacy `<a name>` is scanned only when that misses.
+
+Neither `scrollIntoView` nor `scroll-margin-top` can be used, because the correct resting place is below **two** things the target knows nothing about: the fixed bar and its section's sticky header (D37). One shared `revealAt(viewportTop, section)` measures both and scrolls the page, with `prefers-reduced-motion` honoured as in D38.
+
+**Known gap, deliberately not closed.** The same articles also emit `bword://Artificial Intelligence Notes#note-9` — a word *and* a fragment. Today the word is looked up correctly and the fragment ignored, so the link works but lands at the top of the target article. Honouring it means threading the fragment through `lookupWord` → `doSearch` → an asynchronous, streamed, possibly multi-dictionary render, and then locating the right rendered article. That is a different size of change; the reported failure was the dead link, and this one is merely imprecise.
+
+**Standing rule:** when a URL has parts, handle every part or say which one you dropped. A handler that silently keeps the first half of an address will look correct in code review and dead on screen.
+
+## D40 — A cross-reference is scoped to the dictionary it came from — **ACCEPTED 2026-08-03 (user-directed)**
+Every `bword://` / `entry://` / `d:` / `x:` link was searched across **all enabled dictionaries**. That is too wide and it is wrong about what the link means: an author writing `<a href="bword://The Turing Test">` inside their encyclopedia is pointing at **their own** entry. Answering with 40 dictionaries' takes on the phrase buries the one article that was actually referenced, and pays for 104 lookups nobody asked for.
+
+Measured against the real corpus before committing to the rule: in `eng-eng-stanford-ep`, `bword://The Turing Test` and `bword://Cognitive Science` each resolve to exactly one headword **in that same dictionary**. The premise holds.
+
+**Scoped, but never sticky.** The scope is a property of *this navigation*, not of the user's preferences, so it never touches the `#dict` selector — that control is the user's standing choice for words **they** type, and a link click silently rewriting it is precisely the "state changed and I don't remember doing it" failure D35 was decided against. It is a one-shot `scopeOnce`, consumed by the search that reads it, in the same idiom as `navRecord`.
+
+**Never a dead end.** If the source dictionary genuinely has no such entry, the search widens automatically, once, and says so under the results. The guard is `!anyShown`, not `!anyResults`: a dictionary that errored, or that lacks the index the current mode needs, has *not* said "no such word", and widening past it would discard its "enable substring search" offer.
+
+**The scope is visible where it applies.** A note under the results — not in the status line, which fades on a timer — names the dictionary and offers *Search all dictionaries* in one click. Scope describes what is on screen, so it lives and dies with it. Silently widening without a word would be indistinguishable from the link having been global all along, so the fallback says what it did too.
+
+**Shareable and reversible.** The URL gains `from=<id>` alongside `dict=`, so Back/Forward through a chain of cross-references reproduces each scoped view exactly, and a shared link shows the recipient what the sender saw — while `dict=` continues to mean the selector and nothing else.
+
+**Double-click stays global**, in both renderers. Selecting a word is the user asking what something *means*; following a link is the author saying where to *go*. Same destination type, opposite provenance, so they get opposite scopes.
+
+**Word-plus-fragment now works.** `bword://Artificial Intelligence Notes#note-9` looks up the headword in its own dictionary and then reveals `#note-9` inside the article it finds (verified: that headword exists in the same dictionary and does contain `id="note-9"`). Shadow-DOM articles are measured on the next frame; iframe articles receive the fragment through `frameDoc`'s `data-frag` and jump themselves — **after** reporting their height, never before, because the parent sizes the iframe from that message and a target beyond an unsized 90px frame would be clamped by a document that has not grown yet.
+
+**Standing rule:** a link's scope is a fact about where it was written, not about where the user happens to be looking. Carry the provenance with the click, and let it narrow the answer.
+
+## D41 — One reference parser; exact terms and picked prose are different inputs — **ACCEPTED 2026-08-03**
+Reported: clicking the footnote marker `<a href="bword://Artificial Intelligence Notes#note-1">` issued `?q=Artificial&dict=…` — the headword truncated at the first space and the fragment gone.
+
+**The proximate bug.** `lookupWord` began with `w.trim().split(/[;.,:{}()\[\]\s]/)[0].replace(/\d+$/,"")`. That line is *correct* for the caller it was written for — a double-clicked text selection, which is prose and arrives with trailing commas and footnote digits attached. It is *silent corruption* for the caller that was later pointed at the same function: an author's link target, which is an exact headword and is frequently several words long. Measured on the real article: **all 59** cross-reference targets in Stanford EP's "Artificial Intelligence" are multi-word, so every one of them was being truncated, and 72 fragments were being discarded.
+
+**The class of problem.** A cleaner that is right for one caller is data loss for another, and nothing in the signature said which kind of input it wanted. The fix is not a smarter regex — no regex can distinguish "prose the user swiped" from "a headword the author wrote" once both are bare strings. **It is two functions:** `searchFor(term, …)` uses its term verbatim; `lookupSelection(text)` tidies prose and then calls it. Every caller now states which it has.
+
+**The same shape, one layer up.** The href was parsed by *two* half-parsers (`wordFromHref`, `fragFromHref`) over the same string with different regexes, and callers re-derived the reference's KIND from the shape of the result — `null` meant "not a reference", `""` meant "fragment only", a leading `@` meant "sub-entry". Three meanings smuggled through one return value is what let a term reach the wrong cleaner in the first place. Replaced with one `parseRef(href)` returning `{kind, word, frag}` — `"lookup" | "anchor" | "sub"`, or `null` — parsed once, dispatched once, never re-derived. `frame.js` carries the mirror image, and the message it posts is now typed by provenance (`"ref"` = author's link, `"pick"` = user's selection) instead of leaving the app to infer it from whether a `dict` field happened to be present.
+
+**The first-principles point that governs all of it: `bword://Artificial Intelligence Notes#note-1` is not a URL.** The `//` promises an authority component, and an authority may not contain spaces — while headwords contain spaces, apostrophes, ampersands and question marks routinely. Anything that normalises an authority (`new URL()`, and most "helpful" URL utilities) mangles them. So the parse is by string position only, splitting at the first literal `#` **before** decoding, so a `%23` inside a headword stays part of the headword rather than being promoted to a delimiter. This is the same fact that already forced `rewrite.go` to convert `bword://@…` into the slash-less `bword:@…` server-side: `@` is the userinfo delimiter and URL normalisation eats everything before it.
+
+**Separation of concerns, as it now stands.** *Server, render time* (`rewrite.go`): rewrite resource references and defuse the `//@` spelling — the only normalisation that must happen before the HTML leaves. *Client, click time* (`parseRef`): one string → one typed reference. *Client, dispatch*: kind → action (inline a sub-entry, jump inside this article, or search). *Client, search layer* (`searchFor` / `lookupSelection`): exact terms verbatim, picked prose tidied first, provenance carried as scope (D40).
+
+Two gaps closed in passing: a plain `<a href="#foo">` now works inside shadow-DOM articles, where document fragment navigation cannot see shadow ids and the browser would previously have dirtied the page URL with a hash matching nothing (iframe articles are left alone — the browser does it natively there); and bare-word slob links are now scoped to their dictionary like every other author reference.
+
+**Standing rule:** a function that cleans its input must say whose input it is. When two callers disagree about whether a string is already exact, that disagreement belongs in the type — two functions, or a tagged value — never in a regex trying to guess.

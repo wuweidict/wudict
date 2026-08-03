@@ -188,6 +188,13 @@ html:not([data-theme]) .article.autodark:not(iframe){
 iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8px;
   padding:0;overflow:hidden}
 
+/* Under the results, not in the status line: the scope describes what is on
+   screen, so it must live and die with it rather than fade on a timer. */
+.scopenote{margin-top:var(--sp-2);padding:var(--sp-1) .62rem;font-size:12px;
+  color:var(--fg-faint);text-align:center}
+.scopenote .widen{color:var(--link);cursor:pointer;text-decoration:underline;
+  text-underline-offset:2px}
+.scopenote .widen:hover{color:var(--link-hover)}
 .empty{padding-top:var(--sp-5);text-align:center;color:var(--fg-faint)}
 .empty svg path{fill:var(--line)}
 /* the search bar is inert until at least one dictionary is usable */
@@ -1127,11 +1134,11 @@ mark{background:#fff0b3;color:#5c4a00;border-radius:2px;padding:0 .1em}
   filter:invert(1) hue-rotate(180deg)}
 </style>`;
 
-function renderArticle(dd,body,dictID){
+function renderArticle(dd,body,dictID,frag){
   // Script-bearing articles (custom tooltips, MathJax, …) need a real
   // document scope: shadow roots neither execute <script> nor let
   // scripts see their content. Render those in a sandboxed iframe.
-  if(/<script[\s>]/i.test(body))return renderFrame(dd,body,dictID);
+  if(/<script[\s>]/i.test(body))return renderFrame(dd,body,dictID,frag);
   // <dd> cannot host a shadow root; use an inner <div> as the sandbox
   const host=document.createElement("div");
   host.className="article";host.dataset.dict=dictID;
@@ -1146,17 +1153,17 @@ function renderArticle(dd,body,dictID){
 }
 
 let frameSeq=0;
-function renderFrame(dd,body,dictID){
+function renderFrame(dd,body,dictID,frag){
   const fid="f"+(++frameSeq);
   const ifr=document.createElement("iframe");
   ifr.className="article frame";ifr.dataset.dict=dictID;ifr.dataset.fid=fid;
   ifr.setAttribute("sandbox","allow-scripts allow-same-origin allow-popups");
   ifr.style.height="90px";
-  ifr.srcdoc=frameDoc(body,fid,themeIsDark(),dictID);
+  ifr.srcdoc=frameDoc(body,fid,themeIsDark(),dictID,frag);
   dd.appendChild(ifr);
   return null; // no shadow root: mark.js highlighting not applicable
 }
-function frameDoc(content,fid,dark,dictID){
+function frameDoc(content,fid,dark,dictID,frag){
   return '<!DOCTYPE html><html class="'+(dark?'dark':'')+'"><head><meta charset="utf-8">'+
     '<style>html{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.618;color:#1a1a1a;background:#fff;overflow-y:hidden}'+
     'body{margin:8px;word-break:break-word}img,video,svg{max-width:100%;height:auto}'+
@@ -1165,7 +1172,8 @@ function frameDoc(content,fid,dark,dictID){
     '.wudict-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid #e08600;background:rgba(224,134,0,.06);border-radius:0 6px 6px 0}'+
     '.wudict-sub-close{float:right;cursor:pointer;color:#999;font-size:12px;padding:0 .3em}'+
     '.wudict-sub-close:hover{color:#e08600}'+
-    '</style><script src="/assets/frame.js" data-fid="'+fid+'" data-dict="'+(dictID||"")+'"><\/script></head><body>'+content+'</body></html>';
+    '</style><script src="/assets/frame.js" data-fid="'+fid+'" data-dict="'+(dictID||"")+
+    '" data-frag="'+esc(frag||"").replace(/"/g,"&quot;")+'"><\/script></head><body>'+content+'</body></html>';
 }
 /* bridge messages from article iframes */
 addEventListener("message",e=>{
@@ -1173,8 +1181,16 @@ addEventListener("message",e=>{
   if(d.t==="h"&&d.fid){
     const f=document.querySelector('iframe[data-fid="'+CSS.escape(d.fid)+'"]');
     if(f)f.style.height=Math.min(Math.max((+d.h||0)+6,48),60000)+"px";
-  }else if(d.t==="lookup"&&d.w){
-    lookupWord(d.w);
+  }else if(d.t==="ref"&&d.w){
+    searchFor(d.w,{scope:d.dict,frag:d.frag}); // author's link: exact, scoped
+  }else if(d.t==="pick"&&d.w){
+    lookupSelection(d.w);                      // user's selection: tidied, global
+  }else if(d.t==="anchor"&&d.fid){
+    // an in-article jump inside a sandboxed iframe. The iframe is sized to its
+    // content and never scrolls itself, so the position it reports is relative
+    // to its own top and the PAGE is what has to move.
+    const f=document.querySelector('iframe[data-fid="'+CSS.escape(d.fid)+'"]');
+    if(f)revealAt(f.getBoundingClientRect().top+(+d.y||0),f.closest("details.dict"));
   }
 });
 
@@ -1222,6 +1238,35 @@ async function fetchStream(url,onMsg,signal){
   }
   buf=buf.trim();if(buf)onMsg(JSON.parse(buf));
 }
+function dictName(id){
+  const d=dicts.find(x=>x.id===id);
+  return d?dictLabel(d):id;
+}
+/* Says what was searched and offers the way out, placed under the results
+   rather than in the status line: the scope is a property of what is on
+   screen, so it should live and die with it instead of fading on a timer. */
+function scopeNote(id){
+  const div=document.createElement("div");
+  div.className="scopenote";
+  div.innerHTML=`Followed a link inside <b>${esc(dictName(id))}</b> — only that dictionary was searched. `+
+    `<span class="widen">Search all dictionaries</span>`;
+  return div;
+}
+/* Said once, after the automatic widening, so the user learns what the link
+   claimed and what actually happened — silently searching everything would
+   look identical to the link having been global all along. */
+function widenNote(id,q){
+  const div=document.createElement("div");
+  div.className="scopenote";
+  div.innerHTML=`“${esc(q)}” is not in <b>${esc(dictName(id))}</b>, `+
+    `where the link came from — all dictionaries were searched instead.`;
+  return div;
+}
+$("out").addEventListener("click",e=>{
+  if(!e.target.classList.contains("widen"))return;
+  navRecord="push"; // widening is a state worth having a Back button for
+  doSearch();       // no scopeOnce set: the search runs at the selector's scope
+});
 function highlight(roots,mode,q){
   if(!((mode==="contains"||mode==="fts")&&window.Mark))return;
   const rx=new RegExp(q.trim().split(/\s+/).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|"),"gi");
@@ -1256,12 +1301,24 @@ function renderSlot(box,h,mode,q,perDict){
   for(const r of h.results){
     const dt=document.createElement("dt");dt.textContent=r.Headword;
     const dd=document.createElement("dd");dd.dataset.dict=h.dict;
-    roots.push(renderArticle(dd,r.Body,h.dict));
+    roots.push(renderArticle(dd,r.Body,h.dict,
+      anchorOnce&&anchorOnce.dict===h.dict&&r===h.results[0]?anchorOnce.frag:""));
     dl.appendChild(dt);dl.appendChild(dd);
   }
   det.open=expandAll;
   det.appendChild(dl);box.appendChild(det);
   highlight(roots,mode,q);
+  // A `bword://Word#frag` link: now that the article is in the document, put
+  // the fragment on screen. Shadow-DOM articles can be measured immediately
+  // (next frame, once laid out); iframe ones jump themselves — frameDoc has
+  // already been handed the fragment below.
+  if(anchorOnce&&anchorOnce.dict===h.dict){
+    const frag=anchorOnce.frag;anchorOnce=null;
+    if(roots[0])requestAnimationFrame(()=>{
+      const el=anchorTarget(roots[0],frag);
+      if(el){det.open=true;revealAt(el.getBoundingClientRect().top,det)}
+    });
+  }
   return{shown:true,results:true};
 }
 
@@ -1269,7 +1326,11 @@ async function doSearch(ev){
   if(ev)ev.preventDefault();
   const q=$("q").value.trim();
   if(!q)return;
-  const mode=$("mode").value,dictSel=$("dict").value,seq=++searchSeq;
+  // consumed before the first await, so the history wrapper below can still
+  // read which scope was used
+  const scope=scopeOnce;scopeOnce=null;lastScope=scope;
+  const widened=widenedFrom;widenedFrom=null; // set by the fallback below
+  const mode=$("mode").value,dictSel=scope||$("dict").value,seq=++searchSeq;
   // abort the previous in-flight search so the server stops streaming
   // results nobody will render (superseded typing / mode change).
   if(searchAC)searchAC.abort();
@@ -1298,7 +1359,7 @@ async function doSearch(ev){
     dictParam=ids.join(",");perDict=5;
   }else{dictParam=dictSel;perDict=25}
   const out=$("out");
-  let boxes=[],openedIdx=null,anyShown=false;
+  let boxes=[],openedIdx=null,anyShown=false,anyResults=false;
   try{
     await fetchStream("/api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+encodeURIComponent(dictParam)+"&n="+perDict,msg=>{
       if(seq!==searchSeq)return; // superseded by a newer search
@@ -1310,6 +1371,7 @@ async function doSearch(ev){
         const box=boxes[msg.i];if(!box)return;
         const res=renderSlot(box,msg,mode,q,perDict);
         if(res.shown)anyShown=true;
+        if(res.results)anyResults=true;
         // auto-open the highest-preference (lowest index) dict with results,
         // even if a later-preference dict finished first. Skipped entirely
         // while expand-all is on: openedIdx must stay null, or a lower-index
@@ -1322,7 +1384,22 @@ async function doSearch(ev){
           }
         }
       }else if(msg.t==="end"){
+        // A cross-reference that its own dictionary cannot answer is not a
+        // dead end — widen once, and say that is what happened. The re-run
+        // carries no scope, so it cannot recurse.
+        // !anyShown, not !anyResults: a dictionary that reported an error, or
+        // that lacks the index this mode needs, has not said "no such word" —
+        // widening would throw away its "enable substring search" offer.
+        if(scope&&!anyShown){
+          anchorOnce=null;   // the fragment addressed an article we did not find
+          widenedFrom=scope; // reported on the next search's end, not here:
+          navRecord="replace";// the re-run's own "Searching…" would overwrite it
+          doSearch();         // and the URL must lose its now-false `from`
+          return;
+        }
         if(!anyShown)out.innerHTML=`<div class="empty">${noResultsSVG}<p>No results for “${esc(q)}”</p></div>`;
+        if(scope&&anyShown)out.appendChild(scopeNote(scope));
+        else if(widened)out.appendChild(widenNote(widened,q));
         // Searched a list that is still filling up: say so rather than let an
         // incomplete answer look complete, and re-run when the rest lands.
         if(phase==="partial"){
@@ -1362,11 +1439,39 @@ document.addEventListener("keydown",e=>{
 });
 
 /* clicks inside shadow roots arrive via composedPath */
-function lookupWord(w){
-  $("q").value=w.trim().split(/[;.,:{}()\[\]\s]/)[0].replace(/\d+$/,"");
+/* ── Starting a search from something other than the search box ───────
+   TWO callers, opposite requirements, and conflating them was a real bug:
+
+   searchFor()       takes a term that is ALREADY EXACT — an author's link
+                     target, a restored URL. It is used verbatim.
+   lookupSelection() takes PROSE the user picked out of an article, which may
+                     carry a trailing comma, a footnote digit, or a whole
+                     clause, and must be tidied into something lookup-shaped.
+
+   These used to be one function carrying lookupSelection's tidying, so
+   `bword://Artificial Intelligence Notes#note-1` was cut at the first space
+   and searched for "Artificial". A cleaner that is right for one caller is
+   silent corruption for the other; the fix is two functions, not a smarter
+   regex. */
+function searchFor(term,opts){
+  const t=String(term||"").trim();
+  if(!t)return;
+  $("q").value=t;                       // verbatim: no trimming, ever
   if($("mode").value==="fts")$("mode").value="prefix";
-  navRecord="push"; // following a cross-reference IS navigation — Back must return here
+  const scope=opts?.scope||null,frag=opts?.frag||"";
+  scopeOnce=scope;
+  // the fragment addresses a place in the SCOPED article; renderSlot matches
+  // on the dictionary id, so without a scope there is nothing to match
+  anchorOnce=frag&&scope?{dict:scope,frag}:null;
+  navRecord=opts?.record||"push"; // following a reference IS navigation
   doSearch();
+}
+/* Prose the user selected: first run before punctuation or space, minus a
+   trailing footnote digit. Global by design — picking a word asks what it
+   MEANS; following a link asks where the author pointed (D40). */
+function lookupSelection(text){
+  const w=String(text||"").trim().split(/[;.,:{}()\[\]\s]/)[0].replace(/\d+$/,"");
+  if(w)searchFor(w);
 }
 /* One reused <audio>, kept referenced so the browser can't garbage-collect
    it mid-load. .spx audio is transcoded server-side (speexdec), so the first
@@ -1381,25 +1486,66 @@ function playAudio(url){
   const p=audioEl.play();
   if(p&&p.catch)p.catch(err=>{console.warn("audio play failed:",url,err);setStatus("⚠ could not play audio")});
 }
-/* Dictionary cross-reference links. Accepted forms, all equivalent:
+/* ── Dictionary references ────────────────────────────────────────────
+   `bword://Artificial Intelligence Notes#note-1` IS NOT A URL, and must never
+   be handed to one. The `//` promises an authority component, and an authority
+   may not contain spaces — while headwords contain spaces, apostrophes,
+   ampersands and question marks all day long. `new URL()` (or anything that
+   normalises an authority) mangles them silently. So this parses by string
+   position and nothing else. It is also why the server rewrites `bword://@…`
+   to the slash-less `bword:@…` before it ever reaches us: "@" is the userinfo
+   delimiter, and URL normalisation eats everything before it (rewrite.go).
+
+   Accepted forms, all equivalent:
      bword://word   bword:word   entry://word   entry:word   d:word   x:word
    The slash-less spelling is what GoldenDict also accepts and several MDX
-   dictionaries emit; without it here such a link was inert (it looks like a
-   scheme, so the bare-word fallback below skips it too). A trailing #fragment
-   is dropped — it addresses a place inside the target article, never part of
-   the headword — before decoding, so an encoded %23 in a real headword is
-   preserved. Returns null when the href is not a lookup link at all, "" when
-   it is one but names no word.
-   Sub-entry links ("@name", D26) reach us as `entry:@name`, WITHOUT the
-   slashes: RewriteEntryHTML strips them server-side because "//" makes the
-   rest an authority, where "@" is the userinfo delimiter and is dropped by URL
-   normalization — see subEntryRef in rewrite.go. Do not "restore" the slashes.
-   NOTE: frame.js carries the same logic for articles rendered inside the
-   sandboxed iframe; keep the two in step. */
-function wordFromHref(href){
-  if(!/^(bword|entry):(\/\/)?/i.test(href)&&!/^[dx]:/i.test(href))return null;
-  const raw=href.replace(/^(bword|entry):(\/\/)?/i,"").replace(/^[dx]:/i,"").replace(/#.*$/,"");
-  try{return decodeURIComponent(raw).trim()}catch(_){return raw.trim()}
+   dictionaries emit.
+
+   Parsed ONCE, here, into a structured reference. Everything downstream reads
+   its fields; nothing re-parses an href and nothing re-cleans a term. The
+   previous shape — two half-parsers (`wordFromHref`, `fragFromHref`) plus
+   callers re-deriving the KIND from the shape of the word (null? empty?
+   leading "@"?) — is what let a term escape into the wrong cleaner.
+
+   kind:
+     "lookup"  a headword, optionally with a #fragment inside the target
+     "anchor"  no headword: a #fragment in the article being read — the
+               article's own table of contents, not a cross-reference
+     "sub"     "@name", an article's own expandable section stored as a
+               headword (MDict convention, D26) — inlined, never searched
+   null when the href is not a reference at all. */
+const REF_SCHEME=/^(?:(?:bword|entry):(?:\/\/)?|[dx]:)/i;
+function decodeRef(s){try{return decodeURIComponent(s)}catch(_){return s}}
+function parseRef(href){
+  const m=REF_SCHEME.exec(href||"");
+  if(!m)return null;
+  // split BEFORE decoding, at the first literal "#": a "#" that is part of a
+  // headword has to arrive percent-encoded, and decoding first would promote
+  // it to a delimiter
+  let rest=href.slice(m[0].length),frag="";
+  const h=rest.indexOf("#");
+  if(h>=0){frag=rest.slice(h+1);rest=rest.slice(0,h)}
+  const word=decodeRef(rest).trim();
+  frag=decodeRef(frag);
+  if(word.charAt(0)==="@"&&word.length>1)return{kind:"sub",word,frag};
+  return{kind:word?"lookup":"anchor",word,frag};
+}
+function anchorTarget(root,frag){
+  if(!frag||!root)return null;
+  if(root.getElementById){
+    const el=root.getElementById(frag);
+    if(el)return el;
+  }
+  for(const a of root.querySelectorAll("a[name]"))if(a.getAttribute("name")===frag)return a;
+  return null;
+}
+/* Scroll so a point at `viewportTop` clears the fixed bar AND its section's
+   sticky header (D37), which scrollIntoView cannot know about. Shared by the
+   shadow-DOM articles and the iframe ones, which report a position instead. */
+function revealAt(viewportTop,det){
+  const head=det?.querySelector(":scope>summary")?.offsetHeight||0;
+  scrollTo({top:Math.max(0,viewportTop+scrollY-$("bar").offsetHeight-head-8),
+    behavior:lessMotion.matches?"auto":"smooth"});
 }
 document.addEventListener("click",e=>{
   const path=e.composedPath();
@@ -1408,22 +1554,35 @@ document.addEventListener("click",e=>{
   const dd=path.find(el=>el.classList?.contains("article"));
   const dictID=dd?.dataset.dict;
   const href=a.getAttribute("href")||"";
-  const w=wordFromHref(href);
-  if(w!==null){
+  // one parse, one dispatch — the kind is read, never re-derived
+  const ref=parseRef(href);
+  if(ref){
     e.preventDefault();
-    // "@name" targets are an article's own expandable sections stored as
-    // headwords (MDict convention) — inline them here rather than searching
-    // for them, which would replace the article with a fragment of itself.
-    if(w.charAt(0)==="@"&&w.length>1){toggleSub(a,w,dictID);return}
-    if(w)lookupWord(w); // "bword://#frag" carries no word: swallow the click
+    if(ref.kind==="sub"){toggleSub(a,ref.word,dictID);return}
+    if(ref.kind==="lookup"){searchFor(ref.word,{scope:dictID,frag:ref.frag});return}
+    jumpInArticle(a,dd,ref.frag); // "anchor"
   }else if(/\.(mp3|ogg|wav|spx|m4a)(\?|#|$)/i.test(href)){
     e.preventDefault();playAudio(href.startsWith("/res/")||/^https?:/i.test(href)?href:resURL(dictID,href));
   }else if(a.querySelector("img")&&href.startsWith("/res/")){
     e.preventDefault();playAudio(href);
+  }else if(href.startsWith("#")&&dd){
+    // A PLAIN in-page anchor. Inside an iframe the browser handles this
+    // natively, so frame.js leaves it alone; inside a shadow root it cannot —
+    // document fragment navigation does not see shadow ids — and the browser
+    // would only dirty the page URL with a hash that matches nothing.
+    e.preventDefault();jumpInArticle(a,dd,decodeRef(href.slice(1)));
   }else if(href&&!/^([a-z][\w+.-]*:|\/|#|res\/|assets\/)/i.test(href)){
-    e.preventDefault();lookupWord(decodeURIComponent(href)); // bare-word link (slob)
+    // bare-word link (slob): also an author's reference, so also scoped
+    e.preventDefault();searchFor(decodeRef(href),{scope:dictID});
   }
 });
+/* A fragment naming a place in the article being read. `a.getRootNode()` lands
+   on the shadow root when the link lives inside one; `dd` is the article host,
+   which is in the light DOM and can find the section to offset against. */
+function jumpInArticle(a,dd,frag){
+  const el=anchorTarget(a.getRootNode(),frag);
+  if(el)revealAt(el.getBoundingClientRect().top,dd?.closest("details.dict"));
+}
 /* Sub-entry inlining for shadow-DOM (script-free) articles — the iframe path
    does the same in frame.js. Inserted next to the link, toggled off by a second
    click; nothing touches the search box, the URL or history. */
@@ -1454,7 +1613,7 @@ document.addEventListener("dblclick",e=>{
   const root=path.find(el=>el instanceof ShadowRoot);
   let sel="";
   try{sel=(root&&root.getSelection?root.getSelection():document.getSelection()).toString().trim()}catch(_){ }
-  if(sel)lookupWord(sel);
+  if(sel)lookupSelection(sel);
 });
 
 /* audio inside <object type="audio/…"> (DSL) → click to play */
@@ -1494,12 +1653,25 @@ addEventListener("scroll",()=>{
      following a link  → pushState    (one entry per entry visited)
      Back/Forward      → restore from the URL, recording nothing */
 let navRecord="replace"; // how the NEXT doSearch should record itself
+/* One-shot state consumed by the next doSearch, same idiom as navRecord.
+
+   scopeOnce is the dictionary a cross-reference came FROM. A `bword://` link
+   inside an article is the dictionary talking to itself — the author wrote it
+   pointing at their own entry — so searching all 105 dictionaries for it is
+   both wasteful and wrong: it buries the intended article among namesakes from
+   dictionaries that were never consulted. Scoped, not sticky: it never touches
+   the #dict selector, which is the user's standing preference for the words
+   THEY type, and it is spent by the search that reads it.
+
+   anchorOnce is the #fragment such a link carried, revealed once the target
+   article is on screen. */
+let scopeOnce=null,anchorOnce=null,lastScope=null,widenedFrom=null;
 function applyURL(){
   const p=new URLSearchParams(location.search);
   if(p.get("theme")){localStorage.setItem("wudict_theme",p.get("theme"));applyTheme(p.get("theme"))}
   if(p.get("mode"))$("mode").value=p.get("mode");
   if(p.get("dict"))$("dict").value=p.get("dict");
-  if(p.get("q")){$("q").value=p.get("q");doSearch()}
+  if(p.get("q")){$("q").value=p.get("q");scopeOnce=p.get("from")||null;doSearch()}
 }
 const _doSearch=doSearch;
 doSearch=function(ev){
@@ -1508,7 +1680,11 @@ doSearch=function(ev){
   const r=_doSearch(ev);
   const q=$("q").value.trim();
   if(q&&record!=="none"){
-    const url="?"+new URLSearchParams({q,mode:$("mode").value,dict:$("dict").value}).toString();
+    const params={q,mode:$("mode").value,dict:$("dict").value};
+    // `from` is the one-shot cross-reference scope; `dict` stays the user's
+    // own selector, so restoring a link-followed view never rewrites it
+    if(lastScope)params.from=lastScope;
+    const url="?"+new URLSearchParams(params).toString();
     // clicking the same word twice must not stack identical entries
     if(record==="push"&&url!==location.search)history.pushState(null,"",url);
     else history.replaceState(null,"",url);
@@ -1532,6 +1708,7 @@ window.addEventListener("popstate",()=>{
     return;
   }
   navRecord="none";
+  scopeOnce=p.get("from")||null; // a link-followed view was scoped; restore that
   doSearch();
 });
 $("frm").removeEventListener("submit",_doSearch);
