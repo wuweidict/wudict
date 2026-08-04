@@ -182,15 +182,12 @@ func htmlEscape(s string) string {
 func fold(s string) string { return dict.Fold(s) }
 
 func (d *Dict) Keywords(offset, n int) []string {
-	if offset < 0 {
-		offset = 0
-	}
-	if offset >= len(d.c.refs) {
+	lo, hi, ok := dict.KeywordRange(len(d.c.refs), offset, n)
+	if !ok {
 		return nil
 	}
-	end := min(offset+n, len(d.c.refs))
-	out := make([]string, 0, end-offset)
-	for _, r := range d.c.refs[offset:end] {
+	out := make([]string, 0, hi-lo)
+	for _, r := range d.c.refs[lo:hi] {
 		out = append(out, r.key)
 	}
 	return out
@@ -199,8 +196,17 @@ func (d *Dict) Keywords(offset, n int) []string {
 // Resource serves any blob by its ref key (slob stores resources as
 // ordinary refs with non-article content types).
 func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
+	// ensureExact/ensureFold, not a bare map read. Both indexes are built
+	// lazily on first use, and this read used to assume some earlier lookup
+	// had already triggered that — so on a Dict opened only to serve files it
+	// consulted two nil maps and reported every resource missing. That is the
+	// normal case for a PREPARED dictionary: searches are answered from
+	// text.db, and the slob is reopened solely as the resource fallback
+	// (registry.go's upgraded.src), where no lookup ever runs.
+	d.ensureExact()
 	idxs := d.exactIdx[name]
 	if len(idxs) == 0 {
+		d.ensureFold()
 		idxs = d.foldIdx[fold(name)]
 	}
 	if len(idxs) == 0 {

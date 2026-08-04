@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/legbehindneck/wudict/internal/htmlref"
 )
 
 // Media is one opened `media.db` (SPEC §3): binary resources
@@ -67,9 +68,13 @@ func (m *Media) Resource(name string) (io.ReadCloser, string, error) {
 	return io.NopCloser(bytes.NewReader(data)), mime, nil
 }
 
-// assetRef matches a resource reference in article HTML. Quoted forms only:
-// unquoted attributes are rare in dictionary markup and would drag in noise.
-var assetRef = regexp.MustCompile(`(?i)(?:href|src|data|poster)\s*=\s*["']([^"']+)["']`)
+// References are found with the shared HTML tokenizer (internal/htmlref), not
+// a pattern over the markup. The regex this replaced accepted quoted values
+// only — its own comment claimed "unquoted attributes are rare in dictionary
+// markup", which is simply untrue: OALD10 writes `href=plaintiff__gb_1.ogg"`
+// on every pronunciation link, and every such asset was silently left out of
+// the pack. It also matched inside <script> strings and comments, packing
+// files no article ever loads.
 
 // ReferencedAssets returns the relative resource names an already-prepared
 // dictionary's articles refer to. Packing uses it to include files that live
@@ -93,6 +98,8 @@ func ReferencedAssets(textDB string) ([]string, error) {
 	}
 	defer rows.Close()
 	const maxDistinct = 20000 // a pathological article must not blow up memory
+	// A collector: Refs walks every reference site and rewrites nothing.
+	var walker htmlref.Rewriter
 	seen := map[string]bool{}
 	var out []string
 	for rows.Next() {
@@ -100,8 +107,8 @@ func ReferencedAssets(textDB string) ([]string, error) {
 		if err := rows.Scan(&raw); err != nil {
 			return out, err
 		}
-		for _, m := range assetRef.FindAllStringSubmatch(decodeBody(raw), -1) {
-			name := strings.TrimSpace(m[1])
+		for _, ref := range walker.Refs(decodeBody(raw)) {
+			name := ref.URL
 			if !isRelativeAsset(name) || seen[name] {
 				continue
 			}

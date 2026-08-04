@@ -114,16 +114,25 @@ func New(reg *Registry) *Server {
 	// edited, not just where they are first chosen
 	s.mux.HandleFunc("GET /setup", s.handleSetupPage)
 	s.mux.HandleFunc("GET /res/", s.handleResource)
-	s.mux.HandleFunc("GET /assets/mark.min.js", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=604800")
-		_, _ = w.Write(markJS)
-	})
-	s.mux.HandleFunc("GET /assets/frame.js", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=604800")
-		_, _ = w.Write(frameJS)
-	})
+	// Content-addressed: index.html asks for these with ?v=<hash of the file>,
+	// so the URL changes whenever the file does and a week-long cache is safe.
+	// It was NOT safe before. Both scripts are embedded in the same binary as
+	// index.html and are versioned with it, but the browser cached them
+	// SEPARATELY — index.html fresh from "/", frame.js up to a week stale —
+	// so any change to the protocol between the two broke silently and only
+	// for dictionaries rendered in an iframe. D41 renamed frame.js's lookup
+	// message from "lookup" to "ref"/"pick"; a cached frame.js kept posting
+	// the old name to an index.html that no longer listened for it, and every
+	// entry:// link in a script-bearing dictionary stopped responding.
+	serveScript := func(body []byte) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+			w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
+			_, _ = w.Write(body)
+		}
+	}
+	s.mux.HandleFunc("GET /assets/mark.min.js", serveScript(markJS))
+	s.mux.HandleFunc("GET /assets/frame.js", serveScript(frameJS))
 	// SVG favicon, plus a /favicon.ico route so browsers that fetch the
 	// well-known path by default get the same mark instead of a 404.
 	serveFavicon := func(w http.ResponseWriter, r *http.Request) {
@@ -183,6 +192,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The page is the only thing that names the asset hashes, so it must never
+	// be served from cache: a stale index.html would ask for a stale script by
+	// its old hash and put the two out of step again.
+	w.Header().Set("Cache-Control", "no-cache")
 	// first-run: no dictionaries yet → serve the setup page instead
 	if s.reg.Count() == 0 {
 		_, _ = io.WriteString(w, setupPage(s.reg.Dirs(), 0))
@@ -198,7 +211,10 @@ func (s *Server) page() []byte {
 		if v == "" {
 			v = "dev"
 		}
-		s.indexPage = []byte(strings.ReplaceAll(string(indexHTML), "{{VERSION}}", v))
+		page := strings.ReplaceAll(string(indexHTML), "{{VERSION}}", v)
+		page = strings.ReplaceAll(page, "{{FRAMEJS}}", assetTag(frameJS))
+		page = strings.ReplaceAll(page, "{{MARKJS}}", assetTag(markJS))
+		s.indexPage = []byte(page)
 	})
 	return s.indexPage
 }
@@ -1113,4 +1129,14 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		Entries: m.EntryCount, Caps: d.Caps(),
 		DBPath: dbPathOf(e),
 	})
+}
+
+// assetTag is a short content hash, used as the ?v= of an embedded script so
+// its URL changes exactly when its bytes do. Content addressing rather than
+// the build version: a developer rebuild keeps Version at "dev", which would
+// leave a changed script behind a week-long cache under an unchanged URL —
+// the precise failure this replaces.
+func assetTag(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:8]
 }

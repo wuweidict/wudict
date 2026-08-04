@@ -380,15 +380,12 @@ func (d *Dict) article(i int) (string, error) {
 }
 
 func (d *Dict) Keywords(offset, n int) []string {
-	if offset < 0 {
-		offset = 0
-	}
-	if offset >= len(d.entries) {
+	lo, hi, ok := dict.KeywordRange(len(d.entries), offset, n)
+	if !ok {
 		return nil
 	}
-	end := min(offset+n, len(d.entries))
-	out := make([]string, 0, end-offset)
-	for _, e := range d.entries[offset:end] {
+	out := make([]string, 0, hi-lo)
+	for _, e := range d.entries[lo:hi] {
 		out = append(out, e.word)
 	}
 	return out

@@ -367,3 +367,85 @@ Reported: clicking the footnote marker `<a href="bword://Artificial Intelligence
 Two gaps closed in passing: a plain `<a href="#foo">` now works inside shadow-DOM articles, where document fragment navigation cannot see shadow ids and the browser would previously have dirtied the page URL with a hash matching nothing (iframe articles are left alone — the browser does it natively there); and bare-word slob links are now scoped to their dictionary like every other author reference.
 
 **Standing rule:** a function that cleans its input must say whose input it is. When two callers disagree about whether a string is already exact, that disagreement belongs in the type — two functions, or a tagged value — never in a regex trying to guess.
+
+## D42 — `Keywords` has one stated contract, resolved in one place — **ACCEPTED 2026-08-04**
+`wudict keys -n -1` panicked in `makeslice: cap out of range`. The panic is the symptom; the defect is that `Dictionary.Keywords(offset, n)` was documented as *"returns up to n headwords starting at offset"* and said nothing about `n <= 0`, a negative offset, or an offset past the end. Four implementations had drifted into **three different readings**:
+
+- mdx / slob / stardict computed `end := min(offset+n, len(entries))`, so `n = -1` produced `end = -1` and `make([]string, 0, -1)` — the panic. A large `n` would have overflowed the same sum the other way.
+- store ran `clamp(n)`, which maps `n <= 0` to `maxLimit` — so "no limit" silently meant **500**, and every browse was capped at 500 whatever was asked for. `maxLimit` bounds HTTP *search* results (FTS-audit #7); `Keywords` is not reachable over HTTP at all, and `cmdKeys` is its only caller.
+- the interface comment implied none of the above.
+
+**The contract is now written down** — `n <= 0` means no limit, `offset < 0` counts as 0, an offset past the end returns nil — and, more usefully, it is **resolved in one function** rather than restated at each backend. `dict.KeywordRange(total, offset, n) (lo, hi, ok)` is the only place that arithmetic exists, so a fifth backend cannot invent a fifth reading. It bounds against the *remaining* count (`n < total-offset`) instead of computing `offset+n`, which is precisely the overflow that produced the panic.
+
+**`wudict keys` now lists everything unless asked otherwise** (user-directed). The old default of `-n 50` was a silent truncation of a command whose entire purpose is to be piped into `grep`, `wc` or `sort`: it lied about small dictionaries and quietly cut off every large one, with nothing on screen to say so. Output is buffered — a large dictionary is over a million lines and an unbuffered `fmt.Println` is one write syscall each — and a write error (`| head` closing the pipe) ends the dump rather than crashing.
+
+**Standing rule:** an interface method that takes a limit must say what a non-positive limit means. If it does not, every implementer answers differently, and the disagreement surfaces as a panic in whichever one the user happens to reach first.
+
+## D43 — Article HTML is parsed, not pattern-matched — **ACCEPTED 2026-08-04**
+Reported: in OALD10, the pronunciation link resolved to `http://localhost:6888/plaintiff__gb_1.ogg%22`. Four defects, none of them where the symptom appeared.
+
+### The markup
+
+```html
+<a onclick="new Audio(this.href).play()" href=plaintiff__gb_1.ogg" class="sound">
+```
+
+**The opening quote is missing.** Every browser resolves that through the WHATWG tokenizer's *attribute value (unquoted)* state, which ends the value at whitespace and keeps the stray quote — so the value really is `plaintiff__gb_1.ogg"`, and `this.href` really does resolve against the page origin. The browser was right; we never saw the attribute at all.
+
+### RC1 — markup matched with regular expressions
+
+`attrRef` was `\b(src|href|data|poster)=(?:"([^"]+)"|'([^']+)')`: **it requires a quoted value.** An unquoted one — legal HTML, and what this dictionary writes — does not match, so the reference was left untouched and escaped to the page root. `store/media.go` carried a second, weaker copy of the same pattern, whose comment asserted that "unquoted attributes are rare in dictionary markup". They are not: OALD10 writes one on every pronunciation link, and every one of those assets was silently omitted from `pack media`.
+
+The failure is not a missing case, it is the technique. The same patterns also matched `src="…"` inside a `<script>` string literal, inside an HTML comment, and inside prose, and `<base\b[^>]*>` and `<style>(.*?)</style>` both mis-terminate on a `>` inside a quoted attribute. These are not edge cases to be patched one at a time; they are the difference between matching text and parsing a document.
+
+**Fixed by parsing.** New `internal/htmlref` walks articles with `golang.org/x/net/html`'s tokenizer — the WHATWG state machine browsers implement — so we see exactly what the browser sees. Every token type is accounted for in a documented table, including the two that most needed distinguishing: text inside `<style>` is CSS and gets rewritten, text inside `<script>` is never touched. Untouched elements are emitted as their **original bytes**, so quoting, attribute order, case and whitespace all survive; only an element with a changed value is re-serialised. Both call sites now share it.
+
+### RC2 — the classifier was element-blind
+
+A pattern matching `href="…"` cannot know what element it sits on, so every relative `href` became `/res/{dict}/…` — including `<a href="defendant">`, which is a *headword* in a slob dictionary. Cross-references were being turned into resource fetches that could only 404, and D41's bare-word link handling could never fire because the server had already rewritten the href out of its reach.
+
+`href` is now a resource only where a browser actually **fetches** one — `<link>`, SVG `<image>`, `<use>` — and anywhere else (including `<span class="xr-g" href="defendant_e">`, which is how OALD10 spells a cross-reference) only when it unmistakably names a file. That last line is drawn by `dict.IsAssetName`: `defendant` and `defendant__gb_1.ogg` differ by extension and nothing else. It is an allowlist because the fetching elements are a short closed set, while the elements a dictionary might hang its own `href` on are not.
+
+### RC3 — a correctly parsed value can still be unusable
+
+Parsing gives `plaintiff__gb_1.ogg"`, which resolves to nothing. `htmlref.Clean` strips it, and the justification is about URLs rather than about HTML quoting (which the tokenizer does not report): **RFC 3986 excludes `"`, `'` and a backtick from every component of a URI** — they must be percent-encoded, so a raw one is malformed however it arrived. The tokenizer agrees from the other side, raising *unexpected-character-in-unquoted-attribute-value* for exactly those characters. Only a **trailing** one is stripped; a leading quote is a different malformation, and removing it could change which file is named rather than restore it.
+
+### RC4 — a lazily-built index read without being built
+
+Independent, and it made every one of the above invisible to verify: `slob.Resource` read `d.exactIdx` and `d.foldIdx` **without calling `ensureExact`/`ensureFold`**, assuming some earlier lookup had triggered them. For a *prepared* dictionary that never happens — searches are answered from `text.db` and the slob is reopened solely as the resource fallback (`upgraded.src`), where no lookup runs. So **every resource in every prepared, unpacked slob dictionary was 404**, and `wudict res` never worked at all.
+
+**Standing rule:** parse structured input with a parser for that structure. A regular expression over markup is not a shortcut to the same answer — it is a different, weaker answer that agrees with the parser only on well-formed input, and dictionary HTML is not well-formed. When the browser and your matcher disagree about what a document says, the browser is not wrong.
+
+## D44 — A schemeless `href` is a cross-reference, in both renderers — **ACCEPTED 2026-08-04**
+`<a class="Ref" href="defendant" title="defendant definition">` in OALD10 has no `entry://` prefix. It should still resolve, and `defendant` is a real key in that slob — verified against the file.
+
+Two things had to be true, and only one of them was. D43 stopped the server rewriting the href into `/res/{dict}/defendant` (a resource fetch that could only 404), so the reference now survives to the client intact. But **`frame.js` had no bare-word branch**: `index.html` gained one in D41 and its mirror never did, so inside a sandboxed iframe such a link fell through to the browser and navigated the frame to a relative URL under `about:srcdoc`, losing the article. That is exactly the wrong half to be missing — a script-bearing dictionary is precisely what gets rendered in an iframe, and OALD10 carries a `<script>`.
+
+Both dispatch chains now agree, checked by lifting each file's real parser and branch conditions into a harness and running the article's actual references through them: `defendant` and `@topic_law-and-justice?level=c2` (whose `?` is part of the key, not a query — also verified) become scoped lookups, `#relatedentries` an in-article jump, `/res/…ogg` audio, and real schemes are left to the browser.
+
+### Compared with GoldenDict-ng, whose sources were read for this
+
+GoldenDict reaches the same result by a different and rather elegant route: it serves the article page under its own `gdlookup://` scheme, so **a plain relative link inherits it by ordinary URL resolution** and becomes a lookup with no special-casing at all (`articleview.cc:1186`, *"Plain html links inherit gdlookup scheme"*). Its Aard backend additionally rewrites `<a href="X">` to `bword:X` up front (`aard.cc:350`). We arrive at the same place with an explicit branch, because our articles are served as fragments inside a shadow root or an `srcdoc` iframe, neither of which has a base URL we could hang that trick on.
+
+Where we deliberately do **not** follow it — each verified by running its regex against the real markup rather than read off the page:
+
+- **`https://` links become word lookups.** The guard is `[^#](?!ttp://)`, which excludes `http://` but not `https://` (`ttps:/` ≠ `ttp://`), so `<a href="https://example.com/x">` is rewritten to `bword:https://example.com/x`.
+- **Every `<a href>` becomes a lookup, including audio.** `<a href="plaintiff__gb_1.ogg">` becomes `bword:plaintiff__gb_1.ogg` — a search for the file name. We keep D43's test: on a non-fetching element an href is a resource only when it names an asset file.
+- **The same quoted-attribute assumption we removed in D43.** Its pattern requires `href="`, so OALD10's `href=plaintiff__gb_1.ogg"` is invisible to it too, and falls through to `gdlookup://` — another word lookup. GoldenDict does not play this dictionary's pronunciation audio either, by two independent paths.
+
+One remaining difference is a real choice rather than a defect: a reference like `l2:politics_and_society:law_and_justice?cefr=c2` looks like a URI scheme, so we leave it to the browser while GoldenDict looks it up. Its regex converts *everything*, which is what also produces the `https://` bug. The key does not exist in this dictionary, so nothing is lost today; treating unknown schemes as headwords would need an allowlist of the real ones, and there is no evidence yet that any dictionary depends on it.
+
+**Standing rule:** when a behaviour lives in two renderers, a fix to one is half a fix. `index.html` and `frame.js` implement the same contract for different sandboxes, and every branch added to one must be added to the other or explained in place as deliberately absent.
+
+## D45 — The page and its scripts are cached as one unit — **ACCEPTED 2026-08-04**
+Reported: in Merriam-Webster Collegiate 2015, `<a href="entry://complainant">` did nothing. The dictionary is not defective — `complainant` and `suer` are both real headwords in it, and the server serves the article with the `entry://` links intact. The article was correct, the client was not, and the reason was neither of them.
+
+**Two halves of one protocol, cached independently.** `index.html` is served fresh from `/`, while `/assets/frame.js` was served with `Cache-Control: max-age=604800` at a **fixed URL** — up to a week stale. They ship in the same binary and are versioned together, so nothing in the build could tell them apart; only the browser could. D41 renamed the message frame.js posts for a cross-reference from `{t:"lookup"}` to `{t:"ref"}`/`{t:"pick"}`, and a cached frame.js went on posting a name the new index.html no longer listened for. Every `entry://` link went nowhere.
+
+The failure is precisely shaped by which renderer a dictionary lands in: shadow-DOM articles never load frame.js and kept working, so the symptom appeared only in **script-bearing dictionaries** — Merriam-Webster carries one — which reads as "this dictionary is broken" rather than "your cache is stale". That is what makes this class worth fixing structurally instead of by telling the user to hard-reload.
+
+**Content addressing.** The page now requests `/assets/frame.js?v=<8 hex of sha256(frame.js)>`, and the same for mark.min.js, so the URL changes exactly when the bytes do. The week-long cache becomes correct rather than dangerous, and gains `immutable`. Deliberately **not** the build version: a developer rebuild leaves `Version` at `dev`, which would keep a changed script behind an unchanged URL — the very failure being replaced.
+
+`/` is now served `no-cache`. It is the only thing that names those hashes, so a heuristically-cached page would ask for a stale script by its old hash and put the two out of step again. Content addressing is only as good as the freshness of the document that does the addressing.
+
+**Standing rule:** two files that must agree must be *fetched* as one unit, not merely built as one. Shipping them in the same binary proves nothing about what the browser holds; give the dependent file a URL derived from its content, and make the file that names it revalidate.

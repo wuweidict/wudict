@@ -1108,3 +1108,29 @@ func TestStaleFoldDetectedOnOpen(t *testing.T) {
 		t.Error("a stale index stopped answering entirely")
 	}
 }
+
+// The prepared backend used to run every Keywords call through clamp(), which
+// capped it at maxLimit and turned "no limit" into 500. maxLimit bounds HTTP
+// SEARCH results (FTS-audit #7); Keywords is not reachable over HTTP.
+func TestKeywordsHonoursTheNoLimitContract(t *testing.T) {
+	s := testStore(t)
+	all := s.Keywords(0, 0)
+	if len(all) == 0 {
+		t.Fatal("no headwords at all")
+	}
+	if got := s.Keywords(0, -1); len(got) != len(all) {
+		t.Errorf("n=-1 returned %d headwords, want all %d", len(got), len(all))
+	}
+	if got := s.Keywords(0, 2); len(got) != 2 {
+		t.Errorf("n=2 returned %d headwords, want 2", len(got))
+	}
+	if got := s.Keywords(1, 0); len(got) != len(all)-1 {
+		t.Errorf("offset=1 returned %d, want %d", len(got), len(all)-1)
+	}
+	if got := s.Keywords(-5, 0); len(got) != len(all) {
+		t.Errorf("a negative offset must count as 0: got %d, want %d", len(got), len(all))
+	}
+	if got := s.Keywords(len(all)+10, 0); got != nil {
+		t.Errorf("an offset past the end must be nil, got %v", got)
+	}
+}

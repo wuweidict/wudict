@@ -294,15 +294,12 @@ func (d *Dict) render(e *gomdict.MDictKeywordEntry, seen map[string]bool) []stri
 }
 
 func (d *Dict) Keywords(offset, n int) []string {
-	if offset < 0 {
-		offset = 0
-	}
-	if offset >= len(d.entries) {
+	lo, hi, ok := dict.KeywordRange(len(d.entries), offset, n)
+	if !ok {
 		return nil
 	}
-	end := min(offset+n, len(d.entries))
-	out := make([]string, 0, end-offset)
-	for _, e := range d.entries[offset:end] {
+	out := make([]string, 0, hi-lo)
+	for _, e := range d.entries[lo:hi] {
 		out = append(out, e.KeyWord)
 	}
 	return out
@@ -332,18 +329,10 @@ func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
 	return io.NopCloser(bytes.NewReader(data)), mime.TypeByExtension(path.Ext(norm)), nil
 }
 
-// looseAssetExt is what may be served from beside the .mdx. An article is
-// third-party HTML: the traversal guard keeps a reference inside the
-// dictionary's own folder, and this keeps it to things a dictionary legitimately
-// loads, so a stray `href="secrets.env"` cannot turn the server into a file
-// browser for that directory.
-var looseAssetExt = map[string]bool{
-	".css": true, ".js": true, ".html": true, ".htm": true,
-	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
-	".svg": true, ".bmp": true, ".ico": true,
-	".mp3": true, ".ogg": true, ".wav": true, ".spx": true, ".m4a": true, ".opus": true,
-	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
-}
+// The allowlist of what may be served from beside the .mdx lives in
+// dict.IsAssetName: the article rewriter needs the same answer to tell a
+// pronunciation link from a cross-reference, and two copies of a security
+// allowlist is one copy too many.
 
 // looseFile serves a resource from the .mdx's own directory. The ORIGINAL name
 // is used, not the lower-cased index key: on a case-sensitive filesystem
@@ -353,7 +342,7 @@ func (d *Dict) looseFile(name string) (io.ReadCloser, string, error) {
 	if rel == "" || rel == "." {
 		return nil, "", dict.ErrNotFound
 	}
-	if !looseAssetExt[strings.ToLower(path.Ext(rel))] {
+	if !dict.IsAssetName(rel) {
 		return nil, "", dict.ErrNotFound
 	}
 	dir := filepath.Dir(d.meta.Path)

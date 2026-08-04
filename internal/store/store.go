@@ -388,7 +388,15 @@ func (s *Store) Keywords(offset, n int) []string {
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := s.db.Query("SELECT w FROM entry WHERE w NOT LIKE '@_%' ORDER BY id LIMIT ? OFFSET ?", clamp(n), offset)
+	// n<=0 is "no limit" (dict.Keywords), which SQLite spells as a negative
+	// LIMIT. This used to pass clamp(n), capping every browse at 500 and
+	// turning "no limit" into "500" — maxLimit exists to bound HTTP SEARCH
+	// results (FTS-audit #7), and Keywords is not reachable over HTTP at all.
+	limit := n
+	if limit <= 0 {
+		limit = -1
+	}
+	rows, err := s.db.Query("SELECT w FROM entry WHERE w NOT LIKE '@_%' ORDER BY id LIMIT ? OFFSET ?", limit, offset)
 	if err != nil {
 		return nil
 	}

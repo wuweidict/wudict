@@ -131,6 +131,23 @@
 			audioEl.src = href;
 			var p = audioEl.play();
 			if (p && p.catch) p.catch(function (err) { console.warn("audio play failed:", href, err); });
+		} else if (href && !/^([a-z][\w+.-]*:|\/|#|res\/|assets\/)/i.test(href)) {
+			// A bare relative href with no scheme is a cross-reference: OALD10
+			// writes <a class="Ref" href="defendant">, and Aard/slob articles
+			// generally address their own headwords this way. index.html has
+			// handled it since D41; this file did not, so for every
+			// script-bearing dictionary — which is exactly the ones rendered
+			// in here — those links navigated the iframe to a relative URL
+			// under about:srcdoc and lost the article.
+			//
+			// The exclusions mirror index.html's: a real scheme, a rooted
+			// path, an in-page anchor (the browser follows those natively
+			// here, which index.html cannot do inside a shadow root), and our
+			// own /res/ and /assets/ prefixes.
+			e.preventDefault();
+			e.stopPropagation();
+			if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+			parent.postMessage({ t: "ref", w: decodeRef(href), dict: dictID, frag: "" }, "*");
 		}
 	}, true);
 	// Sub-entry inlining. The iframe is same-origin (sandbox allows it), so it

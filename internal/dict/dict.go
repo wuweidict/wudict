@@ -58,7 +58,16 @@ type Dictionary interface {
 	// Prefix returns exact matches if any, else up to limit prefix matches.
 	Prefix(word string, limit int) ([]Result, error)
 
-	// Keywords returns up to n headwords starting at offset, for browsing.
+	// Keywords returns headwords starting at offset, for browsing.
+	//
+	//	n <= 0     no limit: everything from offset onwards
+	//	offset < 0 treated as 0
+	//	offset past the last headword: nil, never an error
+	//
+	// The three of those used to be unstated, and the implementations had
+	// drifted into disagreeing about all of them — two panicked on a negative
+	// n, a third silently capped every answer at 500. Use KeywordRange to
+	// resolve the window so a fourth backend cannot invent a fourth reading.
 	Keywords(offset, n int) []string
 
 	// Resource streams a binary resource (image/audio/css) by its
@@ -113,4 +122,27 @@ type Reader interface {
 	Meta() Meta
 	Next() (Entry, error)
 	Close() error
+}
+
+// KeywordRange resolves a browse window against a backend holding `total`
+// headwords, per the Keywords contract above: offset<0 counts as 0, n<=0 means
+// "to the end", and an offset past the end reports ok=false so the caller
+// returns nil rather than slicing.
+//
+// The bound is computed against the REMAINING count rather than as offset+n,
+// so a caller passing a huge n cannot overflow the sum into a negative slice
+// index — which is the same arithmetic that made `keys -n -1` panic in
+// makeslice.
+func KeywordRange(total, offset, n int) (lo, hi int, ok bool) {
+	if offset < 0 {
+		offset = 0
+	}
+	if total <= 0 || offset >= total {
+		return 0, 0, false
+	}
+	hi = total
+	if n > 0 && n < total-offset {
+		hi = offset + n
+	}
+	return offset, hi, true
 }

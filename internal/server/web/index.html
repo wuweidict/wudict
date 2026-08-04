@@ -11,7 +11,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>wudict</title>
 <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
-<script src="/assets/mark.min.js"></script>
+<script src="/assets/mark.min.js?v={{MARKJS}}"></script>
 <style>
 /* ── design tokens ─────────────────────────────────────────────────── */
 :root{
@@ -1172,7 +1172,7 @@ function frameDoc(content,fid,dark,dictID,frag){
     '.wudict-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid #e08600;background:rgba(224,134,0,.06);border-radius:0 6px 6px 0}'+
     '.wudict-sub-close{float:right;cursor:pointer;color:#999;font-size:12px;padding:0 .3em}'+
     '.wudict-sub-close:hover{color:#e08600}'+
-    '</style><script src="/assets/frame.js" data-fid="'+fid+'" data-dict="'+(dictID||"")+
+    '</style><script src="/assets/frame.js?v={{FRAMEJS}}" data-fid="'+fid+'" data-dict="'+(dictID||"")+
     '" data-frag="'+esc(frag||"").replace(/"/g,"&quot;")+'"><\/script></head><body>'+content+'</body></html>';
 }
 /* bridge messages from article iframes */

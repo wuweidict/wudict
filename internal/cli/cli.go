@@ -7,6 +7,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -74,7 +75,7 @@ COMMANDS
   prefix [-n max] <dictfile> <word>       Exact-else-prefix lookup (accent-insensitive); HTML to stdout
   contains [-n max] <dictfile> <word>     Substring headword search (FTS5 trigram; ingested dicts only)
   fts    [-n max] <dictfile> <query>      FTS5 full-text search (ingested dicts only)
-  keys   [-offset N] [-n max] <dictfile>  List headwords
+  keys   [-offset N] [-n count] <dictfile>  List headwords (all by default)
   res    [-o out] <dictfile> <name>       Extract one resource (e.g. "audio/word.mp3")
   ingest [-full] [-headwords] [-contains] <dictfile|folder…>
                                           Prepare a dictionary into the library:
@@ -365,21 +366,30 @@ func cmdQuery(mode string, args []string) error {
 
 func cmdKeys(args []string) error {
 	fs := flag.NewFlagSet("keys", flag.ExitOnError)
-	offset := fs.Int("offset", 0, "start offset")
-	n := fs.Int("n", 50, "max headwords")
+	offset := fs.Int("offset", 0, "start at this headword (0 = the first)")
+	// Every headword unless asked otherwise: this command exists to be piped
+	// into grep/wc/sort, and a silent default of 50 made it lie about small
+	// dictionaries and truncate every large one.
+	n := fs.Int("n", 0, "how many headwords (0 = all)")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: wudict keys [-offset N] [-n max] <dictfile>")
+		return fmt.Errorf("usage: wudict keys [-offset N] [-n count] <dictfile>")
 	}
 	d, err := dict.Open(fs.Arg(0))
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	for _, w := range d.Keywords(*offset, *n) {
-		fmt.Println(w)
+	// buffered: a large dictionary is over a million lines, and an unbuffered
+	// fmt.Println is one write syscall each
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+	for _, k := range d.Keywords(*offset, *n) {
+		if _, err := fmt.Fprintln(w, k); err != nil {
+			return err // a closed pipe (`| head`) ends the dump, not a panic
+		}
 	}
-	return nil
+	return w.Flush()
 }
 
 func cmdIngest(args []string) error {
