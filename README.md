@@ -166,6 +166,9 @@ wudict lookup ~/Dicts/Oxford.mdx word    # exact lookup, HTML to stdout
 wudict ingest ~/Dicts                    # index every dictionary in a folder
 wudict ingest -full ~/Dicts/Oxford.mdx   # index + pack media into the same folder
 wudict clean                             # list removable library items (-f deletes)
+wudict keys ~/Dicts/Oxford.mdx           # list headwords
+wudict keys ~/Dicts/Oxford.mdd           # list the files inside a resource archive
+wudict res ~/Dicts/Oxford.mdd audio/a.mp3   # …and pull one out
 ```
 
 ## Sharing dictionaries (one folder each)

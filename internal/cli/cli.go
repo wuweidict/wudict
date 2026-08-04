@@ -75,8 +75,13 @@ COMMANDS
   prefix [-n max] <dictfile> <word>       Exact-else-prefix lookup (accent-insensitive); HTML to stdout
   contains [-n max] <dictfile> <word>     Substring headword search (FTS5 trigram; ingested dicts only)
   fts    [-n max] <dictfile> <query>      FTS5 full-text search (ingested dicts only)
-  keys   [-offset N] [-n count] <dictfile>  List headwords (all by default)
-  res    [-o out] <dictfile> <name>       Extract one resource (e.g. "audio/word.mp3")
+  keys   [-offset N] [-n count] <dictfile>  List headwords (all by default).
+                                          On an .mdd, lists the files it holds —
+                                          the same key/value format, so the same
+                                          command. No .mdx needed.
+  res    [-o out] <dictfile> <name>       Extract one resource (e.g. "audio/word.mp3").
+                                          Takes an .mdd directly too; any name
+                                          that keys printed is one this accepts.
   ingest [-full] [-headwords] [-contains] <dictfile|folder…>
                                           Prepare a dictionary into the library:
                                           <db-dir>/<dictionary name>/text.db (+ info.txt).

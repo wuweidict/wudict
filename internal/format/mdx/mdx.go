@@ -37,6 +37,8 @@ import (
 
 func init() {
 	dict.RegisterFormat(".mdx", func(path string) (dict.Dictionary, error) { return Open(path) })
+	// Openable by name, never discovered: see dict.RegisterInspectable and MDD.
+	dict.RegisterInspectable(".mdd", func(path string) (dict.Dictionary, error) { return OpenMDD(path) })
 	dict.RegisterProber(".mdx", probe)
 }
 

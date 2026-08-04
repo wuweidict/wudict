@@ -41,9 +41,43 @@ func RegisterFileName(name string, fn opener) {
 	fileOpeners[strings.ToLower(name)] = fn
 }
 
-// openerFor resolves the opener for path: an exact base-name registration
-// first (bundle main files), then the longest matching suffix.
+// inspectOpeners are files wudict can OPEN by explicit path but must never
+// DISCOVER as dictionaries.
+//
+// Not everything readable is a dictionary. An .mdd is MDict's resource
+// container — the same key-block file format as an .mdx, holding file bytes
+// instead of articles — so `wudict keys x.mdd` and `wudict res x.mdd name`
+// are exactly as meaningful there as on an .mdx, and a user who has only the
+// .mdd must not be told to go and find an .mdx that may not exist. But a
+// folder scan must not turn every companion .mdd into a dictionary in the
+// panel: that is the same greedy registration the store package warns about,
+// where a bare ".db" key made every media.db sidecar open as a phantom
+// dictionary.
+var inspectOpeners = map[string]opener{}
+
+// RegisterInspectable wires an extension that Open accepts and Discover
+// ignores. See inspectOpeners.
+func RegisterInspectable(ext string, fn opener) {
+	inspectOpeners[strings.ToLower(ext)] = fn
+}
+
+// openerFor resolves the opener for an explicitly named path: an exact
+// base-name registration first (bundle main files), then the longest matching
+// dictionary suffix, and only then an inspect-only container — so a real
+// format always wins.
 func openerFor(path string) (opener, bool) {
+	if fn, ok := fileOpeners[strings.ToLower(filepath.Base(path))]; ok {
+		return fn, true
+	}
+	if fn, ok := matchKey(openers, path); ok {
+		return fn, true
+	}
+	return matchKey(inspectOpeners, path)
+}
+
+// discoverableFor is openerFor without the inspect-only containers: what a
+// folder scan is allowed to consider a dictionary.
+func discoverableFor(path string) (opener, bool) {
 	if fn, ok := fileOpeners[strings.ToLower(filepath.Base(path))]; ok {
 		return fn, true
 	}
@@ -315,7 +349,7 @@ func Discover(root string) ([]string, error) {
 			}
 			return nil
 		}
-		if _, ok := openerFor(p); ok {
+		if _, ok := discoverableFor(p); ok {
 			out = append(out, p)
 		}
 		return nil

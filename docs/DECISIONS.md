@@ -449,3 +449,18 @@ The failure is precisely shaped by which renderer a dictionary lands in: shadow-
 `/` is now served `no-cache`. It is the only thing that names those hashes, so a heuristically-cached page would ask for a stale script by its old hash and put the two out of step again. Content addressing is only as good as the freshness of the document that does the addressing.
 
 **Standing rule:** two files that must agree must be *fetched* as one unit, not merely built as one. Shipping them in the same binary proves nothing about what the browser holds; give the dependent file a URL derived from its content, and make the file that names it revalidate.
+
+## D46 — An `.mdd` is inspectable, not discoverable — **ACCEPTED 2026-08-04 (user-directed)**
+`wudict keys x.mdd` failed with "unsupported dictionary format". Two proposals were rejected before the right one, and the rejections are the useful part.
+
+**Rejected: `res -l`.** It changes the *output type* of a command. `res` emits the bytes of one resource and has `-o` to write them to a file; `res -l` would emit a list of names to stdout. Those are two operations wearing one name, and `-o out.ogg -l` would be meaningless with nothing in the flag set saying so.
+
+**Rejected: `keys -res <dict.mdx>`.** Better — the flag would select a collection rather than change what the command emits — but it fails on three counts, all pointed out by the user. It **assumes the .mdx exists**, which is not a contract we can offer: a user may hold only the resource file. It **conflates companions**: an .mdx may have `NAME.mdd`, `NAME.1.mdd`, `NAME.2.mdd`, and the union of all of them is not what naming one file asked for. And it is **one more syntax to memorise** for an operation the user already knows how to spell.
+
+**Accepted: `wudict keys x.mdd`, with no flag at all.** An .mdd is the *same key-block file format* as an .mdx, carrying file bytes where the articles would be — a key/value store in its own right. So `keys` enumerates it and `res` fetches from it, with the identical grammar, the identical `-offset`/`-n` semantics (D42), and no second spelling. This also matches **mdict-utils**, which people already know.
+
+**The mechanism this needed: openable is not the same as discoverable.** `dict.Open` and `dict.Discover` shared one registry, so registering `.mdd` as a format would have made every companion appear as a dictionary in the panel — the same greedy registration the store package already warns about, where a bare `.db` key made every `media.db` sidecar open as a phantom dictionary. `RegisterInspectable` splits the two: `openerFor` consults dictionary formats first and inspect-only containers last (so a real format always wins), while `discoverableFor` never sees them at all. Verified against the real folder: 39 `.mdd` files present, 0 discovered, 51 `.mdx` still found.
+
+**One contract worth stating: whatever `keys` prints, `res` accepts, unchanged.** MDD stores keys as `\path\name`; the listing normalises to the forward-slash, no-leading-separator form the rest of wudict uses, and keeps the **original case** (`audio/es/Argentina/…`) because lookup is case-insensitive. Round-tripping every printed name back through `Resource` is a test, not an assumption.
+
+**Standing rule:** when a user reaches for an existing verb on a new kind of file, the answer is usually to make the verb work — not to add a flag, and not to make them name a different file. A new spelling is only justified when the operation is genuinely different, and "enumerate the keys of a key/value container" is the same operation whatever the values happen to be.
