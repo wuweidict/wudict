@@ -271,7 +271,14 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 .pd .tag.on{color:var(--accent);border-color:var(--accent)}
 .act{color:var(--link);cursor:pointer;text-decoration:underline;
   text-underline-offset:2px;font-size:12px;margin-right:var(--sp-2)}
-.pd .path{color:var(--fg-faint);font-size:10.5px;word-break:break-all;cursor:pointer}
+/* A provenance row is a PATH plus optional annotations, held as separate
+   elements rather than composed into one sentence — the path carries what it
+   copies in data-full, so nothing downstream has to take a display string
+   apart again to find it (see D49). */
+.pd .prow{font-size:10.5px;color:var(--fg-faint);overflow-wrap:break-word}
+.pd .prow.sub{opacity:.8}
+.pd .pfx{color:var(--fg-soft)}
+.pd .path{color:var(--fg-faint);cursor:pointer}
 .pd .err{color:#c0564f}
 /* an article's own section, pulled in beside the link that asked for it */
 .wudict-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid var(--accent);
@@ -302,19 +309,29 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 #folders .fsum{color:var(--fg-faint)}
 #folders .grp{margin:.5em 0 .2em;color:var(--fg-faint);font-size:11px;
   text-transform:uppercase;letter-spacing:.05em}
-#folders .frow{display:flex;align-items:baseline;gap:.5em;padding:.15em 0}
-#folders .frow .p{flex:1;min-width:0;word-break:break-all;color:var(--fg-soft);
-  font-size:11.5px;cursor:pointer}
-#folders .frow .n{color:var(--fg-faint);font-size:11px;white-space:nowrap}
+/* One row = a path (long, variable) beside its facts (short, fixed). The old
+   layout let ONLY the path shrink, so the path always lost and broke mid-word.
+   Here the path refuses to go under 24ch and the facts travel as ONE unit, so
+   when the row runs out of room that unit drops to a line of its own and the
+   path takes the full width. One line when it fits, two when it must — no
+   media query, and no doubled height on rows that never needed it. */
+#folders .frow{display:flex;flex-wrap:wrap;align-items:baseline;
+  column-gap:.6em;padding:.15em 0}
+#folders .frow .p{flex:1 1 auto;min-width:min(24ch,100%);overflow-wrap:break-word;
+  color:var(--fg-soft);font-size:11.5px;cursor:pointer}
+#folders .frow .meta{margin-left:auto;display:flex;align-items:baseline;gap:.9em;
+  white-space:nowrap}
+#folders .frow .n{color:var(--fg-faint);font-size:11px}
 #folders .frow .n.bad{color:#c0564f}
-#folders .rv{color:var(--fg-faint);font-size:11px;cursor:pointer;white-space:nowrap}
+#folders .rv{color:var(--fg-faint);font-size:11px;cursor:pointer}
 #folders .rv:hover{color:var(--link);text-decoration:underline}
 #folders .frow:hover .rv{color:var(--fg-soft)}
 #folders .facts{display:flex;flex-wrap:wrap;gap:.4em 1.2em;align-items:baseline;margin-top:.7em}
-#folders .facts #rescanBtn,#folders .facts #ftsAllBtn{
-  color:var(--fg-soft);text-decoration:none;font-size:11.5px}
-#folders .facts #rescanBtn:hover,#folders .facts #ftsAllBtn:hover{
-  color:var(--link);text-decoration:underline}
+/* Three peer actions look like peers. "Edit folders…" is an <a> and was
+   inheriting link styling, which made it the loudest of the three purely
+   because of its element name. */
+#folders .facts .act{color:var(--fg-soft);text-decoration:none;font-size:11.5px}
+#folders .facts .act:hover{color:var(--link);text-decoration:underline}
 /* An action that spends disk and CPU states its price where it is triggered,
    in the same breath as the trigger — not in a tooltip, and not after the
    fact (D31). Quiet by design: this is an extra, never a repair. */
@@ -334,7 +351,7 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 #folders .about p{margin:.35em 0 0;font-size:11.5px;color:var(--fg-faint);line-height:1.45}
 #folders .about a{color:var(--fg-soft);text-decoration:none;border-bottom:1px solid var(--line)}
 #folders .about a:hover{color:var(--link);border-bottom-color:currentColor}
-.pd .prov,.pd .prov1{font-size:10.5px;color:var(--fg-faint);word-break:break-all;margin-top:.15em}
+.pd .prov,.pd .prov1{font-size:10.5px;color:var(--fg-faint);overflow-wrap:break-word;margin-top:.15em}
 /* The whole summary toggles, so the whole summary is the affordance: hover
    the row, not a fragment of it. Nothing in here is underlined — on the web an
    underline promises a link that goes somewhere else, and this goes nowhere. */
@@ -353,7 +370,6 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
    details.dict that does not exist here. */
 .pd .companions{color:var(--fg-soft)}
 .pd .provbody{margin:.2em 0 0 1em;display:flex;flex-direction:column;gap:.1em}
-.pd .path.sub{opacity:.8}
 
 /* ── responsive ────────────────────────────────────────────────────── */
 @media (max-width:600px){
@@ -412,8 +428,20 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
   <div class="facts">
     <a class="act" id="editFolders" href="/setup">✏️ Edit folders…</a>
     <span class="act" id="rescanBtn" title="Re-scan every folder and re-open the dictionaries found (takes a moment)">♻️ Rescan folders</span>
+    <!-- Quiet, and shaped like its two peers: verb, object, scope, ellipsis.
+         The shouted version ("ENABLE … GLOBALLY!") gave the panel's least-used
+         and most expensive action its loudest voice, which is the hierarchy
+         upside down — and every word it was shouting is stated precisely, one
+         click away, in the disclosure this opens. The "…" is the honest
+         signal: this reveals a choice, it does not act.
+         "full-text search" and not a friendlier paraphrase: it is the term the
+         mode dropdown, the per-dictionary switch and the result summaries all
+         use, and this action's whole job is to flip that switch in bulk.
+         "every dictionary" and not "globally": the scope is the one thing a
+         user must not misread here, and "dictionaries" is the unit this panel
+         already counts in. -->
     <span class="act" id="ftsAllBtn" role="button" tabindex="0" aria-expanded="false" aria-controls="ftsAllBox"
-      title="Optional. Every dictionary is already searchable by headword; clicking this enables searching in article bodies &mdash; can take SIGNIFICANTLY more disk space!">⚡️⚠️ ENABLE Full-text search for ALL (hover for WARNINGS)</span>
+      title="Optional. Every dictionary can already be searched by headword; full-text search also looks inside article text, and uses noticeably more disk space.">⚡️ Enable full-text search for every dictionary…</span>
   </div>
   <div id="ftsAllBox" class="bulkbox" hidden></div>
   <!-- About: last row of the only chrome panel the app has. Users already open
@@ -434,6 +462,10 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 "use strict";
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
+/* For text going into a double-quoted attribute. esc alone is not enough
+   there: a path may legally contain a quote, and one unescaped `"` ends the
+   attribute and turns the rest of the path into markup. */
+const escAttr=s=>esc(s).replace(/"/g,"&quot;");
 let dicts=[],lastQuery=null,searchSeq=0,searchAC=null;
 
 /* Preference order (ids) + disabled set. New dictionaries not yet in the saved
@@ -805,7 +837,25 @@ function mediaKind(list){
   return "res";
 }
 function provenance(d){
-  const label=(p,cls)=>`<div class="path${cls?" "+cls:""}" title="Click to copy">${esc(p)}</div>`;
+  /* A row is a PATH with optional annotations around it — not a sentence.
+     They used to be one string ("db: /Users/…/Name (text.db + media.db +
+     info.txt)") that the click handler unpicked again with two regexes, and
+     the regexes did not cover what the builders actually produced: copying
+     that row put the prefix's siblings and the parenthesised file list on the
+     clipboard along with the path. The row now carries the path itself in
+     data-full, so copying reads a value instead of reconstructing one. */
+  const label=(p,o)=>{
+    o=o||{};
+    return `<div class="prow${o.cls?" "+o.cls:""}">`+
+      (o.pre?`<span class="pfx">${esc(o.pre)}</span> `:"")+
+      `<span class="path" data-full="${escAttr(p)}" title="Click to copy">${pathHTML(p)}</span>`+
+      (o.post?` <span class="pfx">${esc(o.post)}</span>`:"")+
+      `</div>`;
+  };
+  /* A row that names no path at all. It used to be built by label(), so it
+     wore "Click to copy" and the .path affordance over a sentence — clicking
+     it put a fragment of that sentence on the clipboard. */
+  const note=t=>`<div class="prow">${esc(t)}</div>`;
   const base=p=>String(p).split(/[\\/]/).pop()||String(p); // also handles Windows paths
   let head,rows=[],full="";
   if(d.source){
@@ -822,18 +872,18 @@ function provenance(d){
     head=`${esc(base(d.source))}`+
       (n?` <span class="companions">+ ${n} ${mediaKind(ms)}</span>`:"");
     rows.push(label(d.source));
-    if(d.folder)rows.push(label("db: "+d.folder+" ("+(d.mediaDB?"text.db + media.db + info.txt":"text.db + info.txt")+")"));
-    else if(d.textDB)rows.push(label("db: "+d.textDB+(d.mediaDB?" + media.db":"")));
-    for(const m of ms)rows.push(label(m,"sub"));
+    if(d.folder)rows.push(label(d.folder,{pre:"db:",post:"("+(d.mediaDB?"text.db + media.db + info.txt":"text.db + info.txt")+")"}));
+    else if(d.textDB)rows.push(label(d.textDB,{pre:"db:",post:d.mediaDB?"+ media.db":""}));
+    for(const m of ms)rows.push(label(m,{cls:"sub"}));
   }else{
     full=d.folder||d.textDB||d.path||"";
     head=`<span class="fmt">prepared</span>: ${esc(base(full))}`;
     if(full)rows.push(label(full)); // same rule: the full path lives in the body
-    if(d.folder)rows.push(label("contains: text.db"+(d.mediaDB?" + media.db":"")+" + info.txt"));
-    else if(d.mediaDB)rows.push(label("media: "+d.mediaDB));
+    if(d.folder)rows.push(note("contains: text.db"+(d.mediaDB?" + media.db":"")+" + info.txt"));
+    else if(d.mediaDB)rows.push(label(d.mediaDB,{pre:"media:"}));
   }
-  if(!rows.length)return `<div class="prov1" title="${esc(full)}">${head}</div>`;
-  return `<details class="prov"><summary title="${esc(full)}">${head}</summary>`+
+  if(!rows.length)return `<div class="prov1" title="${escAttr(full)}">${head}</div>`;
+  return `<details class="prov"><summary title="${escAttr(full)}">${head}</summary>`+
     `<div class="provbody">${rows.join("")}</div></details>`;
 }
 function renderPanel(){
@@ -924,24 +974,66 @@ $("rescanBtn").onclick=()=>{loadDicts(true).then(loadFolders)};
 
 /* Folders & configuration ------------------------------------------------ */
 let cfgInfo=null;
+
+/* Every path in this panel opened with the same /Users/<name>/ — eleven
+   characters of nothing, repeated on each row, holding the pixels the eye
+   lands on first while the part that tells the rows APART (mdict, aard,
+   slob_Apple) was pushed right. `~` is the form every shell and file dialog
+   already accepts, so the reader loses nothing.
+   Display only: the clipboard and /api/reveal keep the absolute path. */
+function tildePath(p){
+  const h=cfgInfo&&cfgInfo.home;      // set before any row is built
+  if(!h||!p)return p;
+  if(p===h)return "~";
+  const sep=h.includes("\\")?"\\":"/";
+  return p.startsWith(h+sep)?"~"+sep+p.slice(h.length+sep.length):p;
+}
+/* Break opportunities after separators only. word-break:break-all split
+   "Language" into "Languag"+"e"; a path broken after "/" keeps every segment
+   whole, and word shape is what makes a path readable at a glance rather than
+   letter by letter. <wbr> contributes nothing to textContent, so it can never
+   leak into a copy. */
+function pathHTML(p){
+  return esc(tildePath(p)).replace(/([^\\/])([\\/])/g,"$1$2<wbr>");
+}
+/* Split out of loadFolders because the dictionary cards need cfgInfo.home too,
+   and they are drawn long before anyone opens the Folders section. Fetching it
+   only on open meant every card showed a full path until something happened to
+   re-render it — the ~ form would appear at an arbitrary later moment, which is
+   worse than never having it. Errors are swallowed: no home means full paths,
+   which is a correct fallback, not a failure. */
+async function loadConfig(){
+  try{ cfgInfo=await (await fetch("/api/config")).json() }catch(e){}
+  return cfgInfo;
+}
 async function loadFolders(){
-  try{ cfgInfo=await (await fetch("/api/config")).json() }catch(e){ return }
+  if(!await loadConfig())return;
   const c=cfgInfo,b=$("folderBody");
   const n=(c.roots||[]).length;
   $("folderSummary").textContent=`${n} folder${n===1?"":"s"} · ${c.total} dictionar${c.total===1?"y":"ies"}`;
   b.innerHTML="";
   const row=(path,note,bad)=>{
     const d=document.createElement("div");d.className="frow";
-    const p=document.createElement("span");p.className="p path";p.textContent=path;
+    const p=document.createElement("span");p.className="p path";
+    p.dataset.full=path;              // what gets copied, whatever is displayed
+    p.innerHTML=pathHTML(path);
     p.title="Click to copy";
-    const s=document.createElement("span");s.className="n"+(bad?" bad":"");s.textContent=note;
-    d.append(p,s);
+    d.appendChild(p);
+    // The facts travel as one unit so they wrap as one — and so a row with no
+    // fact (the config file) simply has a shorter unit, instead of holding an
+    // empty column open across the whole width.
+    const m=document.createElement("span");m.className="meta";
+    if(note){
+      const s=document.createElement("span");s.className="n"+(bad?" bad":"");s.textContent=note;
+      m.appendChild(s);
+    }
     if(c.canReveal){
       const rv=document.createElement("span");rv.className="rv";rv.textContent=c.revealLabel;
       rv.onclick=e=>{e.stopPropagation();fetch("/api/reveal?path="+encodeURIComponent(path))
         .then(r=>r.json()).then(j=>{if(j.error)alert(j.error)})};
-      d.appendChild(rv);
+      m.appendChild(rv);
     }
+    if(m.childNodes.length)d.appendChild(m);
     b.appendChild(d);
   };
   const grp=t=>{const g=document.createElement("div");g.className="grp";g.textContent=t;b.appendChild(g)};
@@ -949,7 +1041,7 @@ async function loadFolders(){
   for(const r of c.roots||[]){
     let note=`${r.count} dictionar${r.count===1?"y":"ies"}`,bad=false;
     if(!r.exists){note="folder not found";bad=true}
-    else if(!r.total){note="no dictionaries found"}
+    else if(!r.total){note="no dictionaries"}
     else if(!r.count){note=`${r.total} already listed above`}
     else if(r.total>r.count){note+=` (+${r.total-r.count} listed above)`}
     row(r.path,note,bad);
@@ -960,14 +1052,23 @@ async function loadFolders(){
     w.textContent="⚠ set by "+how+" — it overrides the config file";
     b.appendChild(w);
   }
-  grp("prepared dictionaries (library)");
-  row(c.libDir,`${c.prepared} prepared`+(c.useCached?", in use":c.prepared?", not in use":""),false);
-  if(c.configPath){grp("configuration file");row(c.configPath,"",false)}
+  // "(library)" was the heading explaining itself, and "prepared dictionaries"
+  // is restated one line down by the row's own note — the same rule that keeps
+  // the format prefix off a file name ending in ".mdx" (see provenance above).
+  grp("library");
+  row(c.libDir,`${c.prepared} prepared`+(c.useCached?" · in use":c.prepared?" · not in use":""),false);
+  // Likewise "file": the row shows a path ending in ".toml".
+  if(c.configPath){grp("configuration");row(c.configPath,"",false)}
 }
-$("folders").addEventListener("toggle",()=>{if($("folders").open&&!cfgInfo)loadFolders()});
+// cfgInfo is fetched at boot now, so "have we loaded?" is no longer the same
+// question as "has this section been drawn?" — ask the one that is meant.
+$("folders").addEventListener("toggle",()=>{
+  if($("folders").open&&!$("folderBody").childNodes.length)loadFolders();
+});
 $("folderBody").addEventListener("click",e=>{
   const p=e.target.closest(".path");if(!p)return;
-  navigator.clipboard?.writeText(p.textContent);
+  // The absolute path, not the ~-shortened text on screen.
+  navigator.clipboard?.writeText(p.dataset.full||p.textContent);
   p.style.color="var(--accent)";setTimeout(()=>{p.style.color=""},900);
 });
 /* Bulk full-text (D31). This used to be "⚡ index all", a prominent button in
@@ -1013,7 +1114,7 @@ function openFtsAll(){
     const now=dicts.reduce((n,d)=>n+(d.dbSize||0),0),added=ftsAddedBytes(todo);
     box.innerHTML=
       "<p>Full-text search finds words <em>inside</em> article text. Every dictionary "+
-      "is already searchable by headword without it — this is an extra, not a fix.</p>"+
+      "is already searchable by headword — only enable if you have sufficient disk space.</p>"+
       `<p class="cost">Indexes <b>${todo.length}</b> ${plural(todo.length)}`+
         (entries?` (${entries.toLocaleString()} entries)`:"")+
         ", one at a time — on a large collection that takes a long while."+
@@ -1050,7 +1151,9 @@ $("panelList").addEventListener("click",e=>{
   const mv=e.target.closest("[data-mv]");
   if(mv){moveDict(mv.closest(".pd").dataset.id,mv.dataset.mv);return}
   const path=e.target.closest(".path");
-  if(path){navigator.clipboard?.writeText(path.textContent.replace(/^[a-z]+: /,"").replace(/ \+ media\.db$/,""));path.style.color="var(--accent)";return}
+  // The absolute path the row was built from — not the ~-shortened text on
+  // screen, and no longer a display string with its annotations cut back off.
+  if(path){navigator.clipboard?.writeText(path.dataset.full||path.textContent);path.style.color="var(--accent)";return}
   const feat=e.target.closest(".feat");
   if(feat){
     if(feat.classList.contains("locked")||feat.classList.contains("busy"))return;
@@ -1134,6 +1237,85 @@ mark{background:#fff0b3;color:#5c4a00;border-radius:2px;padding:0 .1em}
   filter:invert(1) hue-rotate(180deg)}
 </style>`;
 
+/* ── @font-face hoisting ─────────────────────────────────────────────────
+   A shadow root scopes ordinary rules, which is exactly why articles render
+   in one. @font-face is the exception: a font family is matched against the
+   DOCUMENT's font set, so a face declared inside a shadow tree is fetched,
+   parsed — and then never selectable. AHD5 declares 'Minion New' (base64 TTF
+   in ahd5.css) and every IPA glyph fell back to the default serif, which is
+   what "Rendered font: Times New Roman" in devtools means.
+
+   There is no scoped form of @font-face in CSS: a face is document-global or
+   it does not exist. So we lift the FACES, and only the faces, up to the
+   document and leave every other rule scoped where it belongs.
+
+   We read them back out of CSSOM rather than re-parsing the CSS, because the
+   browser has already parsed the sheet in order to render the article —
+   ahd5.css is 2.9 MB, and parsing it a second time in JS to learn something
+   the engine already knows would be pure waste.
+
+   The iframe path needs none of this: an iframe is a real document, so faces
+   declared in it work natively. */
+const fontSheetsSeen=new Set();   // by absolute href — skip re-walking a linked sheet
+const fontFacesSeen=new Set();    // by rule text — two dictionaries may ship one font
+let fontSink=null;
+
+/* Families the chrome itself resolves against. @font-face has no scope to
+   hide behind, so a dictionary that redefined one of these would restyle the
+   whole app around it. Dropping a dictionary's "Arial" costs nothing: the
+   system face takes over, which is what it wanted anyway. */
+const uiFamilies=new Set(["-apple-system","system-ui","blinkmacsystemfont","helvetica",
+  "helvetica neue","arial","sans-serif","serif","monospace","ui-monospace","menlo","consolas"]);
+
+function faceFamily(rule){
+  const f=(rule.style&&rule.style.getPropertyValue("font-family"))||"";
+  return f.trim().replace(/^["']|["']$/g,"").toLowerCase();
+}
+/* Walks a sheet for @font-face, descending through @import (.styleSheet) and
+   the grouping rules — @media, @supports, @layer (.cssRules). Reading
+   .cssRules of a cross-origin sheet throws; a dictionary that links a CDN
+   font is simply skipped rather than breaking the render. */
+function collectFaces(sheet,out){
+  let rules=null;
+  try{rules=sheet.cssRules}catch(_){return}
+  if(!rules)return;
+  for(const r of rules){
+    if(window.CSSFontFaceRule&&r instanceof CSSFontFaceRule){
+      if(uiFamilies.has(faceFamily(r)))continue;
+      if(fontFacesSeen.has(r.cssText))continue;
+      fontFacesSeen.add(r.cssText);
+      out.push(r.cssText);
+    }else if(r.styleSheet)collectFaces(r.styleSheet,out);
+    else if(r.cssRules)collectFaces(r,out);
+  }
+}
+function hoistFaces(sheet){
+  if(!sheet)return;
+  const out=[];
+  collectFaces(sheet,out);
+  if(!out.length)return;
+  if(!fontSink){
+    fontSink=document.createElement("style");
+    fontSink.id="wudict-fonts";
+    document.head.appendChild(fontSink);
+  }
+  fontSink.appendChild(document.createTextNode(out.join("\n")));
+}
+/* A <link> in a shadow root loads asynchronously — .sheet is null until it
+   has, so hoist on load as well as immediately (a warm sheet is already
+   parsed by the time we look). Inline <style> is parsed synchronously and
+   walked every render; that walk is strictly cheaper than the innerHTML
+   parse we just paid for the same bytes, so it needs no sheet-level cache. */
+function hoistShadowFonts(root){
+  for(const el of root.querySelectorAll("style,link[rel~='stylesheet' i]")){
+    if(!el.href){hoistFaces(el.sheet);continue}
+    if(fontSheetsSeen.has(el.href))continue;
+    fontSheetsSeen.add(el.href);
+    if(el.sheet)hoistFaces(el.sheet);
+    else el.addEventListener("load",()=>hoistFaces(el.sheet),{once:true});
+  }
+}
+
 function renderArticle(dd,body,dictID,frag){
   // Script-bearing articles (custom tooltips, MathJax, …) need a real
   // document scope: shadow roots neither execute <script> nor let
@@ -1149,6 +1331,8 @@ function renderArticle(dd,body,dictID,frag){
     if(!document.documentElement.hasAttribute("data-theme"))host.classList.add("autodark");
   }
   dd.appendChild(host);
+  // After connecting: a <link> in a disconnected tree does not begin loading.
+  hoistShadowFonts(root);
   return root;
 }
 
@@ -1185,6 +1369,18 @@ addEventListener("message",e=>{
     searchFor(d.w,{scope:d.dict,frag:d.frag}); // author's link: exact, scoped
   }else if(d.t==="pick"&&d.w){
     lookupSelection(d.w);                      // user's selection: tidied, global
+  }else if(d.t==="open"&&d.url){
+    /* An external link from a sandboxed article. The frame cannot open it
+       itself without inheriting its own sandbox into the new tab (no
+       allow-forms, so the destination's own search would be dead), and it must
+       not navigate itself — that replaces the article with a website.
+       The scheme test is NOT decoration. Opening a URL from here runs it in
+       the TOP page's context, so a `javascript:` URL posted by a dictionary's
+       own script would execute with our origin and our access to the article
+       cache and the prefs API. An article can already open popups (the sandbox
+       grants allow-popups), so nothing here widens what a dictionary can do —
+       but this message must never become the one way it gains more. */
+    if(/^https?:\/\//i.test(d.url))window.open(d.url,"_blank","noopener,noreferrer");
   }else if(d.t==="anchor"&&d.fid){
     // an in-article jump inside a sandboxed iframe. The iframe is sized to its
     // content and never scrolls itself, so the position it reports is relative
@@ -1565,11 +1761,25 @@ document.addEventListener("click",e=>{
     e.preventDefault();playAudio(href.startsWith("/res/")||/^https?:/i.test(href)?href:resURL(dictID,href));
   }else if(a.querySelector("img")&&href.startsWith("/res/")){
     e.preventDefault();playAudio(href);
+  }else if(/^https?:\/\//i.test(href)&&dd){
+    // An external link OUT of an article — Cambridge points at
+    // dictionary.cambridge.org three times in one entry. Following it in place
+    // costs the user their search; in the iframe renderer the same click does
+    // visibly worse, since that sandbox has no allow-top-navigation and the
+    // website loads inside the small box where the article was. One cause, two
+    // shapes of damage, so one answer in both renderers: a new tab.
+    // Scoped to links inside an article (`dd`) — the panel's own links are
+    // ordinary navigation and stay that way.
+    e.preventDefault();window.open(href,"_blank","noopener,noreferrer");
   }else if(href.startsWith("#")&&dd){
-    // A PLAIN in-page anchor. Inside an iframe the browser handles this
-    // natively, so frame.js leaves it alone; inside a shadow root it cannot —
-    // document fragment navigation does not see shadow ids — and the browser
-    // would only dirty the page URL with a hash that matches nothing.
+    // A PLAIN in-page anchor. NEITHER renderer can leave this to the browser.
+    // In a shadow root, document fragment navigation does not see shadow ids,
+    // so the browser would only dirty the page URL with a hash matching
+    // nothing. In a srcdoc iframe the document URL is about:srcdoc while the
+    // base URL is inherited from this page, so the browser resolves the
+    // fragment against the WRONG one and navigates cross-document — frame.js
+    // handles it there for that reason (D51). The comment that used to sit
+    // here claimed iframes handled it natively; they never did.
     e.preventDefault();jumpInArticle(a,dd,decodeRef(href.slice(1)));
   }else if(href&&!/^([a-z][\w+.-]*:|\/|#|res\/|assets\/)/i.test(href)){
     // bare-word link (slob): also an author's reference, so also scoped
@@ -1716,8 +1926,10 @@ $("frm").addEventListener("submit",e=>doSearch(e));
 
 // settings first: they decide the panel's order and the search set, and the
 // fetch is a local file read — a millisecond, not a stall worth splitting the
-// boot screen over
-loadPrefs().then(loadDicts).then(applyURL);
+// boot screen over. The config comes alongside rather than after, because the
+// cards need its home prefix to render paths as ~/… on the FIRST draw; run
+// concurrently it costs no extra latency, and it cannot reject.
+Promise.all([loadPrefs(),loadConfig()]).then(loadDicts).then(applyURL);
 </script>
 </body>
 </html>

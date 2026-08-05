@@ -61,3 +61,73 @@ func TestAssetCacheHeaders(t *testing.T) {
 		}
 	}
 }
+
+// "no-cache" means revalidate, not "do not store" — but revalidation needs a
+// validator, and without one the browser could only re-download the whole
+// 100 KB page on every load. This pins the validator AND the freshness
+// guarantee D45 depends on: the page still revalidates every time, it just
+// stops re-sending itself when nothing changed.
+func TestIndexRevalidatesWithoutResending(t *testing.T) {
+	s := newTestServer(t)
+	s.Version = "1.2.3"
+
+	get := func(inm string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/", nil)
+		if inm != "" {
+			req.Header.Set("If-None-Match", inm)
+		}
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		return rec
+	}
+
+	first := get("")
+	etag := first.Header().Get("ETag")
+	if first.Code != 200 || first.Body.Len() == 0 {
+		t.Fatalf("GET / = %d, %d bytes", first.Code, first.Body.Len())
+	}
+	if !strings.HasPrefix(etag, `"`) || !strings.HasSuffix(etag, `"`) || len(etag) < 3 {
+		t.Fatalf("ETag = %q, want a quoted entity-tag", etag)
+	}
+
+	// The whole point: the same page again costs no body.
+	again := get(etag)
+	if again.Code != 304 {
+		t.Errorf("If-None-Match with the current ETag = %d, want 304", again.Code)
+	}
+	if again.Body.Len() != 0 {
+		t.Errorf("304 carried %d bytes of body", again.Body.Len())
+	}
+	if got := again.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("304 Cache-Control = %q — the next load must still revalidate", got)
+	}
+
+	// A GET compares entity-tags WEAKLY, so a cache may echo ours back as
+	// W/"…". A hand-rolled equality check would fail to match a validator we
+	// issued ourselves; net/http's comparison must not.
+	if rec := get(`W/` + etag); rec.Code != 304 {
+		t.Errorf("weak If-None-Match = %d, want 304", rec.Code)
+	}
+	// …and a list, which is what a browser holding several versions sends.
+	if rec := get(`"deadbeef", ` + etag); rec.Code != 304 {
+		t.Errorf("If-None-Match list containing the current ETag = %d, want 304", rec.Code)
+	}
+	// A validator we did not issue must send the page.
+	stale := get(`"deadbeef"`)
+	if stale.Code != 200 || stale.Body.Len() == 0 {
+		t.Errorf("stale If-None-Match = %d, %d bytes — want the page", stale.Code, stale.Body.Len())
+	}
+
+	// The stamp is substituted into the page, so it is part of what the browser
+	// holds: a rebuild that changes only the version must invalidate.
+	other := newTestServer(t)
+	other.Version = "9.9.9"
+	if other.pageETag() == etag {
+		t.Error("ETag ignores the version stamped into the page")
+	}
+	// No Last-Modified: these bytes are embedded and have no meaningful date,
+	// and a second validator we cannot stand behind is worse than none.
+	if got := first.Header().Get("Last-Modified"); got != "" {
+		t.Errorf("Last-Modified = %q, want none", got)
+	}
+}

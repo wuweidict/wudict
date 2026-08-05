@@ -141,6 +141,12 @@ func TestConfigEndpointAndSetupPage(t *testing.T) {
 	if info["revealLabel"] == "" {
 		t.Error("missing reveal label")
 	}
+	// The panel shortens a home prefix to "~" for display only; without this
+	// field it silently falls back to full paths, so the fallback is fine but
+	// the field going missing must not be.
+	if home, _ := os.UserHomeDir(); home != "" && info["home"] != home {
+		t.Errorf("home = %v, want %q", info["home"], home)
+	}
 	// httptest requests come from a TEST-NET address, so this one is remote:
 	// reveal must not be offered
 	if info["canReveal"] != false {

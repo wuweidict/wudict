@@ -464,3 +464,100 @@ The failure is precisely shaped by which renderer a dictionary lands in: shadow-
 **One contract worth stating: whatever `keys` prints, `res` accepts, unchanged.** MDD stores keys as `\path\name`; the listing normalises to the forward-slash, no-leading-separator form the rest of wudict uses, and keeps the **original case** (`audio/es/Argentina/…`) because lookup is case-insensitive. Round-tripping every printed name back through `Resource` is a test, not an assumption.
 
 **Standing rule:** when a user reaches for an existing verb on a new kind of file, the answer is usually to make the verb work — not to add a flag, and not to make them name a different file. A new spelling is only justified when the operation is genuinely different, and "enumerate the keys of a key/value container" is the same operation whatever the values happen to be.
+
+## D47 — @font-face is hoisted out of the shadow root — **ACCEPTED 2026-08-05**
+AHD5's IPA rendered as fallback serif: `<font face="Minion New">ă</font>` showed `ă` in Times New Roman, and devtools reported the family as unresolved. The font was not missing. `ahd5.css` — served from the `.mdd`, 2.9 MB — declares four `@font-face` rules, `'Minion New'` among them, with the TTF inline as a base64 `data:` URI. It was fetched, parsed, and then ignored.
+
+**The rule that bites: `@font-face` does not participate in shadow-tree scoping.** Ordinary rules in a shadow root apply to that tree, which is precisely why D-era article rendering uses one — the dictionary's CSS cannot reach the chrome. Font *families*, though, are resolved against the **document's** font set, so a face declared inside a shadow tree is parsed into a sheet nothing can select from. There is no scoped form of `@font-face` in CSS: a face is document-global or it does not exist. This is not a browser bug and there is no flag for it.
+
+The symptom is shaped by the renderer, exactly as in D45: script-bearing dictionaries render in an iframe, which is a real document, so their fonts have always worked. Only shadow-DOM articles — the majority — lost them, silently, for as long as the shadow renderer has existed.
+
+**Fix: lift the faces, and only the faces.** After an article is connected, its stylesheets are walked and every `CSSFontFaceRule` is copied into one document-level `<style id="wudict-fonts">`. Every other rule stays scoped where it belongs, so the isolation the shadow root exists for is untouched.
+
+**Read the faces from CSSOM, do not re-parse the CSS.** The engine has already parsed the sheet in order to render the article; `link.sheet.cssRules` is same-origin and readable. Re-parsing 2.9 MB of CSS in JavaScript to learn something the engine already knows would be waste, and a hand-written parser would have to get comments, escapes, `@media`, `@supports`, `@layer` and `@import` right — the walk descends through all of them instead, and `rule.style.getPropertyValue("font-family")` replaces a regex over `cssText`.
+
+**One guard: the chrome's own families are skipped.** A face is document-global by nature, so a dictionary declaring `@font-face{font-family:Helvetica}` would restyle the application around it. Dropping such a rule costs the dictionary nothing — the system face takes over, which is what naming `Helvetica` asked for. This exposure is inherent to `@font-face`, not to this fix; GoldenDict carries the same one, with the difference that its chrome is not in the document.
+
+**Standing rule:** a shadow root scopes *rules*, not *registrations*. Anything a stylesheet installs into a document-wide namespace — fonts today, and by the same rule `@counter-style`, `@property`, `@keyframes` referenced from outside — is invisible from inside a shadow tree, and has to be hoisted deliberately or it will fail silently.
+
+## D48 — The folders panel: the path is the content — **ACCEPTED 2026-08-05 (user-directed)**
+Paths in the panel's Folders section wrapped mid-word — `/Users/bio/Downloads/Languag` + `e/mdict`. Four separate faults, only one of which was layout.
+
+**The layout yielded at the wrong end.** `.frow` put a long, variable path beside two short, fixed items, and only the path could shrink (`flex:1`). The least compressible thing on the row was the only thing compressed. Now the path holds `min-width:min(24ch,100%)` and the facts travel as one `.meta` unit, so when the row runs out of room that unit drops to a line of its own and the path takes the full width — one line when it fits, two when it must, without a media query and without doubling the height of rows that never needed it.
+
+**`word-break:break-all` broke inside words.** Wrapping a long path is fine; breaking "Language" into "Languag" + "e" is not. Word shape is a recognition channel — a path split after `/` is read at a glance, one split mid-token is read letter by letter. `<wbr>` after each separator makes the break land on a boundary that means something, and contributes nothing to `textContent`, so it cannot leak into a copy.
+
+**Every row opened with the same 11 characters.** `/Users/bio/` carried no information while holding the pixels the eye lands on first, pushing the part that told the rows apart — `mdict`, `aard`, `slob_Apple` — to where attention is weakest. Rows now display `~/…`; `configInfo.Home` is new and **display-only**, with the clipboard and `/api/reveal` keeping the absolute path, which is what a user pasting into a script needs. The prefix test is `home + separator`, so `/Users/bioinformatics/x` is not mistaken for a child of `/Users/bio`.
+
+**An empty cell held the grid open.** The configuration row has no count, so its middle column was blank and its reveal link floated across a wide gap. Grouping the facts means a row with no fact simply has a shorter group — the layout no longer needs a placeholder to keep its shape.
+
+**Wording.** `⚡️ENABLE Full-text search GLOBALLY!` gave the panel's least-used and most expensive action its loudest voice: all-caps costs word shape and reads as shouting, and with `!` it manufactures urgency for something D31 explicitly designed to be quiet. Every word it shouted is already stated precisely in the disclosure it opens. It becomes `⚡️ Enable full-text search for every dictionary…` — verb, object, scope, ellipsis, matching its two peers. **"full-text search" survives the rewrite deliberately**: it is the term the mode dropdown, the per-dictionary switch and the result summaries all use, and this action's whole job is to flip that switch in bulk, so a friendlier paraphrase would sever the link. "every dictionary" rather than "globally" because scope is the one thing that must not be misread, and "dictionaries" is the unit this panel already counts in. `PREPARED DICTIONARIES (LIBRARY)` → `LIBRARY` and `CONFIGURATION FILE` → `CONFIGURATION`, by the rule already applied to provenance: do not label a thing with what the thing next to it already says (`42 prepared, in use`; a path ending in `.toml`). `Edit folders…` was an `<a>` inheriting link styling, so it looked louder than its peers for no reason but its element name; all three now share `.act`.
+
+**Rejected: an icon-only reveal.** It would reclaim ~90px per row and delete five identical labels. But this is a rarely-opened diagnostic panel where recognition beats compactness, the link is the row's only affordance, and the wording is deliberately the platform's own (`revealLabel`). After the four fixes the section is not space-starved.
+
+**Rejected: middle-ellipsis truncation.** Compact, but it hides characters in a string whose entire purpose is to be read and copied. Wrapping is the correct failure mode for a path.
+
+**Standing rule:** when a row mixes one variable-length item with fixed ones, the variable item is the content and the fixed ones are its annotations — give the content the floor and let the annotations wrap away, never the reverse.
+
+## D49 — A path is a value, not a sentence to be unpicked — **ACCEPTED 2026-08-05**
+Extending D48's `~/…` shortening to the provenance rows inside dictionary cards exposed the reason it could not simply be applied: those rows had no path to shorten. They had **strings**, composed for display, that a click handler took apart again with two regexes:
+
+```js
+label("db: "+d.folder+" ("+(d.mediaDB?"text.db + media.db + info.txt":…)+")")
+…
+writeText(path.textContent.replace(/^[a-z]+: /,"").replace(/ \+ media\.db$/,""))
+```
+
+**The regexes did not match what the builders produced, and the clipboard was already wrong.** Copying the prepared-database row put `/Users/bio/.wudict/db/AHD5 (text.db + media.db + info.txt)` on the clipboard — the parenthesised list survived, because the second pattern is anchored at the end and the string ends in `info.txt)`. Worse, `contains: text.db + media.db + info.txt` names no path at all, yet was built by the same `label()` and so wore the `.path` affordance and the "Click to copy" tooltip over a sentence; clicking it copied the fragment `text.db + media.db`. Both defects predate this change and neither is reachable by reading the click handler alone — you have to hold every call site in your head at once, which is the actual cost of the design.
+
+**A row is now a path plus optional annotations, as separate elements.** `label(p,{pre,post,cls})` puts the path in its own `<span class="path" data-full="…">` with the prefix and suffix beside it, and `note(text)` exists for rows that name no path — no `.path`, no tooltip, no copy. The handler reads `dataset.full`. Nothing reconstructs anything, so the display form is free to differ from the value: that is what let `~/…` and the `<wbr>` separators apply here at all.
+
+**`escAttr`.** Putting a path into a double-quoted attribute needs `"` escaped as well as `&` and `<`; a path may legally contain a quote, and one unescaped quote ends the attribute and turns the rest into markup. The two `title="${esc(full)}"` sites had the same latent hole and were converted too.
+
+**`cfgInfo` is fetched at boot, not on panel open.** The cards need `home` to render `~/…` on their first draw, and they are drawn long before anyone expands the Folders section. Fetching it lazily meant every card showed a full path until some later event happened to re-render it — a form that changes at an arbitrary moment is worse than one that never changes. `loadConfig()` is split out of `loadFolders()` and joined to `loadPrefs()` with `Promise.all`, so it runs concurrently and adds no latency; it swallows its own errors, because "no home" degrades to full paths, which is a correct fallback rather than a failure.
+
+**Standing rule:** when a display string is built by concatenation, whatever needs the underlying value later will have to guess at the seams — and it will guess wrong for the cases nobody had in mind. Carry the value; compose only for the eye.
+
+## D50 — `no-cache` needs something to revalidate against — **ACCEPTED 2026-08-05**
+Raised while costing out minification of `index.html`. The page is 102,574 bytes and `handleIndex` set `Cache-Control: no-cache` and then wrote the body — no `ETag`, no `Last-Modified`, and `net/http` adds neither for a plain `Write`. So **every load, including a plain reload, re-sent the whole 100 KB.**
+
+`no-cache` does not mean "do not store"; it means "revalidate before use". Half of that contract was missing: the browser was told to ask, and given nothing to ask *with*, so the only question it could pose was "send it again". D45 chose `no-cache` for a real reason — the page is the only thing naming the content-addressed script hashes, and a stale one would request stale scripts — but the cost it accepted was avoidable. `s.indexETag` is computed with `s.indexPage` under the same `sync.Once`; an unchanged page now costs a 304 and no body, and the freshness guarantee is **unchanged**: the browser still contacts the server on every single load.
+
+This is D45's content addressing turned around. There the URL carries the hash so the answer can be cached forever; here the validator carries it so the question is cheap to ask.
+
+**`http.ServeContent`, not `If-None-Match == etag`.** The header is a *list*, it may be `*`, and a GET compares entity-tags **weakly**, so a cache may echo our own validator back as `W/"…"`. An equality test would silently fail to match a tag we issued ourselves and re-send the page — the bug would look exactly like no fix at all. net/http implements RFC 9110 §13.1.2; hand-rolling it is the kind of "sloppy assumption" that produced D43.
+
+**Hashed after substitution.** `{{VERSION}}` and the two asset hashes are part of what the browser holds, so a rebuild changing only the stamp must invalidate.
+
+**Deliberately no `Last-Modified`.** The bytes are embedded in the binary and have no meaningful date; `time.Time{}` suppresses the header. Offering a second validator we cannot stand behind is worse than offering one.
+
+**No validator on the first-run setup page.** That body is a function of registry state nothing versions, so an ETag there would be a promise we cannot keep.
+
+**Rejected: minifying index.html.** Measured first: 39% of the file is comments, so minification would save ~50 KB — of a **10.8 MB** binary (0.46%), served over loopback, parsed in single-digit milliseconds against a startup that opens 102 dictionaries in *seconds*. The toolchain cost is structural rather than merely effortful: `go install …@latest` must keep working tag-less (D29) and **never runs the Makefile**, while `go:embed` embeds committed files — so a build-time minifier means either making node a prerequisite nothing would run, or committing a generated `index.min.html` permanently able to drift from its source. A step `go install` silently bypasses is the wrong shape for a project whose Makefile is the developer UI (D10).
+
+**Rejected: gzip/brotli.** Measured: gzip −64% (36,737 B), brotli −69% (31,508 B) — both beat minification. Declined by the user on the correct grounds: wudict is served over loopback, so compression adds CPU on both ends to shorten a memcpy. Revisit only if serving over LAN becomes a real use.
+
+**Standing rule:** a cache directive is half a protocol. Whenever one is set, name the validator that answers it — otherwise "revalidate" degrades to "re-download", quietly and forever.
+
+## D51 — In a srcdoc article, the browser resolves against the wrong URL — **ACCEPTED 2026-08-05**
+Clicking the English/American tabs in Cambridge English Dictionary Online loaded **the whole app inside the article's own iframe**. The dictionary's `scripts_cb.js` was suspected and is innocent: the nested app came up at `?q=wool&mode=prefix&dict=all` — character-for-character the *parent's* URL, which no dictionary script could reproduce. That is the browser resolving a relative reference against a base URL.
+
+**An `about:srcdoc` document splits the two URLs that decide what `#x` means.** Its document URL is `about:srcdoc`; its **base URL is inherited from the parent browsing context**. Link resolution uses the base, same-document detection compares against the document URL, and they disagree — so `#dataset-british` resolves to `<the app's own URL>#dataset-british`, is judged a different document, and triggers a **cross-document navigation**. `frameDoc` emits no `<base>`, and D43 drops any the dictionary shipped, so nothing intervenes.
+
+**How the wrong assumption got in.** D44's exclusion list in `frame.js` was derived by *mirroring index.html's*, and its comment said so: *"an in-page anchor (the browser follows those natively here, which index.html cannot do inside a shadow root)"*. `#` is the single entry where the two renderers genuinely differ, so mirroring was guaranteed to get exactly that one wrong. Four lines above, the same block states the real rule — those links *"navigated the iframe to a relative URL under about:srcdoc and lost the article"*. The base-URL inheritance that motivated D44's bare-word branch and D45's absolute `/res/` URLs breaks fragments for the same reason; the fix was applied to two of three consequences and explicitly carved out for the third.
+
+**Neither renderer can leave a fragment to the browser** — shadow roots because document fragment navigation cannot see shadow ids (D41), srcdoc because the document URL is not the base URL. `frame.js` now owns fragment clicks: `preventDefault` (categorically correct here, not a guess about one dictionary), then the existing `jumpToFragment` deferred by a task so the offset is measured *after* the dictionary's handler has changed the layout, with `post()` first for the reason the load handler already documents. **Propagation is deliberately not stopped** — unlike a `bword://` reference this click belongs to the dictionary, and cancelling the navigation was the only thing Cambridge's jQuery tabs needed from us.
+
+**The cousin: external links.** The same Cambridge entry links to `dictionary.cambridge.org` three times. The sandbox grants no `allow-top-navigation`, so the default navigates *the iframe* — a whole website inside the small box where the article was. In the shadow renderer the same click costs the user their search instead. One cause, two shapes of damage, one answer in both renderers: a new tab. The frame hands the URL to the parent rather than opening it itself, because **a popup from a sandboxed frame inherits that sandbox** unless `allow-popups-to-escape-sandbox` is granted — the site would open without `allow-forms` and its own search box would be dead. Widening the sandbox to fix a link is the wrong trade.
+
+**The scheme test on `{t:"open"}` is not decoration.** `window.open` in the parent runs in the TOP page's context, so a `javascript:` URL posted by a dictionary's own script would execute with our origin, our article cache and our prefs API. An article can already open popups (`allow-popups`), so nothing here widens what a dictionary can do — but this message must never become the way it gains more.
+
+**Rejected: `<base href>` in the frame document.** The obvious first thought and it fixes nothing: no base value can equal `about:srcdoc`, so fragments still resolve cross-document, and it would re-root every relative reference besides.
+
+**Rejected: assigning `location.hash` inside the frame.** It would work — `about:srcdoc#x` *is* a same-document navigation — and would buy `:target` and `hashchange` for free. But each click pushes an entry into the iframe's session history, which joins the top-level history, so **Back would walk backwards through tab clicks** instead of leaving the page.
+
+**Deferred: serving articles from real same-origin URLs instead of srcdoc.** The structural answer — document URL == base URL, so fragments, `:target`, `hashchange` and relative references all work natively and this whole class disappears; it is what GoldenDict gets from `gdlookup://`. It costs a round trip per article, requires articles addressable by (dict, key), and reopens the sandbox question, since a real URL with `allow-same-origin` lets dictionary scripts reach the parent while dropping it breaks the sub-entry `fetch`. The direction to take if a third instance of this class appears.
+
+**Known limitation of the accepted fix:** `:target` CSS and `hashchange` listeners still do not fire in either renderer. A dictionary implementing tabs purely through `:target` would remain inert. Only the deferred option above changes that.
+
+**Standing rule:** an exclusion list is a claim about the *container*, not a list to copy between renderers. Every entry has to be re-derived against the environment it runs in — the entries that agree cost nothing to re-check, and the one that differs is the one that will bite.

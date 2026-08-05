@@ -21,33 +21,32 @@ once.
 1. Download the binary for your platform from
    [releases](https://github.com/legbehindneck/wudict/releases), rename to `wudict`, 
    `chmod +x wudict` (macOS/Linux) and move to a folder in `$PATH`, e.g. `/usr/local/bin`.
-2. Put some dictionaries in `~/Dictionaries` (or anywhere — subfolders
-   are scanned too).
-3. Run `wudict` or `./wudict` if the file is in the current folder. 
-A browser tab opens; if the dictionary folder is missing or
-   empty, a setup page lets you pick one or more folders with dictionaries.
+2. Run `wudict` or `./wudict` if the file is in the current folder. 
+3. By default `wudict` searches for dictionaries under `~/Dictionaries` (including subfolders); 
+   if the dictionary folder is missing or
+   empty, a setup page lets you set custom folders with dictionaries.
 
 ## Adding dictionaries 
 Dictionary folders can be configured in the browser via the [browser setup page](http://localhost:6888/setup). 
 
-### Several dictionary folders
+### Multiple dictionary folders
 
 `DICT_DIR` accepts more than one folder:
 
+As an alternative to the [setup page](http://localhost:6888/setup) you can configure the dictionary folders from
+the console via cli args, env vars or using the config file at `~/.wudict/wudict.toml`:
 ```sh
 # as one or more CLI args:
-wudict --dict-dir ~/Dictionaries --dict-dir /Volumes/Ext/Dicts   # repeat the flag
+wudict --dict-dir ~/Dictionaries --dict-dir /Volumes/Data/Dicts   # repeat the flag
 
 # or via an env var:
-DICT_DIR="~/Dictionaries:/Volumes/Ext/Dicts" wudict              # ":" — ";" on Windows
+DICT_DIR="~/Dictionaries:/Volumes/Data/Dicts" wudict              # ":" — ";" on Windows
 ```
 
 in `wudict.toml`:
 ```toml
-DICT_DIR = ["~/Dictionaries", "/Volumes/Ext/Dicts"]
+DICT_DIR = ["~/Dictionaries", "/Volumes/Data/Dicts"]
 ```
-
-
 
 ## Searching
 

@@ -43,6 +43,12 @@ type configInfo struct {
 	// manager" — the phrase a user of that OS already recognises.
 	RevealLabel string `json:"revealLabel"`
 	CanReveal   bool   `json:"canReveal"`
+
+	// Home lets the panel display ~/… in place of a home prefix that is
+	// identical on every row and therefore carries no information. DISPLAY
+	// ONLY: the clipboard and /api/reveal keep the absolute path, which is
+	// what a user pasting into a script — or the file manager — needs.
+	Home string `json:"home"`
 }
 
 // revealLabel returns the established wording for each desktop:
@@ -62,7 +68,9 @@ func revealLabel() string {
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	lib, _ := store.Library()
+	home, _ := os.UserHomeDir() // empty on failure: the panel then shows full paths
 	info := configInfo{
+		Home:            home,
 		Roots:           s.reg.Roots(),
 		LibDir:          store.DefaultDBDir(),
 		Prepared:        len(lib),

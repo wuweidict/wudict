@@ -131,6 +131,52 @@
 			audioEl.src = href;
 			var p = audioEl.play();
 			if (p && p.catch) p.catch(function (err) { console.warn("audio play failed:", href, err); });
+		} else if (href.charAt(0) === "#") {
+			// A fragment link inside an about:srcdoc document. This container
+			// splits the two URLs that decide what "#x" means: the DOCUMENT URL
+			// is about:srcdoc, while the BASE URL is inherited from the parent
+			// page. Link resolution uses the base; same-document detection
+			// compares against the document URL. They disagree, so the browser
+			// resolves "#x" to <the app's own URL>#x, concludes it is a
+			// different document, and performs a CROSS-document navigation —
+			// loading wudict inside its own iframe, at the parent's exact query
+			// string, in place of the article.
+			//
+			// preventDefault here is therefore not a guess about one dictionary:
+			// the browser's default action is categorically wrong for every
+			// fragment link in every srcdoc article. D44 exempted "#" on the
+			// belief that "the browser follows those natively here" — true of an
+			// ordinary document, false of this one, and it is the single entry
+			// where this renderer and the shadow-DOM one genuinely differ, so
+			// mirroring index.html's exclusion list was bound to get it wrong.
+			//
+			// Propagation is deliberately NOT stopped. Unlike a bword:// link,
+			// this click belongs to the dictionary — Cambridge's English/American
+			// tabs are jQuery handlers on <a href="#dataset-british"> — and
+			// cancelling the navigation is the only thing they needed from us.
+			e.preventDefault();
+			var frag = decodeRef(href.slice(1));
+			// After the dictionary's own handlers, never before: a tab or an
+			// accordion changes what is visible, and an offset measured first
+			// would describe the layout that is being replaced. post() before
+			// the jump for the same reason the load handler does — the parent
+			// sizes this frame from that message, and a target beyond the old
+			// height would be clamped by a document that has not grown yet.
+			setTimeout(function () { post(); jumpToFragment(frag); }, 0);
+		} else if (/^https?:\/\//i.test(href)) {
+			// An external link must LEAVE the article. The sandbox grants no
+			// allow-top-navigation, so the browser's default is to navigate THIS
+			// iframe — putting a whole website inside the small box where the
+			// article was. One Cambridge entry links out three times.
+			//
+			// Handed to the parent rather than opened here: a popup from a
+			// sandboxed frame inherits that sandbox unless
+			// allow-popups-to-escape-sandbox is granted, so the site would open
+			// without allow-forms and its own search box would not work. The
+			// parent is not sandboxed, so it can open an ordinary tab — and
+			// widening this sandbox to fix a link would be the wrong trade.
+			e.preventDefault();
+			parent.postMessage({ t: "open", url: href }, "*");
 		} else if (href && !/^([a-z][\w+.-]*:|\/|#|res\/|assets\/)/i.test(href)) {
 			// A bare relative href with no scheme is a cross-reference: OALD10
 			// writes <a class="Ref" href="defendant">, and Aard/slob articles
@@ -140,10 +186,12 @@
 			// in here — those links navigated the iframe to a relative URL
 			// under about:srcdoc and lost the article.
 			//
-			// The exclusions mirror index.html's: a real scheme, a rooted
-			// path, an in-page anchor (the browser follows those natively
-			// here, which index.html cannot do inside a shadow root), and our
-			// own /res/ and /assets/ prefixes.
+			// The exclusions are a real scheme, a rooted path, an in-page
+			// anchor and our own /res/ and /assets/ prefixes. Each of those
+			// has an owner above; "#" in particular must stay excluded HERE
+			// precisely because it now has its own branch — letting a fragment
+			// fall through to this one would search "#dataset-british" as a
+			// headword.
 			e.preventDefault();
 			e.stopPropagation();
 			if (e.stopImmediatePropagation) e.stopImmediatePropagation();

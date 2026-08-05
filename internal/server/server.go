@@ -68,6 +68,11 @@ type Server struct {
 	// whole page on every load.
 	indexOnce sync.Once
 	indexPage []byte
+	// indexETag identifies indexPage by its content, computed with it. The
+	// page's Cache-Control is no-cache — revalidate every time — which without
+	// a validator to revalidate AGAINST meant re-sending 100 KB on every load,
+	// including a plain reload.
+	indexETag string
 
 	// DictDirOrigin / DictDirEditable describe where the dictionary folders
 	// came from (config layering), so the UI can warn that a flag or an
@@ -193,19 +198,45 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// The page is the only thing that names the asset hashes, so it must never
-	// be served from cache: a stale index.html would ask for a stale script by
-	// its old hash and put the two out of step again.
+	// be served from cache without asking: a stale index.html would ask for a
+	// stale script by its old hash and put the two out of step again (D45).
 	w.Header().Set("Cache-Control", "no-cache")
-	// first-run: no dictionaries yet → serve the setup page instead
+	// first-run: no dictionaries yet → serve the setup page instead. No
+	// validator here: this body is a function of registry state that nothing
+	// versions, so an ETag would be a promise we cannot keep.
 	if s.reg.Count() == 0 {
 		_, _ = io.WriteString(w, setupPage(s.reg.Dirs(), 0))
 		return
 	}
-	_, _ = w.Write(s.page())
+	// "no-cache" means REVALIDATE, not "never store" — and revalidation needs
+	// something to revalidate against. Without a validator the browser had no
+	// way to ask "still the same?", so every load, every reload, re-sent the
+	// whole 100 KB page. With one, an unchanged page costs a 304 and no body,
+	// and the freshness guarantee D45 depends on is unchanged: the browser
+	// still asks the server on every single load.
+	//
+	// ServeContent rather than a hand-rolled `If-None-Match == etag`: the
+	// header is a LIST, it may be `*`, and GET compares weakly, so entries may
+	// arrive as `W/"…"`. net/http implements all of that; an equality test
+	// would quietly fail to match a validator we ourselves issued.
+	//
+	// A zero modtime deliberately emits no Last-Modified: these bytes are
+	// embedded in the binary and have no meaningful date, and offering a
+	// second validator we cannot stand behind is worse than offering one.
+	w.Header().Set("ETag", s.pageETag())
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(s.page()))
 }
 
 // page returns index.html with the build version stamped into the About box.
-func (s *Server) page() []byte {
+func (s *Server) page() []byte { s.buildPage(); return s.indexPage }
+
+// pageETag identifies that page by its content — the same content addressing
+// D45 applies to the scripts, turned around: there the URL carries the hash so
+// the answer can be cached forever, here the validator carries it so the
+// question is cheap to ask.
+func (s *Server) pageETag() string { s.buildPage(); return s.indexETag }
+
+func (s *Server) buildPage() {
 	s.indexOnce.Do(func() {
 		v := s.Version
 		if v == "" {
@@ -215,8 +246,11 @@ func (s *Server) page() []byte {
 		page = strings.ReplaceAll(page, "{{FRAMEJS}}", assetTag(frameJS))
 		page = strings.ReplaceAll(page, "{{MARKJS}}", assetTag(markJS))
 		s.indexPage = []byte(page)
+		// Hashed AFTER substitution: the version stamp and the asset hashes are
+		// part of what the browser is holding, so a rebuild that changes only
+		// those must still invalidate.
+		s.indexETag = `"` + assetTag(s.indexPage) + `"`
 	})
-	return s.indexPage
 }
 
 // handleSetupPage serves the folder editor on demand (the same page first run
