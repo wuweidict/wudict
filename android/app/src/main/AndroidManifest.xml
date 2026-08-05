@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The server speaks HTTP on loopback; the WebView loads it from there.
+         The app only ever talks to 127.0.0.1, so cleartext is allowed
+         app-wide rather than via a networkSecurityConfig domain list. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- D5 (user-approved): dictionaries are read from the shared
+         "Dictionaries" folder. All-files access covers API 30+; the legacy
+         pair covers 26–29 (WRITE is granted at runtime on those). -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+    <application
+        android:allowBackup="false"
+        android:hasFragileUserData="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:largeHeap="true"
+        android:requestLegacyExternalStorage="true"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.WuWeiDict"
+        android:usesCleartextTraffic="true">
+
+        <!-- Native libs use legacy packaging (see app/build.gradle): the
+             server ships as jniLibs/<abi>/libwudict.so and must exist as a
+             real file so it can be exec'd. allowBackup=false: the prepared
+             library can be gigabytes and is rebuildable, so it must never go
+             near Auto Backup. largeHeap: a big MDX collection is heavy. -->
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

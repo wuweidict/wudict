@@ -1,0 +1,63 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// The WuWeiDict app module (D52): a WebView shell around the wudict server
+// binary. There are deliberately no dependencies — the UI is served by the
+// Go server, the shell is one activity and one process launcher.
+plugins {
+    id 'com.android.application'
+}
+
+// Same stamp the Makefile puts into the Go binary: git describe, or "dev".
+// CI overrides both fields with -PversionName=… -PversionCode=…
+def gitVersion = {
+    try {
+        def p = ['git', '-C', rootDir.parent, 'describe', '--tags', '--always', '--dirty'].execute()
+        def out = p.text.trim()
+        return p.exitValue() == 0 && !out.isEmpty() ? out : 'dev'
+    } catch (Exception ignored) {
+        return 'dev'
+    }
+}
+
+android {
+    namespace 'io.github.legbehindneck.wudict'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'io.github.legbehindneck.wudict'
+        // arm64-v8a only (D52): every arm64 device ships API 26+, and the
+        // vector adaptive icon needs no PNG fallbacks at 26+.
+        minSdk 26
+        targetSdk 36
+        versionCode(project.hasProperty('versionCode') ? project.property('versionCode') as int : 1)
+        versionName(project.hasProperty('versionName') ? project.property('versionName') as String : gitVersion())
+    }
+
+    buildFeatures {
+        buildConfig true // BuildConfig.DEBUG gates WebView debugging
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false  // nothing to shrink: two classes, no libraries
+            shrinkResources false
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            // The server ships as jniLibs/<abi>/libwudict.so and is exec'd
+            // from nativeLibraryDir, so the .so must be extracted to the
+            // filesystem at install time (the manifest's extractNativeLibs
+            // attribute is rejected by AGP 9 in favor of this).
+            useLegacyPackaging true
+        }
+    }
+}

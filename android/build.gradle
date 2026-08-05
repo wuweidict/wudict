@@ -1,0 +1,9 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Top-level build file: declares the Android Gradle Plugin version for the
+// whole project. The app module applies it.
+plugins {
+    id 'com.android.application' version '9.3.1' apply false
+}

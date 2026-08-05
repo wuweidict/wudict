@@ -98,6 +98,35 @@ cross: ## Cross-compile all release targets into dist/ (purego flavour: pure-Go 
 	    -o $(BUILD_DIR)/$(BINARY)-$$suffix$$ext $(CMD) || exit 1; \
 	done
 
+# ---- Android (D52) ----------------------------------------------------------
+# The app is android/: a WebView shell around the same binary, built as
+# android/arm64 pure-Go and shipped inside the APK as libwudict.so, which the
+# shell execs as a child process. arm64's internal linker aligns ELF segments
+# to 64 KiB, so the binary already satisfies the 16 KiB page-size mandate —
+# no NDK, no linker flags. (x86_64 would need both, which is why v1 is
+# arm64-only.)
+#
+# Gradle needs JDK 17+. Respect an inherited JAVA_HOME; on macOS fall back to
+# an installed JDK 17 rather than whatever ancient default `java` resolves to.
+ifeq ($(shell uname),Darwin)
+export JAVA_HOME ?= $(shell /usr/libexec/java_home -v 17 2>/dev/null)
+endif
+
+ANDROID_LIB := android/app/src/main/jniLibs/arm64-v8a/libwudict.so
+
+.PHONY: android-go
+android-go: ## Cross-compile the server into the APK's jniLibs (android/arm64, purego)
+	@mkdir -p $(dir $(ANDROID_LIB))
+	CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build $(PUREGO_FLAGS) -ldflags "$(LDFLAGS)" -o $(ANDROID_LIB) $(CMD)
+
+.PHONY: apk
+apk: android-go ## Build the debug APK (needs Android SDK: ANDROID_HOME or local.properties)
+	cd android && ./gradlew assembleDebug
+
+.PHONY: apk-release
+apk-release: android-go ## Build the release APK (unsigned; CI signs with the repo-secret keystore)
+	cd android && ./gradlew assembleRelease
+
 .PHONY: test-purego
 test-purego: ## Run store tests against the pure-Go sqlite driver (release parity)
 	CGO_ENABLED=0 go test -tags purego ./internal/store/ ./internal/server/
