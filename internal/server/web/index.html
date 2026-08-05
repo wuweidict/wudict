@@ -1166,7 +1166,7 @@ function renderFrame(dd,body,dictID,frag){
 function frameDoc(content,fid,dark,dictID,frag){
   return '<!DOCTYPE html><html class="'+(dark?'dark':'')+'"><head><meta charset="utf-8">'+
     '<style>html{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.618;color:#1a1a1a;background:#fff;overflow-y:hidden}'+
-    'body{margin:8px;word-break:break-word}img,video,svg{max-width:100%;height:auto}'+
+    'body{margin:8px}img,video,svg{max-width:100%;height:auto}'+
     'html.dark{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.92)}'+
     'html.dark :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){filter:invert(1) hue-rotate(180deg)}'+
     '.wudict-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid #e08600;background:rgba(224,134,0,.06);border-radius:0 6px 6px 0}'+
@@ -1248,7 +1248,7 @@ function dictName(id){
 function scopeNote(id){
   const div=document.createElement("div");
   div.className="scopenote";
-  div.innerHTML=`Followed a link inside <b>${esc(dictName(id))}</b> — only that dictionary was searched. `+
+  div.innerHTML=`Followed a link inside <b>${esc(dictName(id))}</b> — only this dictionary was searched. `+
     `<span class="widen">Search all dictionaries</span>`;
   return div;
 }

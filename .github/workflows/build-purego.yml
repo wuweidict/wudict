@@ -24,11 +24,17 @@ jobs:
           # ── Linux ──────────────────────────────────────────────
           - { goos: linux,   goarch: amd64  }
           - { goos: linux,   goarch: arm64  }
-          - { goos: linux,   goarch: arm,    goarm: "7" }
+          - { goos: linux,   goarch: arm,    goarm: "7" } # Pi1, Pi2, Zero, Zero W
           - { goos: linux,   goarch: arm,    goarm: "6" }
+          - { goos: linux,   goarch: arm64  }             # Pi3, Pi3B+, Zero2, Pi4, Pi5
           # ── Windows ────────────────────────────────────────────
           - { goos: windows, goarch: amd64,  ext: ".exe" }
           - { goos: windows, goarch: arm64,  ext: ".exe" }
+          # ── Android ────────────────────────────────────────────
+          - { goos: android, goarch: arm64 }              # arm64-v8a — all devices sold since ~2017
+          - { goos: android, goarch: arm,    goarm: "7" } # armeabi-v7a — legacy/budget 32-bit
+          - { goos: android, goarch: amd64 }              # x86_64 — emulators, Chromebooks
+#          - { goos: android, goarch: "386" }             # x86 — legacy emulator images only
 
     steps:
       - name: Checkout
