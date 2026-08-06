@@ -2,8 +2,9 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Android APK (D52): cross-compile the pure-Go android/arm64 server into the
-# APK's jniLibs, then let Gradle package it. No NDK anywhere.
+# Android APK (D52, D53): cross-compile the cgo android/arm64 server (mattn
+# FTS5 + built-in speex) into the APK's jniLibs, then let Gradle package it.
+# The NDK version is pinned here; the Makefile auto-detects it locally.
 #
 # Signing: when the repo secrets ANDROID_KEYSTORE_BASE64 (base64 of the
 # upload keystore) and ANDROID_KEYSTORE_PASSWORD (one password for store and
@@ -29,7 +30,7 @@ env:
 
 jobs:
   build:
-    name: APK (android-arm64, purego)
+    name: APK (android-arm64, cgo)
     runs-on: ubuntu-latest
     outputs:
       signed: ${{ steps.signing.outputs.enabled }}
@@ -53,10 +54,12 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install platform and build-tools
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Install platform, build-tools and NDK
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.15729638"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.15729638" >> "$GITHUB_ENV"
 
-      - name: Build the Go server as libwudict.so
+      - name: Build the Go server as libwudict.so (cgo — FTS5 + speex)
         run: make android-go
 
       - name: Compute version
