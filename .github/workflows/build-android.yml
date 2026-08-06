@@ -65,8 +65,13 @@ jobs:
       - name: Compute version
         id: ver
         run: |
+          # `if`, not `[ … ] && …`: run steps are `bash -e`, so the test
+          # failing BECAUSE a tag was supplied would abort the whole step —
+          # the workflow would break on exactly the runs that pass a tag.
           VERSION="${{ inputs.tag }}"
-          [ -z "$VERSION" ] && VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Detect signing configuration

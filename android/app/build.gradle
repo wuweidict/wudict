@@ -14,8 +14,11 @@ plugins {
 def gitVersion = {
     try {
         def p = ['git', '-C', rootDir.parent, 'describe', '--tags', '--always', '--dirty'].execute()
+        // read the stream to EOF, THEN wait: exitValue() on a process that has
+        // not been reaped throws IllegalThreadStateException, and the catch
+        // below would silently turn a perfectly good tag into "dev".
         def out = p.text.trim()
-        return p.exitValue() == 0 && !out.isEmpty() ? out : 'dev'
+        return p.waitFor() == 0 && !out.isEmpty() ? out : 'dev'
     } catch (Exception ignored) {
         return 'dev'
     }
@@ -51,7 +54,7 @@ android {
         }
     }
 
-    packagingOptions {
+    packaging {
         jniLibs {
             // The server ships as jniLibs/<abi>/libwudict.so and is exec'd
             // from nativeLibraryDir, so the .so must be extracted to the
