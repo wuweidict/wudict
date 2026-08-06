@@ -270,6 +270,7 @@ push:  ## sync remotes
 	git push leg
 	git push iq
 	git push od
+	git push wfrt
 
 .PHONY: push-tags
 push-tags:  ## push tags
@@ -278,6 +279,7 @@ push-tags:  ## push tags
 	git push leg --tags
 	git push iq --tags
 	git push od --tags
+	git push wfrt --tags
 
 .PHONY: remotes
 remotes: ## git git remotes
