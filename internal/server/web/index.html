@@ -109,6 +109,14 @@ input[type=search]{flex:1;min-width:130px;max-width:300px;font-size:16px;
 input[type=search]:focus{border-color:var(--focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 25%,transparent)}
 select{font-size:13px;color:var(--fg-soft);background:var(--bg-card);
   border:1px solid var(--line);border-radius:8px;padding:.3em .4em;max-width:180px}
+/* The pill is INERT above 600px: display:contents leaves the field and the two
+   selects as direct flex children of the form, which is the layout the bar has
+   always had, and the chips are simply not rendered. The whole mobile
+   treatment lives in the one media query at the end of this stylesheet — there
+   is no second layout to keep in step, only a second set of rules for the same
+   markup. */
+.pill,.seg{display:contents}
+.chip{display:none}
 .btn{font-size:15px;background:var(--bg-card);color:var(--fg-soft);
   border:1px solid var(--line);border-radius:8px;padding:.3em .55em;cursor:pointer;line-height:1.2}
 .btn:hover{color:var(--fg);border-color:var(--fg-faint)}
@@ -208,7 +216,10 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
   padding:0 var(--sp-3) var(--sp-3);overflow-y:auto}
 .panel-card h2{margin:0 0 var(--sp-2);font-size:16px;color:var(--fg);
   display:flex;align-items:center}
-.panel-card h2 .btn{margin-left:auto}
+.panel-card h2 .headacts{margin-left:auto;display:flex;gap:var(--sp-1)}
+/* the theme button only exists here on narrow screens, where the bar has no
+   room for it; see the responsive block */
+#panelTheme{display:none}
 /* the title and the master switch stay put while a long list scrolls under
    them — with 55 dictionaries the close button and the "enable all" control
    must not be somewhere up the page. Nothing that spends disk or CPU belongs
@@ -373,14 +384,77 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 
 /* ── responsive ────────────────────────────────────────────────────── */
 @media (max-width:600px){
-  body{padding-top:5.6em}
-  .col{width:auto} /* both of them, or the bar and the cards part company */
+  /* ── one row, one pill, one escape hatch ───────────────────────────
+     The bar used to wrap nine controls as equals, which cost an entire
+     second row — 5.6em of permanent height on the device with the least of
+     it. They are not equals: #q is the app, mode and dictionary are scope
+     the user CONSULTS rather than operates, and the rest are view settings
+     that the ☰ panel already houses. So the field takes the row and the
+     scope rides inside it. */
+  body{padding-top:calc(var(--barh) + var(--sp-2))} /* --barh is measured; see the boot script */
+  .col{width:auto;padding-left:var(--sp-1);padding-right:var(--sp-1)}
   .container{padding-bottom:var(--sp-4)}
   /* Scoped to the top bar: the About wordmark inside the panel must survive
      on narrow screens — that is where the app says what it is. */
   .bar .brand{display:none}
-  input[type=search]{font-size:16px;min-width:100px}
-  select{max-width:130px}
+  .bar form{flex-wrap:nowrap;gap:var(--sp-1)}
+  /* Dropped rather than shrunk, because each is a big-screen affordance.
+     🔍: the form has exactly one implicit-submission field, so Enter still
+     submits, and a phone keyboard offers a Search key anyway. ⇔: below 600
+     .col is already auto, so wide mode has nothing left to widen. ⊞: putting
+     a hundred articles on screen at once is not a phone act. ◐ keeps working
+     from the panel — see #panelTheme. */
+  #frm button[type=submit],#wideBtn,#expandBtn,#frm .themeBtn{display:none}
+  #panelTheme{display:block}
+
+  .pill{display:flex;flex:1;min-width:0;align-items:center;gap:.25em;
+    background:var(--bg-card);border:1px solid var(--line);border-radius:10px;
+    padding:.1em .25em .1em .55em}
+  .pill:has(#q:focus){border-color:var(--focus);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 25%,transparent)}
+  /* borderless inside: the pill wears the border now, and a field with its
+     own would read as a box in a box. 16px is load-bearing, not decorative —
+     iOS zooms the whole viewport on focus for anything smaller. */
+  .pill input[type=search]{flex:1;min-width:0;max-width:none;font-size:16px;
+    border:0;background:none;border-radius:0;padding:.4em 0}
+  .pill input[type=search]:focus{box-shadow:none;border-color:transparent}
+
+  /* A scope control is a chip with its real <select> laid transparently over
+     it. The select keeps the native full-screen picker, the keyboard, the
+     aria-label and its .value, so every call site that reads $("dict").value
+     is untouched — only the rendering is replaced. */
+  /* align-self:stretch and a min-width so the transparent select covers a
+     whole 44px-tall target rather than just the 22px the chip's own text
+     occupies — the chip is what you see, the seg is what you hit. */
+  .seg{display:flex;position:relative;flex:none;align-self:stretch;
+    align-items:center;justify-content:center;min-width:40px}
+  .seg select{position:absolute;inset:0;width:100%;height:100%;margin:0;
+    padding:0;border:0;max-width:none;opacity:0;-webkit-appearance:none;
+    appearance:none}
+  .seg:has(select:focus-visible) .chip{outline:2px solid var(--focus);outline-offset:1px}
+  .seg:has(select:disabled){opacity:.55}
+  .chip{display:flex;align-items:center;gap:.3em;max-width:11ch;
+    white-space:nowrap;font-size:11.5px;line-height:1;color:var(--fg);
+    background:var(--accent-soft);border-radius:7px;padding:.45em .3em .45em .45em}
+  .chip::after{content:"";flex:none;width:0;height:0;margin-top:1px;
+    border:3px solid transparent;border-top-color:var(--fg-faint)}
+  .chip .lbl{overflow:hidden;text-overflow:ellipsis}
+  .chip .bk{width:14px;height:14px;flex:none}
+  /* The default carries no information, so it costs no attention: it recedes
+     to the faint colour, and the dictionary drops its label outright —
+     "All dictionaries" is what every session already is. Only a departure
+     from the default is worth naming, which is also when the user needs
+     reminding of it. (Same argument as the ~/… paths in the folders panel.) */
+  .chip.dflt{background:none;color:var(--fg-faint)}
+  .chip.dflt .lbl{display:none}
+
+  /* Desktop gutters, reclaimed. Three nested insets of .618em — column, list
+     and article — put 30px of a 360px screen into margins before a word of a
+     definition; at .382em that is 18px. */
+  dl{padding:var(--sp-1) var(--sp-1) var(--sp-2)}
+  .article{padding:var(--sp-1)}
+  details.dict>summary{padding-left:.4rem;padding-right:.4rem}
+  .scopenote{padding-left:.4rem;padding-right:.4rem}
 }
 </style>
 </head>
@@ -393,16 +467,30 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
      with an empty dictionary list. -->
 <form id="frm" class="col" role="search" aria-busy="true">
 <span class="brand">WuWei<small>Dict</small></span>
+<!-- The search pill. Above 600px it is display:contents, so the field and the
+     two selects are direct flex children of the form exactly as they always
+     were and the desktop bar is unchanged. Below it the pill becomes the row:
+     one border around field AND scope, so the field reads as large because it
+     IS the row. Each chip carries the rendering; the <select> behind it stays
+     real and keeps the native picker, the keyboard and the accessible name. -->
+<span class="pill">
 <input type="search" id="q" placeholder="Search…" autocomplete="off" autofocus aria-label="Search term" disabled>
+<span class="seg">
+<span class="chip" id="modeChip" aria-hidden="true"></span>
 <select id="mode" aria-label="Search mode" disabled>
 <option value="prefix">starts with</option>
 <option value="exact">exact</option>
 <option value="contains">contains</option>
 <option value="fts">full-text</option>
 </select>
+</span>
+<span class="seg">
+<span class="chip" id="dictChip" aria-hidden="true"><svg class="bk" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M1.5 3.1c1.9-.5 3.8-.3 5.6.7v8.4c-1.8-1-3.7-1.2-5.6-.7V3.1zm13 0c-1.9-.5-3.8-.3-5.6.7v8.4c1.8-1 3.7-1.2 5.6-.7V3.1z"/></svg><span class="lbl" id="dictLbl"></span></span>
 <select id="dict" aria-label="Dictionary" disabled><option value="all">All dictionaries</option></select>
+</span>
+</span>
 <button type="submit" class="btn" title="Search" aria-label="Search">🔍</button>
-<button type="button" class="btn tools" id="themeBtn" title="Theme" aria-label="Toggle theme">◐</button>
+<button type="button" class="btn tools themeBtn" title="Theme" aria-label="Toggle theme">◐</button>
 <button type="button" class="btn" id="wideBtn" title="Toggle wide layout" aria-label="Toggle wide layout">⇔</button>
 <button type="button" class="btn" id="expandBtn" title="Expand all results" aria-label="Expand all results" aria-pressed="false">⊞</button>
 <button type="button" class="btn" id="panelBtn" title="Dictionaries" aria-label="Manage dictionaries">☰</button>
@@ -417,7 +505,12 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 <div id="panel" role="dialog" aria-label="Dictionaries">
 <div class="panel-card">
 <div class="panel-head"><h2>Dictionaries
-<button class="btn" id="closePanel" aria-label="Close">✕</button></h2>
+<span class="headacts">
+<!-- The theme control's narrow-viewport home. Not a second control: both
+     elements carry .themeBtn and one handler drives the pair, the way the
+     wordmark has two mount points selected by media query. -->
+<button type="button" class="btn themeBtn" id="panelTheme" title="Theme" aria-label="Toggle theme">◐</button>
+<button class="btn" id="closePanel" aria-label="Close">✕</button></span></h2>
 <div class="allrow"><label for="enAll" id="enAllLabel">Enable all</label>
 <input type="checkbox" class="en" id="enAll" aria-label="Enable all dictionaries"></div></div>
 <details id="folders">
@@ -543,8 +636,13 @@ const THEMES=["auto","light","dark"];
 function applyTheme(t){
   if(t==="auto")document.documentElement.removeAttribute("data-theme");
   else document.documentElement.setAttribute("data-theme",t);
-  $("themeBtn").textContent=t==="auto"?"◐":(t==="light"?"☀":"☾");
-  $("themeBtn").title="Theme: "+t;
+  // Two mount points, one state: the bar's button above 600px, the panel's
+  // below it (see the responsive block). A NodeList rather than two ids keeps
+  // this one code path — nothing about the pair can drift.
+  for(const b of document.querySelectorAll(".themeBtn")){
+    b.textContent=t==="auto"?"◐":(t==="light"?"☀":"☾");
+    b.title="Theme: "+t;
+  }
   syncAutoDark();
 }
 function themeIsDark(){
@@ -601,11 +699,12 @@ $("expandBtn").onclick=()=>{
   for(const d of $("out").querySelectorAll("details.dict"))d.open=expandAll;
 };
 
-$("themeBtn").onclick=()=>{
+function cycleTheme(){
   const cur=localStorage.getItem("wudict_theme")||"auto";
   const next=THEMES[(THEMES.indexOf(cur)+1)%THEMES.length];
   localStorage.setItem("wudict_theme",next);applyTheme(next);
-};
+}
+for(const b of document.querySelectorAll(".themeBtn"))b.onclick=cycleTheme;
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change",syncAutoDark);
 applyTheme(localStorage.getItem("wudict_theme")||"auto");
 
@@ -726,6 +825,7 @@ function refreshDictUI(now){
     sel.appendChild(o);
   }
   if([...sel.options].some(o=>o.value===prev))sel.value=prev;
+  syncChips(); // the option list just changed under the chip
   renderPanel();
 }
 
@@ -821,7 +921,33 @@ function syncPanelHeader(){
 // clicking an indeterminate checkbox sets checked=true, so "mixed → all"
 // needs no special case.
 $("enAll").addEventListener("change",e=>setAllEnabled(e.target.checked));
-$("dict").onchange=e=>{localStorage.setItem("wudict_dict",e.target.value);if($("q").value.trim())doSearch()};
+/* The narrow-viewport chips. They render the two <select>s and nothing more:
+   the selects stay the single source of truth, so this never has to be
+   consulted before reading a value — only called after one changes.
+
+   "starts with" shortens to "starts" and the others keep their words: those
+   words are the ones the mode dropdown, the per-dictionary switch and the
+   result summaries all use, and a chip that renamed "full-text" would sever
+   the link to every other place it appears. */
+const MODE_SHORT={prefix:"starts",exact:"exact",contains:"contains",fts:"full-text"};
+function syncChips(){
+  const m=$("mode"),d=$("dict");
+  $("modeChip").textContent=MODE_SHORT[m.value]||m.value;
+  $("modeChip").classList.toggle("dflt",m.value==="prefix");
+  // No option selected is the default too, not a nameless scope: a saved id
+  // is written to .value before /api/dicts has put that option in the list,
+  // and assigning an id the <select> does not have yet leaves value "".
+  const opt=d.selectedOptions[0],all=!opt||d.value==="all";
+  $("dictLbl").textContent=all?"":opt.text;
+  $("dictChip").classList.toggle("dflt",all);
+}
+$("dict").onchange=e=>{localStorage.setItem("wudict_dict",e.target.value);syncChips();if($("q").value.trim())doSearch()};
+/* Mode had no change handler at all: it took effect on the next submit. That
+   was survivable while a 🔍 button sat next to it, but the narrow bar has no
+   submit button, so picking a mode would have appeared to do nothing at all.
+   Made symmetric with #dict — re-run if there is something to re-run. */
+$("mode").onchange=()=>{syncChips();if($("q").value.trim())doSearch()};
+syncChips(); // the markup ships empty chips; JS stays the single authority
 
 /* provenance: the collapsed line says where the dictionary came from (its
    foreign source + a media companion count); expanding reveals the library
@@ -1834,9 +1960,12 @@ document.addEventListener("click",e=>{
 
 /* auto-hide bar on scroll down */
 /* The bar's real height, published as --barh so sticky section headers rest
-   just below it. Measured rather than hard-coded: the bar wraps to two rows on
-   narrow screens, and a guessed offset would either hide a header under the bar
-   or float it below a visible gap. */
+   just below it — and, below 600px, so body's own padding-top follows it too
+   rather than repeating a magic number that has to be re-guessed whenever the
+   bar changes. Measured rather than hard-coded: a guessed offset would either
+   hide a header under the bar or float it below a visible gap. This runs
+   synchronously at the end of the body, so the 3.1em fallback in :root never
+   reaches a paint. */
 function measureBar(){
   document.documentElement.style.setProperty("--barh",$("bar").offsetHeight+"px");
 }
@@ -1881,6 +2010,7 @@ function applyURL(){
   if(p.get("theme")){localStorage.setItem("wudict_theme",p.get("theme"));applyTheme(p.get("theme"))}
   if(p.get("mode"))$("mode").value=p.get("mode");
   if(p.get("dict"))$("dict").value=p.get("dict");
+  syncChips();
   if(p.get("q")){$("q").value=p.get("q");scopeOnce=p.get("from")||null;doSearch()}
 }
 const _doSearch=doSearch;
@@ -1908,6 +2038,7 @@ window.addEventListener("popstate",()=>{
   const p=new URLSearchParams(location.search);
   if(p.get("mode"))$("mode").value=p.get("mode");
   if(p.get("dict"))$("dict").value=p.get("dict");
+  syncChips();
   const q=p.get("q")||"";
   $("q").value=q;
   if(!q){ // back to the empty start: leave nothing stale on screen
