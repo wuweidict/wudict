@@ -25,7 +25,7 @@ def gitVersion = {
 }
 
 android {
-    namespace 'io.github.legbehindneck.wudict'
+    namespace 'com.legbehindneck.wudict'
     compileSdk 36
 
     signingConfigs {

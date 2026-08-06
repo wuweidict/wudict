@@ -14,7 +14,7 @@
 // app-private storage, the prepared library goes to internal flash, and
 // dictionary folders are the shared "Dictionaries" folder plus an
 // app-private fallback that needs no permission at all.
-package io.github.legbehindneck.wudict;
+package com.legbehindneck.wudict;
 
 import android.content.Context;
 import android.os.Environment;

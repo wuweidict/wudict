@@ -5,7 +5,7 @@
 // WuWeiDict's Android shell (D52): a WebView over the wudict server binary
 // that ships inside the APK as libwudict.so. The Go program is unchanged —
 // ServerProcess execs it as a child and it answers on 127.0.0.1:6888.
-package io.github.legbehindneck.wudict;
+package com.legbehindneck.wudict;
 
 import android.Manifest;
 import android.app.Activity;
