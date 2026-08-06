@@ -17,6 +17,13 @@
 :root{
   --fi:1.618;                     /* φ */
   --sp-1:.382em; --sp-2:.618em; --sp-3:1em; --sp-4:1.618em; --sp-5:2.618em;
+  /* The same φ progression in the time domain. Geometric rather than linear
+     for a reason that is not decorative: perceived duration grows roughly
+     logarithmically, so equal RATIOS read as equal steps while equal
+     DIFFERENCES do not — which is why f-stops, musical intervals and decibels
+     are all geometric too. One ladder, so a duration is chosen by picking a
+     rung rather than by taste. */
+  --t-1:.236s; --t-2:.382s; --t-3:.618s; --t-4:1s; --t-5:1.618s; --t-6:2.618s;
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
   --bg:#fbfaf8; --bg-card:#ffffff; --bg-bar:rgba(251,250,248,.92);
   --fg:#2b2a28; --fg-soft:#6d6a64; --fg-faint:#a5a19a;
@@ -103,10 +110,53 @@ body.barhidden{--stick:0px}
 /* Wordmark: "WuWei" carries the accent, "Dict" recedes to normal weight — one
    colour, one weight step, no second font. */
 .brand small{font-size:1em;color:var(--fg-soft);font-weight:400}
-input[type=search]{flex:1;min-width:130px;max-width:300px;font-size:16px;
+/* The geometry lives on .qbox so the glyph can be positioned against the
+   field; the input only fills it. */
+.qbox{position:relative;display:flex;flex:1;min-width:130px;max-width:300px}
+input[type=search]{width:100%;min-width:0;font-size:16px;
   color:var(--fg);background:var(--bg-card);border:1px solid var(--line);
-  border-radius:8px;padding:.35em .7em;outline:none;appearance:none}
+  border-radius:8px;padding:.35em .7em .35em 2em;outline:none;appearance:none}
 input[type=search]:focus{border-color:var(--focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 25%,transparent)}
+/* ⌕ and spinner share ONE 14px box and crossfade, so going busy is a change
+   of identity in an occupied box rather than an element arriving — the least
+   intrusive transition available, and the only one that costs no layout.
+   At rest the ⌕ also gives the field an identity, which matters most on
+   narrow screens where the wordmark is hidden. */
+.qled{position:absolute;left:.62em;top:50%;margin-top:-7px;width:14px;height:14px;
+  color:var(--fg-faint);pointer-events:none}
+.qled>*{position:absolute;inset:0;width:14px;height:14px;margin:0;
+  transition:opacity var(--t-2) ease}
+/* Peripheral by construction, in all four dimensions that make a spinner shout.
+   SIZE: inset 2px inside the ⌕'s box — 10px, φ⁻¹ of the glyph, with the stroke
+   thinned to match. COLOUR: currentColor, i.e. the SAME --fg-faint the ⌕ is
+   already drawn in, and no visible ring behind the arc — so the morph changes
+   nothing but geometry, and the accent stays reserved for headwords rather
+   than being spent on a non-event. SPEED: see below. */
+/* Explicit box, and margin:0 restated at THIS specificity. The shared .spin
+   below carries margin-right:.4em for its inline uses, and it is declared
+   later with the same specificity as .qled>*, so its margin wins there. That
+   was harmless while the width was explicit — over-constrained absolute
+   positioning simply drops `right` — but with width:auto the solver SPENDS
+   the margin: 14 − 2 − 2 − 6.4 = 3.6px, a box too small to see. Never size an
+   absolutely positioned box from insets alone when a shared class may put a
+   margin on it.
+   The arc is --fg-soft rather than the ⌕'s --fg-faint on purpose: a 1.5px
+   stroke carries far less ink than the glyph's, so matching its LUMINANCE
+   would not match its presence. One step up is what makes the two read as
+   equally quiet. */
+.qled .spin{top:2px;left:2px;right:auto;bottom:auto;width:10px;height:10px;
+  margin:0;border-width:1.5px;border-color:transparent;
+  border-top-color:var(--fg-soft);animation-duration:var(--t-6);opacity:0}
+.qbox.busy .mag{opacity:0}
+.qbox.busy .spin{opacity:1}
+/* φ² seconds per revolution is 360°/φ² = 137.5° per second — the GOLDEN ANGLE
+   per second, the divergence angle phyllotaxis advances a sunflower's seeds
+   by. It is also 3.7× slower than the .7s the shared .spin uses elsewhere,
+   which takes it out of the few-hertz band where a repeating motion reliably
+   captures attention and into the register of a clock hand: unmistakably
+   moving, demanding nothing. A fast spinner makes a promise — "wait for me to
+   stop"; this one only reports. */
+@media (prefers-reduced-motion:reduce){.qled .spin{animation:none}}
 select{font-size:13px;color:var(--fg-soft);background:var(--bg-card);
   border:1px solid var(--line);border-radius:8px;padding:.3em .4em;max-width:180px}
 /* The pill is INERT above 600px: display:contents leaves the field and the two
@@ -123,9 +173,22 @@ select{font-size:13px;color:var(--fg-soft);background:var(--bg-card);
 .btn:focus-visible,select:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
 
 /* ── results ───────────────────────────────────────────────────────── */
-#status{color:var(--fg-soft);font-size:13px;padding:var(--sp-2) 0;min-height:1.4em;
-  opacity:0;transition:opacity .35s ease}
-#status.show{opacity:1}
+/* Costs nothing until it has something to say. The old rule reserved
+   16.1px of padding plus an 18.2px min-height — 34.3px above the first
+   result, permanently, at every viewport, for a line that is empty for
+   almost the whole session. (That min-height:1.4em was also the one number
+   in this stylesheet off the φ ladder, and redundant: line-height is already
+   φ, so 13px × 1.618 = 21.03px sizes the open state by itself.)
+   grid-template-rows 0fr→1fr animates real height with no measurement and no
+   magic number — and the padding sits INSIDE .txt, within the clipped row,
+   so the closed state is 0px and not 0px-plus-padding. Progress no longer
+   comes through here at all: "Searching…" is the field's own glyph now, so
+   this opens only for statements worth reading. */
+#status{display:grid;grid-template-rows:0fr;color:var(--fg-soft);font-size:13px;
+  opacity:0;transition:grid-template-rows .28s ease,opacity .3s ease}
+#status>.msg{overflow:hidden;min-height:0}
+#status .txt{padding:var(--sp-2) 0}
+#status.show{grid-template-rows:1fr;opacity:1}
 /* one spinner, two homes: inline in #status, and large in the startup
    panel below (.empty) while the dictionary list is still arriving */
 .spin{display:inline-block;width:1em;height:1em;border:2px solid var(--line);
@@ -399,12 +462,11 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
   .bar .brand{display:none}
   .bar form{flex-wrap:nowrap;gap:var(--sp-1)}
   /* Dropped rather than shrunk, because each is a big-screen affordance.
-     🔍: the form has exactly one implicit-submission field, so Enter still
-     submits, and a phone keyboard offers a Search key anyway. ⇔: below 600
-     .col is already auto, so wide mode has nothing left to widen. ⊞: putting
-     a hundred articles on screen at once is not a phone act. ◐ keeps working
-     from the panel — see #panelTheme. */
-  #frm button[type=submit],#wideBtn,#expandBtn,#frm .themeBtn{display:none}
+     ⇔: below 600 .col is already auto, so wide mode has nothing left to
+     widen. ⊞: putting a hundred articles on screen at once is not a phone
+     act. ◐ keeps working from the panel — see #panelTheme. (🔍 is not here:
+     it is gone at every width, see the form markup.) */
+  #wideBtn,#expandBtn,#frm .themeBtn{display:none}
   #panelTheme{display:block}
 
   .pill{display:flex;flex:1;min-width:0;align-items:center;gap:.25em;
@@ -415,9 +477,13 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
   /* borderless inside: the pill wears the border now, and a field with its
      own would read as a box in a box. 16px is load-bearing, not decorative —
      iOS zooms the whole viewport on focus for anything smaller. */
-  .pill input[type=search]{flex:1;min-width:0;max-width:none;font-size:16px;
-    border:0;background:none;border-radius:0;padding:.4em 0}
+  .pill .qbox{flex:1;min-width:0;max-width:none}
+  .pill input[type=search]{width:100%;min-width:0;font-size:16px;
+    border:0;background:none;border-radius:0;padding:.4em 0 .4em 1.55em}
   .pill input[type=search]:focus{box-shadow:none;border-color:transparent}
+  /* flush with the pill's own left padding: inside the pill the field has no
+     border of its own for the glyph to sit within */
+  .pill .qled{left:0}
 
   /* A scope control is a chip with its real <select> laid transparently over
      it. The select keeps the native full-screen picker, the keyboard, the
@@ -474,7 +540,20 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
      IS the row. Each chip carries the rendering; the <select> behind it stays
      real and keeps the native picker, the keyboard and the accessible name. -->
 <span class="pill">
+<!-- The field's leading glyph is the search indicator: ⌕ at rest, spinner in
+     flight, one box, crossfaded. Nothing appears and nothing moves, so a
+     search causes no layout event at all — and the native ✕ at the trailing
+     edge keeps its pixels, which matters because it is present for EVERY
+     search (an empty query never runs one) and it is a control the user has
+     a motor habit for. .qbox is a real element at both widths; .pill is
+     display:contents above 600px and could not position this. -->
+<span class="qbox" id="qbox">
+<span class="qled" aria-hidden="true">
+<svg class="mag" viewBox="0 0 16 16" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M7.1 2.4a4.7 4.7 0 1 0 0 9.4 4.7 4.7 0 0 0 0-9.4zm3.6 8.3l3 3"/></svg>
+<span class="spin"></span>
+</span>
 <input type="search" id="q" placeholder="Search…" autocomplete="off" autofocus aria-label="Search term" disabled>
+</span>
 <span class="seg">
 <span class="chip" id="modeChip" aria-hidden="true"></span>
 <select id="mode" aria-label="Search mode" disabled>
@@ -489,7 +568,13 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 <select id="dict" aria-label="Dictionary" disabled><option value="all">All dictionaries</option></select>
 </span>
 </span>
-<button type="submit" class="btn" title="Search" aria-label="Search">🔍</button>
+<!-- No submit button, at any width. The form has exactly one field that
+     blocks implicit submission (#q; <select> does not count), so Enter
+     submits under the HTML spec's no-submit-button clause and the submit
+     listener below runs unchanged — and anything two characters or longer
+     never waits for a keypress at all, because the input handler searches
+     as you type. The button's only remaining ground was a magnifier next
+     to a magnifier. -->
 <button type="button" class="btn tools themeBtn" title="Theme" aria-label="Toggle theme">◐</button>
 <button type="button" class="btn" id="wideBtn" title="Toggle wide layout" aria-label="Toggle wide layout">⇔</button>
 <button type="button" class="btn" id="expandBtn" title="Expand all results" aria-label="Expand all results" aria-pressed="false">⊞</button>
@@ -498,7 +583,10 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 </header>
 
 <main class="col container">
-<div id="status" role="status" aria-live="polite"></div>
+<!-- Three levels, one job each: #status is the collapsing grid, .msg is the
+     clipped row, and .txt carries the padding INSIDE the clip so the closed
+     state is truly 0px rather than 0px plus padding. -->
+<div id="status" role="status" aria-live="polite"><div class="msg"><div class="txt" id="statusMsg"></div></div></div>
 <div id="out"></div>
 </main>
 
@@ -1530,7 +1618,8 @@ function setStatus(html,owner){
   clearTimeout(statusTimer);
   const el=$("status");
   const apply=()=>{
-    if(statusPending){el.innerHTML=statusPending;el.classList.add("show");statusTs=Date.now()}
+    // the text goes in the inner .txt; .show drives the row from 0fr to 1fr
+    if(statusPending){$("statusMsg").innerHTML=statusPending;el.classList.add("show");statusTs=Date.now()}
     else{el.classList.remove("show");statusTs=0}
   };
   // every displayed message stays readable for STATUS_MIN; bursts of
@@ -1540,6 +1629,30 @@ function setStatus(html,owner){
   apply();
 }
 function clearStatus(owner){if(statusOwner===owner)setStatus("")}
+
+/* Search progress: the field's own leading glyph, not a line of text.
+   Most searches settle in 200–600ms, and a spinner shown at t=0 for 180ms is
+   a FLASH — perceptually worse than no indicator, because it reads as a
+   glitch rather than as work. BUSY_DELAY (φ⁻³ s, one rung of --t-*) holds it
+   back until a search is slow enough to be worth explaining.
+
+   There is deliberately NO minimum-display timer any more. The 382ms opacity
+   transition already is one: a spinner cancelled part-way through its fade-in
+   reverses from wherever it reached, so it can never strobe — it can only
+   leave a ghost. Guaranteeing that in CSS rather than in a timer is what
+   removes the "wait for it to disappear" contract; the indicator is free to
+   go the instant the results are there, because it never arrived hard enough
+   to owe the user a departure. */
+const BUSY_DELAY=236;
+let busyTimer=null,busyWanted=false;
+function setBusy(on){
+  busyWanted=on;
+  clearTimeout(busyTimer);
+  const box=$("qbox");
+  if(!on){box.classList.remove("busy");return}
+  if(box.classList.contains("busy"))return; // already spinning: leave it alone
+  busyTimer=setTimeout(()=>{if(busyWanted)box.classList.add("busy")},BUSY_DELAY);
+}
 
 /* read a newline-delimited JSON response, invoking onMsg per record as it
    arrives — this is what lets each dictionary render the instant it is
@@ -1659,7 +1772,9 @@ async function doSearch(ev){
   searchAC=new AbortController();
   const signal=searchAC.signal;
   lastQuery=q;
-  setStatus('<span class="spin"></span>Searching…');
+  // No "Searching…" text: the spinner alone says it, and saying it twice
+  // cost a permanently reserved line above the results.
+  setBusy(true);
   // "All" queries the enabled dictionaries in preference order (fewer
   // results each); a specific pick queries just that one (more results).
   let dictParam,perDict;
@@ -1672,6 +1787,7 @@ async function doSearch(ev){
       // settled, non-empty list, and until then this reads as what it is —
       // still loading — and re-runs itself when the rest lands (D30).
       const settled=(phase==="ready"||phase==="failed")&&dicts.length>0;
+      setBusy(false); // nothing was ever sent; both branches below are statements
       setStatus(settled
         ?"⚠ All dictionaries are disabled — enable some in the ☰ panel"
         :'<span class="spin"></span>'+esc(readyCount()));
@@ -1731,6 +1847,12 @@ async function doSearch(ev){
       }
     },signal);
   }catch(err){if(err.name==="AbortError")return;if(seq===searchSeq)setStatus("⚠ "+esc(err.message))}
+  finally{
+    // Only the newest search may stop the glyph. An aborted one has already
+    // been superseded by a search that is still running, and clearing here
+    // would blink the spinner off in the middle of the work that replaced it.
+    if(seq===searchSeq)setBusy(false);
+  }
 }
 $("frm").addEventListener("submit",doSearch);
 /* "more…": re-query a single dictionary at a higher limit, in place */
