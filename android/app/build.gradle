@@ -28,8 +28,20 @@ android {
     namespace 'io.github.legbehindneck.wudict'
     compileSdk 36
 
+    signingConfigs {
+        release {
+            def keystore = System.getenv("KEYSTORE")
+            if (keystore != null) {
+                storeFile file(keystore)
+                storePassword System.getenv("STORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS")
+                keyPassword System.getenv("KEY_PASSWORD") ?: System.getenv("STORE_PASSWORD")
+            }
+        }
+    }
+
     defaultConfig {
-        applicationId 'io.github.legbehindneck.wudict'
+        applicationId 'com.legbehindneck.wudict'
         // arm64-v8a only (D52): every arm64 device ships API 26+, and the
         // vector adaptive icon needs no PNG fallbacks at 26+.
         minSdk 26
@@ -40,6 +52,8 @@ android {
 
     buildFeatures {
         buildConfig true // BuildConfig.DEBUG gates WebView debugging
+        // slows down build...
+//        resValues true  // debug's resValue("string", "app_name", …) override
     }
 
     compileOptions {
@@ -51,7 +65,14 @@ android {
         release {
             minifyEnabled false  // nothing to shrink: two classes, no libraries
             shrinkResources false
+            if (System.getenv("KEYSTORE") != null) {
+                signingConfig signingConfigs.release
+            }
         }
+//        debug {
+//            applicationIdSuffix = ".debug"
+//            resValue("string", "app_name", "WuWeiDictDev")
+//        }
     }
 
     packaging {

@@ -8,6 +8,9 @@
 BINARY     := wudict
 CMD        := .
 BUILD_DIR  := dist
+
+JAVA_HOME := /Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
+
 # ---- build flavours -----------------------------------------------------
 # wudict builds in two flavours; `build`/`install`/`check` use cgo:
 #
