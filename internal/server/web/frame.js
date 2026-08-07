@@ -17,14 +17,38 @@
 	var wantFrag = document.currentScript.dataset.frag || "";
 	var audioEl = null; // reused across clicks so playback isn't GC'd mid-load
 
+	// Reports the content's natural height so the parent can size this frame.
+	//
+	// The subtlety, and it is the whole reason this is not one line: for the
+	// ROOT element, scrollHeight is defined as max(scrolling area, VIEWPORT) —
+	// and the viewport here IS the iframe the parent already sized from our
+	// last answer. So documentElement.scrollHeight can never report less than
+	// the height we were last given, which makes the measurement a RATCHET: it
+	// grows and never shrinks. Invisible while every article only ever gets
+	// taller; obvious the moment content can shrink in place — Cambridge's
+	// entry tabs switch from a long "English" panel to a short "American" one
+	// and left ~400px of blank frame below it.
+	//
+	// So the measurement is taken from boxes whose height is driven by their
+	// CONTENT rather than by the viewport, and the root's scrollHeight is
+	// consulted only when it genuinely exceeds the viewport — i.e. when it is
+	// reporting real overflow rather than the clamp. Growth behaves exactly as
+	// before; shrinking now works.
+	//
+	// The +16 is body's 8px margins (see frameDoc). They do not collapse into
+	// html, because html carries overflow-y:hidden and so establishes a block
+	// formatting context — which is also why the root's own border box already
+	// includes them, and why that measure needs no adjustment.
 	function post() {
-		var d = document;
+		var d = document, e = d.documentElement, b = d.body;
+		var viewport = e.clientHeight;
 		var h = Math.max(
-			d.documentElement.scrollHeight,
-			d.body ? d.body.scrollHeight + 16 : 0,
-			d.body ? d.body.offsetHeight + 16 : 0
+			e.getBoundingClientRect().height,
+			b ? b.getBoundingClientRect().height + 16 : 0,
+			b ? b.scrollHeight + 16 : 0,
+			e.scrollHeight > viewport ? e.scrollHeight : 0
 		);
-		parent.postMessage({ t: "h", fid: fid, h: h }, "*");
+		parent.postMessage({ t: "h", fid: fid, h: Math.ceil(h) }, "*");
 	}
 	addEventListener("message", function (e) {
 		if (e.data && e.data.t === "theme") {

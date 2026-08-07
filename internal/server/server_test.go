@@ -7,6 +7,7 @@ package server
 import (
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http/httptest"
@@ -829,5 +830,218 @@ func TestMissingRootIsNotFatal(t *testing.T) {
 	roots := reg.Roots()
 	if len(roots) != 2 || roots[0].Exists || roots[1].Count != 1 {
 		t.Errorf("roots = %+v, want the missing one flagged and the good one counted", roots)
+	}
+}
+
+// newDictWithResources builds a one-dictionary server whose .files.zip holds
+// the named resources verbatim, so a test can put damaged bytes in one.
+func newDictWithResources(t *testing.T, files map[string][]byte) *Server {
+	t.Helper()
+	dir := t.TempDir()
+	dslPath := filepath.Join(dir, "test.dsl")
+	if err := os.WriteFile(dslPath, []byte(sampleDSL), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	zf, err := os.Create(dslPath + ".files.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(zf)
+	for name, data := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	zw.Close()
+	zf.Close()
+
+	isolatedDBDir(t)
+	reg, err := NewRegistry([]string{dir}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(reg)
+}
+
+// A dictionary can ship a damaged bundled resource — one real case in a
+// 105-dictionary corpus is a Cambridge slob whose jquery.js carries 12,186 NUL
+// bytes, which makes it unparseable and silently kills the dictionary's own
+// tab script. Two guarantees are being tested: wudict serves the bytes
+// VERBATIM (diagnosing damage is not licence to alter it), and it says so once.
+func TestDamagedTextResourceIsReportedButServedVerbatim(t *testing.T) {
+	damaged := []byte("var a=1;\x00\x00\x00var b=2;")
+	s := newDictWithResources(t, map[string][]byte{
+		"broken.js": damaged,
+		"clean.js":  []byte("var ok=1;"),
+		"blob.bin":  {0, 1, 2, 0},
+	})
+	id := getDicts(t, s, "/api/dicts")[0].ID
+
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/broken.js", nil))
+	if rec.Code != 200 {
+		t.Fatalf("broken.js: %d", rec.Code)
+	}
+	if got := rec.Body.Bytes(); !bytes.Equal(got, damaged) {
+		t.Errorf("damaged bytes were altered: %q, want %q", got, damaged)
+	}
+	if _, ok := s.nulSeen.Load(id + "\x00" + "broken.js"); !ok {
+		t.Error("a NUL in a .js resource must be reported")
+	}
+
+	// A second request must not re-report: the fact is about the file, and
+	// every article referencing it would otherwise repeat the warning.
+	before := 0
+	s.nulSeen.Range(func(any, any) bool { before++; return true })
+	s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/res/"+id+"/broken.js", nil))
+	after := 0
+	s.nulSeen.Range(func(any, any) bool { after++; return true })
+	if before != after {
+		t.Errorf("re-reported the same damaged resource: %d -> %d", before, after)
+	}
+
+	s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/res/"+id+"/clean.js", nil))
+	if _, ok := s.nulSeen.Load(id + "\x00" + "clean.js"); ok {
+		t.Error("a clean .js must not be reported")
+	}
+	// A NUL is ordinary in a binary: only source-text formats are evidence.
+	s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/res/"+id+"/blob.bin", nil))
+	if _, ok := s.nulSeen.Load(id + "\x00" + "blob.bin"); ok {
+		t.Error("a NUL in a binary resource is not damage")
+	}
+}
+
+// The override lets a user repair a dictionary that ships a broken resource,
+// without rewriting a multi-gigabyte container. It is general: any resource of
+// any dictionary, no knowledge of which file or why.
+func TestResourceOverrideFromLibraryFolder(t *testing.T) {
+	s := newDictWithResources(t, map[string][]byte{"beat.mp3": []byte("BUNDLED")})
+	id := getDicts(t, s, "/api/dicts")[0].ID
+	e, err := s.reg.get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// no library folder yet: the bundled blob is all there is
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/beat.mp3", nil))
+	if rec.Body.String() != "BUNDLED" {
+		t.Fatalf("before preparing: %q", rec.Body.String())
+	}
+
+	if err := e.setFeatures(features{}, nil); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	textDB, ok := preparedTextDB(e.Path)
+	if !ok {
+		t.Fatal("no library folder after preparing")
+	}
+	resDir := filepath.Join(filepath.Dir(textDB), "res")
+	if err := os.MkdirAll(resDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resDir, "beat.mp3"), []byte("OVERRIDE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resDir, "extra.js"), []byte("var added=1;"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// shadows a resource the dictionary does have …
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/beat.mp3", nil))
+	if rec.Code != 200 || rec.Body.String() != "OVERRIDE" {
+		t.Errorf("override not served: %d %q", rec.Code, rec.Body.String())
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		// a day-long cache would hide the user's next edit of the file
+		t.Errorf("override Cache-Control = %q, want no-cache", cc)
+	}
+	// … and supplies one it does not: the override is consulted BEFORE the
+	// dictionary, so it fills a gap as readily as it shadows a bad file.
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/extra.js", nil))
+	if rec.Code != 200 || rec.Body.String() != "var added=1;" {
+		t.Errorf("new override resource: %d %q", rec.Code, rec.Body.String())
+	}
+
+	// Nested names, because that is what articles actually reference: one slob
+	// in the corpus asks for js/entry.js and css/bootstrap.min.css. A flat-only
+	// override would be useless for exactly the dictionaries that need it.
+	if err := os.MkdirAll(filepath.Join(resDir, "js"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resDir, "js", "entry.js"), []byte("var nested=1;"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/js/entry.js", nil))
+	if rec.Code != 200 || rec.Body.String() != "var nested=1;" {
+		t.Errorf("nested override: %d %q", rec.Code, rec.Body.String())
+	}
+
+	// A resource with no override still comes from the dictionary.
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/nope.png", nil))
+	if rec.Code != 404 {
+		t.Errorf("missing resource: %d", rec.Code)
+	}
+}
+
+// The name comes from a URL, so it must not be able to reach outside the
+// override directory — by "..", by an absolute path, or by both.
+func TestResourceOverrideRejectsEscapes(t *testing.T) {
+	s := newDictWithResources(t, map[string][]byte{"beat.mp3": []byte("BUNDLED")})
+	id := getDicts(t, s, "/api/dicts")[0].ID
+	e, err := s.reg.get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.setFeatures(features{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	textDB, _ := preparedTextDB(e.Path)
+	lib := filepath.Dir(textDB)
+	// a real, readable file one level above the override dir — the exact
+	// thing a traversal would be reaching for
+	secret := filepath.Join(lib, "info.txt")
+	if err := os.WriteFile(secret, []byte("SECRET"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(lib, "res"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Positive control: without this the whole loop below could pass simply
+	// because nothing is ever served, and the test would prove nothing.
+	if err := os.WriteFile(filepath.Join(lib, "res", "ok.txt"), []byte("INSIDE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	if !s.serveOverride(rec, httptest.NewRequest("GET", "/res/"+id+"/ok.txt", nil), e, "ok.txt") ||
+		rec.Body.String() != "INSIDE" {
+		t.Fatalf("control: a real override must be served, got %q", rec.Body.String())
+	}
+
+	// The property is "never serves a file outside <lib>/res", not "always
+	// returns false": path.Clean folds "../x" to "x", which lands INSIDE the
+	// directory and is a perfectly fine thing to serve. Assert the content.
+	for _, name := range []string{
+		"../info.txt",
+		"../../info.txt",
+		"a/../../info.txt",
+		"./../info.txt",
+		"/etc/passwd",
+		"../res/../info.txt",
+	} {
+		rec := httptest.NewRecorder()
+		s.serveOverride(rec, httptest.NewRequest("GET", "/res/"+id+"/x", nil), e, name)
+		if strings.Contains(rec.Body.String(), "SECRET") {
+			t.Errorf("%q reached outside the override directory: %q", name, rec.Body.String())
+		}
 	}
 }
