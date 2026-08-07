@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -93,6 +94,11 @@ type Server struct {
 	// concurrent plays of the same word don't spawn two speexdec processes
 	// racing the same output file. Keyed by wav cache path → *sync.Mutex.
 	spxLocks sync.Map
+
+	// nulSeen keys "<dictID>\x00<resource>" for damaged blobs already
+	// reported, so the warning states the fact once instead of on every
+	// article that references the file.
+	nulSeen sync.Map
 
 	// AutoIndex, when true (config AUTO_INDEX=on, the default), prepares a
 	// dictionary's headword index the first time it is searched — silently,
@@ -955,6 +961,9 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 404, "%v", err)
 		return
 	}
+	if s.serveOverride(w, r, e, name) {
+		return
+	}
 	d, err := e.open()
 	if err != nil {
 		httpErr(w, 500, "%v", err)
@@ -1003,7 +1012,107 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 	}
-	_, _ = io.Copy(w, rc)
+	// A NUL byte cannot occur in JavaScript, CSS, HTML or JSON, so finding one
+	// is proof the stored blob is damaged — not a rendering problem, not a
+	// wudict problem, and not something the user can see any other way. One
+	// real case in a 105-dictionary corpus: a Cambridge slob whose bundled
+	// jquery.js has 12,186 NULs in nine block-aligned holes, which makes it
+	// unparseable, so the dictionary's own tab script never runs and its
+	// entries silently show one tab of three. Say so once, and name the
+	// override that fixes it.
+	watch := &nulWatcher{r: rc, text: isTextResource(name)}
+	_, _ = io.Copy(w, watch)
+	if watch.seen {
+		if _, dup := s.nulSeen.LoadOrStore(id+"\x00"+name, true); !dup {
+			logx.Warn("%s%s is damaged: it contains NUL bytes and cannot parse. "+
+				"The dictionary is stored that way — wudict is serving it verbatim. "+
+				"Drop a good copy at <library folder>/res/%s to override it.",
+				logx.Dict(e.Path), name, name)
+		}
+	}
+}
+
+// isTextResource reports whether a NUL byte in this resource would be proof of
+// damage. Deliberately a small allow-list of source-text formats: a NUL is
+// perfectly ordinary in a font, an image or an audio blob.
+func isTextResource(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".js", ".mjs", ".css", ".html", ".htm", ".xhtml", ".json", ".xml", ".svg", ".txt":
+		return true
+	}
+	return false
+}
+
+// nulWatcher passes bytes through and remembers whether any was NUL. It reads
+// the stream that is already being copied, so the check costs one IndexByte
+// per buffer and never buffers the resource itself.
+type nulWatcher struct {
+	r    io.Reader
+	text bool
+	seen bool
+}
+
+func (n *nulWatcher) Read(p []byte) (int, error) {
+	c, err := n.r.Read(p)
+	if n.text && !n.seen && c > 0 && bytes.IndexByte(p[:c], 0) >= 0 {
+		n.seen = true
+	}
+	return c, err
+}
+
+// serveOverride serves <library folder>/res/<name> when the user has put a
+// file there, and reports whether it did.
+//
+// The need is real and not hypothetical: a dictionary can ship a damaged
+// bundled resource (see the NUL check above), and there is otherwise no way to
+// fix it short of rewriting a multi-gigabyte container. This is deliberately
+// NOT special-cased to any file or format — any resource of any dictionary can
+// be shadowed, which is why it needs no knowledge of jQuery, Cambridge, or
+// what a working replacement would look like.
+//
+// The library folder is the right home: it is wudict's own space (never the
+// user's read-only dictionary folder), the panel already displays its path
+// with a "reveal" button, and it is the unit D20 made transferable — so an
+// override travels with the dictionary it repairs.
+func (s *Server) serveOverride(w http.ResponseWriter, r *http.Request, e *entry, name string) bool {
+	textDB, ok := preparedTextDB(e.Path)
+	if !ok {
+		return false // no library folder yet: nothing can have been put in one
+	}
+	dir := filepath.Join(filepath.Dir(textDB), "res")
+	// path.Clean on a rooted copy resolves "..", so /res/{id}/../../../etc/passwd
+	// folds to a name inside the directory rather than above it; `within` is a
+	// second, lexical check for anything that still lands outside. Both are
+	// verified by removing them: four traversal vectors leak without them.
+	// Neither resolves symlinks, and neither needs to — the only way a link
+	// gets into this directory is the user putting it there, in wudict's own
+	// storage, reachable only from loopback.
+	rel := strings.TrimPrefix(path.Clean("/"+name), "/")
+	if rel == "" {
+		return false
+	}
+	full := filepath.Join(dir, filepath.FromSlash(rel))
+	if !within(dir, full) {
+		return false
+	}
+	f, err := os.Open(full)
+	if err != nil {
+		return false // the ordinary case: no override for this resource
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || fi.IsDir() {
+		return false
+	}
+	if m := resolveMIME(name, ""); m != "" {
+		w.Header().Set("Content-Type", m)
+	}
+	// no-cache, not max-age: an override is something the user is actively
+	// editing, and a day-long cache would hide their next attempt. ServeContent
+	// supplies Last-Modified, so revalidation stays cheap.
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, name, fi.ModTime(), f)
+	return true
 }
 
 // canTranscodeSpx reports whether any Speex→WAV backend is available.

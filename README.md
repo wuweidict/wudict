@@ -181,6 +181,7 @@ Indexing a dictionary creates a folder named after it under
     text.db     articles + search indexes
     media.db    audio/images (only after "pack media")
     info.txt    what this is, where it came from
+    res/        optional — files that replace the dictionary's own
 ```
 
 A dictionary is one folder, so it moves as one thing: **copy, move or zip
@@ -211,6 +212,65 @@ live, and which `wudict.toml` is in effect — with *Reveal in Finder* /
 system. **Edit folders…** opens the folder editor (also at `/setup`) at
 any time. If a folder came from `--dict-dir` or `DICT_DIR`, the editor
 says so: saving to the config file cannot override them.
+
+## Replacing or supplying a dictionary's files (`res/`)
+
+Dictionaries carry their own stylesheets, scripts, images and audio
+inside the dictionary file. Sometimes one of them is **damaged**, and
+sometimes it is simply **missing** — an article asks for a file the
+`.mdd`/`.slob` never contained, usually because the dictionary was
+converted or repacked from a website. Either way the result is the same:
+a stylesheet that never applies, a script that never runs, an audio
+button that does nothing. And because a dictionary's own JavaScript
+normally loads a library first, one absent or broken file can disable
+everything interactive in its articles at once.
+
+A `res/` folder inside the dictionary's library folder answers both. A
+file there is served **instead of** the dictionary's copy, or **in place
+of** one it doesn't have — wudict looks in `res/` first and only then
+inside the dictionary:
+
+```
+~/.wudict/db/Cambridge English Dictionary Online/
+  text.db
+  res/
+    jquery.js          ← replaces the dictionary's own (damaged) copy
+    js/entry.js        ← supplies one the dictionary never contained
+    css/style.css
+```
+
+Subfolders work, and they matter: articles routinely reference
+`js/…` and `css/…`, so mirror whatever path the article asks for.
+
+The name is the one the article requests. If you don't know it, open
+*Developer Tools ▸ Network* and look for a `/res/<id>/<name>` request —
+`<name>`, including any folders, is where to put your file. A 404 there
+is exactly the "missing resource" case. Reload the page after adding or
+editing one; overrides are never cached.
+
+This works for any file and any dictionary, and it is also how you'd
+patch a stylesheet you dislike or swap an icon. Nothing is modified
+inside the dictionary itself — remove the file and you're back to what
+it ships.
+
+One exception: a `.spx` audio file placed in `res/` is served as-is,
+**not** transcoded to WAV the way a `.spx` inside the dictionary is, so
+browsers cannot play it. Supply `.mp3` or `.wav` instead.
+
+**wudict tells you when a file is damaged.** Serving a `.js`, `.css`,
+`.html`, `.json`, `.xml`, `.svg` or `.txt` that contains a NUL byte — a
+byte that cannot legally occur in any of them — prints a warning naming
+the file and the folder to put a replacement in:
+
+```
+"…/Cambridge English Dictionary Online.slob": jquery.js is damaged: it
+contains NUL bytes and cannot parse. The dictionary is stored that way —
+wudict is serving it verbatim. Drop a good copy at <library folder>/res/jquery.js
+to override it.
+```
+
+The bytes are still served exactly as stored; wudict never edits what a
+dictionary contains.
 
 ## Disk use
 

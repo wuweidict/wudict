@@ -208,6 +208,35 @@ FIRST RUN
   page: paste a folder path, it is validated live, and the choice is
   saved to wudict.toml — no restart needed.
 
+LIBRARY FOLDER
+  Preparing a dictionary creates <DB_DIR>/<name>/ holding text.db,
+  media.db and info.txt — one folder per dictionary, the unit you copy
+  or hand over.
+
+  A res/ subfolder there replaces — or supplies — the files a dictionary
+  ships. Articles load their stylesheets, scripts and media from inside
+  the dictionary file; res/ is consulted FIRST, so a file there is used
+  whether or not the dictionary has one of that name:
+
+    <DB_DIR>/Cambridge English Dictionary Online/res/jquery.js
+    <DB_DIR>/Stanford Encyclopedia/res/js/entry.js
+
+  Subfolders work, and articles routinely use them (js/…, css/…), so
+  mirror the path the article asks for. That path is the one in the
+  /res/<id>/<name> URL seen in the browser's network panel — a 404 there
+  is the "missing resource" case. Overrides are served uncached, so a
+  reload picks up an edit. Nothing inside the dictionary is modified;
+  delete the file to go back. One exception: a .spx in res/ is served
+  as-is rather than transcoded to WAV, so supply .mp3 or .wav instead.
+
+  This exists because a dictionary can ship a DAMAGED file, and since
+  its own scripts usually load a library first, one bad file can
+  silently disable every interactive part of its articles. wudict warns
+  when it serves a .js/.css/.html/.json/.xml/.svg/.txt containing a NUL
+  byte — impossible in those formats, so proof the stored copy is
+  broken — and names the res/ path that would override it. The bytes
+  themselves are always served exactly as stored.
+
 EXAMPLE wudict.toml
   DICT_DIR    = "/data/dicts"
   DB_DIR      = "~/.wudict/db"
