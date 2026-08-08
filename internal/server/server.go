@@ -811,6 +811,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "%v", err)
 		return
 	}
+	format, err := parseFormat(r.URL.Query().Get("format"))
+	if err != nil {
+		httpErr(w, 400, "%v", err)
+		return
+	}
+	origin := originOf(r)
 	n := 20
 	if v := r.URL.Query().Get("n"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil && p > 0 {
@@ -884,8 +890,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		// resolve dictionary-internal refs (sound://, relative, absolute)
 		// to /res/{dict}/… here, where it is unit-tested.
+		// Rewrite first, reduce second: RewriteEntryHTML is what turns a
+		// dictionary's internal ref into /res/{dict}/…, and `clean` then
+		// absolutises exactly those. Reducing first would throw away the
+		// references before they had been named.
 		for j := range h.Results {
-			h.Results[j].Body = RewriteEntryHTML(h.Results[j].Body, id)
+			h.Results[j].Body = applyFormat(RewriteEntryHTML(h.Results[j].Body, id), format, origin)
 		}
 		m := streamMsg{T: "hit", I: i, Dict: id, Name: name, Results: h.Results, Skipped: h.Skipped}
 		if h.Err != nil {

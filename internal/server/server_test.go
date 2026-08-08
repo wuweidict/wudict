@@ -1045,3 +1045,111 @@ func TestResourceOverrideRejectsEscapes(t *testing.T) {
 		}
 	}
 }
+
+// searchBody runs one search and returns the first result's Body.
+func searchBody(t *testing.T, s *Server, path string) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+	if rec.Code != 200 {
+		t.Fatalf("%s: HTTP %d", path, rec.Code)
+	}
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		if !strings.Contains(line, `"t":"hit"`) {
+			continue
+		}
+		var m struct {
+			Results []struct{ Headword, Body string }
+		}
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if len(m.Results) > 0 {
+			return m.Results[0].Body
+		}
+	}
+	t.Fatalf("%s: no results", path)
+	return ""
+}
+
+// D61: an article body is the dictionary's own HTML, which is right for
+// wudict's own page and wrong for everyone else. `format` lets a client ask for
+// what it can actually render.
+func TestSearchFormats(t *testing.T) {
+	s := newTestServer(t)
+	const q = "/api/search?q=coraz%C3%B3n&mode=exact&n=1"
+
+	raw := searchBody(t, s, q)
+	if !strings.Contains(raw, "/res/") {
+		t.Fatalf("fixture no longer carries a resource ref: %q", raw)
+	}
+	if got := searchBody(t, s, q+"&format=raw"); got != raw {
+		t.Error("format=raw must be byte-identical to no format at all")
+	}
+
+	// clean: root-absolute refs become absolute, so the payload means the same
+	// thing embedded in a page served from somewhere else entirely.
+	clean := searchBody(t, s, q+"&format=clean")
+	if !strings.Contains(clean, "http://example.com/res/") {
+		t.Errorf("clean did not absolutise the resource ref: %q", clean)
+	}
+	if !strings.Contains(clean, "órgano muscular") {
+		t.Errorf("clean lost the definition text: %q", clean)
+	}
+	// DSL spells pronunciation as <object type="audio/x-wav">, which `clean`
+	// drops as an embedding vector — so it must arrive as a plain <audio>
+	// instead, or every DSL dictionary silently loses its audio.
+	if !strings.Contains(clean, `<audio src="http://example.com/res/`) {
+		t.Errorf("clean dropped the pronunciation instead of rewriting it: %q", clean)
+	}
+	if strings.Contains(clean, "<object") {
+		t.Errorf("clean kept an <object>: %q", clean)
+	}
+
+	// text: no markup survives at all
+	text := searchBody(t, s, q+"&format=text")
+	if strings.ContainsAny(text, "<>") {
+		t.Errorf("text still contains markup: %q", text)
+	}
+	if !strings.Contains(text, "órgano muscular") {
+		t.Errorf("text lost the definition: %q", text)
+	}
+
+	// an unknown format is a client bug worth reporting, not a silent fallback
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest("GET", q+"&format=json", nil))
+	if rec.Code != 400 {
+		t.Errorf("unknown format: HTTP %d, want 400", rec.Code)
+	}
+}
+
+// The reduction is the whole point, so assert it actually reduces — on markup
+// shaped like a real dictionary article rather than on a toy string.
+func TestCleanFormatStripsChromeAndScripts(t *testing.T) {
+	body := `<link rel="stylesheet" href="/res/abc/style.css">` +
+		`<script src="/res/abc/jquery.js"></script>` +
+		`<script>window.x=1</script>` +
+		`<div class="entry" style="color:red" onclick="steal()">` +
+		`<span class="hw">speed</span> <i>noun</i>` +
+		`<img src="/res/abc/spkr.png" alt="say"> ` +
+		`<a href="javascript:alert(1)">bad</a>` +
+		`<a href="bword://run">run</a>` +
+		`<font size="2">how fast something moves</font></div>`
+	got := applyFormat(body, formatClean, "http://127.0.0.1:6888")
+
+	for _, gone := range []string{"<script", "<link", "jquery", "onclick", "javascript:",
+		`class="entry"`, `style="color:red"`, "<font"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("clean kept %q:\n%s", gone, got)
+		}
+	}
+	for _, kept := range []string{"speed", "<i>noun</i>", "how fast something moves",
+		`href="bword://run"`, `src="http://127.0.0.1:6888/res/abc/spkr.png"`, `alt="say"`} {
+		if !strings.Contains(got, kept) {
+			t.Errorf("clean lost %q:\n%s", kept, got)
+		}
+	}
+	if len(got) >= len(body) {
+		t.Errorf("clean did not reduce: %d -> %d", len(body), len(got))
+	}
+}
