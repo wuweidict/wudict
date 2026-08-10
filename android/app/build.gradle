@@ -28,6 +28,15 @@ android {
     namespace 'com.legbehindneck.wudict'
     compileSdk 36
 
+    // Names the APK after the product instead of AGP's generic app-<variant>:
+    // wudict-release.apk / wudict-debug.apk. archivesName is the supported
+    // route on AGP 9 — the old applicationVariants.outputs.outputFileName
+    // hook is GONE (verified: "unknown property 'applicationVariants'"), and
+    // renaming through the new Variant API needs a custom task wired to the
+    // APK artifact, which is a lot of build logic to buy a file name. The
+    // Makefile copies the release APK to a stable dist/wudict.apk.
+    base { archivesName = 'wudict' }
+
     signingConfigs {
         release {
             def keystore = System.getenv("KEYSTORE")

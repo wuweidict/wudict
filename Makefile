@@ -146,10 +146,17 @@ android-go-purego: ## NDK-less fallback lib (pure-Go sqlite; .spx audio unavaila
 .PHONY: apk
 apk: android-go ## Build the debug APK (needs Android SDK: ANDROID_HOME or local.properties)
 	cd android && ./gradlew assembleDebug
+	@echo "android/app/build/outputs/apk/debug/$(BINARY)-debug.apk"
 
 .PHONY: apk-release
-apk-release: android-go ## Build the release APK (unsigned; CI signs with the repo-secret keystore)
+apk-release: android-go ## Build the release APK (signed only if a keystore is exported — see build-android.yml)
 	cd android && ./gradlew assembleRelease
+	@# The APK is left where Gradle put it, deliberately: a copy under dist/
+	@# survives a FAILED build, so `adb install dist/wudict.apk` would then
+	@# silently install the previous one — exactly when you are debugging and
+	@# least likely to notice. archivesName already gives it a real name; the
+	@# echo is only so you do not have to remember the path.
+	@echo "android/app/build/outputs/apk/release/$(BINARY)-release.apk"
 
 .PHONY: test-purego
 test-purego: ## Run store tests against the pure-Go sqlite driver (release parity)
@@ -322,8 +329,8 @@ push:  ## sync remotes
 	git push hz
 	git push leg
 	git push iq
-	git push od
-	git push wfrt
+# 	git push od
+	git push wwd
 
 .PHONY: push-tags
 push-tags:  ## push tags
@@ -331,8 +338,8 @@ push-tags:  ## push tags
 	git push hz --tags
 	git push leg --tags
 	git push iq --tags
-	git push od --tags
-	git push wfrt --tags
+	git push wwd --tags
+# 	git push wfrt --tags
 
 .PHONY: remotes
 remotes: ## git git remotes
