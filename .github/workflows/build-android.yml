@@ -27,6 +27,10 @@ permissions:
 env:
   KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
   KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+  KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+  STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+  KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+  KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
 jobs:
   build:
