@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+    <!-- The page's dark background (html[data-theme="dark"] in
+         web/index.html). Matches the theme picker's default, "auto",
+         which follows the system. -->
+    <color name="window_bg">#191A1C</color>
+</resources>

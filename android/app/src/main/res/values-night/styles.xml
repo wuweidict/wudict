@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+    <!-- System dark mode (API 29+): the dark parent so nothing the framework
+         draws — dialogs, the storage-permission prompt — comes up white
+         against a page that is dark. -->
+    <style name="Theme.WuWeiDict" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_bg</item>
+    </style>
+</resources>

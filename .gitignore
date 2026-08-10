@@ -4,3 +4,11 @@ coverage.out
 /wudict.toml
 /state.json
 .DS_Store
+
+# Android (D52) — build outputs and the cross-compiled server lib.
+# gradle-wrapper.jar is NOT ignored: it is the build, committed.
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/jniLibs/
+android/local.properties

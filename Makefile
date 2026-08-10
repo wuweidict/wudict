@@ -8,6 +8,9 @@
 BINARY     := wudict
 CMD        := .
 BUILD_DIR  := dist
+
+JAVA_HOME := /Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
+
 # ---- build flavours -----------------------------------------------------
 # wudict builds in two flavours; `build`/`install`/`check` use cgo:
 #
@@ -97,6 +100,56 @@ cross: ## Cross-compile all release targets into dist/ (purego flavour: pure-Go 
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch GOARM=$$arm go build -trimpath -tags purego -ldflags "$(LDFLAGS)" \
 	    -o $(BUILD_DIR)/$(BINARY)-$$suffix$$ext $(CMD) || exit 1; \
 	done
+
+# ---- Android (D52, D53) -----------------------------------------------------
+# The app is android/: a WebView shell around the same binary, shipped inside
+# the APK as libwudict.so, which the shell execs as a child process.
+#
+# `android-go` is the CGO flavour (D53): mattn FTS5 + built-in speex .spx
+# decoder, cross-compiled with the NDK — desktop parity on-device. The
+# external linker is given -Wl,-z,max-page-size=16384 (verified: PT_LOAD
+# alignment 0x4000), so the 16 KiB page-size mandate is met.
+# `android-go-purego` is the NDK-less fallback (slower sqlite, no .spx audio).
+#
+# NDK resolution: $ANDROID_NDK_HOME, else $ANDROID_NDK, else the newest
+# version under the SDK's ndk/ dir ($ANDROID_HOME, then the macOS default).
+# ANDROID_API matches the app's minSdk.
+ANDROID_SDK  ?= $(or $(ANDROID_HOME),$(HOME)/Library/Android/sdk)
+ANDROID_NDK  ?= $(or $(ANDROID_NDK_HOME),$(lastword $(sort $(wildcard $(ANDROID_SDK)/ndk/*))))
+NDK_HOST     := $(if $(filter Darwin,$(shell uname)),darwin-x86_64,linux-x86_64)
+NDK_BIN      := $(ANDROID_NDK)/toolchains/llvm/prebuilt/$(NDK_HOST)/bin
+ANDROID_API  ?= 26
+ANDROID_LIB  := android/app/src/main/jniLibs/arm64-v8a/libwudict.so
+
+# Gradle needs JDK 17+. Respect an inherited JAVA_HOME; on macOS fall back to
+# an installed JDK 17 rather than whatever ancient default `java` resolves to.
+ifeq ($(shell uname),Darwin)
+export JAVA_HOME ?= $(shell /usr/libexec/java_home -v 17 2>/dev/null)
+endif
+
+.PHONY: android-go
+android-go: ## Cross-compile the server into the APK's jniLibs (android/arm64, cgo: fast FTS5 + built-in speex; needs the NDK)
+	@test -n "$(ANDROID_NDK)" || { echo "error: no Android NDK found."; \
+	  echo "  install one: $(ANDROID_SDK)/cmdline-tools/latest/bin/sdkmanager 'ndk;30.0.15729638'"; \
+	  echo "  or set ANDROID_NDK_HOME / ANDROID_NDK"; exit 2; }
+	@mkdir -p $(dir $(ANDROID_LIB))
+	CC="$(NDK_BIN)/aarch64-linux-android$(ANDROID_API)-clang" \
+	CXX="$(NDK_BIN)/aarch64-linux-android$(ANDROID_API)-clang++" \
+	CGO_ENABLED=1 GOOS=android GOARCH=arm64 go build $(GOFLAGS) \
+	  -ldflags "$(LDFLAGS) -extldflags '-Wl,-z,max-page-size=16384'" -o $(ANDROID_LIB) $(CMD)
+
+.PHONY: android-go-purego
+android-go-purego: ## NDK-less fallback lib (pure-Go sqlite; .spx audio unavailable on-device)
+	@mkdir -p $(dir $(ANDROID_LIB))
+	CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build $(PUREGO_FLAGS) -ldflags "$(LDFLAGS)" -o $(ANDROID_LIB) $(CMD)
+
+.PHONY: apk
+apk: android-go ## Build the debug APK (needs Android SDK: ANDROID_HOME or local.properties)
+	cd android && ./gradlew assembleDebug
+
+.PHONY: apk-release
+apk-release: android-go ## Build the release APK (unsigned; CI signs with the repo-secret keystore)
+	cd android && ./gradlew assembleRelease
 
 .PHONY: test-purego
 test-purego: ## Run store tests against the pure-Go sqlite driver (release parity)

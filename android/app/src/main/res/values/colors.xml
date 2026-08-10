@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+    <color name="ic_launcher_background">#5B7A99</color>
+    <!-- The page's own background token (web/index.html). It paints the
+         window, the inset padding under the system bars and the WebView
+         before its first frame, so none of those flash a foreign colour. -->
+    <color name="window_bg">#FBFAF8</color>
+</resources>

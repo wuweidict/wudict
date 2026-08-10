@@ -1,0 +1,235 @@
+// Copyright (C) 2026 glowinthedark
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Runs the wudict server binary that ships inside the APK as
+// lib/arm64-v8a/libwudict.so — named like a library so the package manager
+// extracts it to the filesystem (with extractNativeLibs=true) and it can be
+// exec'd (D52). This is the same pattern Syncthing-Fork and InviZible Pro
+// ship in production; the alternative (JNI) would force an NDK and glue code
+// for no benefit to a localhost server.
+//
+// The binary is the same pure-Go program `make android-go` cross-compiles;
+// only its environment is arranged here: HOME and TMPDIR point at
+// app-private storage, the prepared library goes to internal flash, and
+// dictionary folders are the shared "Dictionaries" folder plus an
+// app-private fallback that needs no permission at all.
+package com.legbehindneck.wudict;
+
+import android.content.Context;
+import android.os.Environment;
+import android.util.Log;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.Map;
+
+class ServerProcess {
+
+    static final String HOST = "127.0.0.1";
+    // Fixed port (D52): UI prefs live in localStorage, which is keyed by
+    // origin — a random port would forget them on every launch.
+    static final int PORT = 6888;
+
+    interface Listener {
+        void onReady();
+        void onFailed(String message);
+    }
+
+    private static final String BINARY = "libwudict.so";
+    private static final String TAG = "wudict";
+
+    private final Context app;
+    private Process process;
+    // written by the log thread, read by the start thread when the child dies
+    private volatile String lastLine;
+
+    ServerProcess(Context app) {
+        this.app = app;
+    }
+
+    void start(Listener listener) {
+        Thread t = new Thread(() -> run(listener), "wudict-server");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void run(Listener listener) {
+        // A previous run's child can outlive the app process: Android kills
+        // the app, but an exec'd child is reparented to init and keeps
+        // running — still holding 6888, still serving the same library. Only
+        // a clean finish reaches onDestroy and stop(). Spawning a second
+        // server then means a bind failure and a misleading wait, when a
+        // perfectly good one is already there, so adopt it instead.
+        if (adoptRunningServer()) {
+            Log.i(TAG, "adopted a wudict server already listening on " + PORT);
+            listener.onReady();
+            return;
+        }
+
+        String bin = app.getApplicationInfo().nativeLibraryDir + "/" + BINARY;
+        if (!new File(bin).canExecute()) {
+            listener.onFailed("server binary not extracted: " + bin);
+            return;
+        }
+
+        File files = app.getFilesDir();
+        File dbDir = new File(files, "db");                  // prepared library: internal flash
+        File appDicts = new File(files, "Dictionaries");     // zero-permission fallback
+        File sharedDicts = new File(Environment.getExternalStorageDirectory(), "Dictionaries");
+        dbDir.mkdirs();
+        appDicts.mkdirs();
+        sharedDicts.mkdirs(); // best effort: needs the storage grant on API 30+
+        seedConfig(files, sharedDicts, appDicts);
+
+        ProcessBuilder pb = new ProcessBuilder(bin, "serve",
+                "--no-browser",                  // a WebView, not a browser tab
+                "--ip", HOST,
+                "--port", String.valueOf(PORT),
+                "--db-dir", dbDir.getAbsolutePath(),
+                // deliberately NO --dict-dir: see seedConfig
+                "--use-cached");                 // list what dbDir already holds
+        Map<String, String> env = pb.environment();
+        env.put("HOME", files.getAbsolutePath()); // ~/.wudict/wudict.toml lands in app storage
+        env.put("TMPDIR", app.getCacheDir().getAbsolutePath());
+        pb.directory(files);
+        pb.redirectErrorStream(true);
+        try {
+            process = pb.start();
+        } catch (IOException e) {
+            listener.onFailed(String.valueOf(e.getMessage()));
+            return;
+        }
+        logOutput(process.getInputStream());
+
+        if (awaitPort(process)) {
+            listener.onReady();
+        } else if (process.isAlive()) {
+            listener.onFailed("port " + PORT + " never opened");
+        } else {
+            // The child is gone, so its last line of output is the diagnosis —
+            // a bad --db-dir, a port already held, a permission refusal. Saying
+            // "port never opened" instead would send the user hunting for a
+            // network problem that does not exist.
+            listener.onFailed(lastLine == null
+                    ? "server exited immediately (" + process.exitValue() + ")"
+                    : lastLine);
+        }
+    }
+
+    // seedConfig writes the dictionary folders into ~/.wudict/wudict.toml —
+    // HOME is the app's files dir, so that is app-private storage — instead of
+    // passing --dict-dir. The distinction is not cosmetic: a flag is the
+    // HIGHEST config layer, so Config.EditableInFile("DICT_DIR") would be
+    // false and the ☰ panel would (correctly) refuse to change the folders,
+    // on the one platform that has no command line to change them from. Coming
+    // from the file, the panel owns them.
+    //
+    // Written once, only when nothing is there: after that the file is the
+    // user's, and the server's own first-run template step finds it and leaves
+    // it alone. Paths are device-generated (/storage/emulated/0/…, /data/…) so
+    // they need no TOML escaping.
+    private static void seedConfig(File home, File shared, File appPrivate) {
+        File cfg = new File(new File(home, ".wudict"), "wudict.toml");
+        if (cfg.exists()) return;
+        String toml = "# WuWeiDict — written by the Android shell on first launch.\n"
+                + "# Priority: CLI flag > environment variable > this file > default.\n"
+                + "# The app passes no --dict-dir, so the ☰ panel can edit this.\n"
+                + "\n"
+                + "DICT_DIR = [\"" + shared.getAbsolutePath() + "\", \""
+                + appPrivate.getAbsolutePath() + "\"]\n";
+        try {
+            Files.createDirectories(cfg.getParentFile().toPath());
+            Files.write(cfg.toPath(), toml.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            // Not fatal: the server falls back to $HOME/Dictionaries, which is
+            // appPrivate — reachable, just without the shared folder.
+            Log.w(TAG, "could not seed " + cfg, e);
+        }
+    }
+
+    // adoptRunningServer reports whether a wudict server is already answering
+    // on the port. Loopback is shared with every other app on the device, so
+    // an open socket is not proof: it is only adopted if /api/config answers
+    // like ours. process stays null, so stop() will not kill something this
+    // instance never started.
+    private static boolean adoptRunningServer() {
+        HttpURLConnection c = null;
+        try {
+            c = (HttpURLConnection) new URL(
+                    "http://" + HOST + ":" + PORT + "/api/config").openConnection();
+            c.setConnectTimeout(700);
+            c.setReadTimeout(700);
+            if (c.getResponseCode() != 200) return false;
+            StringBuilder body = new StringBuilder();
+            try (BufferedReader r = new BufferedReader(
+                    new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
+                for (String line; (line = r.readLine()) != null; ) body.append(line);
+            }
+            // configInfo's own field names (internal/server/folders.go)
+            return body.indexOf("\"libDir\"") >= 0 && body.indexOf("\"revealLabel\"") >= 0;
+        } catch (IOException | RuntimeException e) {
+            return false; // nothing listening, or not us
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
+    private void logOutput(InputStream in) {
+        Thread t = new Thread(() -> {
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(in))) {
+                for (String line; (line = r.readLine()) != null; ) {
+                    Log.d(TAG, line);
+                    if (!line.trim().isEmpty()) lastLine = line; // not isBlank(): API 35+
+                }
+            } catch (IOException ignored) {
+                // process ended; nothing more to log
+            }
+        }, "wudict-log");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    // Waits for the server to accept a connection. Watching the child as well
+    // as the port matters: a server that dies on startup — the common failure,
+    // since it is the run that creates the config and the library folders —
+    // would otherwise hold the "Starting…" screen for the full minute before
+    // reporting the wrong thing.
+    private static boolean awaitPort(Process child) {
+        long deadline = System.nanoTime() + 60_000_000_000L; // 60 s: first run writes its config
+        while (System.nanoTime() < deadline) {
+            try (Socket s = new Socket()) {
+                s.connect(new InetSocketAddress(HOST, PORT), 500);
+                return true;
+            } catch (IOException refused) {
+                if (!child.isAlive()) return false; // it will never open now
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
+    void stop() {
+        Process p = process;
+        if (p != null) {
+            // No graceful shutdown: Java's destroy() is a hard kill. That is
+            // safe here — SQLite commits are transactional, so the library
+            // cannot be corrupted by it.
+            p.destroy();
+        }
+    }
+}

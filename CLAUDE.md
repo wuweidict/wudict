@@ -23,6 +23,7 @@ This repository is the whole project (`github.com/legbehindneck/wudict`); there 
 - `internal/store` — the prepared SQLite backend: schema, ingest, library folders, media.
 - `internal/server` — registry, HTTP API, embedded UI (`web/index.html`, `web/setup.html`, `web/frame.js`).
 - `internal/gomdict` — inlined MDX/MDD parser. `internal/speex` — in-process .spx decoder (D18).
+- `android/` — the Android app (D52): a dependency-free Java WebView shell that execs the android/arm64 binary shipped inside the APK as `libwudict.so`. `make android-go` rebuilds the Go side (cgo flavour, D53: mattn FTS5 + built-in speex, needs the NDK; `make android-go-purego` is the NDK-less fallback), `make apk` the whole app; CI signs via repo secrets. The port adds no Go code and no build tags.
 - **The Makefile is the developer UI (D10): every action has a target, `make help` lists them, `make check` before declaring work done.**
 
 The reference projects this was built from (`mdict-go-web`, `draego`, `pyglossary`, the speex sources) have been **removed from disk**. `docs/FORMATS.md` still cites their file and function names: read those as provenance for where a rule came from, not as paths you can open.

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+    <!-- No edge-to-edge opt-out here (the old values-v35 override is gone):
+         Android 16 disabled windowOptOutEdgeToEdgeEnforcement for apps
+         targeting API 36, so MainActivity pads for the insets instead. -->
+    <style name="Theme.WuWeiDict" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_bg</item>
+    </style>
+</resources>
