@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
+<!-- The Google Play flavour (D62). It declares NO storage permission: its
+     dictionaries are copied in through the Storage Access Framework and live
+     in the app's own external files dir, which needs none on any API level.
+
+     The only thing added here is a way in from a file manager. ACTION_SEND
+     rather than a "*/*" ACTION_VIEW filter: the latter would put WuWeiDict in
+     the open-with sheet of every file on the device. The MIME list is what
+     Android actually reports for these formats — none of .mdx/.slob/.ifo/.dsl
+     has a registered type, so they arrive as octet-stream, and the compressed
+     ones (.dsl.dz, .dict.dz) as gzip. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <activity android:name=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/gzip" />
+                <data android:mimeType="application/zip" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/gzip" />
+                <data android:mimeType="application/zip" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

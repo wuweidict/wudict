@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
+<!-- The GitHub / F-Droid flavour (D62). Everything Play objects to lives
+     here and nowhere else, so the `play` build cannot inherit it: the merger
+     is additive, and no flavour ever removes another's node.
+
+     D5 (user-approved): dictionaries are read from the shared "Dictionaries"
+     folder. All-files access covers API 30+; the legacy pair covers 26–29
+     (WRITE is granted at runtime on those). requestLegacyExternalStorage is
+     the 29-and-below half of the same story, so it belongs here too. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+    <application android:requestLegacyExternalStorage="true" />
+</manifest>
