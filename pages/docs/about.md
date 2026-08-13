@@ -5,45 +5,25 @@ description: Why WuWeiDict exists — wu wei, effortless action, and the belief 
 
 # The idea
 
-Your tools should as fast as your thought. They should just work, should not get in the way, and be almost invisible.
-And this is the challenge that WuWeiDict take on. You reach for a word, and the answer is
-already there.
+Your tools should be as fast as your thought. They should just work, not get in the way, and be almost unnoticeable.
+And this is the challenge that WuWeiDict take on. You want to look up a word, and the answer is
+right there.
 
-## The problem worth solving
+Results appear as soon as any dictionary has a hit, and more results appear
+as more hits are collected.
 
-WuWeiDict reads all your dictionaries in any of the six formats and presents all
-of them behind one search box.
+## Your data is fully private
 
-## Two engines, one interface
+The server binds to the loopback address,
+listens on your port, and does not know the internet exists. No
+accounts, no telemetry, no analytics, no crash and log collection services, and no tracking.
 
-Under the hood lives a deliberately simple idea. Every dictionary gets two
-ways to be read:
-
-- **Immediately**, through its own native index — the _preview_ mode. Drop
-  the file in, search at once. No import step exists, because nothing needs
-  importing.
-- **Prepared**, quietly, into a small library folder that gives the
-  dictionary powers its original format never had — searching _inside_ the
-  definitions, look up partial words, packing audio. Preparation runs by
-  itself on first use, costs a couple of megabytes, and is always reversible.
-
-Results appear as soon as any dictionary has an answer, and more results appear
-as more answers are available.
-
-## Designed for total privacy
-
-**Your privacy is the default.** The server binds to your loopback address,
-listens on your port, and does not know the internet exists. There is no
-account, no telemetry, and not tracking.
-
-**Override any file** Even when a dictionary
-ships a damaged script or a missing image, wudict serves the bytes exactly
-as stored and let's you override the original resource with files you place in the
+**Override any file** If a dictionary
+ships a bad script or a missing media file, wudict lets you override the original resource with files you place in the
 `./res` subfolder under the internal DB dir, e.g. `~/.wudict/db/<dict_folder>/res`.
 
 ## WuWeiDict API
 
 The `wudict` server uses a compact documented HTTP contract — a
-handful of endpoints, NDJSON. The JSON API is used by the **[Chrome/Firefox extension](extension.md)**
-to enable hovering any word on any page,
-and show the defintion in a popup.
+handful of JSON endpoints. The same JSON API is used both by the WuWeiDict main page and the **[Chrome/Firefox extension](extension.md)**
+which lets you hover or right-click any word on any page, and show its definition in a popup.
