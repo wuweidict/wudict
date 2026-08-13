@@ -79,9 +79,15 @@ COMMANDS
                                           On an .mdd, lists the files it holds —
                                           the same key/value format, so the same
                                           command. No .mdx needed.
-  res    [-o out] <dictfile> <name>       Extract one resource (e.g. "audio/word.mp3").
+  res    [-o out] [-f] <dictfile> <name>  Extract one resource (e.g. "audio/word.mp3").
                                           Takes an .mdd directly too; any name
                                           that keys printed is one this accepts.
+                                          Piped or redirected, the bytes go to stdout.
+                                          On a terminal they are written to a file
+                                          named after the resource instead (-f to
+                                          overwrite). -o names the output: a path
+                                          (parents created), a directory, or "-"
+                                          for stdout.
   ingest [-full] [-headwords] [-contains] <dictfile|folder…>
                                           Prepare a dictionary into the library:
                                           <db-dir>/<dictionary name>/text.db (+ info.txt).
@@ -1138,35 +1144,170 @@ func cmdClean(args []string) error {
 
 func cmdRes(args []string) error {
 	fs := flag.NewFlagSet("res", flag.ExitOnError)
-	out := fs.String("o", "", "output file (default stdout)")
+	out := fs.String("o", "", `output file; "-" is stdout, a directory means "in there", empty writes a file when stdout is a terminal and stdout otherwise`)
+	force := fs.Bool("f", false, "overwrite an existing file whose name was derived from the resource")
 	fs.Parse(args)
 	if fs.NArg() != 2 {
-		return fmt.Errorf("usage: wudict res [-o out] <dictfile> <name>")
+		return fmt.Errorf("usage: wudict res [-o out] [-f] <dictfile> <name>")
 	}
 	d, err := dict.Open(fs.Arg(0))
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	rc, mimeType, err := d.Resource(fs.Arg(1))
+	name := fs.Arg(1)
+	rc, mimeType, err := d.Resource(name)
 	if err != nil {
 		return err
 	}
 	defer rc.Close()
-	w := io.Writer(os.Stdout)
-	if *out != "" {
-		f, err := os.Create(*out)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		w = f
-	}
-	if _, err := io.Copy(w, rc); err != nil {
+
+	dest, derived, err := resDest(*out, name, os.Stdout, os.Stat)
+	if err != nil {
 		return err
 	}
+	if dest == "" { // stdout
+		if _, err := io.Copy(os.Stdout, rc); err != nil {
+			return err
+		}
+		if mimeType != "" {
+			fmt.Fprintln(os.Stderr, "mime:", mimeType)
+		}
+		return nil
+	}
+	// A derived name is a guess, so it never destroys anything without -f; a
+	// name the user typed is an instruction, and truncating it is what every
+	// other tool does with an output path.
+	if derived && !*force {
+		if _, err := os.Stat(dest); err == nil {
+			return fmt.Errorf("%s already exists: pass -f to overwrite, or -o to name the output", dest)
+		}
+	}
+	n, err := writeFileAtomic(dest, rc)
+	if err != nil {
+		return err
+	}
+	// stdout stays free of anything that is not the resource itself, so this
+	// remains usable in a pipeline that also asked for a file.
 	if mimeType != "" {
-		fmt.Fprintln(os.Stderr, "mime:", mimeType)
+		fmt.Fprintf(os.Stderr, "wrote %s (%d bytes, %s)\n", dest, n, mimeType)
+	} else {
+		fmt.Fprintf(os.Stderr, "wrote %s (%d bytes)\n", dest, n)
 	}
 	return nil
+}
+
+// resDest decides where `res` writes. It returns "" for stdout, and reports
+// whether the path was DERIVED from the resource name (the caller then refuses
+// to overwrite) rather than given by the user.
+//
+// The guard is "stdout is a terminal", NOT "stdout". Binary on a terminal is
+// the accident; binary down a pipe or a redirect is the command working as
+// intended, and `wudict res d.mdx img.png > img.png` and `… | file -` must keep
+// meaning what they always meant. `-o -` is an explicit instruction and beats
+// the terminal check — naming stdout IS the consent.
+//
+// stat is injected so the directory case is testable without touching disk.
+func resDest(out, name string, stdout *os.File, stat func(string) (os.FileInfo, error)) (dest string, derived bool, err error) {
+	if out == "-" {
+		return "", false, nil
+	}
+	if out != "" {
+		// An existing directory means "put it in there"; anything else is the
+		// file name itself, parents included (mkdir -p is done at write time).
+		if fi, err := stat(out); err == nil && fi.IsDir() {
+			base := resBasename(name)
+			if base == "" {
+				return "", false, fmt.Errorf("resource %q has no usable file name: name the output file with -o", name)
+			}
+			return filepath.Join(out, base), false, nil
+		}
+		return out, false, nil
+	}
+	if !isTerminal(stdout) {
+		return "", false, nil
+	}
+	base := resBasename(name)
+	if base == "" {
+		return "", false, fmt.Errorf("resource %q has no usable file name: pass -o to name the output, or -o - for stdout", name)
+	}
+	return base, true, nil
+}
+
+// resBasename reduces a resource name to a single, safe file name in the
+// current directory. It returns "" when nothing usable is left.
+//
+// The name comes from the DICTIONARY, not from the user: MDX stores paths as
+// `\audio\x.spx`, and a hostile or merely broken container can hold "..", an
+// absolute path, a Windows drive letter, or a NUL. So the whole path is
+// discarded and only the last element kept — the flat file the user asked for.
+// Recreating the container's directory tree from those strings is what turns
+// this into zip-slip, and is why -o exists for anyone who wants a specific
+// place. The server solved the same problem the same way (D59).
+func resBasename(name string) string {
+	// Both separators, whatever the host: an .mdd written on Windows is read
+	// on Linux, where a backslash is an ordinary character and would otherwise
+	// survive into the file name.
+	name = strings.ReplaceAll(name, "\\", "/")
+	if i := strings.LastIndexByte(name, '/'); i >= 0 {
+		name = name[i+1:]
+	}
+	// A drive-relative name ("c:x.png") keeps a colon that means something on
+	// Windows and nothing here; take what follows it.
+	if i := strings.LastIndexByte(name, ':'); i >= 0 {
+		name = name[i+1:]
+	}
+	name = strings.TrimSpace(name)
+	// "." and ".." are not file names, and a control byte in one is a
+	// terminal-escape vector as much as a filesystem problem.
+	if name == "." || name == ".." || strings.ContainsAny(name, "\x00") {
+		return ""
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return ""
+		}
+	}
+	return name
+}
+
+// writeFileAtomic copies src to path via a sibling temp file, creating parent
+// directories first. Nothing lands at the final name until the copy has fully
+// succeeded: a resource that fails to decompress halfway through must not
+// leave a truncated file that looks like a complete one.
+func writeFileAtomic(path string, src io.Reader) (int64, error) {
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return 0, err
+		}
+	}
+	// Same directory as the destination, so the rename is on one filesystem.
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".part*")
+	if err != nil {
+		return 0, err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		tmp.Close()        // no-op after a successful Close below
+		os.Remove(tmpName) // no-op after a successful Rename
+	}()
+	n, err := io.Copy(tmp, src)
+	if err != nil {
+		return n, err
+	}
+	if err := tmp.Close(); err != nil {
+		return n, err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
+// isTerminal reports whether f is a character device — the same test logx uses
+// for stderr, kept here rather than shared because logx is about progress
+// output and this is about not vomiting a PNG into someone's shell.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
