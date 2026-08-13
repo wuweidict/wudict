@@ -21,7 +21,7 @@ Copyright &copy; 2026 The WuWeiDict contributors
 """
 
 repo_url = "https://github.com/wuweidict/wudict"
-repo_name = "legbehindneck/wudict"
+repo_name = "wuweidict/wudict"
 edit_uri = "edit/master/pages/docs/"
 
 # ----------------------------------------------------------------------------

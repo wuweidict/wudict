@@ -20,7 +20,7 @@ cgo driver, build with `-tags sqlite_fts5` (as draego does), for native/dev buil
 Per-dict/all action; progress "Preparing search index…"; full-ingest variant "…and pack media". Ingest is a feature upgrade, not onboarding — adding a dictionary = dropping files in the dict dir.
 
 ## D6 — Project/module name — **SUPERSEDED 2026-08-02 by D28**
-`github.com/legbehindneck/wuweidict`, code in `wudict/` subdir of the workspace. The module path is now `github.com/wuweidict/wudict` and there is no enclosing workspace.
+`github.com/wuweidict/wudict`, code in `wudict/` subdir of the workspace. The module path is now `github.com/wuweidict/wudict` and there is no enclosing workspace.
 
 ## D11 — License: GPL-3.0-or-later — **ACCEPTED 2026-07-25**
 Required by the inlined GPL-3 go-mdict code. LICENSE file + SPDX headers via `addlicense` (© 2026 glowinthedark); pre-existing third-party headers (gomdict, mark.js) left untouched.
@@ -133,7 +133,7 @@ P6.6 rejected cgo Speex and shelled out to `speexdec`; that made dictionary audi
 
 Two names because a project name and a command name optimize for different things — distinctiveness versus ≤6 typo-proof characters. `wuwei` alone types badly (`ei` is the most transposed English digraph; `w…w` repeats a finger), which the short form fixes. Rejected: `wwdict` (doubled same-finger bigram, reads as a `www` typo, five spoken syllables) and plain `dict` (already `/usr/bin/dict`, the RFC 2229 client).
 
-**Two binaries** — ~~Go names an installed binary after the last element of its package path, so `go install github.com/legbehindneck/wuweidict@latest` can only produce `wuweidict`. Rather than accept a name nobody should type, all CLI code moved to `internal/cli` and two `package main` shims build from it: `./main.go` → `wuweidict`, `cmd/wudict` → `wudict`.~~ **SUPERSEDED 2026-08-02 by D28**: one binary, one entry point. The rest of D27 (the two *names*, the no-migration rule, the About surfaces) stands unchanged, as does the consequence that the version stamp targets `internal/cli.Version`, **not** `main.version`.
+**Two binaries** — ~~Go names an installed binary after the last element of its package path, so `go install github.com/wuweidict/wudict@latest` can only produce `wuweidict`. Rather than accept a name nobody should type, all CLI code moved to `internal/cli` and two `package main` shims build from it: `./main.go` → `wuweidict`, `cmd/wudict` → `wudict`.~~ **SUPERSEDED 2026-08-02 by D28**: one binary, one entry point. The rest of D27 (the two *names*, the no-migration rule, the About surfaces) stands unchanged, as does the consequence that the version stamp targets `internal/cli.Version`, **not** `main.version`.
 
 **No migration**, user-directed: `~/.gonow-dict` is not read, `GONOW_*` is not honoured, `gonow:`-prefixed meta is not accepted, and the old localStorage keys are not carried over. Everything is rebuilt and re-indexed from scratch. This is the one release where that is free; a later rename would not be.
 
@@ -152,7 +152,7 @@ Fixed at the source: the **module path is now `github.com/wuweidict/wudict`**, m
 
 Naming per D27 is untouched — the product a user reads is still **WuWeiDict**, the technical name is still `wudict`. The module path is a technical surface, so it takes the technical name; the long form was never load-bearing for identity, which lives in `internal/cli` (`ProductName`, `SiteURL`, `RepoURL`).
 
-**Consequences.** The GitHub repo must be renamed `wuweidict` → `wudict`, because Go resolves a module path to that repo and then requires the `module` line in `go.mod` to match: GitHub's rename redirect fetches the code but the path mismatch is a hard error, so **`go install github.com/legbehindneck/wuweidict@latest` breaks permanently**. Acceptable pre-1.0 and on the same "one release where it's free" logic as D27's no-migration rule. Pages moves to `legbehindneck.github.io/wudict`; `SiteURL`/`RepoURL`, the systemd unit's `Documentation=`, the web About/setup footers and the README release links all follow. Local git remotes need re-pointing.
+**Consequences.** The GitHub repo must be renamed `wuweidict` → `wudict`, because Go resolves a module path to that repo and then requires the `module` line in `go.mod` to match: GitHub's rename redirect fetches the code but the path mismatch is a hard error, so **`go install github.com/wuweidict/wudict@latest` breaks permanently**. Acceptable pre-1.0 and on the same "one release where it's free" logic as D27's no-migration rule. Pages moves to `legbehindneck.github.io/wudict`; `SiteURL`/`RepoURL`, the systemd unit's `Documentation=`, the web About/setup footers and the README release links all follow. Local git remotes need re-pointing.
 
 **Standing rule:** a second artifact built from identical source is a smell, not a solution. Fix the input that forced it.
 

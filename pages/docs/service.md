@@ -13,16 +13,16 @@ the product; this page is the convenience.
 ## macOS — a LaunchAgent
 
 The Makefile generates a `launchctl` LaunchAgent from
-`launchctl/com.legbehindneck.wudict.plist.in` and manages it for you:
+`launchctl/com.wuweidict.wudict.plist.in` and manages it for you:
 
-| Command | What it does |
-|---|---|
-| `make mac-agent-install` | generate the plist, register the agent |
-| `make mac-agent-start` | `launchctl bootstrap gui/$UID <plist>` |
-| `make mac-agent-stop` | `launchctl bootout gui/$UID/com.legbehindneck.wudict` |
-| `make mac-agent-restart` | rebuild the binary, then `kickstart -k` |
-| `make mac-agent-status` | `launchctl print gui/$UID/<label>` |
-| `make mac-agent-uninstall` | stop it and delete the plist |
+| Command | What it does                                      |
+|---|---------------------------------------------------|
+| `make mac-agent-install` | generate the plist, register the agent            |
+| `make mac-agent-start` | `launchctl bootstrap gui/$UID <plist>`            |
+| `make mac-agent-stop` | `launchctl bootout gui/$UID/com.wuweidict.wudict` |
+| `make mac-agent-restart` | rebuild the binary, then `kickstart -k`           |
+| `make mac-agent-status` | `launchctl print gui/$UID/<label>`                |
+| `make mac-agent-uninstall` | stop it and delete the plist                      |
 
 The agent launches when you log in. Search is available the moment the
 desktop is.

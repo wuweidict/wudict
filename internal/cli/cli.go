@@ -53,7 +53,7 @@ var Version = "dev"
 const (
 	ProductName = "WuWeiDict"
 	Tagline     = "Search every dictionary you own, from one browser tab."
-	SiteURL     = "https://legbehindneck.github.io/wudict"
+	SiteURL     = "https://wuweidict.github.io/wudict"
 	RepoURL     = "https://github.com/wuweidict/wudict"
 )
 
