@@ -1,0 +1,196 @@
+# ============================================================================
+# WuWeiDict — documentation site configuration (Zensical, TOML)
+#
+# Build:   zensical build        (from this directory)
+# Preview: zensical serve        (http://localhost:8000)
+#
+# The marketing copy, install guides and extension docs live in `docs/`
+# as plain Markdown. Keep this file readable: every setting below is
+# deliberate, and every value the site can do without is left out.
+# ============================================================================
+
+[project]
+
+site_name = "WuWeiDict"
+site_description = "WuWeiDict (wudict) — one small binary that turns every dictionary you own into a fast, private, offline-first search server in your browser. Supports MDX/MDD, StarDict, Slob, DSL, BGL and its own portable library format."
+site_author = "The WuWeiDict contributors"
+site_url = "https://wudict.FIXME.TODO.com"
+
+copyright = """
+Copyright &copy; 2026 The WuWeiDict contributors
+"""
+
+repo_url = "https://github.com/legbehindneck/wudict"
+repo_name = "legbehindneck/wudict"
+edit_uri = "edit/master/pages/docs/"
+
+# ----------------------------------------------------------------------------
+# Navigation. Explicit, so the reading order is the thinking order: meet the
+# idea, get it running, learn to use it, then go deeper only when curious.
+# ----------------------------------------------------------------------------
+nav = [
+  { "Home" = "index.md" },
+  { "About" = "about.md" },
+  { "Quick start" = [
+    "install.md",
+    "run.md",
+    "use.md",
+  ] },
+  { "Chrome/Firefox" = [
+    "extension.md",
+  ] },
+  { "Dictionaries" = [
+    "dictionaries.md",
+    "service.md",
+  ] },
+  { "Help" = [
+    "faq.md",
+    "license.md",
+  ] },
+]
+
+extra_css = ["stylesheets/extra.css"]
+
+# ----------------------------------------------------------------------------
+# Theme — the modern variant, tuned for reading
+# ----------------------------------------------------------------------------
+[project.theme]
+variant = "modern"
+custom_dir = "overrides"
+logo = "assets/logo.svg"
+favicon = "assets/favicon.svg"
+language = "en"
+
+features = [
+  # Announcement bar (content in overrides/main.html) — a dismissible line
+  # instead of a wall of text.
+  "announce.dismiss",
+
+  # Read or edit any page right from the GitHub repo.
+  "content.action.edit",
+  "content.action.view",
+
+  # Code blocks: explain with annotations, copy with one click.
+  "content.code.annotate",
+  "content.code.copy",
+  "content.code.select",
+
+  # Footnotes read without leaving the sentence.
+  "content.footnote.tooltips",
+
+  # Tabs with matching labels stay in step across the whole site.
+  "content.tabs.link",
+
+  # Richer link tooltips.
+  "content.tooltips",
+
+  # The header steps aside when you read, returns when you scroll up.
+  "header.autohide",
+
+  # Prev/next links at the foot of every page.
+  "navigation.footer",
+
+  # Navigation behaves like an app: no full reloads, prefetch on hover.
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.instant.progress",
+
+  # Breadcrumbs above every title.
+  "navigation.path",
+
+  # Top-level sections become proper sidebar groups.
+  "navigation.sections",
+
+  # One click returns from a long article.
+  "navigation.top",
+
+  # The URL follows the section you are reading, so links stay shareable.
+  "navigation.tracking",
+
+  # Search results light up the matched words on the page.
+  "search.highlight",
+
+  # The table of contents follows you down the page.
+  "toc.follow",
+]
+
+[project.theme.font]
+text = "Inter"
+code = "JetBrains Mono"
+
+# Light and dark palettes, switched by the sun/moon toggle; the OS
+# preference decides on first visit.
+[[project.theme.palette]]
+scheme = "default"
+primary = "indigo"
+accent = "cyan"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "indigo"
+accent = "cyan"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+tag.default = "lucide/hash"
+tag.start = "lucide/rocket"
+tag.browser = "lucide/globe"
+tag.format = "lucide/book-open"
+
+# ----------------------------------------------------------------------------
+# Extra data used by templates, tags and the social footer
+# ----------------------------------------------------------------------------
+[project.extra.tags]
+Quickstart = "start"
+Browser = "browser"
+Formats = "format"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/legbehindneck/wudict"
+
+# ----------------------------------------------------------------------------
+# Markdown extensions — the working set: callouts, cards, tabs, annotations,
+# formatting, keys, task lists, and Mermaid diagrams. Nothing exotic.
+# ----------------------------------------------------------------------------
+[project.markdown_extensions.abbr]
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.footnotes]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.toc]
+permalink = true
+[project.markdown_extensions.pymdownx.arithmatex]
+generic = true
+[project.markdown_extensions.pymdownx.betterem]
+[project.markdown_extensions.pymdownx.caret]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.emoji]
+emoji_generator = "zensical.extensions.emoji.to_svg"
+emoji_index = "zensical.extensions.emoji.twemoji"
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.keys]
+[project.markdown_extensions.pymdownx.magiclink]
+[project.markdown_extensions.pymdownx.mark]
+[project.markdown_extensions.pymdownx.quotes]
+callouts = true
+[project.markdown_extensions.pymdownx.smartsymbols]
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+combine_header_slug = true
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true
+[project.markdown_extensions.pymdownx.tilde]

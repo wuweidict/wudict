@@ -11,8 +11,8 @@
 # KEY_ALIAS / KEY_PASSWORD from the environment, so all this file does is
 # decode the keystore to a real file and export those four. Doing it in both
 # places is what breaks it: AGP already zipaligns and applies the v1/v2/v3
-# schemes, and its output is wudict-release.apk (archivesName in
-# android/app/build.gradle) — never app-release-unsigned.apk.
+# schemes, and its output is wudict-foss-release.apk (archivesName plus the
+# flavour, D62) — never app-release-unsigned.apk.
 #
 # Secrets required for a signed release build. Miss any one and the workflow
 # falls back to a debug APK rather than failing five minutes into Gradle:
@@ -128,14 +128,26 @@ jobs:
       - name: Assemble
         run: |
           cd android
+          # Only the FOSS flavour is published here (D62). The Play bundle is
+          # built locally with `make aab-play` and signed with Play's UPLOAD
+          # key, which is not this workflow's keystore — producing it here
+          # would only invite someone to upload an APK signed with the wrong
+          # certificate. The Play APK is still assembled, unsigned, so the
+          # permission assertion below has something to inspect.
           if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
-            TASK=assembleRelease
+            TASK=assembleFossRelease
           else
-            TASK=assembleDebug
+            TASK=assembleFossDebug
           fi
-          ./gradlew --no-daemon "$TASK" \
+          ./gradlew --no-daemon "$TASK" assemblePlayDebug \
             -PversionName="${{ steps.ver.outputs.version }}" \
             -PversionCode="${{ steps.ver.outputs.code }}"
+
+      - name: Assert the flavour split held
+        # The Play APK must declare no storage permission and the FOSS one
+        # must still declare All-files access. A manifest-merger change that
+        # quietly unified them is the failure this exists to catch.
+        run: sh tools/verify-apk.sh
 
       - name: Collect and verify the APK
         run: |
@@ -146,12 +158,12 @@ jobs:
           # desktop workflows state cgo/purego because both land in the same
           # release and must be told apart, and only the cgo APK is published.
           if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
-            SRC=android/app/build/outputs/apk/release/wudict-release.apk
+            SRC=android/app/build/outputs/apk/foss/release/wudict-foss-release.apk
             OUT="wudict-android-arm64.apk"
           else
             # A debug APK is signed too — with the SDK's debug key. It is not
             # "unsigned"; it is signed by a certificate nobody should trust.
-            SRC=android/app/build/outputs/apk/debug/wudict-debug.apk
+            SRC=android/app/build/outputs/apk/foss/debug/wudict-foss-debug.apk
             OUT="wudict-android-arm64-debug.apk"
           fi
           if [ ! -f "$SRC" ]; then

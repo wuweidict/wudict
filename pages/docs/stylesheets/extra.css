@@ -1,0 +1,38 @@
+/*
+ * WuWeiDict site — small, deliberate adjustments on top of the Zensical
+ * modern theme. Everything here improves reading; nothing here fights it.
+ */
+
+/*
+ * Read at a comfortable rhythm on wide screens: cap the line, keep the
+ * measure from racing away on very large displays.
+ */
+.md-grid {
+  max-width: 1440px;
+}
+
+/*
+ * Wider code-annotation tooltips: short shell commands deserve a little
+ * more room for the explanation.
+ */
+:root {
+  --md-tooltip-width: 560px;
+}
+
+/*
+ * The material palette leans cool; give admonition bodies and code blocks
+ * the same quiet background so the page reads as one surface, not a quilt.
+ */
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 0.35rem;
+}
+
+/*
+ * Call-to-action buttons: a hair more breathing room so the primary
+ * buttons on the home page read as buttons, not links.
+ */
+.md-typeset .md-button {
+  padding: 0.375rem 1.1rem;
+  border-radius: 999px;
+}

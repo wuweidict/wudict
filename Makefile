@@ -143,20 +143,42 @@ android-go-purego: ## NDK-less fallback lib (pure-Go sqlite; .spx audio unavaila
 	@mkdir -p $(dir $(ANDROID_LIB))
 	CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build $(PUREGO_FLAGS) -ldflags "$(LDFLAGS)" -o $(ANDROID_LIB) $(CMD)
 
+# Two flavours (D62), one binary: `foss` is the GitHub/F-Droid build and keeps
+# All-files access; `play` declares no storage permission and imports through
+# SAF. Both package the same libwudict.so, so android-go is a shared prereq.
 .PHONY: apk
-apk: android-go ## Build the debug APK (needs Android SDK: ANDROID_HOME or local.properties)
-	cd android && ./gradlew assembleDebug
-	@echo "android/app/build/outputs/apk/debug/$(BINARY)-debug.apk"
+apk: android-go ## Build the FOSS debug APK (needs Android SDK: ANDROID_HOME or local.properties)
+	cd android && ./gradlew assembleFossDebug
+	@echo "android/app/build/outputs/apk/foss/debug/$(BINARY)-foss-debug.apk"
 
 .PHONY: apk-release
-apk-release: android-go ## Build the release APK (signed only if a keystore is exported — see build-android.yml)
-	cd android && ./gradlew assembleRelease
+apk-release: android-go ## Build the FOSS release APK (signed only if a keystore is exported — see build-android.yml)
+	cd android && ./gradlew assembleFossRelease
 	@# The APK is left where Gradle put it, deliberately: a copy under dist/
 	@# survives a FAILED build, so `adb install dist/wudict.apk` would then
 	@# silently install the previous one — exactly when you are debugging and
 	@# least likely to notice. archivesName already gives it a real name; the
 	@# echo is only so you do not have to remember the path.
-	@echo "android/app/build/outputs/apk/release/$(BINARY)-release.apk"
+	@echo "android/app/build/outputs/apk/foss/release/$(BINARY)-foss-release.apk"
+
+.PHONY: apk-play-debug
+apk-play-debug: android-go ## Build the Play-flavour debug APK (SAF import)
+	cd android && ./gradlew assemblePlayDebug
+	@echo "android/app/build/outputs/apk/play/debug/$(BINARY)-play-debug.apk"
+
+.PHONY: apk-play-release
+apk-play-release: android-go ## Build the Play-flavour release APK (SAF import)
+	cd android && ./gradlew assemblePlayRelease
+	@echo "android/app/build/outputs/apk/play/release/$(BINARY)-play-release.apk"
+
+.PHONY: aab-play
+aab-play: android-go ## Build the Play release bundle (unsigned: Play App Signing owns the key)
+	cd android && ./gradlew bundlePlayRelease
+	@echo "android/app/build/outputs/bundle/playRelease/$(BINARY)-play-release.aab"
+
+.PHONY: apk-verify
+apk-verify: ## Assert the Play APK declares no storage permission and still extracts the binary
+	@sh tools/verify-apk.sh
 
 .PHONY: test-purego
 test-purego: ## Run store tests against the pure-Go sqlite driver (release parity)

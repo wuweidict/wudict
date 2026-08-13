@@ -9,15 +9,15 @@
 // ship in production; the alternative (JNI) would force an NDK and glue code
 // for no benefit to a localhost server.
 //
-// The binary is the same pure-Go program `make android-go` cross-compiles;
-// only its environment is arranged here: HOME and TMPDIR point at
-// app-private storage, the prepared library goes to internal flash, and
-// dictionary folders are the shared "Dictionaries" folder plus an
-// app-private fallback that needs no permission at all.
+// The binary is the same program `make android-go` cross-compiles; only its
+// environment is arranged here. HOME and the prepared library come from
+// AppDirs — the app's own external files dir, so that a phone with no root
+// can still reach wudict.toml and the db dir (D62). TMPDIR stays on internal
+// storage. Which dictionary folders exist is the flavour's decision and
+// belongs to Storage, not here.
 package com.legbehindneck.wudict;
 
 import android.content.Context;
-import android.os.Environment;
 import android.util.Log;
 
 import java.io.BufferedReader;
@@ -82,14 +82,13 @@ class ServerProcess {
             return;
         }
 
-        File files = app.getFilesDir();
-        File dbDir = new File(files, "db");                  // prepared library: internal flash
-        File appDicts = new File(files, "Dictionaries");     // zero-permission fallback
-        File sharedDicts = new File(Environment.getExternalStorageDirectory(), "Dictionaries");
-        dbDir.mkdirs();
-        appDicts.mkdirs();
-        sharedDicts.mkdirs(); // best effort: needs the storage grant on API 30+
-        seedConfig(files, sharedDicts, appDicts);
+        // Where these live is AppDirs' business (D62: the app's external files
+        // dir, so an unrooted phone can still reach the config and the db
+        // dir), and WHICH dictionary folders exist is the flavour's (Storage).
+        File home = AppDirs.home(app);
+        File dbDir = AppDirs.dbDir(app);
+        File[] dicts = Storage.dictDirs(app);
+        seedConfig(home, dicts);
 
         ProcessBuilder pb = new ProcessBuilder(bin, "serve",
                 "--no-browser",                  // a WebView, not a browser tab
@@ -99,9 +98,9 @@ class ServerProcess {
                 // deliberately NO --dict-dir: see seedConfig
                 "--use-cached");                 // list what dbDir already holds
         Map<String, String> env = pb.environment();
-        env.put("HOME", files.getAbsolutePath()); // ~/.wudict/wudict.toml lands in app storage
+        env.put("HOME", home.getAbsolutePath()); // ~/.wudict/wudict.toml lands in app storage
         env.put("TMPDIR", app.getCacheDir().getAbsolutePath());
-        pb.directory(files);
+        pb.directory(home);
         pb.redirectErrorStream(true);
         try {
             process = pb.start();
@@ -127,8 +126,8 @@ class ServerProcess {
     }
 
     // seedConfig writes the dictionary folders into ~/.wudict/wudict.toml —
-    // HOME is the app's files dir, so that is app-private storage — instead of
-    // passing --dict-dir. The distinction is not cosmetic: a flag is the
+    // HOME is the app's own directory (AppDirs) — instead of passing
+    // --dict-dir. The distinction is not cosmetic: a flag is the
     // HIGHEST config layer, so Config.EditableInFile("DICT_DIR") would be
     // false and the ☰ panel would (correctly) refuse to change the folders,
     // on the one platform that has no command line to change them from. Coming
@@ -138,15 +137,28 @@ class ServerProcess {
     // user's, and the server's own first-run template step finds it and leaves
     // it alone. Paths are device-generated (/storage/emulated/0/…, /data/…) so
     // they need no TOML escaping.
-    private static void seedConfig(File home, File shared, File appPrivate) {
+    //
+    // Consequence worth stating, since Storage.dictDirs can now answer with a
+    // microSD card's folder as well: the volumes present at FIRST launch are
+    // the ones seeded. A card inserted later is not added behind the user's
+    // back — doing so would mean the shell parsing and rewriting a config file
+    // that belongs to the user, in Java, to re-implement what the ☰ panel and
+    // /setup already do. Its folder is app-specific external storage, so it is
+    // readable in every flavour with no permission: the user pastes the path
+    // once, and that is the same act as any other folder they add.
+    private static void seedConfig(File home, File[] dicts) {
         File cfg = new File(new File(home, ".wudict"), "wudict.toml");
         if (cfg.exists()) return;
+        StringBuilder list = new StringBuilder();
+        for (File d : dicts) {
+            if (list.length() > 0) list.append(", ");
+            list.append('"').append(d.getAbsolutePath()).append('"');
+        }
         String toml = "# WuWeiDict — written by the Android shell on first launch.\n"
                 + "# Priority: CLI flag > environment variable > this file > default.\n"
                 + "# The app passes no --dict-dir, so the ☰ panel can edit this.\n"
                 + "\n"
-                + "DICT_DIR = [\"" + shared.getAbsolutePath() + "\", \""
-                + appPrivate.getAbsolutePath() + "\"]\n";
+                + "DICT_DIR = [" + list + "]\n";
         try {
             Files.createDirectories(cfg.getParentFile().toPath());
             Files.write(cfg.toPath(), toml.getBytes(StandardCharsets.UTF_8));

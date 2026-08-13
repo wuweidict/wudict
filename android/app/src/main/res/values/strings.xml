@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Copyright (C) 2026 glowinthedark -->
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Shared by both flavours. Anything that names a storage mechanism belongs
+     to a flavour's own values/ instead (D62). -->
 <resources>
     <string name="app_name">WuWeiDict</string>
     <string name="starting">Starting WuWeiDict…</string>
     <string name="server_failed">WuWeiDict server failed to start: %1$s</string>
-    <string name="storage_title">Dictionary storage</string>
-    <string name="storage_message">WuWeiDict reads dictionaries from the shared “Dictionaries” folder (Internal storage ▸ Dictionaries). Choose “Grant access” and allow All files access on the next screen, then copy your .mdx/.mdd, .ifo, .slob, .dsl and .bgl files into that folder.</string>
-    <string name="storage_grant">Grant access</string>
-    <string name="storage_later">Later</string>
 </resources>

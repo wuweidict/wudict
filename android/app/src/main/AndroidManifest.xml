@@ -8,12 +8,10 @@
          app-wide rather than via a networkSecurityConfig domain list. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- D5 (user-approved): dictionaries are read from the shared
-         "Dictionaries" folder. All-files access covers API 30+; the legacy
-         pair covers 26–29 (WRITE is granted at runtime on those). -->
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!-- INTERNET is the only permission this manifest declares (D62). Every
+         storage permission belongs to the `foss` flavour's manifest, because
+         the `play` flavour has none: its dictionaries live in the app's own
+         external files dir, which is permission-free on every API level. -->
 
     <application
         android:allowBackup="false"
@@ -21,7 +19,6 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:largeHeap="true"
-        android:requestLegacyExternalStorage="true"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.WuWeiDict"
         android:usesCleartextTraffic="true">

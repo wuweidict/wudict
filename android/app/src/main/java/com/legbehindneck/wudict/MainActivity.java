@@ -7,20 +7,15 @@
 // ServerProcess execs it as a child and it answers on 127.0.0.1:6888.
 package com.legbehindneck.wudict;
 
-import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Message;
-import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -85,7 +80,11 @@ public class MainActivity extends Activity {
         setContentView(root);
         applyWindowInsets();
         syncBarAppearance();
-        ensureStorageAccess();
+        // Where dictionaries come from is the one thing that differs between
+        // the FOSS and Play builds (D62), and it lives entirely in Storage —
+        // a class that exists once per flavour and never in this source set.
+        Storage.ensureAccess(this);
+        Storage.onNewIntent(this, getIntent()); // launched by a share, possibly
 
         if (server == null) {
             server = new ServerProcess(getApplication());
@@ -175,6 +174,14 @@ public class MainActivity extends Activity {
         public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
             syncBackCallback(); // canGoBack() just changed
         }
+
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            // The Play flavour adds its import control here. Nothing in
+            // web/index.html knows what Android is — the D54 rule (the shell
+            // absorbs the platform, not the page), applied to the DOM.
+            Storage.onPageFinished(view);
+        }
     }
 
     private class ShellWebChromeClient extends WebChromeClient {
@@ -216,6 +223,10 @@ public class MainActivity extends Activity {
         }
         String url = uri.toString();
         if (url.equals(ORIGIN) || url.startsWith(ORIGIN + "/")) return false;
+        // Shell-private URLs (wudict://…) are a channel from the page to the
+        // Java side that costs no JavascriptInterface and no server API: this
+        // method already inspects every navigation, so the branch is free.
+        if (Storage.handleShellUri(this, uri)) return true;
         try {
             startActivity(new Intent(Intent.ACTION_VIEW, uri)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -278,27 +289,25 @@ public class MainActivity extends Activity {
         });
     }
 
-    // Dictionaries are read from the shared "Dictionaries" folder (D52).
-    // That needs all-files access on API 30+, legacy WRITE below; either way
-    // the server starts — it reports the folder as empty until files arrive.
-    private void ensureStorageAccess() {
-        if (Build.VERSION.SDK_INT >= 30) {
-            if (!Environment.isExternalStorageManager()) {
-                new AlertDialog.Builder(this)
-                        .setTitle(R.string.storage_title)
-                        .setMessage(R.string.storage_message)
-                        .setPositiveButton(R.string.storage_grant, (dialog, which) ->
-                                startActivity(new Intent(
-                                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                        Uri.parse("package:" + getPackageName()))))
-                        .setNegativeButton(R.string.storage_later, null)
-                        .show();
-            }
-        } else if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(
-                    new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
-        }
+    /** Re-loads the page after the library behind it changed (an import). */
+    void reloadPage() {
+        if (!gone && web.getParent() != null) web.reload();
+    }
+
+    // The activity is singleTask, so a share arriving while it is already up
+    // comes here rather than through onCreate.
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        Storage.onNewIntent(this, intent);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation") // startActivityForResult: no androidx here, by design
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        Storage.onActivityResult(this, requestCode, resultCode, data);
     }
 
     @Override

@@ -59,6 +59,22 @@ android {
         versionName(project.hasProperty('versionName') ? project.property('versionName') as String : gitVersion())
     }
 
+    // Two distributions, one source tree (D62). `foss` is the GitHub/F-Droid
+    // build and keeps All-files access; `play` ships with no storage
+    // permission at all and imports through SAF into app-owned storage.
+    //
+    // The split is by SOURCE SET, not by a runtime flag: `Storage` exists once
+    // per flavour and never in src/main, so the Play build cannot so much as
+    // name MANAGE_EXTERNAL_STORAGE — which is what an automated policy scan
+    // looks for. applicationId is deliberately shared: the two builds are the
+    // same app, and cross-updating between them is prevented by the signing
+    // key, not by the id.
+    flavorDimensions 'dist'
+    productFlavors {
+        foss { dimension 'dist' }
+        play { dimension 'dist' }
+    }
+
     buildFeatures {
         buildConfig true // BuildConfig.DEBUG gates WebView debugging
         // slows down build...
