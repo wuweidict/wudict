@@ -23,12 +23,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/legbehindneck/wudict/internal/config"
-	"github.com/legbehindneck/wudict/internal/dict"
-	"github.com/legbehindneck/wudict/internal/logx"
-	"github.com/legbehindneck/wudict/internal/search"
-	"github.com/legbehindneck/wudict/internal/speex"
-	"github.com/legbehindneck/wudict/internal/store"
+	"github.com/wuweidict/wudict/internal/config"
+	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/logx"
+	"github.com/wuweidict/wudict/internal/search"
+	"github.com/wuweidict/wudict/internal/speex"
+	"github.com/wuweidict/wudict/internal/store"
 )
 
 //go:embed web/index.html
@@ -117,6 +117,7 @@ func New(reg *Registry) *Server {
 	s.mux.HandleFunc("GET /api/ingest", s.handleIngest)
 	s.mux.HandleFunc("GET /api/setup", s.handleSetup)
 	s.mux.HandleFunc("GET /api/library", s.handleLibrary)
+	s.mux.HandleFunc("DELETE /api/library", s.handleRemoveLibrary)
 	s.mux.HandleFunc("GET /api/config", s.handleConfig)
 	s.mux.HandleFunc("GET /api/prefs", s.handlePrefs)
 	s.mux.HandleFunc("PUT /api/prefs", s.handleSavePrefs)
@@ -657,7 +658,7 @@ func addProvenance(info *dictInfo, entryPath string) {
 	native := store.IsTextDB(entryPath)
 	if !native && fileExists(entryPath) {
 		info.Source = entryPath
-		info.MediaSrc = companionMedia(entryPath)
+		info.MediaSrc = dict.CompanionMedia(entryPath)
 	}
 
 	// locate the cached text.db: the entry itself when native, else the
@@ -690,47 +691,6 @@ func addProvenance(info *dictInfo, entryPath string) {
 	// SLOB (which embeds resources — not cheaply enumerable, so assume it may).
 	info.HasMedia = info.MediaDB != "" || len(info.MediaSrc) > 0 ||
 		(info.Source != "" && strings.HasSuffix(strings.ToLower(info.Source), ".slob"))
-}
-
-// companionMedia lists the media SOURCE files that sit beside a foreign source
-// and would be packed into a media.db: MDX .mdd siblings, a DSL .files.zip, a
-// StarDict res/ dir or res.zip. Cheap (stat only). Empty for SLOB (media is
-// embedded in the .slob) and for formats with none.
-func companionMedia(src string) []string {
-	ext := strings.ToLower(filepath.Ext(src))
-	noExt := strings.TrimSuffix(src, filepath.Ext(src))
-	dir := filepath.Dir(src)
-	var out []string
-	switch ext {
-	case ".mdx":
-		for _, f := range []string{noExt + ".mdd", noExt + ".1.mdd"} {
-			if fileExists(f) {
-				out = append(out, f)
-			}
-		}
-		for n := 2; ; n++ {
-			f := fmt.Sprintf("%s.%d.mdd", noExt, n)
-			if !fileExists(f) {
-				break
-			}
-			out = append(out, f)
-		}
-	case ".dsl", ".dz":
-		for _, f := range []string{src + ".files.zip", noExt + ".files.zip"} {
-			if fileExists(f) {
-				out = append(out, f)
-				break
-			}
-		}
-	case ".ifo":
-		if d := filepath.Join(dir, "res"); dirExists(d) {
-			out = append(out, d)
-		}
-		if z := filepath.Join(dir, "res.zip"); fileExists(z) {
-			out = append(out, z)
-		}
-	}
-	return out
 }
 
 func fileExists(p string) bool {

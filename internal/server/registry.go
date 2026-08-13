@@ -21,9 +21,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/legbehindneck/wudict/internal/dict"
-	"github.com/legbehindneck/wudict/internal/logx"
-	"github.com/legbehindneck/wudict/internal/store"
+	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/logx"
+	"github.com/wuweidict/wudict/internal/store"
 )
 
 // upgraded serves queries from an ingested text.db while resolving
@@ -500,6 +500,11 @@ func (r *Registry) Rescan() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	seen := map[string]bool{}
+	// Rebuilt, not appended to: an id that no longer discovers to anything —
+	// a dictionary deleted (D63) or a drive unmounted — must stop resolving.
+	// Keeping it made `get` hand out an entry that is not in the list, so a
+	// removed dictionary stayed addressable by anyone still holding its id.
+	byID := make(map[string]*entry, len(paths))
 	var entries []*entry
 	for _, p := range paths {
 		id := pathID(p)
@@ -507,14 +512,14 @@ func (r *Registry) Rescan() error {
 			continue
 		}
 		seen[id] = true
-		if old, ok := r.byID[id]; ok {
-			entries = append(entries, old)
-			continue
+		e, ok := r.byID[id] // keep the open backend across a rescan
+		if !ok {
+			e = &entry{ID: id, Path: p}
 		}
-		e := &entry{ID: id, Path: p}
-		r.byID[id] = e
+		byID[id] = e
 		entries = append(entries, e)
 	}
+	r.byID = byID
 	sort.Slice(entries, func(i, j int) bool {
 		return strings.ToLower(entries[i].Path) < strings.ToLower(entries[j].Path)
 	})

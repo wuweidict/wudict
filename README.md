@@ -19,7 +19,7 @@ once.
 ## Quick start
 
 1. Download the binary for your platform from
-   [releases](https://github.com/legbehindneck/wudict/releases), rename to `wudict`, 
+   [releases](https://github.com/wuweidict/wudict/releases), rename to `wudict`, 
    `chmod +x wudict` (macOS/Linux) and move to a folder in `$PATH`, e.g. `/usr/local/bin`.
 2. Run `wudict` or `./wudict` if the file is in the current folder. 
 3. By default `wudict` searches for dictionaries under `~/Dictionaries` (including subfolders); 
@@ -317,10 +317,10 @@ Or with the Go toolchain alone:
 
 ```sh
 # recommended — fastest (cgo sqlite + built-in speex), needs a C compiler
-go install -tags sqlite_fts5 github.com/legbehindneck/wudict@latest
+go install -tags sqlite_fts5 github.com/wuweidict/wudict@latest
 
 # no C compiler? drop the tag — pure-Go sqlite, .spx audio via external speexdec
-go install github.com/legbehindneck/wudict@latest
+go install github.com/wuweidict/wudict@latest
 ```
 
 Both produce a working `wudict`; the tag only chooses the SQLite driver.

@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/legbehindneck/wudict/internal/dict"
-	"github.com/legbehindneck/wudict/internal/htmlref"
+	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/htmlref"
 )
 
 // schemeRef matches any real URI scheme (http:, data:, bword:, entry:, d:, x:…).

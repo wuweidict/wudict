@@ -10,7 +10,7 @@ tags:
 WuWeiDict ships as **one executable per platform** — no installers, no
 runtimes, no dependencies, nothing to uninstall. Download, rename, run.
 
-Every platform below starts from [the releases page](https://github.com/legbehindneck/wudict/releases "Latest binaries and the Android APK — always on GitHub Releases").
+Every platform below starts from [the releases page](https://github.com/wuweidict/wudict/releases "Latest binaries and the Android APK — always on GitHub Releases").
 
 === "macOS"
 
@@ -115,7 +115,7 @@ Debian/Ubuntu, MSYS2/MinGW on Windows).
 === "With a C compiler — recommended"
 
     ``` sh title="go install — cgo sqlite + in-process speex" hl_lines="1"
-    go install -tags sqlite_fts5 github.com/legbehindneck/wudict@latest
+    go install -tags sqlite_fts5 github.com/wuweidict/wudict@latest
     ```
 
     That is the same recipe as `make build`. From a clone of the
@@ -131,7 +131,7 @@ Debian/Ubuntu, MSYS2/MinGW on Windows).
 === "Without a C compiler"
 
     ``` sh title="go install — pure-Go sqlite"
-    go install github.com/legbehindneck/wudict@latest
+    go install github.com/wuweidict/wudict@latest
     ```
 
     Both commands produce the same `wudict`. If you pass the `-tags

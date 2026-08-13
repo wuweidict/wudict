@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/dict"
 )
 
 // Progress is called during ingest with entries processed so far and the

@@ -20,7 +20,7 @@ copyright = """
 Copyright &copy; 2026 The WuWeiDict contributors
 """
 
-repo_url = "https://github.com/legbehindneck/wudict"
+repo_url = "https://github.com/wuweidict/wudict"
 repo_name = "legbehindneck/wudict"
 edit_uri = "edit/master/pages/docs/"
 
@@ -151,7 +151,7 @@ Formats = "format"
 
 [[project.extra.social]]
 icon = "fontawesome/brands/github"
-link = "https://github.com/legbehindneck/wudict"
+link = "https://github.com/wuweidict/wudict"
 
 # ----------------------------------------------------------------------------
 # Markdown extensions — the working set: callouts, cards, tabs, annotations,

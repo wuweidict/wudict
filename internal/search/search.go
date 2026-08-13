@@ -11,7 +11,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/dict"
 )
 
 // Mode selects the query type; dictionaries lacking the capability are

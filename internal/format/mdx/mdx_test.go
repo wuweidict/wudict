@@ -5,7 +5,7 @@
 package mdx
 
 import (
-	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/dict"
 	"io"
 	"os"
 	"path/filepath"

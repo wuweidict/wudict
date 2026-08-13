@@ -5,14 +5,14 @@
 // Command wudict is WuWeiDict's entry point — the only one.
 //
 // Go names an installed binary after the last element of its package path, so
-// the module path github.com/legbehindneck/wudict makes
+// the module path github.com/wuweidict/wudict makes
 //
-//	go install github.com/legbehindneck/wudict@latest
+//	go install github.com/wuweidict/wudict@latest
 //
 // yield "wudict" directly, with no second shim package (D28). Everything the
 // program actually does lives in internal/cli.
 package main
 
-import "github.com/legbehindneck/wudict/internal/cli"
+import "github.com/wuweidict/wudict/internal/cli"
 
 func main() { cli.Main() }

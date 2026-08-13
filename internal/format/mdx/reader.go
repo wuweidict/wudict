@@ -8,8 +8,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/legbehindneck/wudict/internal/dict"
-	"github.com/legbehindneck/wudict/internal/logx"
+	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/logx"
 )
 
 func init() {

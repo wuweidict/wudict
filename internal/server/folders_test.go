@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/legbehindneck/wudict/internal/dict"
-	"github.com/legbehindneck/wudict/internal/store"
+	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/store"
 )
 
 // Reveal hands a path to the OS file manager, so it must never accept a path
@@ -141,18 +141,30 @@ func TestConfigEndpointAndSetupPage(t *testing.T) {
 	if info["revealLabel"] == "" {
 		t.Error("missing reveal label")
 	}
-	// The panel shortens a home prefix to "~" for display only; without this
-	// field it silently falls back to full paths, so the fallback is fine but
-	// the field going missing must not be.
-	if home, _ := os.UserHomeDir(); home != "" && info["home"] != home {
-		t.Errorf("home = %v, want %q", info["home"], home)
+	// The panel shortens a common prefix for display only, using pairs the
+	// server chose for this platform; without them it silently falls back to
+	// full paths, so the fallback is fine but the field going missing is not.
+	if home, _ := os.UserHomeDir(); home != "" {
+		al, _ := info["pathAliases"].([]any)
+		if len(al) == 0 {
+			t.Fatalf("pathAliases = %v, want the home directory as ~", info["pathAliases"])
+		}
+		first, _ := al[0].([]any)
+		if len(first) != 2 || first[0] != home || first[1] != "~" {
+			t.Errorf("pathAliases[0] = %v, want [%q ~]", first, home)
+		}
 	}
 	// httptest requests come from a TEST-NET address, so this one is remote:
 	// reveal must not be offered
 	if info["canReveal"] != false {
 		t.Error("a non-loopback request must not be offered reveal")
 	}
-	// ...while the same call from localhost is
+	// ...while the same call from localhost is — on a machine that has a file
+	// manager, which a build server may not, so state the world under test
+	// rather than inheriting it (D63 made canReveal depend on it).
+	restore := revealPossible
+	revealPossible = func() bool { return true }
+	defer func() { revealPossible = restore }()
 	req := httptest.NewRequest("GET", "/api/config", nil)
 	req.RemoteAddr = "127.0.0.1:4444"
 	rec0 := httptest.NewRecorder()

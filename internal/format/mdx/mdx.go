@@ -30,9 +30,9 @@ import (
 	"golang.org/x/text/encoding/traditionalchinese"
 	"golang.org/x/text/transform"
 
-	"github.com/legbehindneck/wudict/internal/dict"
-	gomdict "github.com/legbehindneck/wudict/internal/gomdict"
-	"github.com/legbehindneck/wudict/internal/logx"
+	"github.com/wuweidict/wudict/internal/dict"
+	gomdict "github.com/wuweidict/wudict/internal/gomdict"
+	"github.com/wuweidict/wudict/internal/logx"
 )
 
 func init() {

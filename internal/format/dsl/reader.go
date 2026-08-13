@@ -20,7 +20,7 @@ import (
 	"golang.org/x/text/encoding/unicode/utf32"
 	"golang.org/x/text/transform"
 
-	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/dict"
 )
 
 // Reader is the sequential ingest scan over a .dsl / .dsl.dz file.

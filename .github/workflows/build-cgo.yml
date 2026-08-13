@@ -61,7 +61,7 @@ jobs:
           VERSION="${{ inputs.tag }}"
           [ -z "$VERSION" ] && VERSION="$(git describe --abbrev=0 2>/dev/null || echo dev)"
           go build -trimpath -tags sqlite_fts5 \
-            -ldflags="-s -w -X github.com/legbehindneck/wudict/internal/cli.Version=${VERSION}" \
+            -ldflags="-s -w -X github.com/wuweidict/wudict/internal/cli.Version=${VERSION}" \
             -o "${BINARY}" .
 
       - name: Warn on experimental build failure

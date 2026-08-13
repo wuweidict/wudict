@@ -50,6 +50,7 @@ public class MainActivity extends Activity {
 
     private volatile boolean gone;   // onDestroy ran: late server callbacks must not touch the views
     private Object backCallback;     // OnBackInvokedCallback (API 33+), registered only while canGoBack()
+    private boolean openPanelOnLoad; // arrived from "Manage space" (D63): show the panel when the page is up
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -85,6 +86,8 @@ public class MainActivity extends Activity {
         // a class that exists once per flavour and never in this source set.
         Storage.ensureAccess(this);
         Storage.onNewIntent(this, getIntent()); // launched by a share, possibly
+        openPanelOnLoad = getIntent() != null
+                && getIntent().getBooleanExtra(ManageSpaceActivity.EXTRA_MANAGE, false);
 
         if (server == null) {
             server = new ServerProcess(getApplication());
@@ -181,6 +184,10 @@ public class MainActivity extends Activity {
             // web/index.html knows what Android is — the D54 rule (the shell
             // absorbs the platform, not the page), applied to the DOM.
             Storage.onPageFinished(view);
+            if (openPanelOnLoad) {
+                openPanelOnLoad = false;
+                openPanel(view);
+            }
         }
     }
 
@@ -301,6 +308,25 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         Storage.onNewIntent(this, intent);
+        if (intent != null && intent.getBooleanExtra(ManageSpaceActivity.EXTRA_MANAGE, false)) {
+            // The page is already loaded in the common case (the app was in the
+            // background), so act now; if it is not, onPageFinished will.
+            if (!gone && web.getParent() != null) openPanel(web);
+            else openPanelOnLoad = true;
+        }
+    }
+
+    /**
+     * Opens the ☰ panel — the screen that lists dictionaries with their sizes
+     * and, on this platform, can remove them (D63). Driven by clicking the
+     * page's own control rather than by a wudict:// URL or an added API,
+     * because the panel's opener already does everything that must happen
+     * (loads the folder section, refreshes the config): D54, the shell absorbs
+     * the platform and the page is untouched.
+     */
+    private void openPanel(WebView view) {
+        view.evaluateJavascript(
+                "(function(){var b=document.getElementById('panelBtn');if(b)b.click();})()", null);
     }
 
     @Override

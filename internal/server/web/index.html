@@ -345,6 +345,23 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 .pd .tag.on{color:var(--accent);border-color:var(--accent)}
 .act{color:var(--link);cursor:pointer;text-decoration:underline;
   text-underline-offset:2px;font-size:12px;margin-right:var(--sp-2)}
+/* Removal (D63). Deliberately the quietest control on the card: plain,
+   uncoloured, no icon — it is offered only where the platform gives the user
+   no other way to delete these files (Android), and it must not compete with
+   the switches above it, which are the actions a user actually wants. The
+   danger colour appears only in the confirmation, on the button that acts. */
+.pd .rm{color:var(--fg-faint);cursor:pointer;font-size:11.5px;
+  text-decoration:underline;text-underline-offset:2px}
+.pd .rm:hover{color:#c0564f}
+.pd .rmq{font-size:11.5px;color:var(--fg-soft);display:block;line-height:1.7}
+.pd .rmq b{color:var(--fg)}
+.pd .rmgo{display:inline-block;border:1px solid #c0564f;border-radius:99px;
+  padding:.05em .55em;margin:.15em .25em .15em 0;font-size:10.5px;
+  color:#c0564f;cursor:pointer;user-select:none}
+.pd .rmgo:hover{background:#c0564f;color:#fff}
+.pd .rmgo.busy{border-style:dashed;cursor:default;background:none;color:var(--fg-faint)}
+.pd .rmno{color:var(--fg-faint);cursor:pointer;font-size:10.5px;
+  text-decoration:underline;text-underline-offset:2px;margin-left:.25em}
 /* A provenance row is a PATH plus optional annotations, held as separate
    elements rather than composed into one sentence — the path carries what it
    copies in data-full, so nothing downstream has to take a display string
@@ -632,7 +649,7 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
     <span class="brand">WuWei<small>Dict</small></span> <span class="ver">{{VERSION}}</span>
     <p>Search every dictionary you own, from one browser tab.</p>
     <p><a href="https://legbehindneck.github.io/wudict" target="_blank" rel="noopener">Website</a>
-       · <a href="https://github.com/legbehindneck/wudict" target="_blank" rel="noopener">Source</a></p>
+       · <a href="https://github.com/wuweidict/wudict" target="_blank" rel="noopener">Source</a></p>
   </div>
 </details>
 <div id="panelList"></div>
@@ -1139,6 +1156,12 @@ function renderPanel(){
     // media, a source to pack it from, and it isn't already packed.
     let acts="";
     if(d.error)acts=`<span class="err">${esc(d.error)}</span>`;
+    /* Removal (D63) is offered only where the app cannot hand the user to a
+       file manager instead — canDelete is the server's answer to that, not a
+       platform test done here. On a desktop this branch never runs and the
+       card is byte-for-byte what it was. */
+    if(cfgInfo&&cfgInfo.canDelete)
+      acts+=`<span class="rm" title="Delete this dictionary from this device">Remove…</span>`;
     div.innerHTML=`<div class="hd">
         <span class="grip" draggable="true" title="Drag to reorder">⠿</span>
         <b>${esc(dictLabel(d))}</b>
@@ -1192,15 +1215,24 @@ let cfgInfo=null;
 /* Every path in this panel opened with the same /Users/<name>/ — eleven
    characters of nothing, repeated on each row, holding the pixels the eye
    lands on first while the part that tells the rows APART (mdict, aard,
-   slob_Apple) was pushed right. `~` is the form every shell and file dialog
-   already accepts, so the reader loses nothing.
+   slob_Apple) was pushed right.
+   The server sends {prefix,label} pairs (longest first) and this applies them
+   without knowing what they mean: on a desktop that is the home directory as
+   `~`, on Android the volume names the Files app uses. A label the page
+   invented would be a lie on some platform — `~` on Android names a directory
+   with no shell that nobody can open (D63 amendment).
    Display only: the clipboard and /api/reveal keep the absolute path. */
-function tildePath(p){
-  const h=cfgInfo&&cfgInfo.home;      // set before any row is built
-  if(!h||!p)return p;
-  if(p===h)return "~";
-  const sep=h.includes("\\")?"\\":"/";
-  return p.startsWith(h+sep)?"~"+sep+p.slice(h.length+sep.length):p;
+function shortPath(p){
+  const al=cfgInfo&&cfgInfo.pathAliases;   // set before any row is built
+  if(!al||!p)return p;
+  for(const a of al){
+    const pre=a[0],label=a[1];
+    if(!pre)continue;
+    if(p===pre)return label;
+    const sep=pre.includes("\\")?"\\":"/";
+    if(p.startsWith(pre+sep))return label+sep+p.slice(pre.length+sep.length);
+  }
+  return p;
 }
 /* Break opportunities after separators only. word-break:break-all split
    "Language" into "Languag"+"e"; a path broken after "/" keeps every segment
@@ -1208,14 +1240,14 @@ function tildePath(p){
    letter by letter. <wbr> contributes nothing to textContent, so it can never
    leak into a copy. */
 function pathHTML(p){
-  return esc(tildePath(p)).replace(/([^\\/])([\\/])/g,"$1$2<wbr>");
+  return esc(shortPath(p)).replace(/([^\\/])([\\/])/g,"$1$2<wbr>");
 }
-/* Split out of loadFolders because the dictionary cards need cfgInfo.home too,
+/* Split out of loadFolders because the dictionary cards need the aliases too,
    and they are drawn long before anyone opens the Folders section. Fetching it
    only on open meant every card showed a full path until something happened to
-   re-render it — the ~ form would appear at an arbitrary later moment, which is
-   worse than never having it. Errors are swallowed: no home means full paths,
-   which is a correct fallback, not a failure. */
+   re-render it — the short form would appear at an arbitrary later moment,
+   which is worse than never having it. Errors are swallowed: no aliases means
+   full paths, which is a correct fallback, not a failure. */
 async function loadConfig(){
   try{ cfgInfo=await (await fetch("/api/config")).json() }catch(e){}
   return cfgInfo;
@@ -1377,9 +1409,77 @@ $("panelList").addEventListener("click",e=>{
     runIngest(feat.closest(".pd").dataset.id,{[feat.dataset.feat]:on?0:1},feat);
     return;
   }
+  const rm=e.target.closest(".rm");
+  if(rm){askRemoval(rm.closest(".pd"));return}
+  const no=e.target.closest(".rmno");
+  if(no){renderPanel();return}
+  const go=e.target.closest("[data-rm]");
+  if(go){
+    if(go.dataset.busy)return;
+    runRemove(go.closest(".pd").dataset.id,go.dataset.rm,go);
+    return;
+  }
   const act=e.target.closest(".act");if(!act)return;
   runIngest(act.closest(".pd").dataset.id,{fts:1},act);
 });
+
+/* ── removing a dictionary (D63) ─────────────────────────────────────────
+   Two clicks, no modal: the card turns into its own confirmation, so the
+   dictionary being deleted is the one the user is looking at and nothing is
+   named twice. Each choice states what it deletes and what that costs — no
+   "are you sure?", which asks the user to re-read a question they already
+   answered rather than telling them anything.
+
+   Delete-everything is the default because preparation is automatic: deleting
+   only the index of a dictionary whose original is still in a scanned folder
+   frees the space until the next search rebuilds it. "Index only" is offered
+   anyway (it is the honest way to reclaim a full-text index), and it says so
+   afterwards, from the server's own report. */
+function askRemoval(pd){
+  const d=dicts.find(x=>x.id===pd.dataset.id);if(!d)return;
+  const acts=pd.querySelector(".acts");if(!acts)return;
+  const idx=(d.dbSize||0)+(d.mediaSize||0);
+  const prepared=idx>0||!!d.mediaDB;
+  // "original files only" is a genuine option exactly once: the dictionary is
+  // prepared AND its media is packed, so the prepared copy can stand alone.
+  // The server enforces this too (D24 §4) — this only avoids offering what
+  // would be refused.
+  const canDropSource=!!d.source&&prepared&&(!!d.mediaDB||!d.hasMedia);
+  let btns=`<span class="rmgo" data-rm="all">delete${d.source?" everything":""}</span>`;
+  if(d.source&&prepared)btns+=`<span class="rmgo" data-rm="index">index only${idx?" · "+mb(idx):""}</span>`;
+  if(canDropSource)btns+=`<span class="rmgo" data-rm="source">original files only</span>`;
+  acts.innerHTML=`<span class="rmq">Delete <b>${esc(dictLabel(d))}</b>`+
+    (d.source?` — the prepared index${idx?" ("+mb(idx)+")":""} and the original files`
+             :` — this is the only copy, there is no original to rebuild it from`)+
+    `<br>${btns}<span class="rmno">cancel</span></span>`;
+}
+
+async function runRemove(id,kind,node){
+  node.dataset.busy="1";node.classList.add("busy");
+  const d=dicts.find(x=>x.id===id)||{path:""},name=dictLabel(d);
+  node.textContent="deleting…";
+  setStatus('<span class="spin"></span>'+esc(name)+" — deleting…");
+  const q="/api/library?dict="+encodeURIComponent(id)+
+    "&prepared="+(kind==="source"?0:1)+"&source="+(kind==="index"?0:1);
+  let rep;
+  try{
+    const r=await fetch(q,{method:"DELETE"});
+    rep=await r.json();
+    if(!r.ok)throw new Error((rep&&rep.error)||("HTTP "+r.status));
+  }catch(err){
+    node.classList.remove("busy");delete node.dataset.busy;
+    node.textContent="failed";
+    setStatus("⚠ "+esc(name)+" — "+esc(err.message||String(err)));
+    return;
+  }
+  setStatus("✓ "+esc(name)+" — deleted, "+mb(rep.freed||0)+" freed"+
+    (rep.note?" · "+esc(rep.note):""));
+  // The server has already rescanned; this refetches the list it now reports,
+  // and redraws the panel (and the folder section's counts) from it.
+  await loadDicts();
+  if($("folderBody").childNodes.length)loadFolders();
+  if(lastQuery)doSearch();
+}
 $("panelList").addEventListener("change",e=>{
   if(e.target.classList.contains("en"))toggleDict(e.target.closest(".pd").dataset.id);
 });

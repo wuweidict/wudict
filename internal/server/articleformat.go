@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/net/html"
 
-	"github.com/legbehindneck/wudict/internal/htmlref"
+	"github.com/wuweidict/wudict/internal/htmlref"
 )
 
 // Article formats for /api/search (D61). An article body is the dictionary's

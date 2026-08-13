@@ -26,7 +26,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/legbehindneck/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/dict"
 )
 
 // entryTypes are the block types carrying word/definition entries.

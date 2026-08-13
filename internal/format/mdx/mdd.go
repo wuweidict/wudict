@@ -14,8 +14,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/legbehindneck/wudict/internal/dict"
-	go_mdict "github.com/legbehindneck/wudict/internal/gomdict"
+	"github.com/wuweidict/wudict/internal/dict"
+	go_mdict "github.com/wuweidict/wudict/internal/gomdict"
 )
 
 // MDD is ONE .mdd file opened on its own.

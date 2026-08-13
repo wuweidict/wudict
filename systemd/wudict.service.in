@@ -14,7 +14,7 @@
 # template in the repo (systemd/wudict.service.in) instead.
 [Unit]
 Description=WuWeiDict dictionary server
-Documentation=https://github.com/legbehindneck/wudict
+Documentation=https://github.com/wuweidict/wudict
 
 [Service]
 Type=simple

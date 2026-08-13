@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/legbehindneck/wudict/internal/logx"
+	"github.com/wuweidict/wudict/internal/logx"
 )
 
 // StateFile holds the part of the UI that describes the COLLECTION rather than

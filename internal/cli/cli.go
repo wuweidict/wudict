@@ -26,23 +26,23 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/legbehindneck/wudict/internal/config"
-	"github.com/legbehindneck/wudict/internal/dict"
-	"github.com/legbehindneck/wudict/internal/logx"
-	"github.com/legbehindneck/wudict/internal/search"
-	"github.com/legbehindneck/wudict/internal/server"
-	"github.com/legbehindneck/wudict/internal/speex"
-	"github.com/legbehindneck/wudict/internal/store"
+	"github.com/wuweidict/wudict/internal/config"
+	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/logx"
+	"github.com/wuweidict/wudict/internal/search"
+	"github.com/wuweidict/wudict/internal/server"
+	"github.com/wuweidict/wudict/internal/speex"
+	"github.com/wuweidict/wudict/internal/store"
 
-	_ "github.com/legbehindneck/wudict/internal/format/bgl"      // register .bgl
-	_ "github.com/legbehindneck/wudict/internal/format/dsl"      // register .dsl(.dz)
-	_ "github.com/legbehindneck/wudict/internal/format/mdx"      // register .mdx
-	_ "github.com/legbehindneck/wudict/internal/format/slob"     // register .slob
-	_ "github.com/legbehindneck/wudict/internal/format/stardict" // register .ifo
+	_ "github.com/wuweidict/wudict/internal/format/bgl"      // register .bgl
+	_ "github.com/wuweidict/wudict/internal/format/dsl"      // register .dsl(.dz)
+	_ "github.com/wuweidict/wudict/internal/format/mdx"      // register .mdx
+	_ "github.com/wuweidict/wudict/internal/format/slob"     // register .slob
+	_ "github.com/wuweidict/wudict/internal/format/stardict" // register .ifo
 )
 
 // Version is stamped by the Makefile via
-// -ldflags "-X github.com/legbehindneck/wudict/internal/cli.Version=…".
+// -ldflags "-X github.com/wuweidict/wudict/internal/cli.Version=…".
 // It lives here rather than in main because this package, not the one-line
 // shim at the module root, is where the program is.
 var Version = "dev"
@@ -54,7 +54,7 @@ const (
 	ProductName = "WuWeiDict"
 	Tagline     = "Search every dictionary you own, from one browser tab."
 	SiteURL     = "https://legbehindneck.github.io/wudict"
-	RepoURL     = "https://github.com/legbehindneck/wudict"
+	RepoURL     = "https://github.com/wuweidict/wudict"
 )
 
 func usage() string {
@@ -105,6 +105,16 @@ COMMANDS
                                           from the old flat layout. A cached dictionary is
                                           never listed, even if its source is gone or changed.
                                           -f deletes them. Dry run by default.
+  rm [-f] [-keep-source|-keep-index] <name|path>
+                                          Remove one dictionary: its prepared folder in the
+                                          library AND its original files. The argument is a
+                                          library name, a folder, a text.db or the path of an
+                                          original dictionary file. -keep-source deletes only
+                                          the prepared folder (it will be prepared again on
+                                          the next search if the original is still in a
+                                          scanned folder); -keep-index deletes only the
+                                          originals, and refuses while media is unpacked.
+                                          Lists what it would delete; -f deletes it.
 
 SERVE FLAGS
   --dict-dir     <path>   Folder with dictionary files (scanned recursively).
@@ -294,6 +304,8 @@ func Main() {
 		err = cmdRes(args)
 	case "clean":
 		err = cmdClean(args)
+	case "rm", "remove":
+		err = cmdRemove(args)
 	case "-h", "--help", "help":
 		fmt.Print(usage())
 	case "-v", "--version", "version":

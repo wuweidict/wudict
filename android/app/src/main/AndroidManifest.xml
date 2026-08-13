@@ -19,6 +19,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:largeHeap="true"
+        android:manageSpaceActivity=".ManageSpaceActivity"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.WuWeiDict"
         android:usesCleartextTraffic="true">
@@ -40,5 +41,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- "Manage space" in App Info (D63). Launched by the Settings app, so
+             exported; translucent and finished in onCreate, so it is a
+             redirection rather than a screen; excluded from recents so it
+             never appears as a second task alongside the app it opened. -->
+        <activity
+            android:name=".ManageSpaceActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     </application>
 </manifest>

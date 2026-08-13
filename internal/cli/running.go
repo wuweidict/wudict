@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/legbehindneck/wudict/internal/dict"
-	"github.com/legbehindneck/wudict/internal/server"
+	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/server"
 )
 
 // runningInstance describes a wudict already serving on the address this

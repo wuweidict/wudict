@@ -1,4 +1,4 @@
-module github.com/legbehindneck/wudict
+module github.com/wuweidict/wudict
 
 go 1.26.5
 
