@@ -103,6 +103,10 @@ func applyProcs(p Power) {
 	runtime.GOMAXPROCS(n)
 }
 
+// memLimitConfigured is the ceiling the configuration asked for, which is not
+// always the ceiling in force — see relaxMemoryLimit.
+var memLimitConfigured atomic.Int64
+
 // memLimit mirrors the soft heap ceiling passed to the runtime, because the
 // janitor needs the number: a limit alone turns memory pressure into CONTINUOUS
 // GC (the runtime's only lever is to collect harder), which on a phone is the
@@ -119,6 +123,7 @@ func SetMemoryLimit(n int64) {
 	if n <= 0 {
 		return
 	}
+	memLimitConfigured.Store(n)
 	memLimit.Store(n)
 	debug.SetMemoryLimit(n)
 }
@@ -128,28 +133,119 @@ func SetMemoryLimit(n int64) {
 // work with what shedding just freed rather than starting from a full heap.
 const pressureRatio = 0.85
 
-// memoryPressure reports that the heap has grown close enough to the limit for
-// the GC to be about to start working continuously.
+// heapInUse is the quantity SetMemoryLimit itself governs: everything the
+// runtime has mapped, less what it has already handed back to the OS.
 //
 // runtime/metrics rather than ReadMemStats: the latter stops the world, and a
 // periodic pause on a battery-powered device to ask about memory would be its
-// own defect. The quantity is what SetMemoryLimit itself governs — everything
-// the runtime has mapped, less what it has already handed back to the OS.
-func memoryPressure() bool {
-	lim := memLimit.Load()
-	if lim <= 0 {
-		return false
-	}
+// own defect.
+func heapInUse() int64 {
 	s := []metrics.Sample{
 		{Name: "/memory/classes/total:bytes"},
 		{Name: "/memory/classes/heap/released:bytes"},
 	}
 	metrics.Read(s)
 	if s[0].Value.Kind() != metrics.KindUint64 || s[1].Value.Kind() != metrics.KindUint64 {
+		return 0
+	}
+	return int64(s[0].Value.Uint64()) - int64(s[1].Value.Uint64())
+}
+
+// memoryPressure reports that the heap has grown close enough to the limit for
+// the GC to be about to start working continuously.
+func memoryPressure() bool {
+	lim := memLimit.Load()
+	if lim <= 0 {
 		return false
 	}
-	inUse := int64(s[0].Value.Uint64()) - int64(s[1].Value.Uint64())
-	return float64(inUse) > pressureRatio*float64(lim)
+	return float64(heapInUse()) > pressureRatio*float64(lim)
+}
+
+// A ceiling can simply be wrong. It is a number chosen before the workload was
+// known — a fraction of the device's RAM (config.memoryLimitDefault) — and the
+// workload is a library this program did not choose: ONE unprepared dictionary
+// can hold a 400 MB headword index, which is larger than the whole ceiling a
+// phone is given. Measured against the real corpus (D64), a limit below what
+// the process genuinely holds does not bound anything. It pins the collector at
+// ~45% of CPU — just under the runtime's own 50% limiter — for as long as the
+// work lasts, freeing nothing, which on a phone is the precise combination of
+// battery drain and heat this whole mechanism exists to prevent. Being killed
+// by the low-memory daemon is a better outcome than that, and staying under the
+// ceiling was never among the outcomes on offer.
+//
+// So the ceiling yields. After relaxAfterPasses consecutive janitor passes that
+// began under pressure — by which point everything sheddable has been shed
+// several times over and it has not helped — the limit is raised above the
+// measured footprint, and the collector goes back to ordinary work. It is
+// restored the moment the footprint falls far enough below the configured value
+// that restoring it would not immediately re-create the pressure.
+const relaxAfterPasses = 3
+
+var pressurePasses atomic.Int32
+
+// relaxMemoryLimit lifts the ceiling clear of what the process is actually
+// holding, with enough headroom that the next allocation does not re-trigger
+// it. Reports whether it moved.
+func relaxMemoryLimit() bool {
+	cur := memLimit.Load()
+	if cur <= 0 {
+		return false
+	}
+	inUse := heapInUse()
+	want := inUse + inUse/4 // 25% headroom: room to collect, not room to grow
+	if want <= cur {
+		return false
+	}
+	memLimit.Store(want)
+	debug.SetMemoryLimit(want)
+	logx.V("memory limit raised to %d MB: %d MB in use and shedding did not help",
+		want>>20, inUse>>20)
+	return true
+}
+
+// restoreMemoryLimit puts the configured ceiling back once the footprint has
+// fallen clear of it — strictly clear, or restoring would re-enter the state
+// relaxMemoryLimit just left.
+func restoreMemoryLimit() {
+	cfg := memLimitConfigured.Load()
+	if cfg <= 0 || memLimit.Load() <= cfg {
+		return
+	}
+	if float64(heapInUse()) > pressureRatio*float64(cfg) {
+		return
+	}
+	memLimit.Store(cfg)
+	debug.SetMemoryLimit(cfg)
+	logx.V("memory limit restored to %d MB", cfg>>20)
+	// The relaxed ceiling let the heap keep pages it no longer needs; hand them
+	// back now that the ceiling means something again, rather than waiting for
+	// the next close to arm a reclaim that may never come.
+	scheduleReclaim()
+}
+
+// limitRelaxed reports whether the ceiling in force is above the configured
+// one. It is the janitor's reason to keep waking after everything reclaimable
+// is gone: restoring the configured ceiling only ever happens inside a pass,
+// and measured on a real phone (docs/PERF.md §8.5) the passes stop exactly
+// when they are needed — the fan-out that forced the relax ends, the heap
+// drains, nothing is left to reclaim, and without this the process would run
+// under a 6 GB ceiling it was granted for one search, for the rest of its life.
+func limitRelaxed() bool {
+	cfg := memLimitConfigured.Load()
+	return cfg > 0 && memLimit.Load() > cfg
+}
+
+// adjustLimit is the janitor's verdict on the ceiling itself, taken after it
+// has done what it can about the memory underneath it.
+func adjustLimit() {
+	if !memoryPressure() {
+		pressurePasses.Store(0)
+		restoreMemoryLimit()
+		return
+	}
+	if pressurePasses.Add(1) >= relaxAfterPasses && relaxMemoryLimit() {
+		pressurePasses.Store(0)
+	}
 }
 
 // SetPower moves the process between power states, applying the consequences

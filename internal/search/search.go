@@ -87,6 +87,10 @@ func All(ctx context.Context, dicts []dict.Dictionary, mode Mode, term string, p
 				hits[i] = Hit{Meta: d.Meta(), Err: ctx.Err()}
 				return
 			}
+			if err := ctx.Err(); err != nil {
+				hits[i] = Hit{Meta: d.Meta(), Err: err}
+				return
+			}
 			hits[i] = query(d, mode, term, perDict)
 		}(i, d)
 	}
@@ -139,8 +143,33 @@ func StreamOpen(ctx context.Context, openers []Opener, mode Mode, term string, p
 				send(i, Hit{Err: ctx.Err()})
 				return
 			}
+			// Re-check after the wait. Acquiring the semaphore says only that a
+			// slot came free, not that the answer is still wanted: the queue is
+			// long (every dictionary at once) and the slots are few, so by the
+			// time a worker is admitted the request that asked for it may be
+			// minutes dead. The web UI aborts the in-flight fetch on every
+			// keystroke (index.html, searchAC), which makes "the caller has
+			// gone" the common case rather than the exceptional one.
+			//
+			// What it costs to miss this is not a wasted CPU slice. open() on a
+			// direct backend materialises that dictionary's whole in-memory
+			// index — measured on a phone (docs/PERF.md §8.7), three abandoned
+			// fan-outs over 24 preview dictionaries took 90s each and drove RSS
+			// to 1.0 GB, all of it for output nobody would read. Stopping here
+			// bounds the damage of a cancelled search to the opens already in
+			// flight.
+			if err := ctx.Err(); err != nil {
+				send(i, Hit{Err: err})
+				return
+			}
 			d, err := open()
 			if err != nil {
+				send(i, Hit{Err: err})
+				return
+			}
+			if err := ctx.Err(); err != nil {
+				// Cancelled during the open. The dictionary is now materialised
+				// either way; skip only the query, and let the janitor shed it.
 				send(i, Hit{Err: err})
 				return
 			}

@@ -831,11 +831,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// time-to-first-byte is one open at most, never the sum of all of them.
 	begin := make([]streamSlot, len(entries))
 	openers := make([]search.Opener, len(entries))
+	// One budget for this query: what the fan-out may newly materialise before
+	// it starts declining dictionaries instead of opening them (see fanout).
+	// Nil when uncapped, which is the desktop default.
+	fan := s.reg.fanout()
 	for i, e := range entries {
 		e := e
 		begin[i] = streamSlot{Dict: e.ID, Name: e.ID}
 		openers[i] = func() (dict.Dictionary, error) {
-			d, err := e.open()
+			d, err := e.openWithin(fan)
 			if err == nil && s.AutoIndex {
 				e.maybeAutoIndex() // first search of an unprepared dict → index in background
 			}

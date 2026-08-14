@@ -350,21 +350,42 @@ public class MainActivity extends Activity {
         thermalListener = null;
     }
 
-    // The platform's own verdict that memory is short. Levels below
-    // TRIM_MEMORY_BACKGROUND are only ever delivered to a process that is
-    // still visible, where shedding would fight the user's actual work; the
-    // server has its own heap-pressure handling for that case. From
-    // BACKGROUND upwards the next step is being killed, so drop everything.
+    // The platform's own verdict that memory is short, in two quite different
+    // situations.
+    //
+    // From TRIM_MEMORY_BACKGROUND (40) upwards the app is cached and the next
+    // step is being killed, so drop everything and leave it dropped: onStart
+    // will restore the state when the user comes back.
+    //
+    // TRIM_MEMORY_RUNNING_CRITICAL (15) is the opposite case — the app is
+    // VISIBLE and the whole device is short. It is the only such signal we
+    // ever get: the server's own heap-pressure handling measures our heap
+    // against our ceiling, which says nothing about a shortage caused by
+    // everything else on the phone. So it is obeyed, and then undone on a
+    // timer, because nothing else would: no lifecycle callback is coming while
+    // the user simply keeps reading, and a restricted state that never lifts
+    // would leave the app single-threaded for the rest of the session. The
+    // intermediate running levels (LOW, MODERATE) are advisory and are left
+    // alone — shedding there would fight the user's actual work.
     //
     // Recent platform versions have narrowed which of these levels an app
     // targeting a modern API still receives, so this is treated as a bonus
-    // rather than a mechanism: onStop already covers going away, and this only
-    // makes the response harder when the platform does say something.
+    // rather than a mechanism: onStop already covers going away.
+    private static final long TRIM_RECOVERY_MS = 30_000;
+
     @Override
     @SuppressWarnings("deprecation")
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
-        if (level >= TRIM_MEMORY_BACKGROUND) PowerSignal.set(PowerSignal.RESTRICTED);
+        if (level >= TRIM_MEMORY_BACKGROUND) {
+            PowerSignal.set(PowerSignal.RESTRICTED);
+        } else if (level == TRIM_MEMORY_RUNNING_CRITICAL && web != null) {
+            // equality, not >=: TRIM_MEMORY_UI_HIDDEN (20) also sits below
+            // BACKGROUND and means the app went away, which onStop already
+            // said better.
+            PowerSignal.set(PowerSignal.RESTRICTED);
+            web.postDelayed(this::applyPower, TRIM_RECOVERY_MS);
+        }
     }
 
     // ── lifecycle ────────────────────────────────────────────────────────

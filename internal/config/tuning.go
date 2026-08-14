@@ -63,6 +63,27 @@ func previewMemoryDefault() int64 {
 	return 1 << 30
 }
 
+// searchMemoryDefault caps what a SINGLE search may bring into memory.
+//
+// Unset on a desktop. The failure it prevents is real there too — a `dict=all`
+// query over an unprepared library held 6.3 GB against a 64 MB preview budget
+// (docs/PERF.md §8.2) — but the cost of preventing it is dictionaries reported
+// as not searched, and on a machine with the RAM to spare that is a worse deal
+// than the memory. The key exists; the default declines to take it.
+//
+// On Android it is the memory ceiling. Not a fraction of it and not a multiple:
+// the ceiling is the number above which this process is in trouble, so letting
+// one query materialise more than that guarantees the relax valve fires, which
+// is a mechanism for surviving an emergency rather than a way to run. Sized in
+// the weight model's own currency, which over-charges by ~1.7× (§8.3), so the
+// real peak this admits is well under the ceiling — deliberately.
+func searchMemoryDefault() int64 {
+	if runtime.GOOS != "android" {
+		return 0
+	}
+	return memoryLimitDefault()
+}
+
 // memoryLimitDefault is the soft heap ceiling.
 //
 // Unset on a desktop: the machine's own memory manager is better at this than

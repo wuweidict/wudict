@@ -16,7 +16,7 @@ The WuWeiDict server [must be running](run.md) for the extension to work.
 
 === "Chrome"
 
-    **The simplest way — the Chrome Web Store.**
+    **Chrome Web Store.**
 
     [Install from the Chrome Web Store](https://FIXME.TODO.com/chrome-webstore/wudict){ .md-button .md-button--primary }
 
@@ -27,7 +27,7 @@ The WuWeiDict server [must be running](run.md) for the extension to work.
         becomes the real listing. Found your way here before then? Manual
         install below works today.
 
-    **The developer way — install a preview build now.**
+    **Install via developer mode**
 
     ``` sh title="1. download the extension and unpack it"
     # the built extension bundle (source is in the repository)
@@ -36,14 +36,14 @@ The WuWeiDict server [must be running](run.md) for the extension to work.
     ```
 
     1. Open `chrome://extensions`
-    2. Flip **Developer mode** on — top right corner
+    2. Enable the **Developer mode** switch
     3. Click **Load unpacked** and select the `wudict-extension` folder
 
     The extension is live, and stays live across browser restarts.
 
 === "Firefox"
 
-    **The simplest way — Firefox Add-ons.**
+    **Firefox Add-on**
 
     [Get it on Firefox Add-ons](https://FIXME.TODO.com/amo/wudict){ .md-button .md-button--primary }
 

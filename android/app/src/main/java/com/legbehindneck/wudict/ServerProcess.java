@@ -100,6 +100,18 @@ class ServerProcess {
         Map<String, String> env = pb.environment();
         env.put("HOME", home.getAbsolutePath()); // ~/.wudict/wudict.toml lands in app storage
         env.put("TMPDIR", app.getCacheDir().getAbsolutePath());
+        // Give freed pages back to the kernel immediately, and be seen to.
+        // The Go runtime defaults to MADV_DONTNEED only when GOOS == "linux"
+        // (runtime1.go, parseRuntimeDebugVars); GOOS == "android" misses that
+        // branch and keeps MADV_FREE, which leaves every reclaimed page counted
+        // in RSS until the kernel is short of memory. Measured on device: after
+        // shedding a 464k-headword preview backend the Go heap was empty and
+        // VmRSS still read 184 MB. On Android the number is the outcome — the
+        // low-memory killer, the vendor "RAM hog" watchdogs and the user's own
+        // battery screen all read RSS/PSS, so memory we have released but are
+        // still charged for is memory we did not release. Costs a page-fault
+        // per page on reuse; that is the cheaper side of the trade here.
+        env.put("GODEBUG", "madvdontneed=1");
         pb.directory(home);
         pb.redirectErrorStream(true);
         try {

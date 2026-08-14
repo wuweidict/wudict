@@ -601,23 +601,22 @@ func (mdict *MdictBase) decodeKeyEntries(keyBlockDataCompressBuffer []byte) erro
 }
 
 func (mdict *MdictBase) splitKeyBlock(keyBlock []byte) []*MDictKeywordEntry {
-	// delimiter := ""
+	// The terminator width follows the *encoding*, never the file type. MDD key
+	// lists are UTF-16 in v1/v2 — which is why readDictHeader forces the
+	// encoding to UTF-16 for those — but v3 is UTF-8 throughout, MDD included,
+	// and there the keys are single-byte with a single-NUL terminator. Deriving
+	// the width from fileType==MDD scanned a v3 MDD key block at a two-byte
+	// stride, walked past every terminator and then off the end of the block.
 	width := 1
-
-	if mdict.meta.encoding == EncodingUtf16 || mdict.fileType == MdictTypeMdd {
-		//delimiter = "0000"
+	if mdict.meta.encoding == EncodingUtf16 {
 		width = 2
-	} else {
-		//delimiter = "00"
-		width = 1
 	}
 
 	keyList := make([]*MDictKeywordEntry, 0)
 
 	keyStartIndex := 0
-	keyEndIndex := 0
 
-	for keyStartIndex < len(keyBlock) {
+	for keyStartIndex+mdict.meta.numberWidth <= len(keyBlock) {
 		// # the corresponding record's offset in record block
 		recordStartOffset := int64(0)
 
@@ -627,32 +626,26 @@ func (mdict *MdictBase) splitKeyBlock(keyBlock []byte) []*MDictKeywordEntry {
 			recordStartOffset = int64(beBinToU32(keyBlock[keyStartIndex : keyStartIndex+mdict.meta.numberWidth]))
 		}
 
-		// # key text ends with '\x00'
-		i := keyStartIndex + mdict.meta.numberWidth
-		for i < len(keyBlock) {
-			// delimiter = '0' || // delimiter = '00'
-			if (width == 1 && keyBlock[i] == 0) || (width == 2 && keyBlock[i] == 0 && keyBlock[i+1] == 0) {
+		// # key text ends with '\x00'. A truncated or mis-framed block may hold
+		// no terminator at all; take the remainder rather than reusing the
+		// previous entry's end, which would invert the slice below.
+		keyEndIndex := len(keyBlock)
+		for i := keyStartIndex + mdict.meta.numberWidth; i < len(keyBlock); i += width {
+			if keyBlock[i] != 0 {
+				continue
+			}
+			if width == 1 || (i+1 < len(keyBlock) && keyBlock[i+1] == 0) {
 				keyEndIndex = i
 				break
 			}
-			i += width
 		}
 
 		keyTextBytes := keyBlock[keyStartIndex+mdict.meta.numberWidth : keyEndIndex]
 		keyText := string(keyTextBytes)
-		var err error
 
 		if mdict.meta.encoding == EncodingUtf16 {
-			keyText, err = decodeLittleEndianUtf16(keyTextBytes)
-			if err != nil {
-				keyText = string(keyTextBytes)
-			}
-		}
-
-		if mdict.fileType == MdictTypeMdd {
-			keyText, err = decodeLittleEndianUtf16(keyTextBytes)
-			if err != nil {
-				panic(err)
+			if decoded, err := decodeLittleEndianUtf16(keyTextBytes); err == nil {
+				keyText = decoded
 			}
 		}
 

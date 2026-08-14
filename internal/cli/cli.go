@@ -157,6 +157,15 @@ SERVE FLAGS
                           env: PREVIEW_MEMORY toml: PREVIEW_MEMORY
                           default: 1GB (Android: 64MB)
 
+  SEARCH_MEMORY = "512MB" How much RAM ONE search may bring into memory by opening
+                          dictionaries that are not yet prepared. Past it, the
+                          remaining ones are reported as not searched instead of
+                          opened — the only setting here that changes what a
+                          search returns, and it never applies to prepared
+                          dictionaries, which cost nothing to search. "0" = no cap.
+                          env: SEARCH_MEMORY  toml: SEARCH_MEMORY
+                          default: none (Android: the memory limit)
+
   MEMORY_LIMIT = "4GB"    Soft heap ceiling: Go collects harder — and drops its
                           caches — rather than growing past it. "0" = none.
                           env: MEMORY_LIMIT   toml: MEMORY_LIMIT
@@ -725,6 +734,10 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		return fmt.Errorf("scanning %s: %w", strings.Join(cfg.DictDirs, ", "), err)
 	}
 	reg.SetPreviewBudget(cfg.PreviewMemory)
+	reg.SetSearchBudget(cfg.SearchMemory)
+	if cfg.SearchMemory > 0 {
+		logx.V("search memory budget: %d MB per query", cfg.SearchMemory>>20)
+	}
 	srv := server.New(reg)
 	srv.ConfigPath = cfgFile
 	store.SetCompressBodies(!cfg.NoCompress)
@@ -984,7 +997,7 @@ func printStartup(cfg config.Config, in startupInfo) {
 	fmt.Fprintf(out, "  index workers %s%s\n",
 		plural(cfg.IndexWorkers, "dictionary at a time", "dictionaries at a time"),
 		memLimitNote(cfg.MemoryLimit))
-	fmt.Fprintf(out, "  preview memory %s\n", budgetNote(cfg.PreviewMemory))
+	fmt.Fprintf(out, "  preview memory %s%s\n", budgetNote(cfg.PreviewMemory), searchBudgetNote(cfg.SearchMemory))
 	fmt.Fprintf(out, "  serving       %s\n", plural(in.total, "dictionary", "dictionaries"))
 
 	// what to do next, when there is something to do
@@ -1028,6 +1041,17 @@ func budgetNote(b int64) string {
 		return "unlimited — dictionaries stay open once used"
 	}
 	return fmt.Sprintf("%.1f GB for dictionaries that are not yet prepared", float64(b)/(1<<30))
+}
+
+// searchBudgetNote appends the per-search materialisation cap when one is in
+// force. Said out loud because it is the one setting here that can change what
+// a search *returns* — a dictionary it declines is reported as not searched,
+// and a user seeing that deserves to know a number caused it.
+func searchBudgetNote(b int64) string {
+	if b <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("  ·  %d MB per search", b>>20)
 }
 
 // memLimitNote appends the soft heap ceiling to the startup line when set.

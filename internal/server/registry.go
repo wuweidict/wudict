@@ -182,6 +182,14 @@ type entry struct {
 	lastUse atomic.Int64 // unix nanos, for LRU eviction
 	weight  atomic.Int64 // estimated bytes held by a preview backend (0 if cheap)
 
+	// lastWeight is weight, remembered across eviction. weight must go to zero
+	// when the backend is dropped — it is what the sweep totals — but the cost
+	// of opening this dictionary again does not stop being known just because we
+	// closed it, and the fan-out cap needs that number BEFORE it pays it. First
+	// open of a dictionary is therefore uncapped (nothing is known about it yet)
+	// and every later one is priced.
+	lastWeight atomic.Int64
+
 	mediaEmpty bool // a full ingest found no packable resources (dMu-guarded)
 
 	ingestMu  sync.Mutex  // one ingest at a time per dictionary
@@ -265,7 +273,11 @@ func (e *entry) open() (dict.Dictionary, error) {
 		return d, err
 	}
 	m := d.Meta()
-	e.weight.Store(previewWeight(d, m))
+	w := previewWeight(d, m)
+	e.weight.Store(w)
+	if w > 0 {
+		e.lastWeight.Store(w)
+	}
 	if e.reg != nil {
 		// something is open that was not open before: the janitor has a reason
 		// to exist again. It sleeps with no timer whenever nothing does.
@@ -273,6 +285,123 @@ func (e *entry) open() (dict.Dictionary, error) {
 	}
 	logx.V("open %s [%s] %d entries contains=%v (%s)",
 		m.Name, m.Format, m.EntryCount, d.Caps().Contains, time.Since(start).Round(time.Millisecond))
+	return d, err
+}
+
+// fanout is one search's materialisation budget: how many bytes of *newly
+// opened* preview backends a single query may bring into memory.
+//
+// The preview budget cannot do this job and was never able to. It is enforced
+// by the janitor, between bursts, and it deliberately refuses to evict anything
+// used in the last minEvictIdle — which is every dictionary a `dict=all` search
+// just touched. Measured, that means a 64 MB budget coexisting with 6.3 GB held
+// (docs/PERF.md §8.2) on a desktop, and 1.71 GB on a 3.8 GB tablet (§8.6): the
+// budget bounds the *steady state* and nothing bounds the burst. This does.
+//
+// The unit is estimated bytes, not dictionaries, for the same reason the budget
+// is: dictionaries in one library differ by two orders of magnitude in headword
+// count, so "open at most N" is 50 MB or 3 GB depending on which N.
+//
+// What it costs is result completeness, and that is the honest name for it: a
+// dictionary the cap refuses is reported to the client as not searched, with
+// its price and the remedy (prepare it — a prepared dictionary answers from
+// SQLite, weighs nothing here and is never capped). It is off by default on the
+// desktop, where RAM is the machine's own business, and on by default on
+// Android, where the alternative outcome is not a slower search but a killed
+// process. Preview mode is the transient state before preparation (D15/D20), so
+// on a settled library the cap never fires at all.
+type fanout struct{ left atomic.Int64 }
+
+// fanout opens a budget for one search, or nil when uncapped. Nil is a valid
+// receiver everywhere below: "no cap" costs no allocation and no branching at
+// the call sites.
+func (r *Registry) fanout() *fanout {
+	r.mu.RLock()
+	cap_ := r.searchBudget
+	r.mu.RUnlock()
+	if cap_ <= 0 {
+		return nil
+	}
+	f := &fanout{}
+	f.left.Store(cap_)
+	return f
+}
+
+// admit reserves est bytes, reporting whether the caller may open. A dictionary
+// whose known cost exceeds what is left is refused WITHOUT spending the
+// remainder, so one 961 MB monster early in the user's preference order costs
+// the rest of the list nothing — the fan-out packs what fits instead of
+// stopping at the first thing that does not.
+func (f *fanout) admit(est int64) bool {
+	if f == nil {
+		return true
+	}
+	for {
+		left := f.left.Load()
+		if left <= 0 || est > left {
+			return false
+		}
+		if f.left.CompareAndSwap(left, left-est) {
+			return true
+		}
+	}
+}
+
+// settle corrects the reservation once the real weight is known. A first open
+// reserves nothing (est 0) and is charged in full here, which can drive the
+// budget negative — that is correct, and it is what refuses everything after it.
+func (f *fanout) settle(est, actual int64) {
+	if f == nil {
+		return
+	}
+	if d := actual - est; d != 0 {
+		f.left.Add(-d)
+	}
+}
+
+// tooHeavy is what a refused dictionary reports. It carries the estimate so the
+// client can say what was declined and why, rather than showing a silent gap.
+type tooHeavy struct{ bytes int64 }
+
+func (t tooHeavy) Error() string {
+	if t.bytes > 0 {
+		return fmt.Sprintf("not searched: ~%d MB unprepared, over this search's memory budget — prepare it to search it for free", t.bytes>>20)
+	}
+	return "not searched: this search reached its memory budget — prepare this dictionary to search it for free"
+}
+
+// openWithin is open, subject to a fan-out's materialisation budget. A backend
+// that is already resident is free and never refused: the cap exists to stop
+// memory being *created*, and refusing to read what is already in RAM would
+// cost results for no saving whatsoever.
+func (e *entry) openWithin(f *fanout) (dict.Dictionary, error) {
+	if f == nil {
+		return e.open()
+	}
+	e.dMu.RLock()
+	d, err := e.d, e.err
+	e.dMu.RUnlock()
+	if d != nil || err != nil {
+		return e.open() // memoized; open() only refreshes lastUse
+	}
+	est := e.lastWeight.Load()
+	if !f.admit(est) {
+		// A prepared dictionary is never capped: it answers from SQLite, holds
+		// no headword index, and costs this budget nothing. Worth one stat on
+		// the refusal path to be certain, because declining one would drop
+		// results for no memory saved at all — and the refusal path is by
+		// definition the rare one.
+		if _, prepared := preparedFor(e.Path); !prepared {
+			return nil, tooHeavy{bytes: est}
+		}
+		est = 0 // admitted without a reservation: charge whatever it turns out to cost
+	}
+	d, err = e.open()
+	if err != nil {
+		f.settle(est, 0) // nothing was materialised; give the reservation back
+		return d, err
+	}
+	f.settle(est, e.weight.Load())
 	return d, err
 }
 
@@ -298,9 +427,14 @@ func previewWeight(d dict.Dictionary, m dict.Meta) int64 {
 // counted as if it held a headword map in RAM.
 type storeBacked interface{ SourcePath() string }
 
-// previewBytesPerEntry is the measured per-headword cost of a direct backend's
-// in-memory index (docs/PERF.md §3.1: 290–570 B across formats; 350 is the
-// middle of the measured range and errs neither way).
+// previewBytesPerEntry is the per-headword cost of a direct backend's in-memory
+// index (docs/PERF.md §3.1: 290–570 B across formats; 350 is the middle of that
+// range). It is an estimate applied to a headword count, never a measurement of
+// this dictionary: re-measured against MDX in 2026-08 (PERF §8.3) the real cost
+// was 83 B/entry at open and 201 B/entry once a search had built the folded
+// index, so this over-charges that format by ~1.7×. Kept deliberately — on
+// Android over-charging sheds early, and under-charging is what gets a process
+// killed.
 const previewBytesPerEntry = 350
 
 // evict drops this entry's open backend so its memory can be reclaimed. It
@@ -435,6 +569,11 @@ type Registry struct {
 	// (PREVIEW_MEMORY; 0 = unlimited). Prepared ones answer from disk and are
 	// never evicted — there would be nothing to reclaim.
 	previewBudget int64
+
+	// searchBudget caps how much preview memory ONE search may materialise
+	// (SEARCH_MEMORY; 0 = uncapped). See the fanout type for why the preview
+	// budget cannot do this.
+	searchBudget int64
 
 	// prefs is the user's enabled set and order (state.json). Never nil: an
 	// in-memory Prefs answers "nothing is disabled", which is the right
@@ -723,6 +862,15 @@ func (r *Registry) SetPreviewBudget(bytes int64) {
 	r.nudge() // a budget that just got smaller may already be exceeded
 }
 
+// SetSearchBudget sets how much preview memory a single search may materialise
+// (config SEARCH_MEMORY; 0 = uncapped). Unlike the preview budget this needs no
+// nudge: it applies to the next search, and changes nothing already open.
+func (r *Registry) SetSearchBudget(bytes int64) {
+	r.mu.Lock()
+	r.searchBudget = bytes
+	r.mu.Unlock()
+}
+
 // reclaimable is one thing the janitor can close: an unprepared dictionary's
 // whole backend, or a prepared one's resource-fallback handle. Both hold an
 // in-memory headword index; both reopen on demand; they differ only in what
@@ -828,12 +976,17 @@ func (r *Registry) needsSweep() bool {
 		n++
 	}
 	if n == 0 {
-		return false // nothing reclaimable: pressure is not ours to relieve
+		// Nothing reclaimable. Ordinarily that is nothing to do — but under a
+		// ceiling this workload cannot fit beneath, it is the one state that
+		// must still be acted on, because the correction left is to the ceiling
+		// rather than to the memory (adjustLimit). A ceiling already raised is
+		// the same case seen from the other side: it must be handed back.
+		return memoryPressure() || limitRelaxed()
 	}
 	if budget > 0 && total > budget {
 		return true
 	}
-	return memoryPressure()
+	return memoryPressure() || limitRelaxed()
 }
 
 // startJanitor keeps preview memory under the budget in the background. It
@@ -854,6 +1007,7 @@ func (r *Registry) startJanitor() {
 			case <-r.wake:
 			}
 			r.sweep()
+			adjustLimit() // and then judge the ceiling the sweep was working under
 		}
 	}()
 }

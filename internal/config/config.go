@@ -33,6 +33,7 @@ type Config struct {
 	IndexWorkers  int      // INDEX_WORKERS: how many dictionaries may be indexed at once
 	MemoryLimit   int64    // MEMORY_LIMIT: soft heap ceiling in bytes (0 = none)
 	PreviewMemory int64    // PREVIEW_MEMORY: cap on RAM held by unprepared dictionaries (0 = unlimited)
+	SearchMemory  int64    // SEARCH_MEMORY: cap on RAM ONE search may materialise (0 = uncapped)
 	Source        string   // path of the wudict.toml that was loaded ("" if none)
 
 	// Portable reports that Source sits next to the executable: the user put
@@ -77,6 +78,7 @@ func defaults() Config {
 		// platform's opinion of us rather than its capability — see tuning.go
 		PreviewMemory: previewMemoryDefault(),
 		MemoryLimit:   memoryLimitDefault(),
+		SearchMemory:  searchMemoryDefault(),
 	}
 }
 
@@ -152,6 +154,9 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	}
 	if v := get("PREVIEW_MEMORY"); v != "" {
 		cfg.PreviewMemory = ParseSize(v)
+	}
+	if v := get("SEARCH_MEMORY"); v != "" {
+		cfg.SearchMemory = ParseSize(v)
 	}
 	return cfg, nil
 }
@@ -275,6 +280,11 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 #                                     # open. Each costs ~350 bytes per headword; the least recently
 #                                     # used are closed above this. Prepared ones answer from disk and
 #                                     # are never evicted. "0" = no limit. Android defaults to 64MB.
+# SEARCH_MEMORY = "0"                 # how much RAM ONE search may bring in by opening dictionaries
+#                                     # that are not yet prepared. Past it the rest are reported as
+#                                     # not searched rather than opened. Prepared dictionaries are
+#                                     # never capped. "0" = no cap. Android defaults to the memory
+#                                     # limit, where one query could otherwise get the app killed.
 # MEMORY_LIMIT  = "0"                 # soft ceiling, e.g. "4GB": Go collects harder — and sheds its
 #                                     # caches — rather than growing past it. "0" = no ceiling.
 #                                     # Android defaults to a fraction of the device's RAM.

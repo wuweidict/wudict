@@ -5,10 +5,13 @@
 package server
 
 import (
+	"math"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"testing"
 	"time"
 )
@@ -24,6 +27,13 @@ func restorePower(t *testing.T) {
 		powerState.Store(int32(PowerActive))
 		activeProcs.Store(0)
 		memLimit.Store(0)
+		memLimitConfigured.Store(0)
+		pressurePasses.Store(0)
+		// and the runtime's own ceiling, which is NOT the atomic above: a test
+		// that left a 1 MB limit installed would make every test after it run
+		// in continuous GC, which is the failure being tested rather than a
+		// condition to inflict on the rest of the package.
+		debug.SetMemoryLimit(math.MaxInt64)
 		runtime.GOMAXPROCS(procs)
 	})
 }
@@ -47,6 +57,14 @@ func previewRegistry(t *testing.T) (*Server, *Registry) {
 		t.Fatalf("expected one open preview backend, got %d", len(reg.reclaimables()))
 	}
 	return s, reg
+}
+
+// loopbackReq is a POST that came from this machine, which every control that
+// acts on the process rather than the library requires.
+func loopbackReq(target string) *http.Request {
+	req := httptest.NewRequest("POST", target, nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	return req
 }
 
 func TestPowerNames(t *testing.T) {
@@ -203,6 +221,120 @@ func TestJanitorIdlesWithNothingToReclaim(t *testing.T) {
 	if reg.needsSweep() {
 		t.Fatal("after shedding there is nothing left to sweep")
 	}
+	// One exception, and it is the whole reason needsSweep does not simply
+	// return false here: a ceiling this process cannot fit under is not
+	// "nothing to do", and the janitor is the only thing that corrects it.
+	memLimit.Store(1 << 20)
+	if !reg.needsSweep() {
+		t.Fatal("an impossible ceiling with nothing left to shed must still wake the janitor")
+	}
+}
+
+// A ceiling below what the program genuinely holds cannot be obeyed, and trying
+// costs ~45% of CPU indefinitely (D64, measured). It must therefore yield —
+// but only after shedding has been given several passes to prove it cannot fix
+// this, so a transient spike never permanently raises the ceiling.
+func TestRelaxLiftsAnImpossibleCeiling(t *testing.T) {
+	restorePower(t)
+	const impossible = 1 << 20 // 1 MB: the runtime mapped more than this before main
+	SetMemoryLimit(impossible)
+	if !memoryPressure() {
+		t.Fatal("a 1 MB ceiling must read as pressure")
+	}
+	for i := 1; i < relaxAfterPasses; i++ {
+		adjustLimit()
+		if got := memLimit.Load(); got != impossible {
+			t.Fatalf("ceiling moved to %d after only %d passes", got, i)
+		}
+	}
+	adjustLimit()
+	raised := memLimit.Load()
+	if raised <= impossible {
+		t.Fatalf("ceiling did not yield after %d passes: %d", relaxAfterPasses, raised)
+	}
+	if memoryPressure() {
+		t.Error("the raised ceiling is still under pressure — the headroom is too small to end the thrash")
+	}
+	if got := memLimitConfigured.Load(); got != impossible {
+		t.Errorf("relaxing forgot what was configured: %d", got)
+	}
+	// and it must not creep upwards on every later pass
+	adjustLimit()
+	if got := memLimit.Load(); got != raised {
+		t.Errorf("ceiling moved again with no pressure: %d → %d", raised, got)
+	}
+}
+
+// Restoring must not re-create the state it is recovering from, so it waits for
+// the footprint to fall clear of the configured value rather than merely below
+// it.
+func TestRestoreWaitsForRoom(t *testing.T) {
+	restorePower(t)
+	const impossible = 1 << 20
+	SetMemoryLimit(impossible)
+	for i := 0; i < relaxAfterPasses; i++ {
+		adjustLimit()
+	}
+	raised := memLimit.Load()
+	if raised <= impossible {
+		t.Fatalf("setup: ceiling never yielded (%d)", raised)
+	}
+
+	restoreMemoryLimit()
+	if got := memLimit.Load(); got != raised {
+		t.Errorf("restored a ceiling the process still does not fit under: %d", got)
+	}
+
+	// The other half cannot be reached by shrinking a live heap on demand, so
+	// it is constructed: a configured ceiling the footprint now fits under
+	// with room to spare, and an in-force ceiling still raised above it.
+	inUse := heapInUse()
+	roomy := inUse * 2 // 0.85 × this is comfortably above what is in use
+	memLimitConfigured.Store(roomy)
+	memLimit.Store(roomy * 4)
+	restoreMemoryLimit()
+	if got := memLimit.Load(); got != roomy {
+		t.Errorf("a ceiling with room to spare was not restored: %d, want %d", got, roomy)
+	}
+
+	// and the boundary the other way: configured exactly at the footprint is
+	// pressure by definition, so restoring it would re-create what the relax
+	// was for.
+	memLimitConfigured.Store(inUse)
+	memLimit.Store(inUse * 4)
+	restoreMemoryLimit()
+	if got := memLimit.Load(); got != inUse*4 {
+		t.Errorf("restored a ceiling that is itself under pressure: %d", got)
+	}
+}
+
+// A raised ceiling is unfinished business: the janitor must keep taking passes
+// until it can hand it back, even when there is nothing left to reclaim and no
+// pressure to report. Measured on a phone (PERF §8.5) that is precisely the
+// state the passes stopped in — one heavy search raised the ceiling to 6 GB,
+// the heap then drained, and nothing ever asked for the configured 384 MB back.
+func TestJanitorKeepsGoingWhileTheCeilingIsRaised(t *testing.T) {
+	restorePower(t)
+	r := &Registry{}
+	if r.needsSweep() {
+		t.Fatal("setup: an empty registry under no limit wants a sweep")
+	}
+
+	inUse := heapInUse()
+	memLimitConfigured.Store(inUse * 2)
+	memLimit.Store(inUse * 8) // relaxed, and roomy enough that there is no pressure
+	if memoryPressure() {
+		t.Fatal("setup: constructed state is under pressure, which would pass for the wrong reason")
+	}
+	if !r.needsSweep() {
+		t.Error("janitor went to sleep under a ceiling it had raised")
+	}
+
+	// and it stops again once the ceiling is its own
+	memLimit.Store(memLimitConfigured.Load())
+	if r.needsSweep() {
+		t.Error("janitor kept waking with nothing to do and its own ceiling in force")
+	}
 }
 
 // Pressure is measured against the limit the process was given, so a limit
@@ -232,8 +364,10 @@ func TestPowerEndpoint(t *testing.T) {
 	restorePower(t)
 	s, reg := previewRegistry(t)
 
+	// httptest.NewRequest's default RemoteAddr is 192.0.2.1, i.e. NOT this
+	// machine, so every accepted call here has to say where it came from.
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("POST", "/api/power?state=background", nil))
+	s.ServeHTTP(rec, loopbackReq("/api/power?state=background"))
 	if rec.Code != 200 {
 		t.Fatalf("POST background: %d: %s", rec.Code, rec.Body.String())
 	}
@@ -245,7 +379,7 @@ func TestPowerEndpoint(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("POST", "/api/power?state=asleep", nil))
+	s.ServeHTTP(rec, loopbackReq("/api/power?state=asleep"))
 	if rec.Code != 400 {
 		t.Errorf("unknown state: %d, want 400", rec.Code)
 	}

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/wuweidict/wudict/internal/dict"
@@ -153,6 +154,40 @@ func TestAllCancelledContext(t *testing.T) {
 	}
 	if cancelled == 0 {
 		t.Error("no worker observed cancellation")
+	}
+}
+
+// A cancelled fan-out must not open anything. The semaphore select alone does
+// not guarantee this: when a slot is free, both of its cases are ready and the
+// runtime picks one at random, so roughly half of an unbounded queue would sail
+// past a context that was already dead and materialise a dictionary apiece. On
+// a phone that is the difference between an abandoned keystroke costing nothing
+// and costing a gigabyte (docs/PERF.md §8.7). With 200 openers the random path
+// is indistinguishable from broken, which is the point of the count.
+func TestStreamOpenCancelledBeforeStartOpensNothing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var opened atomic.Int32
+	openers := make([]Opener, 200)
+	for i := range openers {
+		openers[i] = func() (dict.Dictionary, error) {
+			opened.Add(1)
+			return &fake{name: "X", words: []string{"w"}}, nil
+		}
+	}
+	seen := 0
+	StreamOpen(ctx, openers, Exact, "w", 1, func(i int, h Hit) {
+		if !errors.Is(h.Err, context.Canceled) {
+			t.Errorf("slot %d: want context.Canceled, got %+v", i, h.Err)
+		}
+		seen++
+	})
+	if seen != len(openers) {
+		t.Errorf("every slot must still be answered: got %d of %d", seen, len(openers))
+	}
+	if n := opened.Load(); n != 0 {
+		t.Errorf("%d dictionaries opened for a request nobody is waiting for", n)
 	}
 }
 

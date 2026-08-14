@@ -292,8 +292,300 @@ costs nothing to keep. Weight now follows the view at every assignment.
    with progress may be more honest than an invisible six-minute storm.
 3. **Eviction policy for direct backends**: never-evict (today), LRU by count,
    or "close after preparing". The last is nearly free given D12/D20.
-4. **Do we want a memory ceiling** (`SetMemoryLimit`) as a safety net, and at
-   what value — fixed, or a fraction of system RAM?
+4. ~~**Do we want a memory ceiling** (`SetMemoryLimit`) as a safety net, and at
+   what value?~~ — decided (D64, §8): **yes on Android, no on the desktop, and
+   the value must be able to yield.** A fraction of system RAM (RAM/16, floored
+   192 MB, capped 384 MB) where the alternative is being killed; unset where the
+   OS is better at this than a guess. Measured: no fixed value is safe on its
+   own.
+
+## 8. Android — measured 2026-08-14 (D64)
+
+Everything above this section was measured for a desktop, where using the
+machine is what a program is for. A phone judges the same behaviour: sustained
+CPU is a battery complaint and a thermal event, resident memory above what the
+platform thinks reasonable is a kill by the low-memory daemon, and a periodic
+timer in a process that outlives its window is a core brought out of idle
+forever to find nothing to do. The mechanisms are in D64; what follows is what
+was measured, including the part that came out the wrong way.
+
+### 8.1 The memory-ceiling sweep
+
+`internal/server/memlimit_test.go`, env-gated and never part of `make check`.
+One **fresh child process per limit** — `debug.SetMemoryLimit` is process-global
+and a heap carries its history, so several limits in one process would measure
+the order they were tried in. Corpus: the real 130 dictionaries, empty db dir so
+every one stays in preview mode (the worst case, and the state a fresh install
+is in), `PREVIEW_MEMORY` 64 MB, 60 `dict=all` prefix queries in 30 words across
+five scripts, 18 cores, Go 1.26.5 darwin/arm64.
+
+| limit | wall | GC share of CPU | GC cycles | live at end | in-use at end | preview held (open) | peak RSS |
+|---|---|---|---|---|---|---|---|
+| none | 140 s | 16.6 % | 26 | 5697 MB | 11823 MB | 6333 MB (106) | 7180 MB |
+| 96 MB | 1036 s | 44.0 % | 6290 | 1650 MB | 2376 MB | 0 MB (0) | 6253 MB |
+| 128 MB | 1069 s | 43.7 % | 6809 | 1083 MB | 1770 MB | 395 MB (1) | 5730 MB |
+| 192 MB | 1052 s | 44.0 % | 6502 | 2288 MB | 2985 MB | 395 MB (1) | 5725 MB |
+| 256 MB | 1144 s | 46.0 % | 6556 | 637 MB | 985 MB | 0 MB (0) | 5359 MB |
+| 384 MB | 1239 s | 44.9 % | 7239 | 662 MB | 1097 MB | 37 MB (1) | 5263 MB |
+| 512 MB | 1210 s | 44.9 % | 6836 | 2950 MB | 3830 MB | 0 MB (0) | 5286 MB |
+
+Read the second and third columns together: **no knee, no trend.** Every ceiling
+produces the same 44–46 % GC share and the same 7.4–8.8× wall time, because what
+is holding the GC share down is Go's own 50 % limiter, not the ceiling. A soft
+limit's only lever is to collect harder; below the working set that means
+collecting continuously and freeing nothing.
+
+The shedding is not at fault and is visible in the same table: 106 open backends
+go to 0–1 and peak RSS falls 7.2 GB → 5.3 GB. But at 512 MB the runtime still
+could not get in-use below 3.8 GB, because the remainder is the fan-out's own
+working set rather than cache. Hence the conclusion in D64: the ceiling stays,
+and `adjustLimit` lets it yield after three consecutive pressured janitor passes
+rather than pinning a phone's CPU at 45 % indefinitely.
+
+Two caveats on reading these numbers as phone numbers. This is desktop hardware
+and a corpus no phone holds; and the ceilings swept are the *Android* defaults,
+applied to a library 130 dictionaries deep. What transfers is the **shape** of
+the failure and one fact that does transfer directly: a single unprepared
+dictionary here holds a 395 MB headword index, which is larger than the entire
+ceiling a phone is given — so "the limit is below one dictionary" is reachable
+on a phone with one big file, not only on this desk.
+
+### 8.2 The preview budget does not bind during a fan-out
+
+The same table's first row is the finding: `PREVIEW_MEMORY` was **64 MB** and
+6333 MB was held across 106 open backends. `minEvictIdle` (45 s) protects every
+backend used recently, and a `dict=all` search touches all of them, so the
+budget is only ever enforced *between* bursts of activity. That is what §6c
+intended — a reopen costs 0.2–1.1 s and evicting the backends a fan-out is about
+to reuse would be self-defeating — but at 130 dictionaries it means the
+configured budget is not a bound at all. Only the pressure path (target 0, grace
+waived) currently bounds it, and that path exists solely because a limit is set,
+which on the desktop it is not.
+
+The honest options were a reference count (evict during use, safely) or a
+per-fan-out cap on how much one search may materialise — `search.Workers()`
+already bounds concurrent *use* to 8, so the other 98 are cache that the budget
+is failing to reclaim.
+
+**Fixed by the cap (D65), and only where the trade is worth taking.**
+`SEARCH_MEMORY` gives each query its own budget: an opener is charged what the
+last open of that dictionary weighed, and once the budget is gone the remaining
+*unprepared* dictionaries are declined with an error the page shows in their
+slot rather than opened. It is a second bound, not a replacement — the preview
+budget still governs what may stay resident *between* searches, and this one
+governs what a single search may create. Prepared dictionaries are never
+declined (they weigh nothing, so refusing them costs results and saves
+nothing), and the first search of a cold dictionary is never declined either,
+because its price is only learned by paying it once. The default is
+**0 (uncapped) on the desktop** — where declining results to protect a machine
+that is not under threat is a bad trade — and the memory ceiling's value on
+**Android**, where the alternative is the 1.71 GB of §8.6.
+
+### 8.3 On device: what shedding actually returns (emulator, API 36 arm64)
+
+One 241 MB MDX (`ODE-Living-Online`, 464,360 headwords) in preview mode
+(`AUTO_INDEX = "off"`), reached over `adb forward`, measured at
+`/proc/<pid>/status` — **not** `ps -o RSS`, whose Android toybox column is in
+4 KB pages and reads a factor of four low; an early round of this measurement
+was read as 29 MB when the process held 116 MB.
+
+| stage | VmRSS |
+| --- | --- |
+| server started, nothing opened | 16.7 MB |
+| after one `dict=all` prefix search | 119.5 MB |
+| 18 s after HOME (evict + `closeGrace` + reclaim) | **19.9 MB** |
+
+The weight model charges `350 B × EntryCount` = 154 MB for this dictionary.
+Measured on the desktop against the same file, the Go heap holds **83 B/entry**
+after `Open` (headword entries decoded, no index) and **201 B/entry** once a
+search has built the folded index — 93.9 MB, against a whole-process 119.5 MB on
+the phone. So the model over-charges a warm MDX by ~1.7×, and the *process*
+by ~1.3×. That is the correct direction to be wrong in on Android and the
+constant stays, but it is an estimate applied without measuring, not a
+measurement.
+
+**The finding that changed code: `GOOS=android` does not get MADV_DONTNEED.**
+`runtime1.go:parseRuntimeDebugVars` sets `debug.madvdontneed = 1` only when
+`GOOS == "linux"`; on `android` the runtime keeps `MADV_FREE`, so pages the
+scavenger has returned stay counted in RSS until the kernel is short of memory.
+Before the fix the table's last row read **184 MB** — unchanged across three
+search/background cycles, and unchanged by `debug.FreeOSMemory`. Eviction was
+not the suspect: driving the same entry through `open → Prefix → evict → wait`
+on the desktop takes the heap 93.9 MB → 0.7 MB, so nothing is retained. The
+shell now passes `GODEBUG=madvdontneed=1` to the exec'd child
+(`ServerProcess.java`), which is what makes the 19.9 MB row above real. On
+Android the number *is* the outcome: the low-memory killer, the vendor RAM
+watchdogs and the battery screen all read RSS/PSS, so memory released but still
+charged is memory not released.
+
+### 8.4 On real hardware — OnePlus PKG110, Android 16 (SDK 36), 8 cores, 11.5 GB
+
+The emulator can show plumbing; it cannot show a vendor's thermal governor or
+what a real library costs. This device carried **61 dictionaries**, all in
+preview mode (`AUTO_INDEX = "off"` — the worst case a fresh install passes
+through, not the steady state), and derived: `GOMAXPROCS=4, search fan-out=4`
+(half of 8), memory limit **384 MB** (11.5 GB/16 = 718 MB, capped), preview
+budget 64 MB.
+
+Eight `dict=all` prefix queries, back to back:
+
+| | |
+| --- | --- |
+| wall | 62 s |
+| CPU | 130 s (4 threads, so ~2.1 cores held) |
+| VmRSS, idle → peak | 288 MB → **4.9 GB** |
+| ceiling | raised 384 MB → 3489 → 3740 → 4602 → 5310 → 6312 MB |
+| thermal | `active → restricted` **25 s in**, from the platform's own thermal status; battery 40.1 °C |
+| lmkd | active throughout (`free 49–57 MB`); the app survived, on a phone with 11.5 GB |
+
+Three things this says that the desktop sweep could not. The relax valve is not
+theoretical — it fired five times in one minute on ordinary use of a large
+unprepared library, and it is what kept the process out of the 45 %-GC state
+§8.1 measured. The thermal path fires on our *own* workload, not on some
+external heat source, which is the strongest argument in this document for the
+`MaxProcs` halving. And **§8.2's fan-out defect is an Android problem, not only
+a desktop one**: 4.9 GB resident on a phone is a kill on any device with 4–6 GB,
+and the only reason this one survived is that it has 11.5 GB.
+
+### 8.5 The ceiling that was raised and never handed back
+
+The same run exposed a defect in the relax mechanism itself. `restoreMemoryLimit`
+only runs inside a janitor pass, and the janitor blocks when `needsSweep()` is
+false — which is exactly the state that follows a relax: the fan-out ends, the
+backends are shed, the heap drains, nothing is reclaimable, and no pressure is
+reported *because the ceiling is now 6 GB*. Measured: the process sat at the
+raised ceiling with the configured 384 MB never restored, for as long as it was
+watched. One heavy search would have bought a 6 GB ceiling for the life of the
+process — the opposite of what D64 promises.
+
+`needsSweep()` now also returns true while `limitRelaxed()`, and
+`restoreMemoryLimit` arms a `scheduleReclaim`. Re-measured on the same device,
+same burst, after backgrounding:
+
+| t after HOME | VmRSS | CPU |
+| --- | --- | --- |
+| +30 s | 4032 MB | 13037 ticks |
+| +60 s | **173 MB** | 13143 |
+| +90 s … +180 s | 170 MB, flat | 13148 → 13149 (10 ms in three minutes) |
+
+with `memory limit restored to 384 MB` in the log one janitor period after the
+last reclaim. Backgrounded, the process is 170 MB resident and costs nothing.
+
+### 8.6 The low-RAM device — Xiaomi MI PAD 4, Android 11 (SDK 30), 6 cores, 3.8 GB
+
+The OnePlus survived §8.4 because it had 11.5 GB. This tablet is the device the
+same library is actually dangerous on: **24 dictionaries**, all preview, derived
+`GOMAXPROCS=3, search fan-out=3`, memory limit **233 MB**, preview budget 64 MB.
+One of the 24 is a Babylon-derived MDX with **2 881 321 headwords** — a single
+dictionary the weight model charges at ~961 MB.
+
+Four `dict=all` prefix queries:
+
+| | |
+| --- | --- |
+| wall / CPU | 177 s / 355 s |
+| VmRSS, idle → peak | 7.7 MB → **1.71 GB** on a 3.8 GB device |
+| MemAvailable | 2.2 GB → **0.57 GB** |
+| latency, per query | 91 s, 36 s, 29 s, 21 s |
+| evictions / ceiling raises | 63 / ten (233 MB → 1586 MB) |
+| idle recovery | 110 MB, `memory limit restored to 233 MB`, CPU flat |
+
+The recovery is the fix of §8.5 working on a second device and a different
+Android generation. The peak is §8.2 as it stood at the time of the run,
+before the cap: **45 % of the machine's memory, for one keystroke's worth of
+query.** Re-measured on the same tablet under D65 with an uncapped control:
+61 s instead of 212 s, 123 s of CPU instead of 438 s, 1.02 GB instead of
+1.30 GB — §8.8. Nothing here is a leak — the same run
+returned to 54 MB unaided — but a phone does not have to kill a leaking process
+to kill this one.
+
+Recovery is also slow, and the slowness is the interesting part: after a burst
+the RSS curve stays flat for ~120 s and only then falls (1.28 GB → 610 MB →
+54 MB over the next 150 s). `minEvictIdle` (45 s) plus a 20 s janitor period
+plus `MADV_DONTNEED` only at reclaim time is a ~4-minute tail. Acceptable when
+the user has put the app down; not acceptable as the state a task-switch back
+into the app finds.
+
+### 8.7 A search nobody is waiting for still costs everything
+
+The web UI aborts the in-flight fetch on every keystroke (`searchAC` in
+`index.html`). Measured on the tablet, three fetches aborted at 4 s: the server
+kept working for **90 s each** and drove RSS to **1.0 GB**, because
+`StreamOpen` consulted the context only while a worker waited for a semaphore
+slot, never after it was admitted. Half the queue could therefore sail past a
+context that was already dead — `select` picks randomly when both cases are
+ready — and every one of those workers materialised a dictionary's whole
+in-memory index for output that had nowhere to go.
+
+`StreamOpen` now re-checks `ctx.Err()` after acquiring the slot and again after
+the open. Re-measured, cold-cache aborts at 1 s: **14 of 24** dictionaries
+opened, the rest skipped.
+
+What the fix cannot do is the residual, and it is the larger half: **an open
+already in flight is uninterruptible.** The 2.88M-headword MDX takes 6–11 s to
+open, so any aborted `dict=all` query that admitted it pays for it in full —
+the request above still ran 9.9 s after its client had gone. Cancellation
+bounds a cancelled fan-out to the opens in flight; the rest is bounded by the
+per-search materialisation cap, §8.2 / D65.
+
+### 8.8 The cap, measured — same tablet, same corpus, A/B in one session
+
+D65 re-measured on the MI PAD 4 (24 unprepared dictionaries under
+`/sdcard/mdict`, `AUTO_INDEX=off`, `GODEBUG=madvdontneed=1`, derived defaults
+`GOMAXPROCS=3` / limit 233 MB / budget **233 MB per query**). The control is the
+**same binary** with `SEARCH_MEMORY=0`, run minutes apart on the same files, so
+the only variable is the cap. Four cold `dict=all` prefix queries
+(`stone water light cat`):
+
+| | uncapped (control) | capped (Android default) |
+| --- | --- | --- |
+| wall / CPU | 212 s / 438 s | **61 s / 123 s** |
+| VmRSS peak | 1.30 GB | **1.02 GB** |
+| MemAvailable, low | 1.17 GB | 1.26 GB |
+| per-query latency | 99 / 49 / 39 / 25 s | **56 / 1 / 1 / 1 s** |
+| dictionaries declined | 0 / 0 / 0 / 0 | 4 / 2 / 3 / 4 of 24 |
+
+**CPU is the headline, not RAM: −72 %.** On a phone that is the number that maps
+to battery and heat. The peak fell only 22 %, and the reason is structural and
+worth stating: the budget is per *query*, and a dictionary already resident is
+free, so four queries inside the 45 s idle grace may each spend a fresh 233 MB
+on top of what the last one left. The cap slows accumulation; the janitor, not
+the cap, is what bounds the residue. Idle recovery was unaffected and complete —
+**34.8 MB** and `memory limit restored to 233 MB` 20 s after the last query,
+1 tick (10 ms) of CPU over the following 200 s.
+
+What the cap does absolutely, which the table understates: the corpus's largest
+dictionary is a **961 MB** headword index, and after the one open that priced it
+it was declined by every later query — `not searched: ~961 MB unprepared`. The
+control opened it three times in four queries. One dictionary larger than the
+whole machine's comfortable working set is the failure mode §8.2 was about, and
+it is now unreachable after the first sight of it.
+
+**The first query cannot be capped, and it costs.** A fan-out is parallel, so
+every opener reads "unknown" before any has settled a charge: 56 s and 393 MB
+of the capped run is that one query paying to learn 24 prices. Persisting
+`lastWeight` across restarts (it is already remembered across eviction) would
+make the cap bind from the first query of every run but the first-ever — the
+obvious follow-up, not taken here.
+
+Unrelated finding, pre-existing and not from this work: three dictionaries in
+this corpus failed to open on-device with deterministic parser panics (`index
+out of range [143] with length 143`, `slice bounds out of range [32734:32724]`
+×2), recovered and reported per dictionary as intended. Deterministic offsets
+meant a parse-path defect rather than memory pressure, and it was one: the panic
+came from the companion `.mdd`, not the named `.mdx`, and `splitKeyBlock` was
+splitting v3 MDD keys at a UTF-16 stride. Fixed in P73; not a memory finding.
+
+### 8.9 Reproducing
+
+```sh
+WUDICT_PERF_CORPUS=~/Downloads/Language WUDICT_PERF_ROUNDS=2 \
+  go test ./internal/server -run TestMemoryLimitSweep -v -timeout 240m
+```
+
+Two hours for seven children. Rows are printed to stderr as each child finishes,
+so an interrupted run keeps what it measured — `testing`'s own log is not
+flushed until the test ends, which on the first attempt threw away 40 minutes.
 
 ## Appendix — reproducing
 

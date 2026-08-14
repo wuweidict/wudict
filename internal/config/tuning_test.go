@@ -38,12 +38,24 @@ func TestTuningDefaults(t *testing.T) {
 		t.Errorf("previewMemoryDefault() = %d MB: too large for a phone", got>>20)
 	}
 
+	// The per-search cap is the one default here that can change what a search
+	// returns, so off Android it must be exactly nothing, and on Android it must
+	// not exceed the ceiling it exists to keep the process under.
+	if got := searchMemoryDefault(); android {
+		if got <= 0 || got > memoryLimitDefault() {
+			t.Errorf("searchMemoryDefault() = %d MB, want 0 < n <= the memory limit (%d MB)",
+				got>>20, memoryLimitDefault()>>20)
+		}
+	} else if got != 0 {
+		t.Errorf("searchMemoryDefault() = %d, want 0 (uncapped) off android — capping costs results", got)
+	}
+
 	// defaults() must actually use them — the layering only holds if the
 	// platform answer is what a config file overrides, not something applied
 	// later behind its back.
 	d := defaults()
-	if d.PreviewMemory != previewMemoryDefault() || d.MemoryLimit != memoryLimitDefault() {
-		t.Errorf("defaults() ignores the platform tuning: %d/%d", d.PreviewMemory, d.MemoryLimit)
+	if d.PreviewMemory != previewMemoryDefault() || d.MemoryLimit != memoryLimitDefault() || d.SearchMemory != searchMemoryDefault() {
+		t.Errorf("defaults() ignores the platform tuning: %d/%d/%d", d.PreviewMemory, d.MemoryLimit, d.SearchMemory)
 	}
 }
 
