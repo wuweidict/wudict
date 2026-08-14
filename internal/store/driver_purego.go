@@ -17,13 +17,26 @@ package store
 // on a machine without a C compiler falls back here rather than breaking.
 // The legacy -tags purego also lands here, which is what it always meant.
 
-import _ "modernc.org/sqlite"
+import (
+	"strconv"
+
+	_ "modernc.org/sqlite"
+)
 
 const driverName = "sqlite"
 
+// cacheClause sizes the per-connection page cache when this platform asks for
+// something other than the driver default (see pageCacheKiB).
+func cacheClause() string {
+	if pageCacheKiB <= 0 {
+		return ""
+	}
+	return "&_pragma=cache_size(-" + strconv.Itoa(pageCacheKiB) + ")"
+}
+
 // dsnRO is a read-only, query-only connection string (modernc pragma syntax).
 func dsnRO(path string) string {
-	return "file:" + path + "?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(5000)"
+	return "file:" + path + "?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(5000)" + cacheClause()
 }
 
 // dsnIngest is a throwaway-safe bulk-write connection string.

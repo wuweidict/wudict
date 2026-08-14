@@ -82,7 +82,7 @@ func (u *upgraded) releaseSource() int64 {
 	u.srcMu.Unlock()
 	time.AfterFunc(closeGrace, func() {
 		d.Close()
-		debug.FreeOSMemory()
+		scheduleReclaim()
 	})
 	logx.V("released resource handle for %s (~%d MB)", filepath.Base(u.srcPath), w>>20)
 	return w
@@ -168,6 +168,11 @@ type entry struct {
 	ID   string
 	Path string
 
+	// reg is the registry that owns this entry, so an open can tell the
+	// janitor there is something to watch again. Nil in tests that build an
+	// entry directly; every call site guards.
+	reg *Registry
+
 	openMu sync.Mutex // serialises opening; NOT sync.Once — an evicted
 	// backend must be openable again
 	dMu sync.RWMutex
@@ -179,8 +184,8 @@ type entry struct {
 
 	mediaEmpty bool // a full ingest found no packable resources (dMu-guarded)
 
-	ingestMu sync.Mutex // one ingest at a time per dictionary
-	autoOnce sync.Once  // first-search auto-index, attempted once
+	ingestMu  sync.Mutex  // one ingest at a time per dictionary
+	autoTried atomic.Bool // first-search auto-index, attempted once
 }
 
 // noPackableMedia reports whether a prior full ingest found nothing to pack,
@@ -196,20 +201,37 @@ func (e *entry) noPackableMedia() bool {
 // once per process; failures (e.g. a read-only library, no ingest reader for
 // the format) are swallowed — auto-indexing is a silent convenience, never a
 // hard requirement.
+//
+// Never while the process is not active: indexing is the single most expensive
+// thing this program does (a saturated core and hundreds of bytes per headword),
+// and starting it because a search landed just as the screen went off is exactly
+// how an app gets flagged as a battery hog. The attempt is un-marked when it
+// declines, so this stays a deferral rather than a silent cancellation — the
+// next search once the user is back does it.
 func (e *entry) maybeAutoIndex() {
-	e.autoOnce.Do(func() {
-		go func() {
-			acquire(indexLimit) // at most INDEX_WORKERS of these run at once
-			defer release(indexLimit)
-			// ensureBaseIndex is a no-op when this dictionary is already
-			// prepared, at whatever level its owner chose
-			if err := e.ensureBaseIndex(nil); err != nil {
-				logx.V("auto-index %s: %v", e.Path, err)
-			} else {
-				logx.V("auto-index %s: index ready", e.Path)
-			}
-		}()
-	})
+	if CurrentPower() != PowerActive {
+		return
+	}
+	if !e.autoTried.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		acquire(indexLimit) // at most INDEX_WORKERS of these run at once
+		defer release(indexLimit)
+		// the queue is FIFO and an ingest takes minutes, so the state that
+		// permitted this may be long gone by the time the slot is ours
+		if CurrentPower() != PowerActive {
+			e.autoTried.Store(false)
+			return
+		}
+		// ensureBaseIndex is a no-op when this dictionary is already
+		// prepared, at whatever level its owner chose
+		if err := e.ensureBaseIndex(nil); err != nil {
+			logx.V("auto-index %s: %v", e.Path, err)
+		} else {
+			logx.V("auto-index %s: index ready", e.Path)
+		}
+	}()
 }
 
 // open opens the source backend and, when a cached text.db (and
@@ -244,6 +266,11 @@ func (e *entry) open() (dict.Dictionary, error) {
 	}
 	m := d.Meta()
 	e.weight.Store(previewWeight(d, m))
+	if e.reg != nil {
+		// something is open that was not open before: the janitor has a reason
+		// to exist again. It sleeps with no timer whenever nothing does.
+		e.reg.nudge()
+	}
 	logx.V("open %s [%s] %d entries contains=%v (%s)",
 		m.Name, m.Format, m.EntryCount, d.Caps().Contains, time.Since(start).Round(time.Millisecond))
 	return d, err
@@ -279,7 +306,15 @@ const previewBytesPerEntry = 350
 // evict drops this entry's open backend so its memory can be reclaimed. It
 // refuses while the dictionary is being prepared, and closes after a grace so
 // requests already reading from it finish. The next open reopens the file.
-func (e *entry) evict() int64 {
+func (e *entry) evict() int64 { return e.drop(false) }
+
+// drop is evict, plus the option to close a backend that weighs nothing.
+// Weightless means "prepared": it answers from SQLite and holds no headword
+// map, so the budget has no reason to touch it — but its file descriptors and
+// page cache are still real, and under PowerRestricted they are worth giving
+// back. Returns the bytes the eviction accounting knows about, which for a
+// prepared dictionary is honestly zero.
+func (e *entry) drop(force bool) int64 {
 	if !e.ingestMu.TryLock() {
 		return 0 // being prepared right now: leave it alone
 	}
@@ -287,7 +322,7 @@ func (e *entry) evict() int64 {
 	e.dMu.Lock()
 	d := e.d
 	w := e.weight.Load()
-	if d == nil || w == 0 {
+	if d == nil || (w == 0 && !force) {
 		e.dMu.Unlock()
 		return 0
 	}
@@ -296,10 +331,34 @@ func (e *entry) evict() int64 {
 	e.dMu.Unlock()
 	time.AfterFunc(closeGrace, func() {
 		d.Close()
+		scheduleReclaim()
+	})
+	if w > 0 {
+		logx.V("evicted preview backend %s (~%d MB)", filepath.Base(e.Path), w>>20)
+	} else {
+		logx.V("closed %s", filepath.Base(e.Path))
+	}
+	return w
+}
+
+// scheduleReclaim hands freed pages back to the OS shortly after a batch of
+// closes. Coalesced deliberately: FreeOSMemory is a stop-the-world collection
+// plus a scavenge, and shedding a hundred dictionaries at once used to mean a
+// hundred of them back to back — a CPU spike indistinguishable, from the
+// platform's point of view, from the runaway work this whole mechanism exists
+// to avoid.
+var reclaimArmed atomic.Bool
+
+const reclaimDelay = 2 * time.Second
+
+func scheduleReclaim() {
+	if reclaimArmed.Swap(true) {
+		return // one is already pending; it will cover this close too
+	}
+	time.AfterFunc(reclaimDelay, func() {
+		reclaimArmed.Store(false)
 		debug.FreeOSMemory()
 	})
-	logx.V("evicted preview backend %s (~%d MB)", filepath.Base(e.Path), w>>20)
-	return w
 }
 
 // native is a standalone naturalized dictionary: a .text.db whose foreign
@@ -381,6 +440,19 @@ type Registry struct {
 	// in-memory Prefs answers "nothing is disabled", which is the right
 	// default everywhere the caller supplied no file.
 	prefs *Prefs
+
+	// wake arms the janitor. Buffered by one: a signal means "there may be
+	// work now", and two of them mean nothing more than one.
+	wake chan struct{}
+}
+
+// nudge tells the janitor something changed. Never blocks — it is called from
+// request paths, and a janitor that is already awake needs no telling.
+func (r *Registry) nudge() {
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
 }
 
 // Option configures a Registry at construction. Prefs must be in place BEFORE
@@ -409,7 +481,13 @@ type Root struct {
 }
 
 func NewRegistry(dictDirs []string, useCached bool, opts ...Option) (*Registry, error) {
-	r := &Registry{dictDirs: dict.DedupeDirs(dictDirs), useCached: useCached, byID: map[string]*entry{}, prefs: LoadPrefs("")}
+	r := &Registry{
+		dictDirs:  dict.DedupeDirs(dictDirs),
+		useCached: useCached,
+		byID:      map[string]*entry{},
+		prefs:     LoadPrefs(""),
+		wake:      make(chan struct{}, 1),
+	}
 	for _, o := range opts {
 		o(r)
 	}
@@ -514,7 +592,7 @@ func (r *Registry) Rescan() error {
 		seen[id] = true
 		e, ok := r.byID[id] // keep the open backend across a rescan
 		if !ok {
-			e = &entry{ID: id, Path: p}
+			e = &entry{ID: id, Path: p, reg: r}
 		}
 		byID[id] = e
 		entries = append(entries, e)
@@ -586,7 +664,18 @@ func pathID(path string) string {
 // stop spending on it, and a few MB of SQLite handle each is exactly the kind
 // of spending they meant; opening them anyway would have made the switch a
 // decoration. One that is turned back on opens on its next search.
+//
+// Not on a phone, and not while the app is away (warmEnabled, CurrentPower):
+// pre-opening is a bet that the user is about to search, paid in file
+// descriptors, SQLite page caches and — worst on Android — a burst of I/O
+// during the exact seconds the platform is measuring the app's launch cost.
+// The bet is good on a desktop that just started a long-lived server; it is a
+// bad one on a device that may be resuming an activity for a screen rotation.
+// The first search opens what it needs, once.
 func (r *Registry) Warm() {
+	if !warmEnabled || CurrentPower() != PowerActive {
+		return
+	}
 	entries := r.all()
 	prefs := r.prefs
 	go func() {
@@ -631,6 +720,7 @@ func (r *Registry) SetPreviewBudget(bytes int64) {
 	r.mu.Lock()
 	r.previewBudget = bytes
 	r.mu.Unlock()
+	r.nudge() // a budget that just got smaller may already be exceeded
 }
 
 // reclaimable is one thing the janitor can close: an unprepared dictionary's
@@ -675,44 +765,94 @@ func (r *Registry) previewBytes() int64 {
 
 // sweep evicts least-recently-used preview backends until the total is back
 // under budget. Returns how many bytes it reclaimed.
+//
+// Under memory pressure (see memoryPressure) the rules change: the target
+// becomes zero rather than the budget, and the idle grace is waived. That is
+// the ONLY correct response to approaching a soft heap limit — the alternative,
+// which is what a limit does on its own, is to collect continuously against a
+// live set that no amount of collecting will shrink.
 func (r *Registry) sweep() int64 {
 	r.mu.RLock()
 	budget := r.previewBudget
 	r.mu.RUnlock()
-	if budget <= 0 {
+	pressed := memoryPressure()
+	if budget <= 0 && !pressed {
 		return 0
+	}
+	target := budget
+	if pressed {
+		target = 0
 	}
 	var total int64
 	var idle []reclaimable
 	cutoff := time.Now().Add(-minEvictIdle).UnixNano()
 	for _, c := range r.reclaimables() {
 		total += c.bytes
-		if c.used < cutoff {
+		if pressed || c.used < cutoff {
 			idle = append(idle, c)
 		}
 	}
-	if total <= budget || len(idle) == 0 {
+	if total <= target || len(idle) == 0 {
 		return 0
 	}
 	sort.Slice(idle, func(i, j int) bool { return idle[i].used < idle[j].used }) // oldest first
 	var freed int64
 	for _, c := range idle {
-		if total-freed <= budget {
+		if total-freed <= target {
 			break
 		}
 		freed += c.free()
 	}
 	if freed > 0 {
-		logx.V("preview budget: reclaimed %d MB (was %d MB, budget %d MB)",
-			freed>>20, total>>20, budget>>20)
+		logx.V("preview budget: reclaimed %d MB (was %d MB, budget %d MB, pressure=%v)",
+			freed>>20, total>>20, budget>>20, pressed)
 	}
 	return freed
 }
 
-// startJanitor keeps preview memory under the budget in the background.
+// needsSweep reports whether there is anything for the janitor to do at all.
+//
+// This is the whole point of the event-driven janitor: a periodic timer in a
+// process that outlives its window is a wakeup the kernel must schedule, a core
+// it must bring out of idle, and — on a phone, every twenty seconds, forever —
+// a measurable battery cost for a function that in the overwhelmingly common
+// case finds nothing to free. A sleeping goroutine costs nothing at all.
+func (r *Registry) needsSweep() bool {
+	r.mu.RLock()
+	budget := r.previewBudget
+	r.mu.RUnlock()
+	var total int64
+	n := 0
+	for _, c := range r.reclaimables() {
+		total += c.bytes
+		n++
+	}
+	if n == 0 {
+		return false // nothing reclaimable: pressure is not ours to relieve
+	}
+	if budget > 0 && total > budget {
+		return true
+	}
+	return memoryPressure()
+}
+
+// startJanitor keeps preview memory under the budget in the background. It
+// runs only while there is something to reclaim; otherwise it blocks on wake,
+// which nudge signals whenever a dictionary is opened, the budget changes, or
+// the power state does.
 func (r *Registry) startJanitor() {
 	go func() {
-		for range time.Tick(janitorPeriod) {
+		for {
+			if !r.needsSweep() {
+				<-r.wake
+				continue
+			}
+			// a fresh timer per pass rather than a Ticker: the pass only
+			// happens while there is work, so nothing is armed when idle
+			select {
+			case <-time.After(janitorPeriod):
+			case <-r.wake:
+			}
 			r.sweep()
 		}
 	}()
@@ -876,8 +1016,10 @@ func (e *entry) reopen() error {
 		time.AfterFunc(closeGrace, func() {
 			old.Close()
 			// preparing is the memory high-water mark; hand the pages back
-			// rather than sitting on them until the next natural GC
-			debug.FreeOSMemory()
+			// rather than sitting on them until the next natural GC —
+			// coalesced with any other close landing at the same moment,
+			// since INDEX_WORKERS>1 makes that the normal case
+			scheduleReclaim()
 		})
 	}
 	return nil

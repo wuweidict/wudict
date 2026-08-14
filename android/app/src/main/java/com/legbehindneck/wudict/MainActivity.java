@@ -13,9 +13,11 @@ import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Insets;
 import android.net.Uri;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
+import android.os.PowerManager;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -84,6 +86,7 @@ public class MainActivity extends Activity {
         // Where dictionaries come from is the one thing that differs between
         // the FOSS and Play builds (D62), and it lives entirely in Storage —
         // a class that exists once per flavour and never in this source set.
+        watchThermal();
         Storage.ensureAccess(this);
         Storage.onNewIntent(this, getIntent()); // launched by a share, possibly
         openPanelOnLoad = getIntent() != null
@@ -274,7 +277,113 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ── power ────────────────────────────────────────────────────────────
+    // Everything the server is allowed to know about the device's mood is
+    // decided here, in one function, from fields that are the only inputs
+    // (D64). One place, because these inputs contradict each other — the app
+    // can be visible while the device is hot, backgrounded while charging —
+    // and a set of independent callbacks each pushing its own state would make
+    // the last event win rather than the strictest condition.
+    //
+    // The battery and power-save inputs are SAMPLED here rather than watched
+    // with broadcast receivers: a receiver is a wakeup the app would not
+    // otherwise take, which is the exact cost this whole change exists to
+    // avoid, and every transition that matters already calls this.
+
+    private boolean visible;    // between onStart and onStop
+    private int thermal;        // PowerManager.THERMAL_STATUS_*, 0 when unknown
+    private Object thermalListener; // PowerManager.OnThermalStatusChangedListener, API 29+
+
+    private void applyPower() {
+        PowerManager pm = getSystemService(PowerManager.class);
+        boolean hot = thermal >= PowerManager.THERMAL_STATUS_MODERATE;
+        boolean saving = pm != null && pm.isPowerSaveMode();
+
+        String state;
+        if (hot) {
+            // Thermal throttling has already begun at MODERATE. Holding caches
+            // and threads through it is how an app earns a place on a vendor's
+            // battery-abuse list, and the user is holding a device that is
+            // getting warm.
+            state = PowerSignal.RESTRICTED;
+        } else if (!visible) {
+            // Charging is the one case where staying active off-screen is
+            // defensible: preparing a dictionary is the only real work this
+            // app has, it is what the user is waiting for, and a plugged-in
+            // device is not spending the user's battery on it.
+            state = charging() ? PowerSignal.ACTIVE : PowerSignal.BACKGROUND;
+        } else if (saving) {
+            // Visible, but the user has asked the whole system to conserve.
+            // Serve lookups, on one thread, holding nothing extra.
+            state = PowerSignal.BACKGROUND;
+        } else {
+            state = PowerSignal.ACTIVE;
+        }
+        PowerSignal.set(state);
+    }
+
+    private boolean charging() {
+        BatteryManager bm = getSystemService(BatteryManager.class);
+        return bm != null && bm.isCharging();
+    }
+
+    private void watchThermal() {
+        if (Build.VERSION.SDK_INT < 29) return;
+        PowerManager pm = getSystemService(PowerManager.class);
+        if (pm == null) return;
+        thermal = pm.getCurrentThermalStatus();
+        PowerManager.OnThermalStatusChangedListener l = status -> {
+            thermal = status;
+            applyPower();
+        };
+        pm.addThermalStatusListener(getMainExecutor(), l);
+        thermalListener = l;
+    }
+
+    private void unwatchThermal() {
+        if (Build.VERSION.SDK_INT < 29 || thermalListener == null) return;
+        PowerManager pm = getSystemService(PowerManager.class);
+        if (pm != null) {
+            pm.removeThermalStatusListener(
+                    (PowerManager.OnThermalStatusChangedListener) thermalListener);
+        }
+        thermalListener = null;
+    }
+
+    // The platform's own verdict that memory is short. Levels below
+    // TRIM_MEMORY_BACKGROUND are only ever delivered to a process that is
+    // still visible, where shedding would fight the user's actual work; the
+    // server has its own heap-pressure handling for that case. From
+    // BACKGROUND upwards the next step is being killed, so drop everything.
+    //
+    // Recent platform versions have narrowed which of these levels an app
+    // targeting a modern API still receives, so this is treated as a bonus
+    // rather than a mechanism: onStop already covers going away, and this only
+    // makes the response harder when the platform does say something.
+    @Override
+    @SuppressWarnings("deprecation")
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= TRIM_MEMORY_BACKGROUND) PowerSignal.set(PowerSignal.RESTRICTED);
+    }
+
     // ── lifecycle ────────────────────────────────────────────────────────
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        visible = true;
+        applyPower();
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        visible = false;
+        // Sent now, while the process is still running: a cached app is frozen
+        // by the platform shortly after this, and the child freezes with it.
+        applyPower();
+    }
 
     private void showPage() {
         runOnUiThread(() -> {
@@ -339,6 +448,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         gone = true;
+        unwatchThermal();
         // The server is bound to the app's lifetime (D52): finishing kills
         // it; swiping the task away kills the process group, which includes
         // the child. Recreation keeps it.

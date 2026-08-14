@@ -19,6 +19,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/wuweidict/wudict/internal/dict"
 )
@@ -48,7 +49,19 @@ type Store struct {
 	srcPath    string // source_path recorded at ingest ("" if unknown)
 	hasTrigram bool   // entry_trigram present → "contains" substring search
 	staleFold  bool   // trigram built by a different dict.FoldVersion
-	media      *Media // sibling .media.db, when present and uuid-paired
+	uuid       string // dict_uuid: what a sibling media.db must match
+
+	// The sibling media.db is opened on the first resource that asks for one,
+	// not at open. Most opens never serve a resource at all — a search touches
+	// text only — and the media database of a large dictionary is the bigger
+	// file of the pair, so eagerly attaching it meant a second SQLite handle,
+	// a second page cache and a second set of descriptors per dictionary, held
+	// for the life of the process, on the chance that an article referenced an
+	// image. (D64)
+	mediaPath  string // "" when this dictionary has no packed media
+	mediaMu    sync.Mutex
+	media      *Media
+	mediaTried bool // opened and failed, or opened and rejected: do not retry
 }
 
 // foldVersionOf reads the folding version a database records.
@@ -82,7 +95,7 @@ func FoldStale(m map[string]string) bool {
 
 // Open opens and validates a wudict text database.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open(driverName, dsnRO(path))
+	db, err := openRO(path)
 	if err != nil {
 		return nil, err
 	}
@@ -119,18 +132,41 @@ func Open(path string) (*Store, error) {
 	// database whose meta and schema disagree is judged by its schema
 	s.staleFold = s.hasTrigram && foldVersionOf(m) != dict.FoldVersion
 	fmt.Sscanf(m["entry_count"], "%d", &s.meta.EntryCount)
-	// standalone use: attach the sibling media.db so a copied folder works
-	// without the original source (D2/D9); uuid mismatch = not our pair
-	if sib := MediaSibling(path); sib != "" {
-		if md, err := OpenMedia(sib); err == nil {
-			if md.UUID == m["dict_uuid"] {
-				s.media = md
-			} else {
-				md.Close()
-			}
-		}
+	// standalone use: note the sibling media.db so a copied folder works
+	// without the original source (D2/D9). Only its existence is checked here;
+	// the uuid pairing is verified when it is first opened, which is when a
+	// resource actually needs it.
+	s.uuid = m["dict_uuid"]
+	if sib := MediaSibling(path); sib != "" && fileExists(sib) {
+		s.mediaPath = sib
 	}
 	return s, nil
+}
+
+// mediaDB opens the paired media database on first use, and remembers a
+// failure so a dictionary whose media.db is corrupt or foreign does not retry
+// on every image in every article. Nil means "this dictionary has no packed
+// media", which the caller reports as a plain miss.
+func (s *Store) mediaDB() *Media {
+	if s.mediaPath == "" {
+		return nil
+	}
+	s.mediaMu.Lock()
+	defer s.mediaMu.Unlock()
+	if s.media != nil || s.mediaTried {
+		return s.media
+	}
+	s.mediaTried = true
+	md, err := OpenMedia(s.mediaPath)
+	if err != nil {
+		return nil
+	}
+	if md.UUID != s.uuid {
+		md.Close() // not our pair: a media.db left beside someone else's text.db
+		return nil
+	}
+	s.media = md
+	return md
 }
 
 func readMeta(db *sql.DB) (map[string]string, error) {
@@ -154,7 +190,7 @@ func readMeta(db *sql.DB) (map[string]string, error) {
 // table. Used by the cheap dictionary-list path to read name/entry_count/
 // ingest_level without opening the heavy direct backend.
 func ReadMeta(dbPath string) (map[string]string, error) {
-	db, err := sql.Open(driverName, dsnRO(dbPath))
+	db, err := openRO(dbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -178,8 +214,12 @@ func (s *Store) Caps() dict.Caps {
 func (s *Store) ContainsStale() bool { return s.staleFold }
 
 func (s *Store) Close() error {
-	if s.media != nil {
-		s.media.Close()
+	s.mediaMu.Lock()
+	md := s.media
+	s.media, s.mediaTried = nil, true // a closed Store never reopens anything
+	s.mediaMu.Unlock()
+	if md != nil {
+		md.Close()
 	}
 	return s.db.Close()
 }
@@ -188,8 +228,8 @@ func (s *Store) Close() error {
 // otherwise text databases carry no binary resources (the upgraded
 // server backend falls back to the original source file).
 func (s *Store) Resource(name string) (io.ReadCloser, string, error) {
-	if s.media != nil {
-		return s.media.Resource(name)
+	if md := s.mediaDB(); md != nil {
+		return md.Resource(name)
 	}
 	return nil, "", dict.ErrNotFound
 }

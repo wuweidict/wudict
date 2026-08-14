@@ -10,6 +10,7 @@ package search
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/wuweidict/wudict/internal/dict"
 )
@@ -38,12 +39,42 @@ type Hit struct {
 	Skipped bool // dictionary does not support the requested mode
 }
 
+// workers bounds how many dictionaries are queried at once. Eight is right for
+// a desktop: the queries are I/O-bound, so oversubscribing the cores hides seek
+// latency and costs nothing that matters there.
+//
+// It is wrong for a phone, where eight concurrent SQLite readers means eight
+// page caches, eight threads the scheduler must place, and a burst of parallel
+// I/O that reads to the platform exactly like a misbehaving app — for a query
+// whose answer a human then spends seconds reading. The Android startup path
+// sets this to the same number as GOMAXPROCS (D64).
 const defaultWorkers = 8
+
+var workers atomic.Int32 // 0 = unset, see Workers
+
+// SetWorkers sizes the fan-out. Values below one are ignored rather than
+// clamped silently to a fixed floor, because "no parallelism" is not a
+// configuration this code can honour: one worker is the floor.
+func SetWorkers(n int) {
+	if n < 1 {
+		return
+	}
+	workers.Store(int32(n))
+}
+
+// Workers reports the current fan-out width, so the other place that touches
+// every dictionary at once (the dictionary list) can use the same number.
+func Workers() int {
+	if n := int(workers.Load()); n > 0 {
+		return n
+	}
+	return defaultWorkers
+}
 
 // All queries every dictionary with term, at most perDict results each.
 func All(ctx context.Context, dicts []dict.Dictionary, mode Mode, term string, perDict int) []Hit {
 	hits := make([]Hit, len(dicts))
-	sem := make(chan struct{}, defaultWorkers)
+	sem := make(chan struct{}, Workers())
 	var wg sync.WaitGroup
 	for i, d := range dicts {
 		wg.Add(1)
@@ -89,7 +120,7 @@ type Opener func() (dict.Dictionary, error)
 // one open, not the sum of all of them. emit calls are serialized (safe for a
 // shared response) but arrive in completion order; i is the input index.
 func StreamOpen(ctx context.Context, openers []Opener, mode Mode, term string, perDict int, emit func(i int, h Hit)) {
-	sem := make(chan struct{}, defaultWorkers)
+	sem := make(chan struct{}, Workers())
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	send := func(i int, h Hit) {

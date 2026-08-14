@@ -26,7 +26,7 @@ type Media struct {
 }
 
 func OpenMedia(path string) (*Media, error) {
-	db, err := sql.Open(driverName, dsnRO(path))
+	db, err := openRO(path)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (m *Media) Resource(name string) (io.ReadCloser, string, error) {
 // already there, and packing media is an explicit, minutes-long operation where
 // one decompression pass costs nothing.
 func ReferencedAssets(textDB string) ([]string, error) {
-	db, err := sql.Open(driverName, dsnRO(textDB))
+	db, err := openRO(textDB)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +227,7 @@ func IngestMedia(d dict.Dictionary, names []string, dbPath, dictUUID string, pro
 
 // ReadMetaValue reads one meta value from a wudict database file.
 func ReadMetaValue(dbPath, key string) (string, error) {
-	db, err := sql.Open(driverName, dsnRO(dbPath))
+	db, err := openRO(dbPath)
 	if err != nil {
 		return "", err
 	}

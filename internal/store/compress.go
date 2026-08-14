@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"io"
+	"runtime"
 	"sync"
 )
 
@@ -41,8 +42,29 @@ func SetCompressBodies(on bool) { compressBodies = on }
 // CompressBodies reports the current setting.
 func CompressBodies() bool { return compressBodies }
 
+// compressLevel is where the size/speed balance is struck. Level 6 is the
+// usual answer and the right one on a desktop, where an ingest is a minute of
+// a machine that is plugged in.
+//
+// On a phone it is the wrong answer. Compressing every article of a large
+// dictionary at level 6 is the longest sustained CPU burn this program ever
+// does, and sustained CPU is precisely what drains a battery and heats a
+// device into thermal throttling. Level 1 costs roughly a tenth of the CPU for
+// article HTML — highly repetitive markup, which deflate's cheapest settings
+// already handle well — in exchange for a database on the order of a tenth
+// larger. Storage is the resource a phone has most of. (D64)
+//
+// Read-side is unaffected: DEFLATE decoding does not depend on the level a
+// stream was written at, so databases stay interchangeable between platforms.
+var compressLevel = func() int {
+	if runtime.GOOS == "android" {
+		return 1
+	}
+	return 6
+}()
+
 var flateWriters = sync.Pool{New: func() any {
-	w, _ := flate.NewWriter(io.Discard, 6) // 6: the usual size/speed balance
+	w, _ := flate.NewWriter(io.Discard, compressLevel)
 	return w
 }}
 

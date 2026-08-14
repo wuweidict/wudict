@@ -20,7 +20,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -156,12 +155,12 @@ SERVE FLAGS
                           recently used are closed above this; prepared ones
                           answer from disk and are never evicted. "0" = no limit.
                           env: PREVIEW_MEMORY toml: PREVIEW_MEMORY
-                          default: 1GB
+                          default: 1GB (Android: 64MB)
 
-  MEMORY_LIMIT = "4GB"    Soft heap ceiling: Go collects harder rather than growing
-                          past it. "0" = none.
+  MEMORY_LIMIT = "4GB"    Soft heap ceiling: Go collects harder — and drops its
+                          caches — rather than growing past it. "0" = none.
                           env: MEMORY_LIMIT   toml: MEMORY_LIMIT
-                          default: none
+                          default: none (Android: a fraction of device RAM)
 
   --no-compress           Store article text uncompressed. Prepared databases are
                           roughly 3x larger; reads are marginally faster. Only
@@ -705,6 +704,17 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		}
 	}
 
+	// Parallelism, before anything starts using it. Zero means this platform
+	// keeps the runtime's own default (every core), which is right on a desktop
+	// and wrong on a phone — see config.MaxProcs. Handing the number to the
+	// server as well is what lets the power states lower it while the app is
+	// away and restore it on return (D64).
+	if n := config.MaxProcs(); n > 0 {
+		server.SetActiveProcs(n)
+		search.SetWorkers(n)
+		logx.V("parallelism: GOMAXPROCS=%d, search fan-out=%d", n, n)
+	}
+
 	// The UI state (which dictionaries are searched, in what order) lives
 	// beside the config file in effect, so a portable install carries both and
 	// --config re-points both. Loaded BEFORE the registry: Warm skips disabled
@@ -720,8 +730,13 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	store.SetCompressBodies(!cfg.NoCompress)
 	server.SetIndexWorkers(cfg.IndexWorkers)
 	if cfg.MemoryLimit > 0 {
-		// a soft ceiling: Go collects harder instead of growing past it
-		debug.SetMemoryLimit(cfg.MemoryLimit)
+		// A soft ceiling: Go collects harder instead of growing past it. Set it
+		// through the server rather than debug directly, because a ceiling on
+		// its own only buys more GC — the registry needs the same number to
+		// know when to shed caches instead, which is what turns pressure into
+		// freed memory rather than a collector spinning on a live set (D64).
+		server.SetMemoryLimit(cfg.MemoryLimit)
+		logx.V("memory limit: %d MB", cfg.MemoryLimit>>20)
 	}
 	srv.Version = Version
 	srv.DictDirOrigin = cfg.Origin("DICT_DIR")

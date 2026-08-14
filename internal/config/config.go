@@ -69,11 +69,14 @@ func defaults() Config {
 		Port:     "6888",
 		// Speexdec "" = auto-detect at launch (next to the executable, then
 		// $PATH); SPEEXDEC overrides. See resolveSpeexdec in the CLI.
-		Speexdec:      "",
-		SpeexBackend:  "internal",  // in-process libspeex (cgo); "external" = speexdec binary
-		AutoIndex:     AutoIndexOn, // opt-out: prepare an index on first use
-		IndexWorkers:  1,           // one dictionary at a time: the machine has other work to do
-		PreviewMemory: 1 << 30,     // 1 GB of unprepared dictionaries kept open
+		Speexdec:     "",
+		SpeexBackend: "internal",  // in-process libspeex (cgo); "external" = speexdec binary
+		AutoIndex:    AutoIndexOn, // opt-out: prepare an index on first use
+		IndexWorkers: 1,           // one dictionary at a time: the machine has other work to do
+		// both are platform-dependent, and for reasons that are about the
+		// platform's opinion of us rather than its capability — see tuning.go
+		PreviewMemory: previewMemoryDefault(),
+		MemoryLimit:   memoryLimitDefault(),
 	}
 }
 
@@ -271,9 +274,10 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 # PREVIEW_MEMORY = "1GB"              # how much RAM dictionaries that are NOT yet prepared may hold
 #                                     # open. Each costs ~350 bytes per headword; the least recently
 #                                     # used are closed above this. Prepared ones answer from disk and
-#                                     # are never evicted. "0" = no limit.
-# MEMORY_LIMIT  = "0"                 # soft ceiling, e.g. "4GB": Go collects harder rather than
-#                                     # growing past it. "0" = no ceiling.
+#                                     # are never evicted. "0" = no limit. Android defaults to 64MB.
+# MEMORY_LIMIT  = "0"                 # soft ceiling, e.g. "4GB": Go collects harder — and sheds its
+#                                     # caches — rather than growing past it. "0" = no ceiling.
+#                                     # Android defaults to a fraction of the device's RAM.
 # NO_COMPRESS = "0"                   # "1" = store article text uncompressed (databases roughly 3x larger,
 #                                     #       marginally faster reads; only worth it with disk to spare)
 # USE_CACHED  = "0"                   # "1" = also list previously imported dictionaries kept in DB_DIR

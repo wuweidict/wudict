@@ -116,7 +116,9 @@ final class Storage {
      * Anchors are STATIC markup in both pages (the panel header; the Save
      * button), never a node the page builds after an async fetch — setup.html
      * fills its folder rows only once /api/config answers, so anchoring there
-     * would be a race this has no way to win.
+     * would be a race this has no way to win. The same rule rules out the
+     * dictionary list itself, tempting as it is: loadDicts rebuilds it, and a
+     * control that vanishes on the first refresh is worse than none.
      */
     static void onPageFinished(WebView web) {
         web.evaluateJavascript(IMPORT_BUTTON_JS, null);
@@ -126,16 +128,30 @@ final class Storage {
             "(function(){"
                     + "if(document.getElementById('shellImportBtn'))return;"
                     + "var go=function(){location.href='wudict://import';};"
-                    // index.html: an icon in the ☰ panel's header row.
-                    + "var h=document.querySelector('#panel .panel-head .headacts');"
-                    + "if(h){"
+                    // index.html: a WORDED, full-width row at the top of the ☰
+                    // panel, not an icon in .headacts. That strip is chrome —
+                    // theme and close — and a user scans it for "get me out of
+                    // here", so the one function without which this app is
+                    // empty was the least findable thing in it. A glyph there
+                    // cost nothing to miss; the row costs one line of panel and
+                    // cannot be missed. It sits ABOVE .allrow so that row's
+                    // border-bottom still divides header from list, and so the
+                    // master switch stays adjacent to the cards it governs.
+                    + "var ph=document.querySelector('#panel .panel-head');"
+                    + "if(ph){"
                     + "var b=document.createElement('button');"
-                    + "b.type='button';b.className='btn';b.id='shellImportBtn';"
-                    + "b.title='Import dictionaries';"
-                    + "b.setAttribute('aria-label','Import dictionaries');"
-                    + "b.textContent='\\u21A5';"
+                    + "b.type='button';b.id='shellImportBtn';"
+                    + "b.textContent='\\uD83D\\uDCE5 Import dictionaries\\u2026';"
+                    // Inline, and only in terms of the page's own custom
+                    // properties: the shell must not ship a palette that would
+                    // have to be kept in step with the page's themes (D54).
+                    + "b.style.cssText='display:block;width:100%;box-sizing:border-box;"
+                    + "font:inherit;font-size:13px;text-align:left;cursor:pointer;"
+                    + "background:none;border:0;color:var(--link);"
+                    + "padding:var(--sp-1) var(--sp-2);margin:0 0 var(--sp-1)';"
                     + "b.addEventListener('click',go);"
-                    + "h.insertBefore(b,h.firstChild);"
+                    + "var ar=ph.querySelector('.allrow');"
+                    + "if(ar)ph.insertBefore(b,ar);else ph.appendChild(b);"
                     + "return;}"
                     // setup.html: a worded button before Save, which is itself
                     // disabled until a folder holds something — so on a fresh

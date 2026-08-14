@@ -1134,3 +1134,77 @@ func TestKeywordsHonoursTheNoLimitContract(t *testing.T) {
 		t.Errorf("an offset past the end must be nil, got %v", got)
 	}
 }
+
+// A media.db is a second SQLite handle with its own page cache and its own
+// descriptors, and most sessions never ask a given dictionary for a resource
+// at all. Opening it with the text.db meant a hundred prepared dictionaries
+// paid for a hundred of them at startup; it is opened on the first resource
+// that needs one instead (D64). A failure is remembered, so a corrupt or
+// foreign media.db is not retried once per image for the life of the process.
+func TestMediaOpensLazily(t *testing.T) {
+	r := &fakeReader{meta: dict.Meta{Name: "m", Format: "test", Path: "/gone"},
+		entries: []dict.Entry{h("w", "<p>x</p>")}}
+	base := filepath.Join(t.TempDir(), "lazy")
+	if err := Ingest(r, base+".text.db", nil); err != nil {
+		t.Fatal(err)
+	}
+	uuid, _ := ReadMetaValue(base+".text.db", "dict_uuid")
+	if err := IngestMedia(&mediaSrc{}, []string{"a.png"}, base+".media.db", uuid, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(base + ".text.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if s.media != nil {
+		t.Fatal("Open must not open the sibling media.db")
+	}
+	if s.mediaPath == "" {
+		t.Fatal("Open must still notice that a sibling media.db exists")
+	}
+
+	rc, _, err := s.Resource("a.png")
+	if err != nil {
+		t.Fatalf("first resource: %v", err)
+	}
+	rc.Close()
+	if s.media == nil {
+		t.Fatal("the first resource must open the media.db")
+	}
+
+	// a closed store never reopens anything, however late a request arrives
+	s.Close()
+	if _, _, err := s.Resource("a.png"); err == nil {
+		t.Error("a resource served from a closed store")
+	}
+}
+
+// A media.db belonging to some other dictionary must be rejected once, not
+// once per request: the check is a uuid comparison, and mediaTried is what
+// stops it becoming an open/close cycle on every image in an article.
+func TestForeignMediaRejectedOnce(t *testing.T) {
+	dir := t.TempDir()
+	r := &fakeReader{meta: dict.Meta{Name: "m", Format: "test", Path: "/gone"},
+		entries: []dict.Entry{h("w", "<p>x</p>")}}
+	base := filepath.Join(dir, "own")
+	if err := Ingest(r, base+".text.db", nil); err != nil {
+		t.Fatal(err)
+	}
+	// media packed against a different dictionary's uuid
+	if err := IngestMedia(&mediaSrc{}, []string{"a.png"}, base+".media.db", "not-our-uuid", nil); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(base + ".text.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, _, err := s.Resource("a.png"); err != dict.ErrNotFound {
+		t.Fatalf("foreign media.db was served: %v", err)
+	}
+	if s.media != nil || !s.mediaTried {
+		t.Errorf("rejection not remembered: media=%v tried=%v", s.media != nil, s.mediaTried)
+	}
+}

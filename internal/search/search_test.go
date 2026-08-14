@@ -155,3 +155,27 @@ func TestAllCancelledContext(t *testing.T) {
 		t.Error("no worker observed cancellation")
 	}
 }
+
+// The fan-out width is one number shared by both places that touch every
+// dictionary at once (search and the dictionary list), and on Android it is
+// lowered to keep the work off the big cores (D64). Zero means unset, not
+// "no workers": a fan-out of zero would deadlock, so the floor is one and
+// nonsense is ignored rather than obeyed.
+func TestWorkers(t *testing.T) {
+	t.Cleanup(func() { workers.Store(0) })
+
+	workers.Store(0)
+	if got := Workers(); got != defaultWorkers {
+		t.Errorf("unset: Workers() = %d, want %d", got, defaultWorkers)
+	}
+	SetWorkers(3)
+	if got := Workers(); got != 3 {
+		t.Errorf("after SetWorkers(3): %d", got)
+	}
+	for _, n := range []int{0, -1} {
+		SetWorkers(n)
+		if got := Workers(); got != 3 {
+			t.Errorf("SetWorkers(%d) must be ignored, got %d", n, got)
+		}
+	}
+}

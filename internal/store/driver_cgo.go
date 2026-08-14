@@ -21,13 +21,26 @@ package store
 // always correct if slower. The two constraints are exhaustive by
 // construction, so no flag combination can produce a binary without FTS5.
 
-import _ "github.com/mattn/go-sqlite3"
+import (
+	"strconv"
+
+	_ "github.com/mattn/go-sqlite3"
+)
 
 const driverName = "sqlite3"
 
+// cacheClause sizes the per-connection page cache when this platform asks for
+// something other than the driver default (see pageCacheKiB).
+func cacheClause() string {
+	if pageCacheKiB <= 0 {
+		return ""
+	}
+	return "&_cache_size=-" + strconv.Itoa(pageCacheKiB)
+}
+
 // dsnRO is a read-only, query-only connection string.
 func dsnRO(path string) string {
-	return "file:" + path + "?mode=ro&_query_only=1&_busy_timeout=5000"
+	return "file:" + path + "?mode=ro&_query_only=1&_busy_timeout=5000" + cacheClause()
 }
 
 // dsnIngest is a throwaway-safe bulk-write connection string (the ingest

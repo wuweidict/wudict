@@ -122,6 +122,10 @@ func New(reg *Registry) *Server {
 	s.mux.HandleFunc("GET /api/prefs", s.handlePrefs)
 	s.mux.HandleFunc("PUT /api/prefs", s.handleSavePrefs)
 	s.mux.HandleFunc("GET /api/reveal", s.handleReveal)
+	// what the platform is doing to us (D64) — the Android shell's channel for
+	// onStop / onTrimMemory / thermal / battery-saver, which the exec'd server
+	// has no other way of learning
+	s.mux.HandleFunc("POST /api/power", s.handlePower)
 	// the setup page stays reachable after first run: it is where folders are
 	// edited, not just where they are first chosen
 	s.mux.HandleFunc("GET /setup", s.handleSetupPage)
@@ -556,7 +560,9 @@ func (s *Server) handleDicts(w http.ResponseWriter, r *http.Request) {
 
 	writeLine(dictMsg{T: "begin", Total: len(entries)})
 
-	sem := make(chan struct{}, 8)
+	// same width as a search fan-out, and for the same reason: this is the
+	// other place the whole library is touched at once (search.Workers)
+	sem := make(chan struct{}, search.Workers())
 	var wg sync.WaitGroup
 	for _, e := range entries {
 		wg.Add(1)
@@ -940,6 +946,11 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rc, mime, err := d.Resource(name)
+	// serving a resource is the one path that can open a handle the entry's own
+	// open() never accounts for: a prepared dictionary lazily opening its source
+	// because media.db missed. Tell the janitor, or that handle would stay until
+	// something else happened to wake it.
+	s.reg.nudge()
 	if err != nil {
 		if err == dict.ErrNotFound {
 			http.NotFound(w, r)
