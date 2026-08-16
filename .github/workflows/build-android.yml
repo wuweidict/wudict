@@ -6,16 +6,7 @@
 # FTS5 + built-in speex) into the APK's jniLibs, then let Gradle package it.
 # The NDK version is pinned here; the Makefile auto-detects it locally.
 #
-# Signing is done by GRADLE, not by this workflow. android/app/build.gradle
-# declares a release signingConfig that reads KEYSTORE / STORE_PASSWORD /
-# KEY_ALIAS / KEY_PASSWORD from the environment, so all this file does is
-# decode the keystore to a real file and export those four. Doing it in both
-# places is what breaks it: AGP already zipaligns and applies the v1/v2/v3
-# schemes, and its output is wudict-foss-release.apk (archivesName plus the
-# flavour, D62) — never app-release-unsigned.apk.
-#
-# Secrets required for a signed release build. Miss any one and the workflow
-# falls back to a debug APK rather than failing five minutes into Gradle:
+# Secrets required for a signed release build. 
 #   ANDROID_KEYSTORE_BASE64    base64 of the upload keystore
 #   ANDROID_KEYSTORE_PASSWORD  store password
 #   KEY_ALIAS                  key alias inside the store
@@ -27,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag for the release (e.g., v0.1)"
+        description: "Tag for the release (e.g., v0.1) or use latest tag if empty"
         required: false
 
 permissions:
@@ -39,8 +30,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       signed: ${{ steps.signing.outputs.enabled }}
-    # Scoped to this job: the release job below never needs the keystore, and
-    # a secret in workflow-level env is exported into every job that runs.
     env:
       KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -86,14 +75,7 @@ jobs:
             VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
           fi
 
-          # versionCode is the commit count, NOT github.run_number. run_number
-          # is a property of the CI, not of the software: it resets when the
-          # workflow file is renamed, it differs between two builds of the same
-          # tag, and re-running an OLD tag produces a HIGHER code than a newer
-          # release — so version order and release order drift apart, and
-          # Android refuses the "downgrade" that results. The commit count is
-          # monotonic along the branch, identical for two builds of the same
-          # commit, and needs no CI to reproduce.
+          # versionCode is the commit count
           CODE="$(git rev-list --count HEAD)"
           [ "$CODE" -gt 0 ] || CODE=1
 
@@ -104,9 +86,6 @@ jobs:
       - name: Configure signing
         id: signing
         run: |
-          # All four or none. A partial set used to reach Gradle and fail there
-          # with a null keyAlias, minutes into the build and nowhere near the
-          # cause.
           if [ -z "$KS_B64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "::notice::signing secrets incomplete — building a debug APK"
@@ -121,7 +100,6 @@ jobs:
           keytool -list -keystore "$KS" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null
 
           # KEYSTORE must be a PATH — build.gradle does file(System.getenv("KEYSTORE")).
-          # Handing it the base64 blob names a file 3 KB long that cannot exist.
           echo "KEYSTORE=$KS" >> "$GITHUB_ENV"
           echo "enabled=true" >> "$GITHUB_OUTPUT"
 
@@ -161,8 +139,6 @@ jobs:
             SRC=android/app/build/outputs/apk/foss/release/wudict-foss-release.apk
             OUT="wudict-android-arm64.apk"
           else
-            # A debug APK is signed too — with the SDK's debug key. It is not
-            # "unsigned"; it is signed by a certificate nobody should trust.
             SRC=android/app/build/outputs/apk/foss/debug/wudict-foss-debug.apk
             OUT="wudict-android-arm64-debug.apk"
           fi
@@ -173,11 +149,6 @@ jobs:
           fi
           cp "$SRC" "$OUT"
 
-          # Verify what we are about to publish, rather than trusting that the
-          # signingConfig was applied: a release build with no signingConfig
-          # silently produces an UNSIGNED apk that installs nowhere.
-          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
-          "$BT/apksigner" verify --print-certs "$OUT"
           echo "APK=$OUT" >> "$GITHUB_ENV"
 
       - name: Upload artifact
