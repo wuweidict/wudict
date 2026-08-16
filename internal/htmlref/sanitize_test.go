@@ -4,7 +4,11 @@
 
 package htmlref
 
-import "testing"
+import (
+	"testing"
+
+	"golang.org/x/net/html"
+)
 
 // testPolicy mirrors the shape wudict uses: a small keep set, a small drop set,
 // everything else unwrapped, and an attribute allowlist.
@@ -149,6 +153,86 @@ func containsFold(s, sub string) bool {
 	return false
 }
 
+// stylePolicy is testPolicy plus the CSS hook, shaped exactly as the server's
+// clean policy shapes it: a hidden class is dropped with its content, a block
+// class becomes a <div>, and <span> is bare-unwrapped when nothing survives.
+func stylePolicy(st Styles) Policy {
+	p := testPolicy()
+	p.Bare = func(tag string) bool { return tag == "span" }
+	p.Elem = func(act TagAction, tag string, attrs []html.Attribute) (TagAction, string) {
+		switch st.Class(classAttr(attrs)) {
+		case DisplayNone:
+			return TagDrop, tag
+		case DisplayBlock:
+			if tag == "span" {
+				return TagKeep, "div"
+			}
+			return TagKeep, tag
+		}
+		return act, tag
+	}
+	return p
+}
+
+// The bug this exists to fix: LDOCE's senses, examples and collocations are
+// <span>s that are blocks only because its stylesheet says so, and its internal
+// field codes are <span>s that are invisible for the same reason. Strip the
+// stylesheet without reading it and the entry becomes one run of text with the
+// field codes spliced into it.
+func TestSanitizeAppliesStyles(t *testing.T) {
+	st := Styles{"Sense": DisplayBlock, "EXAMPLE": DisplayBlock, "FIELD": DisplayNone}
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"a block class becomes a real block",
+			`<span class="Sense">one</span><span class="Sense">two</span>`,
+			`<div>one</div><div>two</div>`},
+		{"a hidden class goes with its content",
+			`<span class="FIELD">TT</span><span class="ACTIV">TRAVEL</span>`,
+			`TRAVEL`},
+		{"the boundary survives an attribute-less block",
+			`<span class="Sense"><span>x</span></span>`,
+			`<div>x</div>`},
+		{"a kept attribute rides along the renamed element",
+			`<span class="Sense" title="sense 1">x</span>`,
+			`<div title="sense 1">x</div>`},
+		{"an unstyled span is still 13 bytes of nothing",
+			`<span class="HWD">x</span>`, `x`},
+		{"a renamed element closes where it opened, not where the stack ends",
+			`<span>x<span class="Sense">y</span>z</span>`,
+			`x<div>y</div>z`},
+		{"nested blocks nest",
+			`<span class="Sense">a<span class="EXAMPLE">b</span></span>`,
+			`<div>a<div>b</div></div>`},
+		{"a hidden subtree cannot be re-opened by a block inside it",
+			`<span class="FIELD">a<span class="Sense">b</span>c</span>d`,
+			`d`},
+		{"elements that carry their own meaning are never renamed",
+			`<a href="x" class="Sense">go</a>`,
+			`<a href="x">go</a>`},
+		{"no class, no change", `<p>plain</p>`, `<p>plain</p>`},
+	}
+	p := stylePolicy(st)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Sanitize(tc.in, p); got != tc.want {
+				t.Errorf("Sanitize(%q)\n got %q\nwant %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// Nothing a stylesheet says may talk a <script> back into the output: Elem is
+// never consulted for an element the tag policy already dropped.
+func TestStylesCannotRescueADroppedElement(t *testing.T) {
+	p := stylePolicy(Styles{"x": DisplayBlock})
+	if got := Sanitize(`<script class="x">alert(1)</script><p>a</p>`, p); got != `<p>a</p>` {
+		t.Errorf("a class revived a dropped element: %q", got)
+	}
+}
+
 func TestText(t *testing.T) {
 	tests := []struct {
 		name string
@@ -173,9 +257,43 @@ func TestText(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Text(tc.in); got != tc.want {
+			if got := Text(tc.in, nil); got != tc.want {
 				t.Errorf("Text(%q)\n got %q\nwant %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+// Without the stylesheet, a dictionary whose entry is one <span> per sense has
+// no block tag anywhere in it and collapses to a single line.
+func TestTextAppliesStyles(t *testing.T) {
+	st := Styles{"Sense": DisplayBlock, "FIELD": DisplayNone}
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"styled spans break the line",
+			`<span class="Sense">one</span><span class="Sense">two</span>`,
+			"one\ntwo"},
+		{"text after a block is not swallowed by it",
+			`<span class="Sense">one</span>after`, "one\nafter"},
+		{"hidden classes contribute nothing",
+			`<span class="FIELD">TT</span>TRAVEL`, "TRAVEL"},
+		{"a hidden subtree stays hidden throughout",
+			`<span class="FIELD">a<span class="Sense">b</span>c</span>d`, "d"},
+		{"block tags still work", `<p>a</p><p>b</p>`, "a\nb"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Text(tc.in, st); got != tc.want {
+				t.Errorf("Text(%q)\n got %q\nwant %q", tc.in, got, tc.want)
+			}
+		})
+	}
+	// The same input without a stylesheet is the old, wrong answer — asserted
+	// so the fixture cannot silently stop demonstrating the bug.
+	if got := Text(`<span class="Sense">one</span><span class="Sense">two</span>`, nil); got != "onetwo" {
+		t.Errorf("unstyled Text = %q, want %q", got, "onetwo")
 	}
 }

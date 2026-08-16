@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/htmlref"
 	"github.com/wuweidict/wudict/internal/logx"
 	"github.com/wuweidict/wudict/internal/store"
 )
@@ -191,6 +192,15 @@ type entry struct {
 	lastWeight atomic.Int64
 
 	mediaEmpty bool // a full ingest found no packable resources (dMu-guarded)
+
+	// This dictionary's own CSS, reduced to class → display, for the `clean`
+	// and `text` article formats (see articlestyle.go). Derived on first use
+	// and forgotten whenever the backend it was read from is closed or
+	// replaced. styleDone distinguishes "not derived yet" from "derived, and
+	// this dictionary has no stylesheet" — the second must not retry.
+	styleMu   sync.Mutex
+	styleDone bool
+	style     htmlref.Styles
 
 	ingestMu  sync.Mutex  // one ingest at a time per dictionary
 	autoTried atomic.Bool // first-search auto-index, attempted once
@@ -526,6 +536,9 @@ func (e *entry) drop(force bool) int64 {
 	e.d, e.err = nil, nil
 	e.weight.Store(0)
 	e.dMu.Unlock()
+	// Outside dMu, so this lock is only ever taken before dMu and never after
+	// it — the derivation in entry.styles holds styleMu while it opens.
+	e.forgetStyles()
 	time.AfterFunc(closeGrace, func() {
 		d.Close()
 		scheduleReclaim()
@@ -1229,6 +1242,9 @@ func (e *entry) reopen() error {
 	// become an eviction candidate
 	e.weight.Store(previewWeight(fresh, fresh.Meta()))
 	e.dMu.Unlock()
+	// The new view resolves resources differently (media.db first, D2), so the
+	// stylesheet is read again rather than trusted from the backend it replaced.
+	e.forgetStyles()
 	if old != nil && old != fresh {
 		time.AfterFunc(closeGrace, func() {
 			old.Close()

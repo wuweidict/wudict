@@ -131,8 +131,35 @@ func cleanURL(v, base string) (string, bool) {
 	return t, true
 }
 
-func cleanPolicy(base string) htmlref.Policy {
-	return htmlref.Policy{
+// blockTagFor is the element to emit for one the dictionary's CSS displays as
+// a block. Only elements that carry no meaning of their own are renamed: a
+// <span> is a hook for a class and nothing else, and an unknown element was
+// going to be unwrapped anyway. Everything the keep-list names is left alone —
+// renaming an <a> to a <div> would trade a boundary for a link, and a <td> for
+// its table.
+func blockTagFor(tag string) string {
+	if tag == "span" || !cleanKeep[tag] {
+		return "div"
+	}
+	return tag
+}
+
+func attrValue(attrs []html.Attribute, name string) string {
+	for _, a := range attrs {
+		if a.Key == name { // the tokenizer lower-cases attribute names
+			return a.Val
+		}
+	}
+	return ""
+}
+
+// cleanPolicy is the reduction, plus whatever the dictionary's own stylesheet
+// says about layout (st, possibly nil — see internal/htmlref/css.go). Without
+// it the tag skeleton is all there is to go on, and for a dictionary written as
+// nested <span class="…"> that is nothing: every sense, example and collocation
+// runs into the next, and content the stylesheet hid becomes visible.
+func cleanPolicy(base string, st htmlref.Styles) htmlref.Policy {
+	p := htmlref.Policy{
 		Tag: func(tag string) htmlref.TagAction {
 			switch {
 			case cleanDrop[tag]:
@@ -158,6 +185,27 @@ func cleanPolicy(base string) htmlref.Policy {
 		Bare:    func(tag string) bool { return tag == "span" },
 		Replace: audioObject(base),
 	}
+	// Left nil when there is no stylesheet, so a dictionary without one pays
+	// nothing at all for this: the walker never calls a hook it does not have.
+	if len(st) > 0 {
+		p.Elem = func(act htmlref.TagAction, tag string, attrs []html.Attribute) (htmlref.TagAction, string) {
+			class := attrValue(attrs, "class")
+			if class == "" {
+				return act, tag
+			}
+			switch st.Class(class) {
+			case htmlref.DisplayNone:
+				// The dictionary hides this — LDOCE's <span class="FIELD">TT
+				// </span> field codes, which surface as "TTTRAVEL" the moment
+				// the stylesheet is dropped. Hidden is what the author meant.
+				return htmlref.TagDrop, tag
+			case htmlref.DisplayBlock:
+				return htmlref.TagKeep, blockTagFor(tag)
+			}
+			return act, tag
+		}
+	}
+	return p
 }
 
 // audioObject rescues the one thing dropping <object> would otherwise throw
@@ -194,12 +242,12 @@ func audioObject(base string) func(string, []html.Attribute) string {
 
 // applyFormat reduces one article body. `raw` returns it untouched and costs
 // nothing, which is what keeps the desktop UI's path exactly as it was.
-func applyFormat(body, format, base string) string {
+func applyFormat(body, format, base string, st htmlref.Styles) string {
 	switch format {
 	case formatClean:
-		return htmlref.Sanitize(body, cleanPolicy(base))
+		return htmlref.Sanitize(body, cleanPolicy(base, st))
 	case formatText:
-		return htmlref.Text(body)
+		return htmlref.Text(body, st)
 	}
 	return body
 }

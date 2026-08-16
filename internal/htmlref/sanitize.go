@@ -56,6 +56,18 @@ type Policy struct {
 	// arrive lower-cased.
 	Attr func(tag, name, val string) (string, bool)
 
+	// Elem refines what Tag decided, with the element's attributes in hand, and
+	// names the tag to EMIT in its place. It is the hook through which a
+	// dictionary's own CSS reaches this walker (see css.go): a <span> the
+	// stylesheet displays as a block is emitted as a <div>, so a client that
+	// never sees that stylesheet still gets the boundary, and one the
+	// stylesheet hides is dropped rather than uncovered.
+	//
+	// Never consulted for an element Tag already dropped: dropping is a safety
+	// decision, and no class may talk a <script> back into the output.
+	// Returning "" for the tag means "unchanged".
+	Elem func(act TagAction, tag string, attrs []html.Attribute) (TagAction, string)
+
 	// Bare names elements worth keeping only for their attributes. Dictionary
 	// markup is overwhelmingly <span class="…">: in one LDOCE article, 3,237
 	// of 3,796 elements are spans, and once class and style are filtered away
@@ -97,9 +109,13 @@ func Sanitize(doc string, p Policy) string {
 	// The dropped subtree we are inside: its tag and our depth within it, so a
 	// nested <div> inside a dropped <div> cannot end the drop early.
 	dropTag, dropDepth := "", 0
-	// Elements whose start tag was unwrapped and whose end tag must therefore
-	// also be suppressed.
-	var unwrapped []string
+	// Open elements whose end tag is not simply their own: unwrapped ones
+	// (emit "", the end tag is suppressed) and renamed ones (emit the new
+	// name). One stack rather than two, because their relative order is what
+	// decides where a renamed element closes — `<span>x<span class="Sense">y
+	// </span>z</span>` must put z outside the block, and two stacks consulted
+	// in a fixed order cannot tell which </span> came first.
+	var pending []pendingEnd
 
 	for {
 		tt := z.Next()
@@ -119,29 +135,48 @@ func Sanitize(doc string, p Policy) string {
 				}
 				continue
 			}
-			switch p.act(tag) {
+			act, emit := p.act(tag), tag
+			if act != TagDrop && p.Elem != nil {
+				if a, name := p.Elem(act, tag, t.Attr); name != "" {
+					act, emit = a, name
+				} else {
+					act = a
+				}
+			}
+			open := tt == html.StartTagToken && !voidTag(tag)
+			switch act {
 			case TagDrop:
 				if p.Replace != nil {
 					b.WriteString(p.Replace(tag, t.Attr))
 				}
-				if tt == html.StartTagToken && !voidTag(tag) {
+				if open {
 					dropTag, dropDepth = tag, 1
 				}
 				continue
 			case TagUnwrap:
-				if tt == html.StartTagToken && !voidTag(tag) {
-					unwrapped = append(unwrapped, tag)
+				if open {
+					pending = append(pending, pendingEnd{tag: tag})
 				}
 				continue
 			}
-			kept := filterAttrs(t.Data, t.Attr, p)
-			if len(kept) == 0 && p.Bare != nil && p.Bare(tag) {
-				if tt == html.StartTagToken && !voidTag(tag) {
-					unwrapped = append(unwrapped, tag)
+			// The ATTRIBUTE policy still answers for the source element: a
+			// <span> emitted as a <div> is the same span it always was, and
+			// asking as though it were a div would admit attributes the policy
+			// never allowed a span to carry.
+			kept := filterAttrs(tag, t.Attr, p)
+			// Bare asks about the EMITTED element, which is the whole point of
+			// the rename: an attribute-less <span> is 13 bytes of nothing and
+			// goes, an attribute-less <div> is a block boundary and stays.
+			if len(kept) == 0 && p.Bare != nil && p.Bare(emit) {
+				if open {
+					pending = append(pending, pendingEnd{tag: tag})
 				}
 				continue
 			}
-			writeOpenTag(&b, tag, kept, tt == html.SelfClosingTagToken)
+			if open && emit != tag {
+				pending = append(pending, pendingEnd{tag: tag, emit: emit})
+			}
+			writeOpenTag(&b, emit, kept, tt == html.SelfClosingTagToken)
 
 		case html.EndTagToken:
 			tag := z.Token().Data
@@ -153,10 +188,16 @@ func Sanitize(doc string, p Policy) string {
 				}
 				continue
 			}
-			// The NEAREST matching unwrapped element, not the top of the
-			// stack: mis-nested markup would otherwise leak a stray </b>.
-			if i := lastIndexOf(unwrapped, tag); i >= 0 {
-				unwrapped = append(unwrapped[:i], unwrapped[i+1:]...)
+			// The NEAREST matching open element, not the top of the stack:
+			// mis-nested markup would otherwise leak a stray </b>.
+			if i := lastIndexOf(pending, tag); i >= 0 {
+				emit := pending[i].emit
+				pending = append(pending[:i], pending[i+1:]...)
+				if emit != "" {
+					b.WriteString("</")
+					b.WriteString(emit)
+					b.WriteString(">")
+				}
 				continue
 			}
 			if p.act(tag) == TagKeep && !voidTag(tag) {
@@ -176,9 +217,13 @@ func Sanitize(doc string, p Policy) string {
 	}
 }
 
-func lastIndexOf(s []string, v string) int {
+// pendingEnd is one open element whose end tag is not its own: emit is the
+// name to close with, or "" to suppress the end tag entirely.
+type pendingEnd struct{ tag, emit string }
+
+func lastIndexOf(s []pendingEnd, v string) int {
 	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == v {
+		if s[i].tag == v {
 			return i
 		}
 	}
@@ -249,14 +294,26 @@ func blockTag(name string) bool {
 // Text reduces an article to plain text: no markup, block boundaries as
 // newlines, whitespace collapsed. Elements whose content is not prose
 // (<script>, <style>, …) are dropped along with their text.
-func Text(doc string) string {
+//
+// st is the dictionary's own CSS reduced to class → display, or nil. Without
+// it the only boundaries available are the block TAGS, and a dictionary whose
+// entry is one <span> per sense — which is most of them — collapses into a
+// single line. With it, the classes the stylesheet displays as blocks break the
+// line too, and the ones it hides contribute nothing.
+func Text(doc string, st Styles) string {
 	if doc == "" {
 		return doc
 	}
 	z := html.NewTokenizer(strings.NewReader(doc))
 	var b strings.Builder
 	b.Grow(len(doc) / 4)
-	skip := ""
+	// The subtree being skipped — a raw-text element or one the stylesheet
+	// hides — and our depth within it, so a nested span cannot end it early.
+	skip, skipDepth := "", 0
+	// Open elements that started a block because of their CLASS. Their end tag
+	// carries no class, so the boundary has to be remembered here; nearest
+	// match wins, as in Sanitize.
+	var blocks []string
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
@@ -264,13 +321,43 @@ func Text(doc string) string {
 		}
 		switch tt {
 		case html.StartTagToken, html.SelfClosingTagToken:
-			tag, _ := z.TagName()
-			name := string(tag)
-			if skip == "" && rawTextTag(name) && tt == html.StartTagToken {
-				skip = name
+			// Attributes cost an allocation to read, so they are read only when
+			// there is a stylesheet to consult. Token() must precede TagName();
+			// see the note in Sanitize.
+			var name string
+			var attrs []html.Attribute
+			if len(st) > 0 {
+				t := z.Token()
+				name, attrs = t.Data, t.Attr
+			} else {
+				tag, _ := z.TagName()
+				name = string(tag)
+			}
+			open := tt == html.StartTagToken && !voidTag(name)
+			if skip != "" {
+				if name == skip && open {
+					skipDepth++
+				}
 				continue
 			}
-			if skip == "" && blockTag(name) {
+			if rawTextTag(name) && tt == html.StartTagToken {
+				skip, skipDepth = name, 1
+				continue
+			}
+			switch st.Class(classAttr(attrs)) {
+			case DisplayNone:
+				if open {
+					skip, skipDepth = name, 1
+				}
+				continue
+			case DisplayBlock:
+				b.WriteString("\n")
+				if open {
+					blocks = append(blocks, name)
+				}
+				continue
+			}
+			if blockTag(name) {
 				b.WriteString("\n")
 			}
 		case html.EndTagToken:
@@ -278,8 +365,15 @@ func Text(doc string) string {
 			name := string(tag)
 			if skip != "" {
 				if name == skip {
-					skip = ""
+					if skipDepth--; skipDepth == 0 {
+						skip = ""
+					}
 				}
+				continue
+			}
+			if i := lastIndexOfString(blocks, name); i >= 0 {
+				blocks = append(blocks[:i], blocks[i+1:]...)
+				b.WriteString("\n")
 				continue
 			}
 			if blockTag(name) {
@@ -295,6 +389,25 @@ func Text(doc string) string {
 			}
 		}
 	}
+}
+
+func lastIndexOfString(s []string, v string) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == v {
+			return i
+		}
+	}
+	return -1
+}
+
+// classAttr returns an element's class attribute, or "" if it has none.
+func classAttr(attrs []html.Attribute) string {
+	for _, a := range attrs {
+		if a.Key == "class" { // the tokenizer lower-cases attribute names
+			return a.Val
+		}
+	}
+	return ""
 }
 
 // squeeze reduces every run of whitespace to a single space, preserving one

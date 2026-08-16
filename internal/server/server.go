@@ -26,6 +26,7 @@ import (
 
 	"github.com/wuweidict/wudict/internal/config"
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/htmlref"
 	"github.com/wuweidict/wudict/internal/logx"
 	"github.com/wuweidict/wudict/internal/search"
 	"github.com/wuweidict/wudict/internal/speex"
@@ -897,7 +898,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		// absolutises exactly those. Reducing first would throw away the
 		// references before they had been named.
 		for j := range h.Results {
-			h.Results[j].Body = applyFormat(RewriteEntryHTML(h.Results[j].Body, id), format, origin)
+			h.Results[j].Body = RewriteEntryHTML(h.Results[j].Body, id)
+		}
+		// `clean` and `text` need this dictionary's own CSS to know which of
+		// its classes are blocks and which are hidden (D68); derived once per
+		// dictionary, from the article that first asks. `raw` never asks, so
+		// the desktop path costs nothing.
+		var st htmlref.Styles
+		if format != formatRaw && len(h.Results) > 0 {
+			st = s.articleStyles(id, h.Results[0].Body)
+		}
+		for j := range h.Results {
+			h.Results[j].Body = applyFormat(h.Results[j].Body, format, origin, st)
 		}
 		m := streamMsg{T: "hit", I: i, Dict: id, Name: name, Results: h.Results, Skipped: h.Skipped}
 		var heavy tooHeavy

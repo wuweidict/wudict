@@ -1135,7 +1135,7 @@ func TestCleanFormatStripsChromeAndScripts(t *testing.T) {
 		`<a href="javascript:alert(1)">bad</a>` +
 		`<a href="bword://run">run</a>` +
 		`<font size="2">how fast something moves</font></div>`
-	got := applyFormat(body, formatClean, "http://127.0.0.1:6888")
+	got := applyFormat(body, formatClean, "http://127.0.0.1:6888", nil)
 
 	for _, gone := range []string{"<script", "<link", "jquery", "onclick", "javascript:",
 		`class="entry"`, `style="color:red"`, "<font"} {
