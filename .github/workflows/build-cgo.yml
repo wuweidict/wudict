@@ -31,13 +31,18 @@ jobs:
       matrix:
         include:
           # ── Linux (native gcc) ────────────────────────────────
-          - { runner: ubuntu-24.04,     goos: linux,   goarch: amd64 }
-          - { runner: ubuntu-24.04-arm, goos: linux,   goarch: arm64 }
+          - { runner: ubuntu-24.04, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
           # ── macOS (Apple-Silicon runner; amd64 via arch flag) ─
-          - { runner: macos-14,         goos: darwin,  goarch: arm64 }
-          - { runner: macos-14,         goos: darwin,  goarch: amd64, cc: "clang -arch x86_64" }
+          - { runner: macos-14, goos: darwin, goarch: arm64 }
+          - {
+              runner: macos-14,
+              goos: darwin,
+              goarch: amd64,
+              cc: "clang -arch x86_64",
+            }
           # ── Windows (amd64 native mingw gcc; arm64 via clang) ─
-          - { runner: windows-2022,     goos: windows, goarch: amd64, ext: ".exe" }
+          - { runner: windows-2022, goos: windows, goarch: amd64, ext: ".exe" }
           # - { runner: windows-11-arm,   goos: windows, goarch: arm64, ext: ".exe", cc: "clang", experimental: true }
 
     steps:
@@ -85,14 +90,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0        # full history + tags so git describe works
+          fetch-depth: 0 # full history + tags so git describe works
           persist-credentials: true
 
       - name: Resolve tag
         id: tag
         run: |
           TAG="${{ inputs.tag }}"
-          [ -z "$TAG" ] && TAG="$(git describe --abbrev=0 2>/dev/null || true)"
+          [ -z "$TAG" ] && TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
           if [ -z "$TAG" ]; then
             echo "::error::No tag input and no existing git tag to fall back on." >&2
             exit 1
