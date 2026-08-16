@@ -6,7 +6,7 @@
 # FTS5 + built-in speex) into the APK's jniLibs, then let Gradle package it.
 # The NDK version is pinned here; the Makefile auto-detects it locally.
 #
-# Secrets required for a signed release build. 
+# Secrets required for a signed release build.
 #   ANDROID_KEYSTORE_BASE64    base64 of the upload keystore
 #   ANDROID_KEYSTORE_PASSWORD  store password
 #   KEY_ALIAS                  key alias inside the store
@@ -25,8 +25,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: APK (android-arm64, cgo)
+  build-and-release:
+    name: Build & Release APK
     runs-on: ubuntu-latest
     outputs:
       signed: ${{ steps.signing.outputs.enabled }}
@@ -35,6 +35,8 @@ jobs:
       STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -67,9 +69,6 @@ jobs:
       - name: Compute version
         id: ver
         run: |
-          # `if`, not `[ … ] && …`: run steps are `bash -e`, so the test
-          # failing BECAUSE a tag was supplied would abort the whole step —
-          # the workflow would break on exactly the runs that pass a tag.
           VERSION="${{ inputs.tag }}"
           if [ -z "$VERSION" ]; then
             VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
@@ -81,6 +80,7 @@ jobs:
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "TAG=$VERSION" >> "$GITHUB_ENV"
           echo "building $VERSION (versionCode $CODE)"
 
       - name: Configure signing
@@ -108,9 +108,8 @@ jobs:
           cd android
           # Only the FOSS flavour is published here (D62). The Play bundle is
           # built locally with `make aab-play` and signed with Play's UPLOAD
-          # key, which is not this workflow's keystore — producing it here
-          # would only invite someone to upload an APK signed with the wrong
-          # certificate. The Play APK is still assembled, unsigned, so the
+          # key, which is not this workflow's keystore.
+          # The Play APK is still assembled, unsigned, so the
           # permission assertion below has something to inspect.
           if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
             TASK=assembleFossRelease
@@ -123,8 +122,7 @@ jobs:
 
       - name: Assert the flavour split held
         # The Play APK must declare no storage permission and the FOSS one
-        # must still declare All-files access. A manifest-merger change that
-        # quietly unified them is the failure this exists to catch.
+        # must declare All-files access.
         run: sh tools/verify-apk.sh
 
       - name: Collect and verify the APK
@@ -148,37 +146,16 @@ jobs:
             exit 1
           fi
           cp "$SRC" "$OUT"
-
           echo "APK=$OUT" >> "$GITHUB_ENV"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ env.APK }}
-          path: ${{ env.APK }}
-
-  release:
-    needs: build
-    if: ${{ inputs.tag != '' && needs.build.outputs.signed == 'true' }}
-    runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      TAG: ${{ inputs.tag }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Download artifact
-        uses: actions/download-artifact@v8
-        with:
-          pattern: wudict-*
-          merge-multiple: true
+      # - name: Upload artifact
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: ${{ env.APK }}
+      #     path: ${{ env.APK }}
 
       - name: Create git tag if missing
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
         run: |
           # --exit-code with the full ref, not `| grep -q "$TAG"`: an unanchored
           # grep for "v0.1" matches an existing "v0.10" and silently skips
@@ -186,7 +163,7 @@ jobs:
           if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" > /dev/null 2>&1; then
             echo "Tag ${TAG} already exists — skipping."
           else
-            git config user.name  "github-actions[bot]"
+            git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git tag -a "${TAG}" -m "Release ${TAG}"
             git push origin "${TAG}"
@@ -194,13 +171,14 @@ jobs:
           fi
 
       - name: Create or update GitHub release
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
         run: |
           if gh release view "${TAG}" > /dev/null 2>&1; then
             echo "Release ${TAG} exists — replacing assets."
-            gh release upload "${TAG}" wudict-*.apk --clobber
+            gh release upload "${TAG}" "$APK" --clobber
           else
             echo "Creating release ${TAG}."
-            gh release create "${TAG}" wudict-*.apk \
+            gh release create "${TAG}" "$APK" \
               --title "${{ github.event.repository.name }} ${TAG}" \
               --generate-notes
           fi

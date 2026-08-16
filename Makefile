@@ -9,8 +9,6 @@ BINARY     := wudict
 CMD        := .
 BUILD_DIR  := dist
 
-JAVA_HOME := /Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
-
 # ---- build flavours -----------------------------------------------------
 # wudict builds in two flavours; `build`/`install`/`check` use cgo:
 #
@@ -124,7 +122,7 @@ ANDROID_LIB  := android/app/src/main/jniLibs/arm64-v8a/libwudict.so
 # Gradle needs JDK 17+. Respect an inherited JAVA_HOME; on macOS fall back to
 # an installed JDK 17 rather than whatever ancient default `java` resolves to.
 ifeq ($(shell uname),Darwin)
-export JAVA_HOME ?= $(shell /usr/libexec/java_home -v 17 2>/dev/null)
+export JAVA_HOME ?= $(shell /usr/libexec/java_home -v 21 2>/dev/null)
 endif
 
 .PHONY: android-go
