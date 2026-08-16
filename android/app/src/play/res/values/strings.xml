@@ -2,23 +2,36 @@
 <!-- Copyright (C) 2026 glowinthedark -->
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <!-- The Play flavour asks for no permission, so it has no permission to
-     explain: everything here is about the import (D62). -->
+     explain: everything here is about the import (D62).
+
+     Vocabulary rule (D66). The user reads "import", never "copy": copying is
+     our mechanism and it reads as the app helping itself to their disk, while
+     importing is the thing they asked for. The ONE exception is
+     import_message, the screen where they consent — spending gigabytes must
+     be stated before it happens, not after. And "originals" appears in
+     exactly one place, the delete offer, where it is qualified by the folder's
+     own name; the dictionary cards say "dictionary files" for the imported
+     copy, so no two screens use one word for two different files. -->
 <resources>
     <string name="import_title">Import dictionaries</string>
-    <string name="import_message">Choose the folder holding your dictionaries. WuWeiDict copies it into its own storage, keeping the folder layout — an .mdx needs its .mdd beside it, a StarDict its .idx and .dict, a DSL its res folder. You can remove the originals afterwards.</string>
+    <string name="import_message">Choose the folder holding your dictionaries. WuWeiDict copies it into its own storage, keeping the folder layout — an .mdx needs its .mdd beside it, a StarDict its .idx and .dict, a DSL its res folder. Afterwards it offers to delete the files it imported from, so your collection is not stored twice.</string>
     <string name="import_choose">Choose folder</string>
     <string name="import_later">Later</string>
     <string name="import_cancel">Cancel</string>
     <string name="import_scanning">Reading the folder…</string>
-    <string name="import_progress">Copying %1$d of %2$d\n%3$s</string>
+    <string name="import_progress">Importing %1$d of %2$d\n%3$s</string>
     <string name="import_busy">An import is already running.</string>
     <string name="import_nothing">That folder holds no files.</string>
     <string name="import_no_space">Not enough space: %1$s needed, %2$s free.</string>
     <string name="import_done">Imported %1$d files.</string>
-    <string name="import_done_offer_delete">Imported %1$d files. Remove the originals from the folder you picked?</string>
-    <string name="import_delete_originals">Remove originals</string>
-    <string name="import_keep_originals">Keep them</string>
-    <string name="import_deleted">Removed %1$d originals.</string>
+    <!-- %2$s is the picked folder, in quotes, or import_source_fallback when
+         the provider would not name it; %3$s is what deleting would free. -->
+    <string name="import_done_offer_delete">Imported %1$d files.\n\nWuWeiDict now keeps its own copy, so the files in %2$s on your device are no longer needed — deleting them frees %3$s. Your dictionaries work either way.</string>
+    <string name="import_done_offer_delete_nosize">Imported %1$d files.\n\nWuWeiDict now keeps its own copy, so the files in %2$s on your device are no longer needed. Your dictionaries work either way.</string>
+    <string name="import_source_fallback">the folder you picked</string>
+    <string name="import_delete_files">Delete</string>
+    <string name="import_keep_files">Keep</string>
+    <string name="import_deleted">Deleted %1$d files, %2$s freed.</string>
     <string name="import_partial">Imported %1$d files; %2$d could not be read.</string>
     <string name="import_cancelled">Cancelled after %1$d files.</string>
     <string name="import_failed">Import failed: %1$s</string>

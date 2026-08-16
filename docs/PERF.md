@@ -561,6 +561,19 @@ control opened it three times in four queries. One dictionary larger than the
 whole machine's comfortable working set is the failure mode §8.2 was about, and
 it is now unreachable after the first sight of it.
 
+**The cap must not strand what it declines (corrected 2026-08-16, P74).** As
+measured above it did: `maybeAutoIndex` fires only from a *successful* open, and
+the cap refuses before opening, so the declined tail was never indexed, never
+prepared, and weighed the same on every later query — admission runs in
+preference order, so it was the same tail every time. The convergence path is
+the mechanism, not an accident: a dictionary that fits the budget gets its
+headword index, prepared ⇒ `previewWeight` 0, and the budget it used to occupy
+is freed for the next one, so the library walks itself to fully prepared over a
+few sessions. A dictionary that does not fit stays out of the automatic queue on
+purpose — that is the ceiling — and is lifted by the user opening its section,
+which searches it uncapped (a single-dictionary search has no fan-out to bound)
+and indexes it in the foreground lane. See D65's 2026-08-16 amendment.
+
 **The first query cannot be capped, and it costs.** A fan-out is parallel, so
 every opener reads "unknown" before any has settled a charge: 56 s and 393 MB
 of the capped run is that one query paying to learn 24 prices. Persisting

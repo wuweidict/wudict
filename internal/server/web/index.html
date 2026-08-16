@@ -238,6 +238,12 @@ details.dict[open]>summary{border-bottom:1px solid var(--line-soft)}
    The size hint keeps the scrollbar from jumping as they are rendered. */
 details.dict[open]>dl{content-visibility:auto;contain-intrinsic-size:0 400px}
 summary .count{margin-left:auto;font-weight:400;color:var(--fg-faint);font-size:12px}
+/* A deferred dictionary's hint (renderSlot, h.deferred). Link-coloured because
+   it is an offer rather than a status, not underlined because the target is the
+   whole summary and not these two words, and never wrapped: it sits opposite a
+   dictionary name that already wraps, and a two-line hint beside a three-line
+   name is the layout in the bug report this replaced. */
+summary .count.hint{color:var(--link);white-space:nowrap}
 summary .more{font-weight:400;font-size:12px;color:var(--link);cursor:pointer;
   text-decoration:underline;text-underline-offset:2px;margin-left:var(--sp-2)}
 summary .upgrade{font-weight:400;font-size:12px;color:var(--link);cursor:pointer;
@@ -800,8 +806,12 @@ $("expandBtn").onclick=()=>{
   expandAll=!expandAll;
   applyExpand();
   // act on what is already on screen: re-running the search would throw away
-  // the results the user is looking at to fetch the same ones again
-  for(const d of $("out").querySelectorAll("details.dict"))d.open=expandAll;
+  // the results the user is looking at to fetch the same ones again.
+  // Deferred sections are excluded: opening one FETCHES it (loadDeferred), so
+  // including them here would turn one click into a dozen simultaneous opens —
+  // precisely the burst the fan-out cap deferred them to avoid. They stay a
+  // per-dictionary decision.
+  for(const d of $("out").querySelectorAll("details.dict:not([data-deferred])"))d.open=expandAll;
 };
 
 function cycleTheme(){
@@ -1143,7 +1153,7 @@ function renderPanel(){
          rules, so it can only miss words whose folding changed. So it is
          marked, not disabled, and the click rebuilds instead of removing. */
       const stale=key==="contains"&&on&&d.containsStale;
-      const tip=!canToggle?"The original files are gone — this is the only copy, so it cannot be changed":
+      const tip=!canToggle?"The dictionary files are gone — this is the only copy, so it cannot be changed":
         stale?"Built with older text-folding rules — click to rebuild":
         on?"Click to remove":"Click to add";
       caps+=`<span class="feat${on?" on":""}${stale?" stale":""}${canToggle?"":" locked"}"`+
@@ -1431,26 +1441,32 @@ $("panelList").addEventListener("click",e=>{
    answered rather than telling them anything.
 
    Delete-everything is the default because preparation is automatic: deleting
-   only the index of a dictionary whose original is still in a scanned folder
+   only the index of a dictionary whose file is still in a scanned folder
    frees the space until the next search rebuilds it. "Index only" is offered
    anyway (it is the honest way to reclaim a full-text index), and it says so
-   afterwards, from the server's own report. */
+   afterwards, from the server's own report.
+
+   Vocabulary: these are "the dictionary files", never "the originals". On the
+   Play flavour the file this deletes is itself a COPY the importer made, and
+   the import dialog uses "originals" for the user's own files on shared
+   storage — one word for two different files, in one app, is the confusion
+   that made the import's keep/delete question unanswerable. */
 function askRemoval(pd){
   const d=dicts.find(x=>x.id===pd.dataset.id);if(!d)return;
   const acts=pd.querySelector(".acts");if(!acts)return;
   const idx=(d.dbSize||0)+(d.mediaSize||0);
   const prepared=idx>0||!!d.mediaDB;
-  // "original files only" is a genuine option exactly once: the dictionary is
+  // "dictionary files only" is a genuine option exactly once: the dictionary is
   // prepared AND its media is packed, so the prepared copy can stand alone.
   // The server enforces this too (D24 §4) — this only avoids offering what
   // would be refused.
   const canDropSource=!!d.source&&prepared&&(!!d.mediaDB||!d.hasMedia);
   let btns=`<span class="rmgo" data-rm="all">delete${d.source?" everything":""}</span>`;
   if(d.source&&prepared)btns+=`<span class="rmgo" data-rm="index">index only${idx?" · "+mb(idx):""}</span>`;
-  if(canDropSource)btns+=`<span class="rmgo" data-rm="source">original files only</span>`;
+  if(canDropSource)btns+=`<span class="rmgo" data-rm="source">dictionary files only</span>`;
   acts.innerHTML=`<span class="rmq">Delete <b>${esc(dictLabel(d))}</b>`+
-    (d.source?` — the prepared index${idx?" ("+mb(idx)+")":""} and the original files`
-             :` — this is the only copy, there is no original to rebuild it from`)+
+    (d.source?` — the prepared index${idx?" ("+mb(idx)+")":""} and the dictionary files`
+             :` — this is the only copy, there are no dictionary files to rebuild it from`)+
     `<br>${btns}<span class="rmno">cancel</span></span>`;
 }
 
@@ -1807,13 +1823,86 @@ function highlight(roots,mode,q){
   const rx=new RegExp(q.trim().split(/\s+/).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|"),"gi");
   for(const root of roots){if(root)try{new Mark(root).markRegExp(rx)}catch(e){}}
 }
+/* The name to put on a section, preferring what the dictionary list already
+   knows. A hit whose open never happened — deferred, or a failed open — carries
+   no metadata, so the server falls back to the file name and the section reads
+   "Dorland 32th.mdx" while its neighbours read properly. /api/dicts already has
+   the real name from a cheap header probe; nothing has to be opened to use it. */
+function hitName(h){
+  const d=dicts.find(x=>x.id===h.dict);
+  return (d&&dictLabel(d))||h.name||h.dict;
+}
+/* Whether this device is touched or pointed at, which is the difference
+   between "tap" and "click" and nothing else. Read once: it does not change
+   under a running page in any way worth re-rendering for. */
+const TAPS=matchMedia("(pointer:coarse)").matches;
+
+/* A deferred dictionary (server: streamMsg.Deferred) was not searched because
+   this query was already carrying as much newly-opened dictionary as its
+   memory budget allows — a phone-only default, and only ever while the
+   dictionary is still unprepared. It is NOT an error and must not look like
+   one: nothing is broken, nothing is misconfigured, and there is exactly one
+   thing to do about it, which is to open the section. That opening re-queries
+   this dictionary alone, which the server does not cap, and which also puts it
+   in line to be prepared — so the same tap answers the question now and stops
+   it being asked again. */
+function loadDeferred(det,box,h,mode,q){
+  if(det.dataset.loading)return;
+  det.dataset.loading="1";
+  const cnt=det.querySelector(".count");
+  if(cnt)cnt.innerHTML='<span class="spin"></span>searching…';
+  let shown=false;
+  fetchStream("/api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+encodeURIComponent(h.dict)+"&n=25",msg=>{
+    // The user has moved on: a new search replaced every box, so this one is
+    // detached and writing into it would paint nothing at a cost.
+    if(msg.t!=="hit"||!box.isConnected)return;
+    shown=renderSlot(box,msg,mode,q,25).shown;
+    const nd=box.querySelector("details.dict");
+    if(nd)nd.open=true; // it was open when they asked; it stays open
+  },searchAC&&searchAC.signal).then(()=>{
+    if(shown||!box.isConnected)return;
+    // Answered, and the answer is "not in this one". Saying so is the whole
+    // point — a section that vanished under the finger it was tapped with
+    // would read as a bug.
+    box.innerHTML=`<details class="dict" open><summary>${esc(hitName(h))}`+
+      `<span class="count">no results</span></summary></details>`;
+  }).catch(err=>{
+    if(!box.isConnected)return; // superseded and already off screen
+    // Re-arm either way: the section stays tappable and a second try is one
+    // more tap. An abort is not a failure — the search that owned this card was
+    // replaced — so it restores the offer rather than accusing the dictionary.
+    delete det.dataset.loading;
+    det.open=false;
+    if(!cnt)return;
+    const aborted=err.name==="AbortError";
+    cnt.classList.toggle("hint",aborted); // an error is not an offer: drop the link colour
+    cnt.textContent=aborted?(TAPS?"tap":"click")+" to search"
+                           :"⚠ "+(err.message||"could not search this dictionary");
+  });
+}
 /* render one dictionary's results into its ordered slot box; returns
    {shown,results}. shown = something visible (results/error/upgrade);
    results = actual entries (drives auto-open + empty-state). */
 function renderSlot(box,h,mode,q,perDict){
   box.innerHTML="";
+  if(h.deferred){
+    const det=document.createElement("details");
+    det.className="dict";
+    det.dataset.deferred=h.dict; // also what excludes it from expand-all
+    det.innerHTML=`<summary>${esc(hitName(h))}`+
+      `<span class="count hint">${TAPS?"tap":"click"} to search</span></summary>`;
+    // `toggle` does not bubble, so this is bound to the element rather than
+    // delegated on #out. It is not `once`: a failed load re-arms itself.
+    det.addEventListener("toggle",()=>{if(det.open)loadDeferred(det,box,h,mode,q)});
+    box.appendChild(det);
+    // shown, but NOT results: a deferred dictionary has said nothing about the
+    // word yet, so it must not suppress the empty state or satisfy the
+    // link-scope widening — and it must never be the section auto-opened,
+    // which would fetch it without anyone asking.
+    return{shown:true};
+  }
   if(h.error){
-    box.innerHTML=`<details class="dict"><summary>${esc(h.name||h.dict)}<span class="count">⚠ ${esc(h.error)}</span></summary></details>`;
+    box.innerHTML=`<details class="dict"><summary>${esc(hitName(h))}<span class="count">⚠ ${esc(h.error)}</span></summary></details>`;
     return{shown:true};
   }
   if(h.skipped){

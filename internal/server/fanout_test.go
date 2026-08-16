@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -157,8 +156,9 @@ func TestSearchBudgetRefusesUnpreparedDictionariesOnceSpent(t *testing.T) {
 // Over HTTP, a capped search must still answer for every dictionary it was
 // asked about. A silently missing slot is the failure mode that would make this
 // cap dishonest — the user would read "no results" where the truth is "not
-// looked", so the refusal travels to the client as the slot's error, with the
-// dictionary named.
+// looked" — so the refusal travels as a DEFERRED slot: named, priced, carrying
+// no error, and answerable by asking for that dictionary on its own, which is
+// the tap the client offers and which this test performs.
 func TestCappedSearchReportsWhatItDeclined(t *testing.T) {
 	isolatedDBDir(t)
 	dir := t.TempDir()
@@ -198,16 +198,26 @@ func TestCappedSearchReportsWhatItDeclined(t *testing.T) {
 		t.Fatalf("every dictionary must be accounted for: got %d hits of 4", len(hits))
 	}
 	declined, answered := 0, 0
+	var deferredID string
 	for _, h := range hits {
 		switch {
-		case h.Error != "":
+		case h.Deferred:
 			declined++
-			if !strings.Contains(h.Error, "not searched") {
-				t.Errorf("unhelpful refusal: %q", h.Error)
+			deferredID = h.Dict
+			// Deferred is not an error and must not arrive as one: the client
+			// renders an offer, and an error string would make it render a
+			// failure. This is the whole user-facing contract of the cap.
+			if h.Error != "" {
+				t.Errorf("a deferred slot carried an error string: %q", h.Error)
+			}
+			if h.Bytes <= 0 {
+				t.Error("a deferred slot must carry what the open would have cost")
 			}
 			if h.Name == "" {
-				t.Error("a declined slot must still name its dictionary")
+				t.Error("a deferred slot must still name its dictionary")
 			}
+		case h.Error != "":
+			t.Errorf("unexpected error for %s: %s", h.Name, h.Error)
 		case len(h.Results) > 0:
 			answered++
 		}
@@ -216,12 +226,31 @@ func TestCappedSearchReportsWhatItDeclined(t *testing.T) {
 		t.Fatalf("answered %d, declined %d — want some of each under a one-dictionary budget", answered, declined)
 	}
 
+	// The remedy the client offers is a tap, and a tap is a search of one
+	// dictionary. It must answer under the same budget that just deferred it —
+	// otherwise the offer is a lie and the dictionary is unreachable by every
+	// path the app has.
+	one := searchStream(t, s, "/api/search?q=beta&mode=prefix&dict="+deferredID)
+	if len(one) != 1 {
+		t.Fatalf("a single-dictionary search returned %d slots", len(one))
+	}
+	if one[0].Deferred || one[0].Error != "" {
+		t.Fatalf("the deferred dictionary was refused when asked for by itself: deferred=%v err=%q",
+			one[0].Deferred, one[0].Error)
+	}
+	if len(one[0].Results) == 0 {
+		t.Error("a single-dictionary search of a deferred dictionary returned nothing")
+	}
+
 	// Uncapped, the same query answers everything: the cap is the only reason
-	// anything was declined.
+	// anything was deferred.
 	reg.SetSearchBudget(0)
+	for _, e := range reg.all() {
+		e.evict()
+	}
 	hits = searchStream(t, s, "/api/search?q=beta&mode=prefix&dict=all")
 	for _, h := range hits {
-		if h.Error != "" {
+		if h.Error != "" || h.Deferred {
 			t.Errorf("uncapped search still declined %s: %s", h.Name, h.Error)
 		}
 	}

@@ -37,6 +37,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 
 final class SafImporter {
 
@@ -78,7 +79,10 @@ final class SafImporter {
                     DocumentsContract.buildDocumentUriUsingTree(tree, rootId)));
             List<Item> items = new ArrayList<>();
             enumerate(a.getContentResolver(), tree, rootId, "", items);
-            return new Batch(folder == null ? "Imported" : folder, items, true);
+            // folder is where the bytes land; source is what the DELETE OFFER
+            // names, and it stays null when the provider would not tell us, so
+            // that offer never invents a folder name the user cannot find.
+            return new Batch(folder == null ? "Imported" : folder, folder, items, true);
         });
     }
 
@@ -93,19 +97,21 @@ final class SafImporter {
                 if (name == null) continue;
                 items.add(new Item(u, name, sizeOf(cr, u)));
             }
-            return new Batch("Imported", items, false);
+            return new Batch("Imported", null, items, false);
         });
     }
 
     // ── the work ─────────────────────────────────────────────────────────
 
     private static final class Batch {
-        final String folder;
+        final String folder;     // DESTINATION subfolder under appDicts — ours, always non-null
+        final String source;     // what the user's folder is CALLED on their device, or null
         final List<Item> items;
-        final boolean deletable; // a tree grant may allow removing the originals
+        final boolean deletable; // a tree grant may allow removing the user's own files
 
-        Batch(String folder, List<Item> items, boolean deletable) {
+        Batch(String folder, String source, List<Item> items, boolean deletable) {
             this.folder = folder;
+            this.source = source;
             this.items = items;
             this.deletable = deletable;
         }
@@ -159,18 +165,26 @@ final class SafImporter {
         if (batch.items.isEmpty()) return a.getString(R.string.import_nothing);
 
         File root = new File(AppDirs.appDicts(a), batch.folder);
+        sweepPartials(root);
+        // Only what is NOT already here counts against free space. Summing the
+        // whole batch made a re-import of a folder that is 95 % imported —
+        // the normal way a user adds one dictionary — refuse itself with "not
+        // enough space" for bytes it was never going to write.
         long need = 0;
         for (Item it : batch.items) {
-            if (it.size > 0) need += it.size;
+            if (it.size <= 0) continue;
+            File dst = resolve(root, it.rel);
+            if (dst != null && dst.isFile() && dst.length() == it.size) continue;
+            need += it.size;
         }
         long free = new StatFs(AppDirs.appDicts(a).getAbsolutePath()).getAvailableBytes();
         if (need + SLACK > free) {
-            return a.getString(R.string.import_no_space, mb(need), mb(free));
+            return a.getString(R.string.import_no_space, size(need), size(free));
         }
 
         ContentResolver cr = a.getContentResolver();
         int done = 0, skipped = 0;
-        List<Uri> copied = new ArrayList<>();
+        List<Item> copied = new ArrayList<>();
         List<String> failed = new ArrayList<>();
 
         for (Item it : batch.items) {
@@ -184,7 +198,7 @@ final class SafImporter {
             // added dictionaries must not re-copy gigabytes it already has.
             if (dst.isFile() && it.size >= 0 && dst.length() == it.size) {
                 skipped++;
-                copied.add(it.src);
+                copied.add(it);
                 continue;
             }
             final int n = done + skipped + failed.size() + 1;
@@ -196,7 +210,7 @@ final class SafImporter {
             });
             if (copyOne(cr, it.src, dst)) {
                 done++;
-                copied.add(it.src);
+                copied.add(it);
             } else {
                 failed.add(it.rel);
             }
@@ -213,7 +227,7 @@ final class SafImporter {
             return a.getString(R.string.import_cancelled, done);
         }
         if (batch.deletable && !copied.isEmpty() && failed.isEmpty()) {
-            offerDelete(a, cr, copied, done + skipped);
+            offerDelete(a, cr, batch.source, copied, done + skipped);
             return null; // offerDelete owns the closing message
         }
         if (!failed.isEmpty()) {
@@ -259,38 +273,94 @@ final class SafImporter {
         return true;
     }
 
-    // The originals are the user's, so removing them is offered, never done.
-    // Taking it up turns the import into a move, which is what keeps a
+    // These are the USER'S OWN FILES on shared storage, not our temporaries —
+    // the copy this import just made is the app's permanent library and the
+    // only bytes the server can ever read (D62). So removal is offered, never
+    // done; taking it up turns the import into a move, which is what keeps a
     // multi-GB collection from existing twice.
-    private static void offerDelete(Activity a, ContentResolver cr, List<Uri> docs, int count) {
+    //
+    // Two rules the wording has to satisfy, both learned from the shipped
+    // version being unanswerable ("keep or delete SOURCES — which files?").
+    // FIRST, the question names the folder as the user's own device shows it
+    // and states what deleting frees, because "sources" is our word and a
+    // number of gigabytes is the only part of this the user actually cares
+    // about. SECOND, KEEP sits in the affirmative slot: the destructive answer
+    // must not be where a reflex tap lands, and the cost of keeping is one
+    // folder the user can delete later, while the cost of a mistaken delete is
+    // their collection.
+    private static void offerDelete(Activity a, ContentResolver cr, String source,
+                                    List<Item> docs, int count) {
+        long known = 0;
+        for (Item it : docs) {
+            if (it.size > 0) known += it.size;
+        }
+        final long freed = known;
         a.runOnUiThread(() -> {
             if (a.isFinishing() || a.isDestroyed()) return;
+            String where = source != null
+                    // “…” as escapes: javac's source encoding is a
+                    // build setting, not something this file may assume.
+                    ? "\u201C" + source + "\u201D"
+                    : a.getString(R.string.import_source_fallback);
+            // A provider is not obliged to report sizes. Promising to free
+            // "0 KB" would be worse than promising nothing.
+            String msg = freed > 0
+                    ? a.getString(R.string.import_done_offer_delete, count, where, size(freed))
+                    : a.getString(R.string.import_done_offer_delete_nosize, count, where);
             new AlertDialog.Builder(a)
                     .setTitle(R.string.import_title)
-                    .setMessage(a.getString(R.string.import_done_offer_delete, count))
-                    .setPositiveButton(R.string.import_delete_originals, (d, w) -> {
+                    .setMessage(msg)
+                    .setPositiveButton(R.string.import_keep_files, null)
+                    .setNegativeButton(R.string.import_delete_files, (d, w) -> {
                         Thread t = new Thread(() -> {
                             int gone = 0;
-                            for (Uri u : docs) {
+                            long back = 0;
+                            for (Item it : docs) {
                                 try {
-                                    if (DocumentsContract.deleteDocument(cr, u)) gone++;
+                                    if (DocumentsContract.deleteDocument(cr, it.src)) {
+                                        gone++;
+                                        if (it.size > 0) back += it.size;
+                                    }
                                 } catch (Exception e) {
-                                    Log.w(TAG, "could not delete " + u, e);
+                                    Log.w(TAG, "could not delete " + it.src, e);
                                 }
                             }
                             final int n = gone;
+                            final long got = back;
                             a.runOnUiThread(() -> {
                                 if (!a.isFinishing() && !a.isDestroyed()) {
-                                    toastDialog(a, a.getString(R.string.import_deleted, n));
+                                    toastDialog(a, a.getString(R.string.import_deleted, n, size(got)));
                                 }
                             });
                         }, "wudict-import-delete");
                         t.setDaemon(true);
                         t.start();
                     })
-                    .setNegativeButton(R.string.import_keep_originals, null)
                     .show();
         });
+    }
+
+    // Our own leftovers, and the one thing here that IS deleted without asking.
+    // A kill mid-copy strands a <name>.part that nothing else will ever remove,
+    // that discovery ignores, and that the user can only see as unexplained app
+    // storage. They are bytes we wrote for an import that did not finish, and a
+    // re-run rewrites them; claim() guarantees no concurrent import is holding
+    // one open.
+    private static void sweepPartials(File root) {
+        if (root == null || !root.isDirectory()) return;
+        Deque<File> stack = new ArrayDeque<>();
+        stack.push(root);
+        for (int seen = 0; !stack.isEmpty() && seen < MAX_ENTRIES; seen++) {
+            File[] kids = stack.pop().listFiles();
+            if (kids == null) continue; // unreadable is not fatal: it is a sweep
+            for (File f : kids) {
+                if (f.isDirectory()) {
+                    stack.push(f);
+                } else if (f.getName().endsWith(".part") && !f.delete()) {
+                    Log.w(TAG, "stale partial left behind: " + f);
+                }
+            }
+        }
     }
 
     // ── SAF plumbing ─────────────────────────────────────────────────────
@@ -413,7 +483,13 @@ final class SafImporter {
                 .show();
     }
 
-    private static String mb(long bytes) {
-        return (bytes >> 20) + " MB";
+    // A dictionary collection is measured in gigabytes, and "12800 MB" is a
+    // number the reader has to convert before it means anything.
+    private static String size(long bytes) {
+        if (bytes >= 1L << 30) {
+            return String.format(Locale.US, "%.1f GB", bytes / (double) (1L << 30));
+        }
+        if (bytes >= 1L << 20) return (bytes >> 20) + " MB";
+        return Math.max(bytes, 0) / 1024 + " KB";
     }
 }

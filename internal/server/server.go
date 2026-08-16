@@ -11,6 +11,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -757,6 +758,15 @@ type streamMsg struct {
 	Results []dict.Result `json:"results,omitempty"`
 	Skipped bool          `json:"skipped,omitempty"`
 	Error   string        `json:"error,omitempty"`
+
+	// Deferred: this dictionary was not searched because the fan-out cap
+	// declined to materialise it (see fanout). It is NOT an error and must not
+	// be reported as one: the dictionary is fine, the query was wide, and
+	// asking for this one dictionary by itself answers it. Bytes is what the
+	// open was estimated to cost, for logs and tests — the UI does not show a
+	// number, because a megabyte figure is not a decision the reader can make.
+	Deferred bool  `json:"deferred,omitempty"`
+	Bytes    int64 `json:"bytes,omitempty"`
 }
 
 // handleSearch streams results as newline-delimited JSON so the client can
@@ -834,14 +844,36 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// One budget for this query: what the fan-out may newly materialise before
 	// it starts declining dictionaries instead of opening them (see fanout).
 	// Nil when uncapped, which is the desktop default.
+	//
+	// A query naming ONE dictionary has no fan-out to cap, and is never capped.
+	// The budget bounds the multiplication — N dictionaries materialised at
+	// once by a single `all` query — and a search of one is bounded by that one
+	// dictionary. It is also, always, a direct demand: the user picked it in
+	// the selector, asked for `more…`, or opened a deferred section. Declining
+	// it would leave the dictionary unreachable through EVERY path the app has,
+	// which is worse than the memory by a wide margin — and the steady state is
+	// still held by PREVIEW_MEMORY, the janitor and the relax valve, none of
+	// which this bypasses.
 	fan := s.reg.fanout()
+	demand := len(entries) == 1
+	if demand {
+		fan = nil
+	}
 	for i, e := range entries {
 		e := e
 		begin[i] = streamSlot{Dict: e.ID, Name: e.ID}
 		openers[i] = func() (dict.Dictionary, error) {
 			d, err := e.openWithin(fan)
 			if err == nil && s.AutoIndex {
-				e.maybeAutoIndex() // first search of an unprepared dict → index in background
+				// A search of one dictionary is a demand for that dictionary,
+				// so its index jumps the background queue (demandIndex); a
+				// dictionary that merely happened to be in a wide search takes
+				// its turn (maybeAutoIndex). Both prepare the same thing.
+				if demand {
+					e.demandIndex()
+				} else {
+					e.maybeAutoIndex()
+				}
 			}
 			return d, err
 		}
@@ -868,7 +900,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			h.Results[j].Body = applyFormat(RewriteEntryHTML(h.Results[j].Body, id), format, origin)
 		}
 		m := streamMsg{T: "hit", I: i, Dict: id, Name: name, Results: h.Results, Skipped: h.Skipped}
-		if h.Err != nil {
+		var heavy tooHeavy
+		switch {
+		case errors.As(h.Err, &heavy):
+			// Deferred, not failed. The client renders a section the user can
+			// open, and opening it re-queries this dictionary alone — which is
+			// uncapped above, and which auto-indexes it so the deferral does
+			// not recur.
+			m.Deferred, m.Bytes = true, heavy.bytes
+		case h.Err != nil:
 			m.Error = h.Err.Error()
 		}
 		writeLine(m)

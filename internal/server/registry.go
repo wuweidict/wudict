@@ -194,6 +194,7 @@ type entry struct {
 
 	ingestMu  sync.Mutex  // one ingest at a time per dictionary
 	autoTried atomic.Bool // first-search auto-index, attempted once
+	demanded  atomic.Bool // user-demanded index, attempted once (see demandIndex)
 }
 
 // noPackableMedia reports whether a prior full ingest found nothing to pack,
@@ -209,6 +210,19 @@ func (e *entry) noPackableMedia() bool {
 // once per process; failures (e.g. a read-only library, no ingest reader for
 // the format) are swallowed — auto-indexing is a silent convenience, never a
 // hard requirement.
+//
+// Automatic while it is cheap; on demand once it is not. This fires from a
+// SUCCESSFUL open only, which is what bounds it: a dictionary the fan-out cap
+// declined is not opened and is therefore not indexed here, deliberately. That
+// refusal is the ceiling past which preparation stops being automatic — on a
+// phone the alternative is queueing an hour of sustained ingest for
+// dictionaries the user has not asked for, which is the storm the cap exists to
+// prevent. What lifts it is the user opening that dictionary's section: the
+// resulting single-dictionary search is uncapped (handleSearch), so it opens,
+// so it lands here, so it is prepared and never deferred again. Meanwhile every
+// dictionary that DID fit is prepared in the background, and each one that
+// finishes drops to previewWeight 0 and frees budget for the next — the library
+// converges on its own, at a rate the cap chooses.
 //
 // Never while the process is not active: indexing is the single most expensive
 // thing this program does (a saturated core and hundreds of bytes per headword),
@@ -238,6 +252,48 @@ func (e *entry) maybeAutoIndex() {
 			logx.V("auto-index %s: %v", e.Path, err)
 		} else {
 			logx.V("auto-index %s: index ready", e.Path)
+		}
+	}()
+}
+
+// demandIndex prepares this dictionary's headword index because the user asked
+// for THIS dictionary: they chose it in the selector, followed a link into it,
+// or opened a section the fan-out cap had deferred. Same work as
+// maybeAutoIndex, one difference — the queue.
+//
+// maybeAutoIndex waits on indexLimit, which is one worker and, on a library of
+// a hundred dictionaries, hours long. That is right for a convenience nobody
+// asked for and wrong here: the deferred dictionary is already in that queue,
+// somewhere, and leaving it there would mean "I opened this one" buys nothing
+// until this evening — the user would meet the same deferral on the same
+// dictionary tomorrow. So a demand jumps to frontLimit, the lane setFeatures
+// uses for work a person is waiting on. At most one such ingest runs at a time,
+// alongside at most one background one; the ceiling on concurrent ingests goes
+// from one to two, and only ever because someone asked.
+//
+// Attempted once per process, like maybeAutoIndex and for the same reason: a
+// search runs on every keystroke, and a demand that re-queued an ingest per
+// keystroke would be a far worse defect than the one this fixes. A pending
+// background attempt for the same dictionary is not cancelled — whichever
+// arrives second finds the index built and returns immediately.
+func (e *entry) demandIndex() {
+	if CurrentPower() != PowerActive {
+		return
+	}
+	if !e.demanded.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		acquire(frontLimit)
+		defer release(frontLimit)
+		if CurrentPower() != PowerActive {
+			e.demanded.Store(false) // deferred, not cancelled: the next demand does it
+			return
+		}
+		if err := e.ensureBaseIndex(nil); err != nil {
+			logx.V("demand-index %s: %v", e.Path, err)
+		} else {
+			logx.V("demand-index %s: index ready", e.Path)
 		}
 	}()
 }
@@ -303,9 +359,12 @@ func (e *entry) open() (dict.Dictionary, error) {
 // count, so "open at most N" is 50 MB or 3 GB depending on which N.
 //
 // What it costs is result completeness, and that is the honest name for it: a
-// dictionary the cap refuses is reported to the client as not searched, with
-// its price and the remedy (prepare it — a prepared dictionary answers from
-// SQLite, weighs nothing here and is never capped). It is off by default on the
+// dictionary the cap refuses is reported to the client as DEFERRED — its
+// section is still there, in preference order, and opening it searches it,
+// because a search naming one dictionary is not capped. That is the whole
+// remedy, and it is a tap: the same open prepares the dictionary in the
+// background, and a prepared dictionary answers from SQLite, weighs nothing
+// here and is never capped again. It is off by default on the
 // desktop, where RAM is the machine's own business, and on by default on
 // Android, where the alternative outcome is not a slower search but a killed
 // process. Preview mode is the transient state before preparation (D15/D20), so
@@ -359,15 +418,19 @@ func (f *fanout) settle(est, actual int64) {
 	}
 }
 
-// tooHeavy is what a refused dictionary reports. It carries the estimate so the
-// client can say what was declined and why, rather than showing a silent gap.
+// tooHeavy is what a refused dictionary reports: deferred, not failed. It
+// carries the estimate so the caller can say what was declined and at what
+// price. This string is a LOG line and a test fixture; it is never rendered.
+// handleSearch matches this type and streams `deferred` instead, because the
+// user-facing statement is "not searched yet — open this to search it", and a
+// megabyte figure over a budget nobody set is not something a reader can act on.
 type tooHeavy struct{ bytes int64 }
 
 func (t tooHeavy) Error() string {
 	if t.bytes > 0 {
-		return fmt.Sprintf("not searched: ~%d MB unprepared, over this search's memory budget — prepare it to search it for free", t.bytes>>20)
+		return fmt.Sprintf("deferred: ~%d MB to open, over this search's materialisation budget", t.bytes>>20)
 	}
-	return "not searched: this search reached its memory budget — prepare this dictionary to search it for free"
+	return "deferred: this search reached its materialisation budget"
 }
 
 // openWithin is open, subject to a fan-out's materialisation budget. A backend

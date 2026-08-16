@@ -151,8 +151,8 @@ apk: android-go ## Build the FOSS debug APK (needs Android SDK: ANDROID_HOME or 
 	cd android && ./gradlew assembleFossDebug
 	@echo "android/app/build/outputs/apk/foss/debug/$(BINARY)-foss-debug.apk"
 
-.PHONY: apk-release
-apk-release: android-go ## Build the FOSS release APK (signed only if a keystore is exported — see build-android.yml)
+.PHONY: apk-foss-release
+apk-foss-release: android-go ## Build the FOSS release APK (signed only if a keystore is exported — see build-android.yml)
 	cd android && ./gradlew assembleFossRelease
 	@# The APK is left where Gradle put it, deliberately: a copy under dist/
 	@# survives a FAILED build, so `adb install dist/wudict.apk` would then
@@ -160,6 +160,10 @@ apk-release: android-go ## Build the FOSS release APK (signed only if a keystore
 	@# least likely to notice. archivesName already gives it a real name; the
 	@# echo is only so you do not have to remember the path.
 	@echo "android/app/build/outputs/apk/foss/release/$(BINARY)-foss-release.apk"
+
+.PHONY: apk-foss-release-install
+apk-foss-release-install: apk-foss-release ## build FOSS release and install via adb
+	adb install "android/app/build/outputs/apk/foss/release/$(BINARY)-foss-release.apk"
 
 .PHONY: apk-play-debug
 apk-play-debug: android-go ## Build the Play-flavour debug APK (SAF import)
@@ -170,6 +174,10 @@ apk-play-debug: android-go ## Build the Play-flavour debug APK (SAF import)
 apk-play-release: android-go ## Build the Play-flavour release APK (SAF import)
 	cd android && ./gradlew assemblePlayRelease
 	@echo "android/app/build/outputs/apk/play/release/$(BINARY)-play-release.apk"
+
+.PHONY: apk-play-release-install
+apk-play-release-install: apk-play-release ## build FOSS release and install via adb
+	adb install "android/app/build/outputs/apk/foss/release/$(BINARY)-foss-release.apk"
 
 .PHONY: aab-play
 aab-play: android-go ## Build the Play release bundle (unsigned: Play App Signing owns the key)
