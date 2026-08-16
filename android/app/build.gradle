@@ -25,8 +25,8 @@ def gitVersion = {
 }
 
 android {
-    namespace 'com.legbehindneck.wudict'
-    compileSdk 36
+    namespace = 'com.legbehindneck.wudict'
+    compileSdk = 36
 
     // Names the APK after the product instead of AGP's generic app-<variant>:
     // wudict-release.apk / wudict-debug.apk. archivesName is the supported
@@ -76,28 +76,27 @@ android {
     }
 
     buildFeatures {
-        buildConfig true // BuildConfig.DEBUG gates WebView debugging
+        buildConfig = true // BuildConfig.DEBUG gates WebView debugging
         // slows down build...
 //        resValues true  // debug's resValue("string", "app_name", …) override
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     buildTypes {
         release {
-            minifyEnabled false  // nothing to shrink: two classes, no libraries
-            shrinkResources false
+            minifyEnabled = false  // nothing to shrink: two classes, no libraries
+            shrinkResources = false
             if (System.getenv("KEYSTORE") != null) {
-                signingConfig signingConfigs.release
+                signingConfig = signingConfigs.release
             }
         }
-//        debug {
-//            applicationIdSuffix = ".debug"
-//            resValue("string", "app_name", "WuWeiDictDev")
-//        }
+        debug {
+            applicationIdSuffix = ".debug"
+        }
     }
 
     packaging {
@@ -106,7 +105,7 @@ android {
             // from nativeLibraryDir, so the .so must be extracted to the
             // filesystem at install time (the manifest's extractNativeLibs
             // attribute is rejected by AGP 9 in favor of this).
-            useLegacyPackaging true
+            useLegacyPackaging = true
         }
     }
 }

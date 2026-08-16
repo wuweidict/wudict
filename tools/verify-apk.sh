@@ -46,7 +46,16 @@ if [ -n "$PLAY" ]; then
         if ! echo "$perms" | grep -q 'android.permission.INTERNET'; then
             fail "$apk lost INTERNET"
         fi
-        echo "ok: $apk declares no storage permission"
+        # INTERNET and nothing else. Stated as a whole-set assertion rather
+        # than a list of things to be absent, because the next permission to
+        # creep in is by definition one nobody thought to forbid — a feature
+        # added to the shell is exactly how it would arrive.
+        extra=$(echo "$perms" | sed -n "s/^uses-permission: name='\([^']*\)'.*/\1/p" \
+            | grep -v '^android.permission.INTERNET$' || true)
+        if [ -n "$extra" ]; then
+            fail "$apk declares more than INTERNET: $extra"
+        fi
+        echo "ok: $apk declares INTERNET and nothing else"
     done
 else
     echo "skip: no play APK built (make apk-play)"
@@ -72,4 +81,14 @@ for apk in $FOSS $PLAY; do
         | grep -Eq 'extractNativeLibs[^=]*=(true|\(type 0x12\)0xffffffff)' \
         || fail "$apk has extractNativeLibs=false: the server could not be exec'd"
     echo "ok: $apk extracts libwudict.so"
+
+    # Selection lookup (D67) is declared in src/main, so BOTH flavours must
+    # carry it — a filter that quietly lands in one flavour's manifest is the
+    # classic way this split rots. It is also the property most likely to be
+    # lost silently: nothing fails to build without it, the entry simply stops
+    # appearing in the selection toolbar.
+    "$AAPT2" dump xmltree --file AndroidManifest.xml "$apk" \
+        | grep -q 'android.intent.action.PROCESS_TEXT' \
+        || fail "$apk declares no PROCESS_TEXT filter: no selection lookup"
+    echo "ok: $apk offers selection lookup"
 done

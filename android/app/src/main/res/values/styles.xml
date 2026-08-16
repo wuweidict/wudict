@@ -8,4 +8,14 @@
     <style name="Theme.WuWeiDict" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_bg</item>
     </style>
+
+    <!-- The selection-lookup popup (D67): a window that floats over whatever
+         app the user selected the word in, so a definition costs them no place
+         in the text. Floating windows are exempt from the edge-to-edge
+         enforcement above, so LookupActivity needs none of that padding. -->
+    <style name="Theme.WuWeiDict.Lookup" parent="android:Theme.Material.Light.Dialog.NoActionBar">
+        <item name="android:windowBackground">@color/window_bg</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+    </style>
 </resources>

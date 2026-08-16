@@ -7,4 +7,13 @@
     <string name="app_name">WuWeiDict</string>
     <string name="starting">Starting WuWeiDict…</string>
     <string name="server_failed">WuWeiDict server failed to start: %1$s</string>
+
+    <!-- The selection-toolbar entry (D67). It labels the PROCESS_TEXT filter
+         only, where the toolbar is a row of verbs among other apps' verbs
+         ("Read aloud", "Translate") and a product name would read as the odd
+         one out. The share sheet keeps app_name. -->
+    <string name="lookup_label">Look up</string>
+    <string name="lookup_starting">Looking up “%1$s”…</string>
+    <string name="lookup_empty">Nothing to look up</string>
+    <string name="lookup_open_app">Open in WuWeiDict</string>
 </resources>

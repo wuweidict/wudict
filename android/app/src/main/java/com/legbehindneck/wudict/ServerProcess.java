@@ -31,6 +31,8 @@ import java.net.Socket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 class ServerProcess {
@@ -48,16 +50,102 @@ class ServerProcess {
     private static final String BINARY = "libwudict.so";
     private static final String TAG = "wudict";
 
+    // ── the one child, and who is holding it ─────────────────────────────
+    // One server per app process, shared across activity recreation: the child
+    // holds port 6888, so a second spawn would lose the port to it.
+    //
+    // This used to be a `private static ServerProcess` inside MainActivity,
+    // started in onCreate and read back as "non-null means ready". D67 made
+    // that untrue in two ways at once: a lookup popup must work with
+    // MainActivity dead, and two activities can now ask at the same time —
+    // during which non-null means *starting*. So the field lives here as a
+    // state machine with a waiting list, and a start in flight is joined
+    // rather than duplicated.
+    private static final int IDLE = 0, STARTING = 1, READY = 2, FAILED = 3;
+
+    private static int state = IDLE;
+    private static ServerProcess shared;
+    private static final List<Listener> waiting = new ArrayList<>();
+    private static int holders;    // live windows retaining the server
+    private static int generation; // invalidates callbacks from a child we stopped
+
+    /**
+     * Runs {@code l} against a ready server, starting one if needed. A second
+     * caller during STARTING queues rather than exec'ing a second child; READY
+     * calls back immediately; a previous FAILED is retried, because the reason
+     * (a folder that was not there yet, a port a stale child was still holding)
+     * may well be gone by the next attempt.
+     *
+     * <p>Callbacks arrive on whichever thread settles the start — the
+     * activities hop to the main thread themselves, as they must anyway for the
+     * adopt path, which answers inline.
+     */
+    static synchronized void ensure(Context ctx, Listener l) {
+        if (state == READY) {
+            l.onReady();
+            return;
+        }
+        waiting.add(l);
+        if (state == STARTING) return;
+        state = STARTING;
+        final int gen = generation;
+        shared = new ServerProcess(ctx.getApplicationContext());
+        shared.start(new Listener() {
+            @Override public void onReady() { settle(gen, READY, null); }
+            @Override public void onFailed(String message) { settle(gen, FAILED, message); }
+        });
+    }
+
+    private static void settle(int gen, int newState, String message) {
+        List<Listener> pending;
+        synchronized (ServerProcess.class) {
+            if (gen != generation) return; // this child was stopped; nobody is waiting on it
+            state = newState;
+            pending = new ArrayList<>(waiting);
+            waiting.clear();
+        }
+        // Outside the lock: a listener runs activity code, and holding the
+        // class monitor across it would let a UI callback block the next
+        // ensure().
+        for (Listener l : pending) {
+            if (newState == READY) l.onReady();
+            else l.onFailed(message);
+        }
+    }
+
+    /** A window that needs the server is alive. Paired with {@link #release}. */
+    static synchronized void retain() {
+        holders++;
+    }
+
+    /**
+     * A window is gone. {@code mayStop} is the caller's answer to "is this
+     * window's own reason for the server ending too?" — MainActivity passes
+     * {@code isFinishing()}, the lookup popup always passes false: a popup
+     * closing must never stop the server (D67), it drops to
+     * {@link PowerSignal#BACKGROUND} instead, so the next lookup from any app
+     * is instant. The child is killed only when the last holder says so.
+     */
+    static synchronized void release(boolean mayStop) {
+        if (holders > 0) holders--;
+        if (!mayStop || holders > 0) return;
+        generation++; // any callback still in flight from this child is now stale
+        if (shared != null) shared.stop();
+        shared = null;
+        state = IDLE;
+        waiting.clear();
+    }
+
     private final Context app;
     private Process process;
     // written by the log thread, read by the start thread when the child dies
     private volatile String lastLine;
 
-    ServerProcess(Context app) {
+    private ServerProcess(Context app) {
         this.app = app;
     }
 
-    void start(Listener listener) {
+    private void start(Listener listener) {
         Thread t = new Thread(() -> run(listener), "wudict-server");
         t.setDaemon(true);
         t.start();
@@ -247,7 +335,7 @@ class ServerProcess {
         return false;
     }
 
-    void stop() {
+    private void stop() {
         Process p = process;
         if (p != null) {
             // No graceful shutdown: Java's destroy() is a hard kill. That is

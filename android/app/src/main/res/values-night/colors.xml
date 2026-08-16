@@ -6,4 +6,6 @@
          web/index.html). Matches the theme picker's default, "auto",
          which follows the system. -->
     <color name="window_bg">#191A1C</color>
+    <!-- The page's dark accent token. -->
+    <color name="accent">#E69A33</color>
 </resources>

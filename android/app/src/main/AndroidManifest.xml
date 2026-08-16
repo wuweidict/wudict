@@ -42,6 +42,55 @@
             </intent-filter>
         </activity>
 
+        <!-- Look up a selection made in another app (D67). One activity behind
+             three ways in; a floating dialog, so it appears OVER the app the
+             user is reading rather than replacing it. taskAffinity="" plus
+             excludeFromRecents keeps it out of the app's own task and out of
+             the recents list: it is an answer, not a place. Both filters live
+             in src/main, so foss and play get them identically — nothing here
+             touches storage. -->
+        <activity
+            android:name=".LookupActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/Theme.WuWeiDict.Lookup"
+            android:windowSoftInputMode="adjustResize">
+
+            <!-- The selection toolbar. android:label here overrides the
+                 activity label for THIS filter only, so the toolbar reads
+                 "Look up" while the share sheet below still reads
+                 "WuWeiDict". -->
+            <intent-filter android:label="@string/lookup_label">
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+            <!-- Share ⋯ — for apps that suppress the toolbar, and for
+                 passages selected across several paragraphs. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+            <!-- wudict://lookup?q=… — other apps and automation (Tasker,
+                 Termux, note apps). The scheme is already the page→shell
+                 private channel (Storage.handleShellUri, host "import"), and
+                 the hosts do not collide: in-page wudict:// URLs are
+                 intercepted by Shell.openExternal and never reach the system,
+                 while this filter only ever sees other apps' intents. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:host="lookup" android:scheme="wudict" />
+            </intent-filter>
+        </activity>
+
         <!-- "Manage space" in App Info (D63). Launched by the Settings app, so
              exported; translucent and finished in onCreate, so it is a
              redirection rather than a screen; excluded from recents so it

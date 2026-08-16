@@ -7,27 +7,17 @@
 // ServerProcess execs it as a child and it answers on 127.0.0.1:6888.
 package com.legbehindneck.wudict;
 
-import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Insets;
-import android.net.Uri;
-import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Message;
 import android.os.PowerManager;
-import android.util.Log;
 import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewConfiguration;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
-import android.view.inputmethod.InputMethodManager;
-import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -38,17 +28,8 @@ import android.window.OnBackInvokedDispatcher;
 
 public class MainActivity extends Activity {
 
-    private static final String TAG = "wudict";
-
-    // The one origin that belongs to us. Everything else a dictionary links to
-    // is somebody else's website and leaves for the browser (see openExternal).
-    private static final String ORIGIN =
-            "http://" + ServerProcess.HOST + ":" + ServerProcess.PORT;
-    private static final String PAGE_URL = ORIGIN + "/";
-
-    // One server per app process, shared across activity recreation: the
-    // child holds port 6888, so a second spawn would lose the port to it.
-    private static ServerProcess server;
+    /** Optional query to run on load — set by the lookup popup's handoff (D67). */
+    static final String EXTRA_QUERY = "com.legbehindneck.wudict.QUERY";
 
     private FrameLayout root;
     private TextView status;
@@ -57,6 +38,7 @@ public class MainActivity extends Activity {
     private volatile boolean gone;   // onDestroy ran: late server callbacks must not touch the views
     private Object backCallback;     // OnBackInvokedCallback (API 33+), registered only while canGoBack()
     private boolean openPanelOnLoad; // arrived from "Manage space" (D63): show the panel when the page is up
+    private String pendingQuery;     // arrived from the lookup popup's handoff (D67)
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -73,16 +55,10 @@ public class MainActivity extends Activity {
 
         web = new WebView(this);
         web.setBackgroundColor(getColor(R.color.window_bg)); // no white flash before first paint
-        web.getSettings().setJavaScriptEnabled(true);            // the UI is one SPA
-        web.getSettings().setDomStorageEnabled(true);            // UI prefs live in localStorage
-        web.getSettings().setMediaPlaybackRequiresUserGesture(false); // dictionary audio
-        // D51 hands an article's external links to the page, which opens them
-        // with window.open(). A WebView has no tabs, so that call is inert
-        // unless multiple windows are supported and onCreateWindow answers it.
-        web.getSettings().setSupportMultipleWindows(true);
-        hideImeOnScroll(web);
+        Shell.configure(web);
+        Ime.hideOnScroll(web);
         web.setWebViewClient(new ShellWebViewClient());
-        web.setWebChromeClient(new ShellWebChromeClient());
+        web.setWebChromeClient(Shell.windows(this));
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
 
         setContentView(root);
@@ -96,16 +72,13 @@ public class MainActivity extends Activity {
         Storage.onNewIntent(this, getIntent()); // launched by a share, possibly
         openPanelOnLoad = getIntent() != null
                 && getIntent().getBooleanExtra(ManageSpaceActivity.EXTRA_MANAGE, false);
+        pendingQuery = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_QUERY);
 
-        if (server == null) {
-            server = new ServerProcess(getApplication());
-            server.start(new ServerProcess.Listener() {
-                @Override public void onReady() { showPage(); }
-                @Override public void onFailed(String message) { showFailure(message); }
-            });
-        } else {
-            showPage();
-        }
+        ServerProcess.retain();
+        ServerProcess.ensure(this, new ServerProcess.Listener() {
+            @Override public void onReady() { showPage(); }
+            @Override public void onFailed(String message) { showFailure(message); }
+        });
     }
 
     // ── window insets ────────────────────────────────────────────────────
@@ -146,71 +119,6 @@ public class MainActivity extends Activity {
                 insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
     }
 
-    // ── the keyboard gets out of the way when the reading starts ─────────
-    // Typing a word leaves the IME up, and it stays up while the definition is
-    // being read: on a phone that is a third of the screen spent on a control
-    // the user has finished with. The only way out today is the Back key,
-    // which is a thing to KNOW rather than a thing to notice.
-    //
-    // The signal is the scroll gesture itself: a finger dragging vertically is
-    // the moment the user stops writing and starts reading. It is taken HERE
-    // rather than in the page for two reasons. Articles render in sandboxed
-    // iframes sized to their content (frame.js), so a drag over an article is
-    // delivered to the CHILD document and the page's own listeners never see
-    // it — while the WebView sees every touch in the window whichever document
-    // it lands in. And an IME is a platform input concern, which is what this
-    // shell is for; the pages stay unaware that Android exists (D54).
-    //
-    // The focused element keeps its focus: only the IME is hidden, exactly
-    // what the Back key does, so tapping the field brings the keyboard back
-    // with no help from us and the caret, the selection and the query are
-    // untouched.
-    @SuppressLint("ClickableViewAccessibility") // a spy: consumes nothing, clicks unaffected
-    private void hideImeOnScroll(WebView v) {
-        final int slop = ViewConfiguration.get(this).getScaledTouchSlop();
-        final float[] down = new float[2];      // where the gesture started
-        final boolean[] fired = new boolean[1]; // once per gesture, not per event
-        v.setOnTouchListener((view, e) -> {
-            switch (e.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                    down[0] = e.getX();
-                    down[1] = e.getY();
-                    fired[0] = false;
-                    break;
-                case MotionEvent.ACTION_MOVE:
-                    if (fired[0]) break;
-                    float dy = Math.abs(e.getY() - down[1]);
-                    // Vertical dominance is what keeps a drag INSIDE the search
-                    // field — selecting the word just typed — from being read
-                    // as a scroll. That gesture is horizontal, and it is the
-                    // one case where the keyboard has to stay.
-                    if (dy > slop && dy > Math.abs(e.getX() - down[0])) {
-                        fired[0] = true;
-                        hideIme(view);
-                    }
-                    break;
-                default:
-                    break;
-            }
-            return false; // never consumed: the WebView scrolls, zooms and clicks as before
-        });
-    }
-
-    private void hideIme(View v) {
-        if (Build.VERSION.SDK_INT >= 30) {
-            WindowInsets in = v.getRootWindowInsets();
-            // Hiding what is already hidden would be harmless; asking first
-            // also skips the controller lookup on every scroll of a session
-            // that never opened the keyboard at all.
-            if (in == null || !in.isVisible(WindowInsets.Type.ime())) return;
-            WindowInsetsController c = v.getWindowInsetsController();
-            if (c != null) c.hide(WindowInsets.Type.ime());
-            return;
-        }
-        InputMethodManager imm = getSystemService(InputMethodManager.class);
-        if (imm != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
-    }
-
     // The bars are transparent under edge-to-edge, so their icons are drawn
     // over OUR padding — they have to contrast with the window background,
     // which follows the system's day/night mode (values-night/colors.xml).
@@ -243,7 +151,7 @@ public class MainActivity extends Activity {
     private class ShellWebViewClient extends WebViewClient {
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
-            return openExternal(req.getUrl());
+            return Shell.openExternal(MainActivity.this, req.getUrl());
         }
 
         @Override
@@ -262,58 +170,6 @@ public class MainActivity extends Activity {
                 openPanel(view);
             }
         }
-    }
-
-    private class ShellWebChromeClient extends WebChromeClient {
-        @Override
-        public boolean onCreateWindow(WebView view, boolean isDialog,
-                                      boolean isUserGesture, Message resultMsg) {
-            // window.open() has no URL in this callback — the only way to learn
-            // it is to hand the transport a throwaway WebView and read the
-            // navigation it is about to make.
-            WebView sink = new WebView(view.getContext());
-            sink.setWebViewClient(new WebViewClient() {
-                @Override
-                public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
-                    openExternal(req.getUrl());
-                    v.post(v::destroy); // never destroy a WebView inside its own callback
-                    return true;
-                }
-            });
-            ((WebView.WebViewTransport) resultMsg.obj).setWebView(sink);
-            resultMsg.sendToTarget();
-            return true;
-        }
-    }
-
-    // openExternal reports whether it took the navigation off the WebView's
-    // hands. Our own origin stays; a dictionary's link to a real website goes
-    // to whatever the user browses with, because a WebView with no address
-    // bar, no tabs and no back affordance is a trap to land a website in.
-    private boolean openExternal(Uri uri) {
-        if (uri == null) return false;
-        String scheme = uri.getScheme();
-        if (scheme == null) return false;
-        scheme = scheme.toLowerCase();
-        // The article machinery's own URLs: srcdoc frames, data: media, the
-        // blob: URLs audio playback builds. None of those leave the app.
-        if (scheme.equals("data") || scheme.equals("blob")
-                || scheme.equals("about") || scheme.equals("javascript")) {
-            return false;
-        }
-        String url = uri.toString();
-        if (url.equals(ORIGIN) || url.startsWith(ORIGIN + "/")) return false;
-        // Shell-private URLs (wudict://…) are a channel from the page to the
-        // Java side that costs no JavascriptInterface and no server API: this
-        // method already inspects every navigation, so the branch is free.
-        if (Storage.handleShellUri(this, uri)) return true;
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, uri)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-        } catch (ActivityNotFoundException | SecurityException e) {
-            Log.w(TAG, "no app can open " + uri, e);
-        }
-        return true;
     }
 
     // Back. Apps targeting API 35+ get predictive back enabled by default, and
@@ -348,64 +204,20 @@ public class MainActivity extends Activity {
     }
 
     // ── power ────────────────────────────────────────────────────────────
-    // Everything the server is allowed to know about the device's mood is
-    // decided here, in one function, from fields that are the only inputs
-    // (D64). One place, because these inputs contradict each other — the app
-    // can be visible while the device is hot, backgrounded while charging —
-    // and a set of independent callbacks each pushing its own state would make
-    // the last event win rather than the strictest condition.
-    //
-    // The battery and power-save inputs are SAMPLED here rather than watched
-    // with broadcast receivers: a receiver is a wakeup the app would not
-    // otherwise take, which is the exact cost this whole change exists to
-    // avoid, and every transition that matters already calls this.
+    // The decision itself lives in Power (D64: one place decides), because the
+    // lookup popup (D67) is a second window that can be visible. What stays
+    // here is the thermal subscription — the app's own window is where it is
+    // worth paying for, and a popup that lives for a few seconds would learn
+    // nothing from one.
 
-    private boolean visible;    // between onStart and onStop
-    private int thermal;        // PowerManager.THERMAL_STATUS_*, 0 when unknown
     private Object thermalListener; // PowerManager.OnThermalStatusChangedListener, API 29+
-
-    private void applyPower() {
-        PowerManager pm = getSystemService(PowerManager.class);
-        boolean hot = thermal >= PowerManager.THERMAL_STATUS_MODERATE;
-        boolean saving = pm != null && pm.isPowerSaveMode();
-
-        String state;
-        if (hot) {
-            // Thermal throttling has already begun at MODERATE. Holding caches
-            // and threads through it is how an app earns a place on a vendor's
-            // battery-abuse list, and the user is holding a device that is
-            // getting warm.
-            state = PowerSignal.RESTRICTED;
-        } else if (!visible) {
-            // Charging is the one case where staying active off-screen is
-            // defensible: preparing a dictionary is the only real work this
-            // app has, it is what the user is waiting for, and a plugged-in
-            // device is not spending the user's battery on it.
-            state = charging() ? PowerSignal.ACTIVE : PowerSignal.BACKGROUND;
-        } else if (saving) {
-            // Visible, but the user has asked the whole system to conserve.
-            // Serve lookups, on one thread, holding nothing extra.
-            state = PowerSignal.BACKGROUND;
-        } else {
-            state = PowerSignal.ACTIVE;
-        }
-        PowerSignal.set(state);
-    }
-
-    private boolean charging() {
-        BatteryManager bm = getSystemService(BatteryManager.class);
-        return bm != null && bm.isCharging();
-    }
 
     private void watchThermal() {
         if (Build.VERSION.SDK_INT < 29) return;
         PowerManager pm = getSystemService(PowerManager.class);
         if (pm == null) return;
-        thermal = pm.getCurrentThermalStatus();
-        PowerManager.OnThermalStatusChangedListener l = status -> {
-            thermal = status;
-            applyPower();
-        };
+        Power.thermal(this, pm.getCurrentThermalStatus());
+        PowerManager.OnThermalStatusChangedListener l = status -> Power.thermal(this, status);
         pm.addThermalStatusListener(getMainExecutor(), l);
         thermalListener = l;
     }
@@ -454,7 +266,7 @@ public class MainActivity extends Activity {
             // BACKGROUND and means the app went away, which onStop already
             // said better.
             PowerSignal.set(PowerSignal.RESTRICTED);
-            web.postDelayed(this::applyPower, TRIM_RECOVERY_MS);
+            web.postDelayed(() -> Power.apply(this), TRIM_RECOVERY_MS);
         }
     }
 
@@ -463,17 +275,15 @@ public class MainActivity extends Activity {
     @Override
     protected void onStart() {
         super.onStart();
-        visible = true;
-        applyPower();
+        Power.enter(this);
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-        visible = false;
         // Sent now, while the process is still running: a cached app is frozen
         // by the platform shortly after this, and the child freezes with it.
-        applyPower();
+        Power.exit(this);
     }
 
     private void showPage() {
@@ -485,7 +295,9 @@ public class MainActivity extends Activity {
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT));
             }
-            web.loadUrl(PAGE_URL);
+            String q = pendingQuery;
+            pendingQuery = null;
+            web.loadUrl(q == null ? Shell.PAGE_URL : Shell.searchUrl(q, null, null));
         });
     }
 
@@ -508,6 +320,13 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         Storage.onNewIntent(this, intent);
+        String q = intent == null ? null : intent.getStringExtra(EXTRA_QUERY);
+        if (q != null) {
+            // Handed over by the popup, so the app is very likely already up
+            // and showing something else; if it is not, showPage takes it.
+            if (!gone && web.getParent() != null) web.loadUrl(Shell.searchUrl(q, null, null));
+            else pendingQuery = q;
+        }
         if (intent != null && intent.getBooleanExtra(ManageSpaceActivity.EXTRA_MANAGE, false)) {
             // The page is already loaded in the common case (the app was in the
             // background), so act now; if it is not, onPageFinished will.
@@ -542,11 +361,10 @@ public class MainActivity extends Activity {
         unwatchThermal();
         // The server is bound to the app's lifetime (D52): finishing kills
         // it; swiping the task away kills the process group, which includes
-        // the child. Recreation keeps it.
-        if (isFinishing() && server != null) {
-            server.stop();
-            server = null;
-        }
+        // the child. Recreation keeps it — and so does a lookup popup that is
+        // still up, which is why the decision is ServerProcess's and not this
+        // activity's (D67).
+        ServerProcess.release(isFinishing());
         if (web.getParent() != null) {
             ((FrameLayout) web.getParent()).removeView(web);
         }
