@@ -2,7 +2,10 @@
 <!-- Copyright (C) 2026 glowinthedark -->
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <!-- The favicon.svg glyph (32×32) scaled ×1.5 into the 108dp adaptive-icon
-     canvas: 32·1.5 = 48, centred by (108−48)/2 = 30. -->
+     canvas: 32·1.5 = 48, centred by (108−48)/2 = 30. The glyph's own ink is
+     centred inside its 32-unit box (see favicon.svg), so the drawn mark lands on
+     the canvas centre and stays inside the 66dp safe zone every launcher mask
+     respects — 39×31.5dp of ink, worst case a circle mask with 13dp to spare. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -14,21 +17,21 @@
         android:translateX="30"
         android:translateY="30">
         <path
-            android:pathData="M7,11 L20,11 M7,16.5 L15.5,16.5"
+            android:pathData="M4,7 L17,7 M4,13 L12,13"
             android:strokeColor="#FFFFFF"
-            android:strokeWidth="2.4"
+            android:strokeWidth="2"
             android:strokeLineCap="round"
             android:fillColor="#00000000" />
         <path
-            android:pathData="M23.8,19.4 A6,6 0 1 1 11.8,19.4 A6,6 0 1 1 23.8,19.4"
+            android:pathData="M25,18 A5,5 0 1 1 15,18 A5,5 0 1 1 25,18"
             android:strokeColor="#FFFFFF"
-            android:strokeWidth="2.4"
+            android:strokeWidth="2"
             android:strokeLineCap="round"
             android:fillColor="#00000000" />
         <path
-            android:pathData="M22.2,23.6 L27.4,28.8"
+            android:pathData="M24,22 L27.5,25.5"
             android:strokeColor="#FFFFFF"
-            android:strokeWidth="2.8"
+            android:strokeWidth="3"
             android:strokeLineCap="round"
             android:fillColor="#00000000" />
     </group>
