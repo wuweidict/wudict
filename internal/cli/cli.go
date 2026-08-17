@@ -184,6 +184,19 @@ SERVE FLAGS
                           env: USE_CACHED     toml: USE_CACHED
                           default: off
 
+  (env/toml only)
+  BROWSER_EXTENSIONS      Which browser extensions may look words up in this
+                          server from the pages they run in. Blank = any
+                          installed extension; it reaches the dictionary API
+                          (/api/dicts, /api/search, /res/) and nothing else —
+                          never your settings, preferences or library. Pin it
+                          to exact origins to allow only those:
+                            BROWSER_EXTENSIONS = ["chrome-extension://abc…"]
+                          (Firefox regenerates moz-extension:// per install,
+                          so there is no stable origin to pin there.)
+                          env: BROWSER_EXTENSIONS  toml: BROWSER_EXTENSIONS
+                          default: any extension
+
   --ip           <addr>   Listen IP address
                           env: SERVER_IP      toml: SERVER_IP
                           default: 127.0.0.1
@@ -766,6 +779,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	}
 	srv.Speexdec = sxPath
 	srv.AutoIndex = cfg.AutoIndexEnabled()
+	srv.BrowserExtensions = cfg.BrowserExtensions
 
 	lib, _ := store.Library()
 	inFolder, fromLib := reg.Counts()

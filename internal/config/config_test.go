@@ -157,6 +157,60 @@ func TestDictDirList(t *testing.T) {
 	}
 }
 
+// BROWSER_EXTENSIONS holds origins, not paths: every value contains the ':'
+// that ParseList splits on, so it needs its own parser (D69).
+func TestParseOrigins(t *testing.T) {
+	const chrome = "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+	const fx = "moz-extension://5b1f2e3c-0a4d-4c7e-9f21-2a6c8d1e7b40"
+	cases := []struct {
+		name, value string
+		want        []string
+	}{
+		{"single", chrome, []string{chrome}},
+		{"toml array", `["` + chrome + `", "` + fx + `"]`, []string{chrome, fx}},
+		{"comma separated", chrome + "," + fx, []string{chrome, fx}},
+		{"space separated", chrome + " " + fx, []string{chrome, fx}},
+		{"the scheme's colon is not a separator", chrome, []string{chrome}},
+		{"trailing slash dropped", chrome + "/", []string{chrome}},
+		{"blanks dropped", " , " + chrome + " , ", []string{chrome}},
+		{"empty", "", nil},
+		{"empty array", "[]", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ParseOrigins(c.value)
+			if len(got) != len(c.want) {
+				t.Fatalf("ParseOrigins(%q) = %q, want %q", c.value, got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("ParseOrigins(%q) = %q, want %q", c.value, got, c.want)
+				}
+			}
+		})
+	}
+	// …and it survives the config file, whose parser strips quotes and a
+	// trailing " #" comment before this ever sees the value.
+	p := filepath.Join(t.TempDir(), Name)
+	if err := os.WriteFile(p, []byte("BROWSER_EXTENSIONS = [\""+chrome+"\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.BrowserExtensions) != 1 || cfg.BrowserExtensions[0] != chrome {
+		t.Errorf("BROWSER_EXTENSIONS from file = %q, want [%q]", cfg.BrowserExtensions, chrome)
+	}
+	blank := filepath.Join(t.TempDir(), Name)
+	if err := os.WriteFile(blank, []byte("SERVER_PORT = \"1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg2, _ := Load(blank, nil); len(cfg2.BrowserExtensions) != 0 {
+		t.Errorf("unset BROWSER_EXTENSIONS = %q, want empty (any extension)", cfg2.BrowserExtensions)
+	}
+}
+
 // AUTO_INDEX is on|off since the "fuzzy" search mode it was named after was
 // retired — but an existing wudict.toml saying "fuzzy" must keep working.
 func TestAutoIndexValues(t *testing.T) {

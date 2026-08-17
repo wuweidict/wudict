@@ -36,6 +36,11 @@ type Config struct {
 	SearchMemory  int64    // SEARCH_MEMORY: cap on RAM ONE search may materialise (0 = uncapped)
 	Source        string   // path of the wudict.toml that was loaded ("" if none)
 
+	// BrowserExtensions (BROWSER_EXTENSIONS) pins which browser-extension
+	// origins may read /api/dicts, /api/search and /res/ cross-origin. Empty =
+	// any chrome-extension:// or moz-extension:// origin. See D69.
+	BrowserExtensions []string
+
 	// Portable reports that Source sits next to the executable: the user put
 	// it there, so that is where saves go too (D32).
 	Portable bool
@@ -157,6 +162,9 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	}
 	if v := get("SEARCH_MEMORY"); v != "" {
 		cfg.SearchMemory = ParseSize(v)
+	}
+	if v := get("BROWSER_EXTENSIONS"); v != "" {
+		cfg.BrowserExtensions = ParseOrigins(v)
 	}
 	return cfg, nil
 }
@@ -292,6 +300,11 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 #                                     #       marginally faster reads; only worth it with disk to spare)
 # USE_CACHED  = "0"                   # "1" = also list previously imported dictionaries kept in DB_DIR
 #                                     #       (set from the setup page: "Use these dictionaries")
+# BROWSER_EXTENSIONS = []             # which browser extensions may read this server from a web page
+#                                     # they run in. Blank = any installed extension may look words up
+#                                     # (it can read dictionaries and nothing else — never your
+#                                     # settings or library). List origins to allow only those:
+#                                     # ["chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
 `
 
 // EnsureConfigFile makes sure a config file exists, generating the fully
@@ -411,6 +424,31 @@ func ParseList(v string) []string {
 	for _, p := range parts {
 		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, ExpandHome(p))
+		}
+	}
+	return out
+}
+
+// ParseOrigins reads BROWSER_EXTENSIONS: a list of browser-extension origins,
+// written as a TOML array or separated by commas, semicolons or whitespace.
+//
+//	BROWSER_EXTENSIONS = ["chrome-extension://abc…", "moz-extension://1f2e…"]
+//	BROWSER_EXTENSIONS=chrome-extension://abc…,moz-extension://1f2e…
+//
+// It deliberately does NOT split on os.PathListSeparator the way ParseList does:
+// that is ':' on Unix, and every value here contains one. A trailing '/' is
+// dropped — an origin has no path, but it is the obvious thing to type.
+func ParseOrigins(v string) []string {
+	v = strings.TrimSpace(v)
+	if strings.HasPrefix(v, "[") {
+		v = strings.Trim(v, "[]")
+	}
+	var out []string
+	for _, raw := range strings.FieldsFunc(v, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	}) {
+		if s := strings.TrimRight(strings.Trim(raw, "\"'`"), "/"); s != "" {
+			out = append(out, s)
 		}
 	}
 	return out

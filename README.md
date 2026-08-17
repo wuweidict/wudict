@@ -142,8 +142,22 @@ config file path is printed on startup.
 | `--use-cached` | `USE_CACHED` | off                           |
 | — | `AUTO_INDEX` | `on` (`off` to disable)       |
 | `--no-compress` | `NO_COMPRESS` | off (article text compressed) |
+| — | `BROWSER_EXTENSIONS` | any extension may look words up |
 
 
+
+**`BROWSER_EXTENSIONS`** decides which browser extensions may look words up in
+your server from the pages they run in. Blank (the default) lets any installed
+extension reach the read-only dictionary API — `/api/dicts`, `/api/search`,
+`/res/` — and nothing else: never your preferences, your config or your library.
+Set it to allow only the extensions you name:
+
+```toml
+BROWSER_EXTENSIONS = ["chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
+```
+
+(Firefox generates a fresh `moz-extension://` id for every installation, so
+there is no stable origin to pin there.)
 
 Config file search order: `--config` / `CONFIG_PATH`, then
 `<exe-dir>/wudict.toml`, `~/.wudict/wudict.toml`,

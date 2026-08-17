@@ -108,13 +108,27 @@ type Server struct {
 	// query without the user ever asking. The heavier indexes (contains,
 	// full-text) and media stay opt-in per dictionary.
 	AutoIndex bool
+
+	// BrowserExtensions optionally pins which extension origins may read the
+	// client API cross-origin (config BROWSER_EXTENSIONS). Empty = any
+	// chrome-extension:// or moz-extension:// origin, which is what Firefox
+	// forces anyway: its moz-extension UUID is regenerated per install, so
+	// there is no stable id to list. See cors.go (D69).
+	BrowserExtensions []string
 }
 
 func New(reg *Registry) *Server {
 	s := &Server{reg: reg, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /", s.handleIndex)
-	s.mux.HandleFunc("GET /api/dicts", s.handleDicts)
-	s.mux.HandleFunc("GET /api/search", s.handleSearch)
+	// The three read-only routes the browser extension uses, and the only ones
+	// that answer a cross-origin request — see cors.go (D69). Everything below
+	// stays same-origin: an extension can read dictionaries, and can neither
+	// read the user's preferences nor touch the library.
+	s.mux.HandleFunc("GET /api/dicts", s.withCORS(s.handleDicts))
+	s.mux.HandleFunc("GET /api/search", s.withCORS(s.handleSearch))
+	s.mux.HandleFunc("OPTIONS /api/dicts", s.handlePreflight)
+	s.mux.HandleFunc("OPTIONS /api/search", s.handlePreflight)
+	s.mux.HandleFunc("OPTIONS /res/", s.handlePreflight)
 	s.mux.HandleFunc("GET /api/rescan", s.handleRescan)
 	s.mux.HandleFunc("GET /api/ingest", s.handleIngest)
 	s.mux.HandleFunc("GET /api/setup", s.handleSetup)
@@ -131,7 +145,7 @@ func New(reg *Registry) *Server {
 	// the setup page stays reachable after first run: it is where folders are
 	// edited, not just where they are first chosen
 	s.mux.HandleFunc("GET /setup", s.handleSetupPage)
-	s.mux.HandleFunc("GET /res/", s.handleResource)
+	s.mux.HandleFunc("GET /res/", s.withCORS(s.handleResource))
 	// Content-addressed: index.html asks for these with ?v=<hash of the file>,
 	// so the URL changes whenever the file does and a week-long cache is safe.
 	// It was NOT safe before. Both scripts are embedded in the same binary as

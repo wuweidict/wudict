@@ -109,9 +109,20 @@ server's public contract:
   network twice (worker cache).
 - **The worker talks, the page doesn't.** Browser security forbids an
   ordinary page from calling your server — so the extension's background
-  worker carries that permission and relays results to the popup. The
-  server's loopback binding stays intact, and your dictionaries stay
+  worker does it, on its own extension identity, and relays results to
+  the popup. Definitions, images and pronunciation audio all arrive that
+  way; the page you are reading never addresses your machine, so your
+  browser never asks whether *that site* may reach your local network.
+  The server's loopback binding stays intact, and your dictionaries stay
   unexposed to the internet.
+
+    WuWeiDict answers extension identities — and only them — on the three
+    read-only endpoints the extension uses. Websites get nothing, and no
+    part of the private API (importing, deleting, settings) is reachable
+    that way. `BROWSER_EXTENSIONS` narrows it further to a named list.
+
+    If the extension reports **"is not answering extensions"**, the
+    WuWeiDict you are running predates this and needs an update.
 
 ## Requirements
 
@@ -119,6 +130,8 @@ server's public contract:
   extension reaches `127.0.0.1:6888`, nothing else.
 - Modern Chrome or Firefox (Manifest V3). No other extensions required,
   and none of your browsing data requests is ever read.
+- **No permissions to grant.** The extension asks for no site and no host
+  at install; there is nothing to approve and no prompt to dismiss.
 
 !!! info inline end "Status"
 
