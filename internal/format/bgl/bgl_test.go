@@ -8,9 +8,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/wuweidict/wudict/internal/dict"
@@ -197,5 +200,94 @@ func TestOpenAutoIngestAndLookup(t *testing.T) {
 	rc.Close()
 	if string(b) != "PNGDATA" {
 		t.Errorf("resource: %q", b)
+	}
+}
+
+// titledEntry builds a type-1 entry whose definition carries a 0x18 title
+// field, the way Babylon stores the headword it draws above an article.
+func titledEntry(key, title, body string, alts ...string) []byte {
+	defi := body + "\x14\x18" + string([]byte{byte(len(title))}) + title
+	return stdEntry(key, defi, alts...)
+}
+
+// writeProbeBGL assembles a dictionary of `n` titled entries. When `idKeys` is
+// set the keys are internal identifiers and the real word appears only in the
+// title and the alternates — the Larousse "Gran Diccionario" shape; otherwise
+// the key is itself the word and the title is a decorated variant of it, which
+// is what most BGLs do and what must NOT trip the detector.
+func writeProbeBGL(t *testing.T, dir string, n int, idKeys bool) string {
+	t.Helper()
+	var stream []byte
+	stream = append(stream, info3(0x01, []byte("Probe BGL"))...)
+	stream = append(stream, info3(0x07, []byte{0, 0, 0, 0})...)
+	stream = append(stream, info3(0x08, []byte{0, 0, 0, 0})...)
+	stream = append(stream, block(0, []byte{8, 0x42})...)
+	for i := 0; i < n; i++ {
+		word := fmt.Sprintf("word%d", i)
+		if idKeys {
+			stream = append(stream, titledEntry(
+				fmt.Sprintf("E%d0", i), "<b>"+word+"</b>", "body "+word, word, word+"s")...)
+		} else {
+			stream = append(stream, titledEntry(
+				word, "<b>"+word+"</b> (noun)", "body "+word, word+"s")...)
+		}
+	}
+
+	var gzbuf bytes.Buffer
+	zw := gzip.NewWriter(&gzbuf)
+	zw.Write(stream)
+	zw.Close()
+
+	var file bytes.Buffer
+	file.Write([]byte{0x12, 0x34, 0x00, 0x02, 0x00, 0x06})
+	file.Write(gzbuf.Bytes())
+
+	p := filepath.Join(dir, "probe.bgl")
+	if err := os.WriteFile(p, file.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestIDKeyedPromotion covers decideIDKey: a dictionary keyed by internal
+// identifier is indexed and displayed under the word its title field carries,
+// with the identifier demoted to an alternate (articles cross-link by it), and
+// an ordinary dictionary is left exactly as it was.
+func TestIDKeyedPromotion(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		idKeys  bool
+		n       int
+		want    bool
+		headArg []string // headwords expected for entry 0
+	}{
+		{"id-keyed", true, 30, true, []string{"word0", "E00", "word0s"}},
+		{"ordinary", false, 30, false, []string{"word0", "word0s"}},
+		// Too small to judge: a handful of entries is not evidence, so the
+		// keys stay exactly as the file has them.
+		{"below sample floor", true, idProbeMin - 1, false, []string{"E00", "word0", "word0s"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := NewReader(writeProbeBGL(t, t.TempDir(), tc.n, tc.idKeys))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			if r.idKeyed != tc.want {
+				t.Fatalf("idKeyed = %v, want %v", r.idKeyed, tc.want)
+			}
+			e, err := r.Next()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(e.Headwords, tc.headArg) {
+				t.Errorf("headwords = %v, want %v", e.Headwords, tc.headArg)
+			}
+			// The title stays in the rendered article either way; promotion
+			// changes what the entry is filed under, not what it reads like.
+			if !strings.Contains(e.Body, "word0") {
+				t.Errorf("body lost its title: %q", e.Body)
+			}
+		})
 	}
 }

@@ -59,6 +59,10 @@ type Reader struct {
 	targetCharset  string
 	utf8Encoding   bool
 
+	// id-keyed verdict (decideIDKey), reached in the metadata pass
+	probes  []idProbe
+	idKeyed bool
+
 	// second-pass streaming state (opened lazily on first Next)
 	f       *os.File
 	br      *bufio.Reader
@@ -187,11 +191,14 @@ func NewReader(path string) (*Reader, error) {
 			r.readType3(data)
 		case isEntryType(typ):
 			r.numEntries++
+			r.probeIDKey(typ, data)
 		}
 	}
 	f.Close()
 
 	r.detectEncoding()
+	r.idKeyed = r.decideIDKey()
+	r.probes = nil
 
 	name := strings.Trim(strings.TrimSpace(decodeBytes(r.targetEncoding, r.title)), "\x00")
 	if name == "" {
@@ -250,15 +257,12 @@ func (r *Reader) Next() (dict.Entry, error) {
 		if !isEntryType(typ) || len(data) == 0 {
 			continue
 		}
-		var word, defi string
-		var alts []string
-		var good bool
-		if typ == 11 {
-			word, alts, defi, good = r.readEntryType11(data)
-		} else {
-			word, alts, defi, good = r.readEntryStandard(data)
+		raw, good := splitEntry(typ, data)
+		if !good {
+			continue
 		}
-		if !good || word == "" {
+		word, alts, defi := r.decodeEntry(raw)
+		if word == "" {
 			continue
 		}
 		return dict.Entry{
@@ -344,73 +348,83 @@ func (r *Reader) detectEncoding() {
 	}
 }
 
-// readEntryStandard parses a type 1/7/10/13 entry: 1-byte-len word, 2-byte-len
-// definition, then a run of 1-byte-len alternates.
-func (r *Reader) readEntryStandard(data []byte) (word string, alts []string, defi string, ok bool) {
+// rawEntry is one entry's byte fields, framed but not decoded. Framing needs
+// no encoding, which is what lets the metadata pass sample entries before the
+// source/target encodings are resolved.
+type rawEntry struct {
+	word []byte
+	defi []byte
+	alts [][]byte
+}
+
+func splitEntry(typ byte, data []byte) (rawEntry, bool) {
+	if typ == 11 {
+		return splitEntryType11(data)
+	}
+	return splitEntryStandard(data)
+}
+
+// splitEntryStandard frames a type 1/7/10/13 entry: 1-byte-len word,
+// 2-byte-len definition, then a run of 1-byte-len alternates.
+func splitEntryStandard(data []byte) (e rawEntry, ok bool) {
 	pos := 0
 	if pos+1 > len(data) {
-		return
+		return e, false
 	}
 	wl := int(data[pos])
 	pos++
 	if pos+wl > len(data) {
-		return
+		return e, false
 	}
-	bWord := data[pos : pos+wl]
+	e.word = data[pos : pos+wl]
 	pos += wl
-	word = r.processKey(bWord)
 
 	if pos+2 > len(data) {
-		return
+		return e, false
 	}
 	dl := uintBE(data[pos : pos+2])
 	pos += 2
 	if pos+dl > len(data) {
-		return
+		return e, false
 	}
-	defi = r.processDefi(data[pos:pos+dl], bWord)
+	e.defi = data[pos : pos+dl]
 	pos += dl
 
-	altSet := map[string]bool{}
 	for pos < len(data) {
 		al := int(data[pos])
 		pos++
 		if pos+al > len(data) {
 			break // malformed alt: keep the entry with what we have
 		}
-		if ua := r.processAlternativeKey(data[pos : pos+al]); ua != "" && ua != word {
-			altSet[ua] = true
-		}
+		e.alts = append(e.alts, data[pos:pos+al])
 		pos += al
 	}
-	return word, sortedKeys(altSet), defi, true
+	return e, true
 }
 
-// readEntryType11 parses a type 11 entry: 5-byte-len word, 4-byte alt count,
+// splitEntryType11 frames a type 11 entry: 5-byte-len word, 4-byte alt count,
 // 4-byte-len alternates (terminated by a zero length), then 4-byte-len defi.
-func (r *Reader) readEntryType11(data []byte) (word string, alts []string, defi string, ok bool) {
+func splitEntryType11(data []byte) (e rawEntry, ok bool) {
 	pos := 0
 	if pos+5 > len(data) {
-		return
+		return e, false
 	}
 	wl := uintBE(data[pos : pos+5])
 	pos += 5
 	if pos+wl > len(data) {
-		return
+		return e, false
 	}
-	bWord := data[pos : pos+wl]
+	e.word = data[pos : pos+wl]
 	pos += wl
-	word = r.processKey(bWord)
 
 	if pos+4 > len(data) {
-		return
+		return e, false
 	}
 	altsCount := uintBE(data[pos : pos+4])
 	pos += 4
-	altSet := map[string]bool{}
 	for k := 0; k < altsCount; k++ {
 		if pos+4 > len(data) {
-			return
+			return e, false
 		}
 		al := uintBE(data[pos : pos+4])
 		pos += 4
@@ -418,24 +432,133 @@ func (r *Reader) readEntryType11(data []byte) (word string, alts []string, defi 
 			break
 		}
 		if pos+al > len(data) {
-			return
+			return e, false
 		}
-		if ua := r.processAlternativeKey(data[pos : pos+al]); ua != "" && ua != word {
-			altSet[ua] = true
-		}
+		e.alts = append(e.alts, data[pos:pos+al])
 		pos += al
 	}
 
 	if pos+4 > len(data) {
-		return
+		return e, false
 	}
 	dl := uintBE(data[pos : pos+4])
 	pos += 4
 	if pos+dl > len(data) {
+		return e, false
+	}
+	e.defi = data[pos : pos+dl]
+	return e, true
+}
+
+// decodeEntry renders one framed entry: headword, alternates, HTML definition.
+func (r *Reader) decodeEntry(e rawEntry) (word string, alts []string, defi string) {
+	f := r.collectDefiFields(e.defi)
+	word = r.processKey(e.word)
+
+	altSet := map[string]bool{}
+	for _, a := range e.alts {
+		if ua := r.processAlternativeKey(a); ua != "" {
+			altSet[ua] = true
+		}
+	}
+
+	// In an id-keyed dictionary the key is an internal identifier and the
+	// definition's title field holds the actual word (decideIDKey). Swap
+	// them: the id stays searchable as an alternate because articles link
+	// by it, but it must not be what the reader is indexed and shown under.
+	if r.idKeyed {
+		if t := r.plainTitle(f.bTitle); t != "" && !strings.EqualFold(t, word) {
+			if word != "" {
+				altSet[word] = true
+			}
+			word = t
+		}
+	}
+	delete(altSet, word)
+
+	return word, sortedKeys(altSet), r.renderDefi(f)
+}
+
+// idProbe is one sampled entry, kept as raw bytes: the metadata pass can frame
+// an entry but not decode it, and the verdict needs the whole file.
+type idProbe struct {
+	word  []byte
+	title []byte
+	alts  [][]byte
+}
+
+const (
+	idProbeSample = 1000 // entries sampled from the head of the file
+	idProbeMin    = 20   // below this a dictionary is too small to judge
+	idProbeRatio  = 0.90 // share of the sample that must show the signature
+)
+
+// probeIDKey records one sampled entry's key, title and alternates. Only the
+// small fields are copied, so a 1000-entry sample does not pin 1000
+// definitions in memory.
+func (r *Reader) probeIDKey(typ byte, data []byte) {
+	if len(r.probes) >= idProbeSample {
 		return
 	}
-	defi = r.processDefi(data[pos:pos+dl], bWord)
-	return word, sortedKeys(altSet), defi, true
+	e, ok := splitEntry(typ, data)
+	if !ok {
+		return
+	}
+	f := r.collectDefiFields(e.defi)
+	p := idProbe{word: bytes.Clone(e.word), title: bytes.Clone(f.bTitle)}
+	for _, a := range e.alts {
+		p.alts = append(p.alts, bytes.Clone(a))
+	}
+	r.probes = append(r.probes, p)
+}
+
+// decideIDKey reports whether this dictionary keys its entries by internal
+// identifier rather than by word.
+//
+// Larousse's "Gran Diccionario de la Lengua Española" does: every key is a
+// string like "E310420", the real headword sits in the definition's title
+// field, and the word is repeated among the alternates. Left alone, all 86,916
+// of its entries index and display under their id — headwords the user cannot
+// read and the contains/full-text indexes, which cover the headword column
+// only, cannot search. Its articles cross-link by id (bword://E310420), which
+// is why the id is demoted to an alternate rather than dropped.
+//
+// The verdict is per-file and deliberately narrow: for nearly every sampled
+// entry the title must exist, differ from the key, be one of that entry's own
+// alternates, and the key must not be. Measured across an 18-file BGL corpus
+// that separates the one id-keyed dictionary (99.0% of its sample) from every
+// other (<=1.1%). Two dictionaries contain entries that match the rule
+// individually — Merriam-Webster Collegiate's "A"/"Å", Larousse Compact's
+// "about time"/"time" — and a per-entry rule would wrongly rewrite them; a
+// whole-file rule ignores them.
+func (r *Reader) decideIDKey() bool {
+	if len(r.probes) < idProbeMin {
+		return false
+	}
+	hits := 0
+	for _, p := range r.probes {
+		title := r.plainTitle(p.title)
+		if title == "" {
+			continue
+		}
+		key := r.processKey(p.word)
+		if strings.EqualFold(title, key) {
+			continue
+		}
+		keyIsAlt, titleIsAlt := false, false
+		for _, a := range p.alts {
+			switch alt := r.processAlternativeKey(a); {
+			case strings.EqualFold(alt, key):
+				keyIsAlt = true
+			case strings.EqualFold(alt, title):
+				titleIsAlt = true
+			}
+		}
+		if titleIsAlt && !keyIsAlt {
+			hits++
+		}
+	}
+	return float64(hits) >= idProbeRatio*float64(len(r.probes))
 }
 
 // scanResources streams the file once and returns its embedded resources

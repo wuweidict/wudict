@@ -139,11 +139,26 @@ func (r *Reader) processAlternativeKey(bWord []byte) string {
 	return strings.TrimLeft(u, ltrimCutset)
 }
 
-// processDefi decodes a definition to HTML, extracting the part of speech,
-// title and transcription fields. Port of reader_defi.processDefi.
-func (r *Reader) processDefi(bDefi, bKey []byte) string {
-	f := r.collectDefiFields(bDefi)
+// plainTitle renders a definition's title field (0x18) as literal text, the
+// way processKey renders a key — Babylon draws a headword as text, not markup.
+// Empty when the entry carries no title.
+func (r *Reader) plainTitle(bTitle []byte) string {
+	if len(bTitle) == 0 {
+		return ""
+	}
+	s, _ := r.decodeCharsetTags(bTitle, r.sourceEncoding)
+	s = replaceHTMLEntities(s, false)
+	s = stripHTMLTags(s)
+	s = removeControlChars(s)
+	s = removeNewlines(s)
+	return strings.TrimSpace(s)
+}
 
+// renderDefi turns a definition's collected fields into HTML, prepending the
+// part of speech, title and transcriptions. Port of reader_defi.processDefi
+// (the collect step is split out so a caller that also wants the title —
+// decodeEntry — pays for the field scan once).
+func (r *Reader) renderDefi(f defiFields) string {
 	uDefi, _ := r.decodeCharsetTags(f.bDefi, r.targetEncoding)
 	uDefi = fixImgLinks(uDefi)
 	uDefi = replaceHTMLEntities(uDefi, true)
