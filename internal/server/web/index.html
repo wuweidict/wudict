@@ -1687,7 +1687,21 @@ function frameDoc(content,fid,dark,dictID,frag){
     '.wudict-sub-close{float:right;cursor:pointer;color:#999;font-size:12px;padding:0 .3em}'+
     '.wudict-sub-close:hover{color:#e08600}'+
     '</style><script src="/assets/frame.js?v={{FRAMEJS}}" data-fid="'+fid+'" data-dict="'+(dictID||"")+
-    '" data-frag="'+esc(frag||"").replace(/"/g,"&quot;")+'"><\/script></head><body>'+content+'</body></html>';
+    '" data-frag="'+esc(frag||"").replace(/"/g,"&quot;")+'"><\/script></head><body>'+content+
+    /* A stylesheet written for a full page sizes html and body from the
+       VIEWPORT — LDOCE's ldoce.css opens with `html, body{height:100%}`. Here the
+       viewport is a frame we sized from what the frame measured, so every
+       measurement it can take is its own last answer handed back, and the article
+       grows by its margins on every pass until the parent's 60000px clamp. The
+       article is not wrong; it is simply not the document it was written for.
+       This goes AFTER the content, not in <head>, because the article's own
+       <link> is inside the body and would otherwise win on order at equal
+       specificity; `:root, :root > body` outranks an `html body{...!important}`
+       too. Nothing else is neutralised — an article may still make body a scroll
+       container or paint it; only self-referential SIZING is refused.
+       frame.js carries the matching backstop (D72). */
+    '<style>:root,:root>body{height:auto!important;min-height:0!important;max-height:none!important}</style>'+
+    '</body></html>';
 }
 /* bridge messages from article iframes */
 addEventListener("message",e=>{

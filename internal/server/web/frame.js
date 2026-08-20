@@ -19,35 +19,79 @@
 
 	// Reports the content's natural height so the parent can size this frame.
 	//
-	// The subtlety, and it is the whole reason this is not one line: for the
-	// ROOT element, scrollHeight is defined as max(scrolling area, VIEWPORT) —
-	// and the viewport here IS the iframe the parent already sized from our
-	// last answer. So documentElement.scrollHeight can never report less than
-	// the height we were last given, which makes the measurement a RATCHET: it
-	// grows and never shrinks. Invisible while every article only ever gets
-	// taller; obvious the moment content can shrink in place — Cambridge's
-	// entry tabs switch from a long "English" panel to a short "American" one
-	// and left ~400px of blank frame below it.
+	// The rule this function exists to obey (D60): every term must be a function of
+	// the CONTENT, never of the frame we were last given. The parent sizes us from
+	// what we report, so anything that reads our own viewport back is a RATCHET —
+	// it can only grow, and it grows once per measurement.
 	//
-	// So the measurement is taken from boxes whose height is driven by their
-	// CONTENT rather than by the viewport, and the root's scrollHeight is
-	// consulted only when it genuinely exceeds the viewport — i.e. when it is
-	// reporting real overflow rather than the clamp. Growth behaves exactly as
-	// before; shrinking now works.
+	// For the ROOT element, scrollHeight is DEFINED as max(scrolling area, VIEWPORT),
+	// and the viewport here IS the iframe the parent already sized from our last
+	// answer. Invisible while every article only ever gets taller; obvious the moment
+	// content can shrink in place — Cambridge's entry tabs switch from a long
+	// "English" panel to a short "American" one and left ~400px of blank frame below.
+	// So it is consulted only when it genuinely EXCEEDS the viewport, i.e. when it
+	// reports real overflow rather than the clamp.
 	//
-	// The +16 is body's 8px margins (see frameDoc). They do not collapse into
+	// The rest of D60's terms are content-driven only while the ARTICLE'S OWN
+	// STYLESHEET leaves html and body alone. Stylesheets written for a full page do
+	// not: LDOCE's ldoce.css opens with `html, body { height: 100% }`, where 100% is
+	// now ours, and then body's box, the root's box and (via body's 8px margins) the
+	// root's scrolling area are all our own height handed back — 22px of growth per
+	// pass, to the parent's 60000px cap. frameDoc neutralises that at the source with
+	// a trailing !important override, and this is the backstop for an article that
+	// defeats it: when body's box IS the viewport, nothing body or the root reports
+	// can be believed, and the extent of body's in-flow children is measured instead.
+	//
+	// Why children and not a Range over body's contents: a Range unions the border
+	// boxes of everything it contains, DESCENDANTS INCLUDED, so an absolutely
+	// positioned box anchored near the viewport bottom lands in the union and the
+	// ratchet returns by another door — measured at +241px on Merriam-Webster
+	// Online, whose stylesheet has eight `position:absolute` rules. An element's own
+	// border box excludes its out-of-flow descendants, which is exactly the property
+	// wanted here.
+	//
+	// The +8 and +16 are body's 8px margins (see frameDoc). They do not collapse into
 	// html, because html carries overflow-y:hidden and so establishes a block
 	// formatting context — which is also why the root's own border box already
 	// includes them, and why that measure needs no adjustment.
+	function inflowBottom(b) {
+		var bot = 0, seen = false;
+		for (var n = b.firstElementChild; n; n = n.nextElementSibling) {
+			var pos = getComputedStyle(n).position;
+			if (pos === "fixed" || pos === "absolute") continue;
+			var r = n.getBoundingClientRect();
+			if (!r.height && !r.width) continue;
+			seen = true;
+			if (r.bottom > bot) bot = r.bottom;
+		}
+		// an article that is bare text, with no element children at all
+		if (!seen && b.firstChild) {
+			var rg = document.createRange();
+			rg.selectNodeContents(b);
+			bot = rg.getBoundingClientRect().bottom;
+		}
+		// viewport coordinates -> document coordinates. The frame never scrolls
+		// itself, but a dictionary is free to make body a scroll container.
+		return bot + (document.documentElement.scrollTop || 0) + (b.scrollTop || 0);
+	}
 	function post() {
 		var d = document, e = d.documentElement, b = d.body;
 		var viewport = e.clientHeight;
-		var h = Math.max(
-			e.getBoundingClientRect().height,
-			b ? b.getBoundingClientRect().height + 16 : 0,
-			b ? b.scrollHeight + 16 : 0,
-			e.scrollHeight > viewport ? e.scrollHeight : 0
-		);
+		var box = b ? b.getBoundingClientRect().height : 0;
+		var h;
+		if (b && Math.abs(box - viewport) <= 1) {
+			// body is the viewport, to the pixel: it is being sized BY us, not by
+			// its content. Equality is the test, not "at least" — on the first
+			// measurement the frame is 90px and a real article is far taller.
+			h = inflowBottom(b) + 8;
+		} else {
+			h = Math.max(
+				e.getBoundingClientRect().height,
+				b ? box + 16 : 0,
+				b ? b.scrollHeight + 16 : 0,
+				e.scrollHeight > viewport ? e.scrollHeight : 0
+			);
+		}
 		parent.postMessage({ t: "h", fid: fid, h: Math.ceil(h) }, "*");
 	}
 	addEventListener("message", function (e) {
