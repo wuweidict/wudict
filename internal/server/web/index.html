@@ -917,10 +917,13 @@ $("out").addEventListener("click",e=>{
   // the toggle — but not before this listener, which is nearer the target
   if(e.target.closest(".more,.upgrade"))return;
   const det=sum.parentElement,opening=!det.open; // the toggle lands after us
+  openedIdx=-1; // the user decided; no arrival may take the slot back (D73)
   requestAnimationFrame(()=>{  // measure the section at its new height
     const top=det.getBoundingClientRect().top;
     const need=opening?top>innerHeight*0.5:top<$("bar").offsetHeight;
-    if(need)det.scrollIntoView({block:"start",behavior:lessMotion.matches?"auto":"smooth"});
+    if(need){
+      det.scrollIntoView({block:"start",behavior:lessMotion.matches?"auto":"smooth"});
+    }
   });
 });
 
@@ -1708,6 +1711,11 @@ addEventListener("message",e=>{
   const d=e.data||{};
   if(d.t==="h"&&d.fid){
     const f=document.querySelector('iframe[data-fid="'+CSS.escape(d.fid)+'"]');
+    // A frame settles on its true height after insertion. In latch mode that
+    // is the open section itself, which grows downward from its own top and
+    // pushes only what is already below it. Under expand-all a frame above can
+    // still move the reading position; there is no latch there and so no
+    // section we are entitled to call the focused one (D73/M4).
     if(f)f.style.height=Math.min(Math.max((+d.h||0)+6,48),60000)+"px";
   }else if(d.t==="ref"&&d.w){
     searchFor(d.w,{scope:d.dict,frag:d.frag}); // author's link: exact, scoped
@@ -1897,6 +1905,53 @@ function loadDeferred(det,box,h,mode,q){
 /* render one dictionary's results into its ordered slot box; returns
    {shown,results}. shown = something visible (results/error/upgrade);
    results = actual entries (drives auto-open + empty-state). */
+/* ── Arrivals never land above what the user is reading (D73) ───────────
+   The slots are already in the user's dictionary order before any result
+   exists — the server sends the list on `begin` and every hit carries its
+   index — so nothing here ever REORDERS by rank. What used to move was the
+   open section and the reading position, which is a different problem wearing
+   the same clothes.
+
+   `openedIdx` is the latch. It lives at module scope, not inside doSearch,
+   because a click on a summary has to be able to take it: -1 is "the user
+   decided", and no arrival may argue. It is re-armed to null on `begin`.
+
+   `promote` is the whole shift fix, and it is a layout decision rather than a
+   scroll correction. When a dictionary takes the open slot, every slot above
+   it that is STILL EMPTY moves below it. Empty boxes have no content and no
+   height, so this is provably zero visual change — not smoothed, not animated,
+   zero, at any scroll offset and in every browser — and from that instant no
+   later arrival can insert above the section being read. The pile-up cannot
+   happen because there is nowhere above to pile.
+
+   The winner is by definition the first slot to render, so at the moment of
+   promotion it is already what the eye sees at the top; this only makes the
+   DOM agree. Boxes above it that already said something (deferred, error,
+   skipped) are left exactly where they are — that content is on screen, it
+   cannot grow, and moving it would be the real motion we are avoiding.
+
+   The accepted cost: a higher-preference dictionary that answers later is
+   displayed below the winner. Preference order is preserved among all the
+   others. This is the Spotlight "Top Hit" / omnibox default-match shape — the
+   item you are acting on is pinned, the ranked list follows.
+
+   Superseded: an earlier version cancelled the shift with a compensating
+   scrollBy. It could not help the commonest case (at scrollY 0 there is
+   nothing to scroll back to, yet that is exactly where a freshly opened
+   definition is read), and programmatic scrolling breaks workflows that are
+   none of our business. Reordering nothing-sized boxes costs nothing and needs
+   no browser to cooperate. Under expand-all there is no latch and so no
+   winner: nothing is promoted, and Chromium's native scroll anchoring is left
+   to do what it already does. */
+let openedIdx=null;
+function promote(boxes,i){
+  let ref=boxes[i];
+  for(let k=0;k<i;k++){
+    const b=boxes[k];
+    if(b.firstChild)continue; // already visible: leave it above, untouched
+    ref.after(b);ref=b;       // in order, so preference survives among them
+  }
+}
 function renderSlot(box,h,mode,q,perDict){
   box.innerHTML="";
   if(h.deferred){
@@ -2000,29 +2055,58 @@ async function doSearch(ev){
     dictParam=ids.join(",");perDict=5;
   }else{dictParam=dictSel;perDict=25}
   const out=$("out");
-  let boxes=[],openedIdx=null,anyShown=false,anyResults=false;
+  /* Never blank between two answers (D73/M2). Clearing on `begin` made every
+     keystroke-pause a full → empty → full flash: two motions where one will
+     do, and an empty results area reads as a failure followed by a recovery.
+
+     So the new generation's boxes are appended BELOW the previous answer —
+     they are empty divs, so nothing moves and nothing is visible — and the old
+     content is dropped only once there is something to replace it with.
+
+     Appended rather than built in a DocumentFragment and swapped in: a shadow
+     root's inline <style> has a null `.sheet` until it is connected to a
+     document, so rendering an article off-document would silently drop every
+     inline @font-face it declares (hoistShadowFonts). The box a slot renders
+     into is attached for its whole life here, exactly as before. */
+  let boxes=[],anyShown=false,anyResults=false,stale=null;
+  const swap=()=>{if(stale){for(const n of stale)n.remove();stale=null}};
   try{
     await fetchStream("/api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+encodeURIComponent(dictParam)+"&n="+perDict,msg=>{
       if(seq!==searchSeq)return; // superseded by a newer search
       if(msg.t==="begin"){
-        out.innerHTML="";
+        stale=[...out.childNodes];
         boxes=(msg.slots||[]).map(()=>{const b=document.createElement("div");out.appendChild(b);return b});
+        openedIdx=null; // re-arm the latch: a new generation, a new decision
         setStatus("");
       }else if(msg.t==="hit"){
         const box=boxes[msg.i];if(!box)return;
         const res=renderSlot(box,msg,mode,q,perDict);
+        if(res.shown)swap();
         if(res.shown)anyShown=true;
         if(res.results)anyResults=true;
-        // auto-open the highest-preference (lowest index) dict with results,
-        // even if a later-preference dict finished first. Skipped entirely
-        // while expand-all is on: openedIdx must stay null, or a lower-index
-        // dictionary arriving late would close a section being read.
-        if(!expandAll&&res.results&&(openedIdx===null||msg.i<openedIdx)){
+        /* The latch (D73/M3). The FIRST dictionary to answer takes the open
+           slot and keeps it; a higher-preference one that finishes later fills
+           its own position, above, and stays shut.
+
+           This used to promote on `msg.i<openedIdx`, closing the section being
+           read — a definition would appear, be read into, and vanish under the
+           reader because a slower dictionary was ranked higher. Ranking is a
+           property of the query; a reading in progress is a commitment, and it
+           outranks it. The visible cost, accepted deliberately: the open
+           section is often NOT the top one.
+
+           No grace window before committing. It would buy top-position
+           fidelity for ~200ms on top of the 300ms input debounce, and 500ms to
+           first definition is past the point where the UI stops feeling
+           immediate. Every dictionary here is local; the miss is rare and
+           costs one click.
+
+           `res.results`, not `res.shown`: deferred, errored and skipped
+           sections have said nothing about the word and must never be the one
+           that opens — auto-opening a deferred one would fetch it unasked. */
+        if(!expandAll&&res.results&&openedIdx===null){
           const det=box.querySelector("details.dict");
-          if(det){
-            if(openedIdx!==null){const p=boxes[openedIdx]?.querySelector("details.dict");if(p)p.open=false}
-            det.open=true;openedIdx=msg.i;
-          }
+          if(det){det.open=true;openedIdx=msg.i;promote(boxes,msg.i)}
         }
       }else if(msg.t==="end"){
         // A cross-reference that its own dictionary cannot answer is not a
@@ -2036,8 +2120,10 @@ async function doSearch(ev){
           widenedFrom=scope; // reported on the next search's end, not here:
           navRecord="replace";// the re-run's own "Searching…" would overwrite it
           doSearch();         // and the URL must lose its now-false `from`
-          return;
-        }
+          return;                 // NOT swapped: the old answer holds the
+        }                         // screen until the re-run has something
+        swap();                   // nothing came, or everything did: commit
+        // (the empty-state innerHTML below also clears the boxes — they are empty)
         if(!anyShown)out.innerHTML=`<div class="empty">${noResultsSVG}<p>No results for “${esc(q)}”</p></div>`;
         if(scope&&anyShown)out.appendChild(scopeNote(scope));
         else if(widened)out.appendChild(widenNote(widened,q));

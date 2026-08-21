@@ -361,3 +361,31 @@ Fixed where it starts: `frameDoc` now appends `:root,:root>body{height:auto!impo
 A first attempt measured a `Range` over body's contents and was withdrawn after browser testing: a Range unions out-of-flow descendants, so an absolutely positioned box near the viewport bottom restarts the runaway — Merriam-Webster Online 2438 → 2679px — and trailing margins vanish. Verification was a headless-Chrome harness over 25 script-bearing dictionaries from the user's library plus 14 synthetic pathologies: identical to today on 24 of 25, LDoCE alone changing (1702 → 1571), shrink-in-place still settling 822 → 322. `make check` green; the page's `{{FRAMEJS}}` tag is a content hash, so browsers pick the new script up without a cache clear — but the binary must be rebuilt, both files are embedded. Decision recorded as D72.
 
 Flagged, not fixed: `OED(20200912)` (mdx) and `OED-2020` (slob) hit the parent's 60000px clamp on *water* — their ink measures 177,533px and 235,500px — and `html{overflow-y:hidden}` makes the remainder unreachable. Needs its own decision (raise the cap, or let an over-cap frame scroll itself).
+
+### P83 — The definition that vanished under the reader — 2026-08-21 — COMPLETE (uncommitted)
+
+Typing a word, pausing, and starting to read produced a definition that was replaced under the eye as slower-but-higher-preference dictionaries reported. Diagnosis before design: the slots were **already** extrinsically ordered — the server sends the dictionary list on `begin`, boxes are created empty and in order, and `msg.i` addresses them — so no result has ever changed another result's position. The bug was one clause in `doSearch` that closed the open section when a lower-index dictionary arrived, plus `out.innerHTML=""` on `begin` blanking the whole area once per keystroke-pause.
+
+Shipped in `internal/server/web/index.html` only — no server change, no new files, no dependency, no animation, no tuning constant:
+
+- **`promote(boxes,i)`** (new, above `renderSlot`) — when a slot takes the latch, every slot above it that is still empty moves below it. Empty boxes have no height, so the reorder is invisible; afterwards nothing can arrive above the section being read. No scroll position is ever touched.
+- **`openedIdx` moved to module scope**, so a click on a summary can set it to `-1` permanently; the auto-open guard lost its `msg.i<openedIdx` promotion branch.
+- **Append-then-drop** — the new generation's boxes are appended *below* the previous answer on `begin` (they are empty divs: nothing moves, nothing shows) and the old nodes are removed on the first rendering hit, or on `end`. Not a detached `DocumentFragment` swap, which was the first design and is wrong here: an inline `<style>` in a shadow root has a null `.sheet` until connected, so rendering an article off-document would make `hoistShadowFonts` silently drop every inline `@font-face`. The widening re-run deliberately leaves the previous answer on screen.
+- **`revealAt` and the summary-click correction** are unchanged from before P83 — with no anchor logic to fight, the `smoothUntil` marking they briefly carried is gone.
+
+**Redesigned mid-phase, after user testing.** The first implementation cancelled the shift with a compensating `scrollBy` (`keepPlace`) and carved out `scrollY === 0`. On a word with many hits (`pot`) the sections still piled up above the open one and pushed it down — the carve-out excluded exactly the case that matters, because a freshly opened definition is read at the top of the page. The user also rejected programmatic scrolling on principle. `promote` replaces it: `keepPlace`, `smoothUntil`, both carve-outs, the smooth-scroll marking and the Safari `overflow-anchor` reasoning are all deleted, for a net reduction in code. D73's M4 section records both designs and why the second is not merely simpler but correct where the first was not.
+
+D73 records the four state machines, the rejected grace window, and why `overflow-anchor` could not be the mechanism (Safari).
+
+**Flagged, not fixed.** The `phase === "partial"` re-run at the end of `doSearch` — a search issued while the dictionary list is still streaming re-runs itself when the rest lands. That is a *new generation*: new slot set, latch re-armed, reading position lost, possibly mid-article. M2 keeps it from blanking but does not prevent it. Fixing it properly means suppressing the re-run once the user has scrolled or interacted, which is a behaviour change to D30 and belongs in its own phase.
+
+**Validated by a 12-test Playwright suite** (scratchpad, not landed:
+`…/scratchpad/web-tests/`). It drives the `/api/search` NDJSON stream line by
+line through a `fetch` shim backed by a `ReadableStream`, so arrival order is
+exact and no test sleeps. Discrimination was proven by stashing `index.html`,
+rebuilding and re-running against the pre-fix binary: 8 of the 13 fail there,
+at least one per defect. The M4 tests assert the section top *and* `window.scrollY`
+together — the first was achievable with a compensating scroll, and the pair is
+what pins the promotion design. Two of them boot with `overflow-anchor:none`
+injected so that Chromium's native scroll anchoring cannot be what is holding
+the position.
