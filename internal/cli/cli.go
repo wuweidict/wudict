@@ -50,7 +50,7 @@ var Version = "dev"
 // read is WuWeiDict. Anything user-facing — CLI banner, web UI
 // About box, setup page — sources its wording from here or mirrors it.
 const (
-	ProductName = "WuWeiDict"
+	ProductName = "wuDict"
 	Tagline     = "Search every dictionary you own, from one browser tab."
 	SiteURL     = "https://wuweidict.github.io/wudict"
 	RepoURL     = "https://github.com/wuweidict/wudict"

@@ -527,7 +527,7 @@ func TestSetupFlow(t *testing.T) {
 	// missing folder → setup page, not the app
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Point WuWeiDict at your dictionaries") {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Point wuDict at your dictionaries") {
 		t.Fatalf("expected setup page, got %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "does not exist") {
