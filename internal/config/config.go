@@ -19,22 +19,28 @@ import (
 
 // Config holds all server settings.
 type Config struct {
-	DictDirs      []string // DICT_DIR: one or more folders scanned for dictionaries
-	DBDir         string   // DB_DIR: cache dir for generated .text.db/.media.db
-	IP            string   // SERVER_IP
-	Port          string   // SERVER_PORT
-	NoBrowser     bool     // NO_BROWSER=1: do not open a browser tab
-	Verbose       bool     // VERBOSE=1: verbose logging
-	Speexdec      string   // SPEEXDEC: path to the external speexdec binary (.spx audio)
-	SpeexBackend  string   // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
-	AutoIndex     string   // AUTO_INDEX: on|off — prepare a dictionary's index on first search
-	UseCached     bool     // USE_CACHED=1: also list previously imported dictionaries from the db dir
-	NoCompress    bool     // NO_COMPRESS=1: store article text verbatim (bigger databases)
-	IndexWorkers  int      // INDEX_WORKERS: how many dictionaries may be indexed at once
-	MemoryLimit   int64    // MEMORY_LIMIT: soft heap ceiling in bytes (0 = none)
-	PreviewMemory int64    // PREVIEW_MEMORY: cap on RAM held by unprepared dictionaries (0 = unlimited)
-	SearchMemory  int64    // SEARCH_MEMORY: cap on RAM ONE search may materialise (0 = uncapped)
-	Source        string   // path of the wudict.toml that was loaded ("" if none)
+	DictDirs  []string // DICT_DIR: one or more folders scanned for dictionaries
+	DBDir     string   // DB_DIR: cache dir for generated .text.db/.media.db
+	IP        string   // SERVER_IP
+	Port      string   // SERVER_PORT
+	NoBrowser bool     // NO_BROWSER=1: do not open a browser tab
+
+	// Tray is tri-state, so it is a pointer rather than a bool: unset means
+	// "decide from how the app was launched" — a GUI launch (a macOS .app, the
+	// double-clicked wudict.exe) gets an icon, a terminal or a service does not.
+	// TRAY=1 or TRAY=0 overrides that decision in either direction (D74).
+	Tray          *bool  // TRAY
+	Verbose       bool   // VERBOSE=1: verbose logging
+	Speexdec      string // SPEEXDEC: path to the external speexdec binary (.spx audio)
+	SpeexBackend  string // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
+	AutoIndex     string // AUTO_INDEX: on|off — prepare a dictionary's index on first search
+	UseCached     bool   // USE_CACHED=1: also list previously imported dictionaries from the db dir
+	NoCompress    bool   // NO_COMPRESS=1: store article text verbatim (bigger databases)
+	IndexWorkers  int    // INDEX_WORKERS: how many dictionaries may be indexed at once
+	MemoryLimit   int64  // MEMORY_LIMIT: soft heap ceiling in bytes (0 = none)
+	PreviewMemory int64  // PREVIEW_MEMORY: cap on RAM held by unprepared dictionaries (0 = unlimited)
+	SearchMemory  int64  // SEARCH_MEMORY: cap on RAM ONE search may materialise (0 = uncapped)
+	Source        string // path of the wudict.toml that was loaded ("" if none)
 
 	// BrowserExtensions (BROWSER_EXTENSIONS) pins which browser-extension
 	// origins may read /api/dicts, /api/search and /res/ cross-origin. Empty =
@@ -132,6 +138,10 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	}
 	if v := get("NO_BROWSER"); v != "" && v != "0" {
 		cfg.NoBrowser = true
+	}
+	if v := get("TRAY"); v != "" {
+		on := v != "0"
+		cfg.Tray = &on
 	}
 	if v := get("VERBOSE"); v != "" && v != "0" {
 		cfg.Verbose = true
@@ -275,6 +285,7 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 # SERVER_IP   = "127.0.0.1"           # listen address (0.0.0.0 = all interfaces)
 # SERVER_PORT = "6888"
 # NO_BROWSER  = "0"                   # "1" = do not open a browser tab on startup
+# TRAY        = ""                    # "1" = system tray icon, "0" = never; unset = only when launched from a desktop
 # VERBOSE     = "0"                   # "1" = verbose logging for debugging
 # SPEEX_BACKEND = "internal"          # ".spx" audio decoder: "internal" (built-in libspeex) or "external" (speexdec)
 # SPEEXDEC    = "/usr/bin/speexdec"   # external speexdec path; blank = auto-detect (next to the executable, then $PATH)

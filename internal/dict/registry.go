@@ -357,3 +357,16 @@ func Discover(root string) ([]string, error) {
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i]) < strings.ToLower(out[j]) })
 	return out, err
 }
+
+// IsDictionaryFile reports whether path names a file this build can serve as a
+// dictionary: a registered main file or suffix, and not an inspect-only
+// container (an .mdd is readable but is not a dictionary — see inspectOpeners).
+// It is a name test, not a probe: no bytes are read.
+//
+// Used by the "open this file with wudict" entry point the desktop file
+// associations rely on, so that `wudict nonsense` still reports an unknown
+// command instead of trying to serve a typo.
+func IsDictionaryFile(path string) bool {
+	_, ok := discoverableFor(path)
+	return ok
+}

@@ -81,8 +81,102 @@ jobs:
           name: wudict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo
           path: wudict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo${{ matrix.ext }}
 
-  release:
+  # The double-clickable macOS app (D75). One UNIVERSAL bundle rather than one
+  # per chip: the point of an .app is that nobody has to know what a chip is.
+  # Version and name come from the binary itself (`wudict --version`), so this
+  # job stamps nothing and cannot drift from the build job above.
+  macos-app:
+    name: macOS .app (universal)
     needs: build
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download the darwin binaries
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: wudict-darwin-*-cgo
+          merge-multiple: true
+
+      - name: Fuse the slices and build the bundle
+        shell: bash
+        run: |
+          set -eu
+          slices=$(ls artifacts/wudict-darwin-*-cgo 2>/dev/null || true)
+          if [ -z "$slices" ]; then
+            echo "::warning title=No .app::no darwin binaries were produced — skipping the bundle"
+            exit 0
+          fi
+          # lipo -create accepts a single input, so a half-failed matrix still
+          # yields a usable (thin) app instead of no app at all.
+          lipo -create -output wudict $slices
+          chmod +x wudict
+          lipo -info wudict
+          APP_BIN="$PWD/wudict" BUILD_DIR="$PWD/dist" sh tools/make-app.sh
+          # ditto, not zip: it is the only archiver Apple guarantees keeps the
+          # bundle's symlinks, xattrs and code signature intact.
+          ditto -c -k --keepParent "$(cat dist/.app-path)" wudict-macos-app.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: wudict-macos-app
+          path: wudict-macos-app.zip
+          if-no-files-found: warn
+
+  # The Windows installer (D76). Per-user, no admin prompt, and ONE wudict.exe:
+  # the binary decides at runtime whether a person or a shell started it, so
+  # there is no second GUI-subsystem artifact to build or to choose between.
+  windows-installer:
+    name: Windows installer
+    needs: build
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download the windows binary
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: wudict-windows-*-cgo
+          merge-multiple: true
+
+      - name: Ensure Inno Setup 6
+        shell: bash
+        run: |
+          set -eu
+          # Preinstalled on the windows-2022 image, but pinning the run to that
+          # promise would make an image change a release outage.
+          if [ -x "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ] || command -v iscc >/dev/null 2>&1; then
+            echo "Inno Setup already present"
+          else
+            choco install innosetup -y --no-progress
+          fi
+
+      - name: Compile the installer
+        shell: bash
+        run: |
+          set -eu
+          exe=$(ls artifacts/wudict-windows-amd64-cgo.exe 2>/dev/null || true)
+          if [ -z "$exe" ]; then
+            echo "::warning title=No installer::the windows/amd64 build did not produce a binary — skipping"
+            exit 0
+          fi
+          cp "$exe" wudict.exe
+          WIN_EXE="$PWD/wudict.exe" BUILD_DIR="$PWD/dist" sh tools/make-installer.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: wudict-windows-installer
+          path: dist/wudict-setup-*.exe
+          if-no-files-found: warn
+
+  release:
+    needs: [build, macos-app, windows-installer]
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

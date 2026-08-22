@@ -294,6 +294,11 @@ var revealPossible = func() bool {
 	}
 }
 
+// Reveal shows path in the platform file manager. Exported for the tray's
+// "Open dictionary folder" item (D74), which drives the same action as
+// /api/reveal without going through the mux.
+func Reveal(path string) error { return reveal(path) }
+
 // reveal opens the platform file manager on path. Each OS gets the command its
 // users expect: Finder selects the item, Explorer selects it, and on Linux
 // xdg-open hands the *containing folder* to whatever file manager is

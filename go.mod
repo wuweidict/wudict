@@ -10,6 +10,8 @@ require (
 )
 
 require (
+	github.com/godbus/dbus/v5 v5.2.2
+	github.com/gogpu/systray v0.2.8
 	github.com/mattn/go-sqlite3 v1.14.48
 	github.com/ulikunitz/xz v0.5.16
 	golang.org/x/net v0.57.0
@@ -18,6 +20,7 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/go-webgpu/goffi v0.6.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

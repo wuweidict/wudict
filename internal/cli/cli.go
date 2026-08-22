@@ -22,6 +22,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,6 +34,7 @@ import (
 	"github.com/wuweidict/wudict/internal/server"
 	"github.com/wuweidict/wudict/internal/speex"
 	"github.com/wuweidict/wudict/internal/store"
+	"github.com/wuweidict/wudict/internal/tray"
 
 	_ "github.com/wuweidict/wudict/internal/format/bgl"      // register .bgl
 	_ "github.com/wuweidict/wudict/internal/format/dsl"      // register .dsl(.dz)
@@ -65,6 +68,10 @@ USAGE
 
   Running wudict with no arguments (or with only flags) starts the
   HTTP server — the same as the "serve" command.
+
+  wudict <dictfile>                       Serve the folder that holds that file
+                                          and open it in the browser. This is what
+                                          double-clicking a dictionary does.
 
 COMMANDS
   serve                                   Start the HTTP server (the default command)
@@ -338,6 +345,13 @@ func Main() {
 			err = cmdServe(os.Args[1:])
 			break
 		}
+		if args := openFileArgs(cmd); args != nil {
+			// `wudict <dictfile>` — the entry point desktop file associations
+			// point at (D76). Tested last, so a typo is still an unknown
+			// command rather than a silently misread path.
+			err = cmdServe(args)
+			break
+		}
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", cmd, usage())
 		os.Exit(2)
 	}
@@ -345,6 +359,30 @@ func Main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+// openFileArgs turns a lone dictionary path into serve flags, or returns nil
+// if the argument is not one. Double-clicking a .mdx serves the FOLDER that
+// holds it, not the single file: dictionaries travel with companions (an .mdd
+// beside its .mdx, a StarDict .idx beside its .ifo — dict.SourceFiles), the
+// discovery path already knows how to pair them, and one folder is the
+// smallest unit that cannot be half-opened.
+//
+// The folder REPLACES the configured library for this run rather than joining
+// it: "open this file" should show that file, promptly, and a preview scan of
+// one download is D15's cheap path. The configured library is one launch away.
+func openFileArgs(arg string) []string {
+	if !dict.IsDictionaryFile(arg) {
+		return nil
+	}
+	abs, err := filepath.Abs(arg)
+	if err != nil {
+		return nil
+	}
+	if st, err := os.Stat(abs); err != nil || st.IsDir() {
+		return nil
+	}
+	return []string{"--dict-dir", filepath.Dir(abs)}
 }
 
 func cmdList(args []string) error {
@@ -620,6 +658,8 @@ func cmdServe(args []string) error {
 	noBrowser := fs.Bool("no-browser", false, "do not open a browser tab (env/toml: NO_BROWSER)")
 	verbose := fs.Bool("verbose", false, "verbose logging (env/toml: VERBOSE)")
 	speexdec := fs.String("speexdec", "", "path to speexdec for .spx audio (env/toml: SPEEXDEC)")
+	trayOn := fs.Bool("tray", false, "show a system tray icon (env/toml: TRAY)")
+	trayOff := fs.Bool("no-tray", false, "never show a system tray icon (env/toml: TRAY=0)")
 	fs.Parse(args)
 
 	if *configPath == "" {
@@ -645,12 +685,45 @@ func cmdServe(args []string) error {
 	if *indexWorkers != "" {
 		flagVals["INDEX_WORKERS"] = *indexWorkers
 	}
+	// --no-tray is checked second so it wins if both are given: between two
+	// contradictory flags, the one that changes nothing about the process is
+	// the safe reading.
+	if *trayOn {
+		flagVals["TRAY"] = "1"
+	}
+	if *trayOff {
+		flagVals["TRAY"] = "0"
+	}
 	cfg, err := config.Load(*configPath, flagVals)
 	if err != nil {
 		return err
 	}
 	if cfg.Verbose {
 		logx.Enabled = true
+	}
+
+	// Machine C (D74). A terminal launch keeps today's behaviour byte for
+	// byte; only a GUI launch — a macOS .app, a double-clicked wudict.exe —
+	// moves the message channel, because there stderr points at nothing a
+	// human will ever read. A console is never taken from a user who has one.
+	//
+	// Read once and carried: on Windows GUILaunched asks who else is attached
+	// to this console, and DetachConsole below makes the same question answer
+	// differently (D76).
+	gui := tray.GUILaunched()
+	trayWanted := gui
+	if cfg.Tray != nil {
+		trayWanted = *cfg.Tray
+	}
+	if trayWanted && gui {
+		// Order matters. Take the log first and give up the console second: if
+		// the log cannot be opened, keeping an ugly black window is worth more
+		// than a server that runs in total silence.
+		if f, err := openHeadlessLog(); err == nil {
+			logx.SetOutput(f)
+			defer func() { logx.SetOutput(nil); f.Close() }()
+			tray.DetachConsole()
+		}
 	}
 	logx.V("config: source=%q dictDirs=%v dbDir=%q addr=%s speexdec=%s",
 		cfg.Source, cfg.DictDirs, cfg.DBDir, cfg.Addr(), cfg.Speexdec)
@@ -705,7 +778,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		logx.Warn("could not tidy the library: %v", err)
 	} else if len(moved) > 0 {
 		for _, m := range moved {
-			fmt.Fprintf(os.Stderr, "library: %s → %s/\n", filepath.Base(m.From), filepath.Base(m.Dir))
+			logx.Status("library: %s → %s/", filepath.Base(m.From), filepath.Base(m.Dir))
 		}
 	}
 
@@ -721,7 +794,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		} else {
 			cfgFile, cfg.Source = p, p
 			if created {
-				fmt.Fprintf(os.Stderr, "config: created %s\n", p)
+				logx.Status("config: created %s", p)
 			}
 		}
 	}
@@ -804,25 +877,120 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
-	// graceful shutdown on Ctrl-C / SIGTERM: finish in-flight requests,
-	// close database handles cleanly
+	// Graceful shutdown on Ctrl-C / SIGTERM: finish in-flight requests, close
+	// database handles cleanly. One shutdown, reachable from two places — a
+	// signal and the tray's Quit item — so sync.Once, not a second code path.
 	idle := make(chan struct{})
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			logx.Status("\nshutting down…")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = httpSrv.Shutdown(ctx)
+			close(idle)
+		})
+	}
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 		<-sig
-		fmt.Fprintln(os.Stderr, "\nshutting down…")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = httpSrv.Shutdown(ctx)
-		close(idle)
+		stop()
 	}()
-	err = httpSrv.Serve(ln)
-	if errors.Is(err, http.ErrServerClosed) {
-		<-idle
+
+	serve := func() error {
+		err := httpSrv.Serve(ln)
+		if errors.Is(err, http.ErrServerClosed) {
+			<-idle
+			return nil
+		}
+		return err
+	}
+
+	// The tray wraps the server rather than the other way round: serve() runs
+	// to completion whatever the tray does, and with the tray off (every
+	// terminal launch, every service unit, Android) Wrap is a pass-through.
+	// Name is left empty so the menu uses the package default, WuWeiDict —
+	// ProductName still reads "wuDict", which predates D27.
+	return tray.Wrap(tray.Config{
+		Enabled:  trayWanted,
+		Explicit: cfg.Tray != nil,
+		GUI:      gui,
+		Version:  Version,
+		URL:      url,
+		Open:     func() { browserCmd(url) },
+		Rescan:   trayRescan(reg),
+		OpenDir:  trayOpenDir(reg.Dirs()),
+		Shutdown: stop,
+	}, serve)
+}
+
+// trayRescan drives the same rescan /api/rescan does. Menu clicks arrive on
+// the platform's own thread, so the work runs off it — a rescan of 105
+// dictionaries would otherwise freeze the menu — and a second click while one
+// is running is dropped rather than queued.
+func trayRescan(reg *server.Registry) func() {
+	var busy atomic.Bool
+	return func() {
+		if !busy.CompareAndSwap(false, true) {
+			return
+		}
+		go func() {
+			defer busy.Store(false)
+			if err := reg.Rescan(); err != nil {
+				logx.Warn("rescan: %v", err)
+				return
+			}
+			reg.Warm()
+		}()
+	}
+}
+
+// trayOpenDir reveals the first dictionary folder, or reports nothing to
+// reveal by omitting the menu item entirely (a nil callback).
+func trayOpenDir(dirs []string) func() {
+	if len(dirs) == 0 {
 		return nil
 	}
-	return err
+	dir := dirs[0]
+	return func() {
+		go func() {
+			if err := server.Reveal(dir); err != nil {
+				logx.Warn("open dictionary folder: %v", err)
+			}
+		}()
+	}
+}
+
+// openHeadlessLog is where logx goes when there is no console to write to. The
+// destinations are the ones the service templates already chose, so a user who
+// switches between a GUI launch and a launchd agent finds one log, not two.
+func openHeadlessLog() (*os.File, error) {
+	var path string
+	switch runtime.GOOS {
+	case "darwin":
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.Join(home, "Library", "Logs", "wudict.log")
+	case "windows":
+		dir := os.Getenv("LOCALAPPDATA")
+		if dir == "" {
+			return nil, errors.New("LOCALAPPDATA is not set")
+		}
+		path = filepath.Join(dir, "wudict", "wudict.log")
+	default:
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.Join(home, ".wudict", "wudict.log")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 }
 
 // applyLibrarySettings gives the subcommands that touch the library the same
@@ -952,7 +1120,9 @@ func statePath(cfgFile string) string {
 }
 
 func printStartup(cfg config.Config, in startupInfo) {
-	out := os.Stderr
+	// Not os.Stderr: in a GUI launch the whole channel has been moved to a
+	// log file, and the banner is the most useful thing in it (D74).
+	out := logx.Output()
 	fmt.Fprintf(out, "%s %s\n", ProductName, Version)
 
 	// one line per folder, aligned in a single column, each with its own

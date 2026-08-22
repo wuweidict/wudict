@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- TEMPLATE — rendered by tools/make-app.sh, which strips this comment.
+     Tokens: @NAME@ @EXEC@ @ID@ @SHORT@ @BUILD@ @GITVER@ @ICON@ @MINOS@ @COPYRIGHT@
+
+     Why each non-obvious key is here:
+
+     LSUIElement — the whole point of the bundle. The app has no window and no
+     Dock icon; its only UI is the menu-bar item (D74). Without this key macOS
+     puts a bouncing Dock icon on a process that will never show a window.
+
+     LSMinimumSystemVersion — Go 1.26's own floor is macOS 12 (go.dev/wiki/
+     MinimumRequirements). Claiming it here turns "launches and crashes" into
+     "Finder says it needs a newer macOS", which is the difference between a
+     bug report and an answer.
+
+     NSSupportsSuddenTermination false — the process owns open SQLite handles.
+     It must be asked to stop (tray Quit → httpSrv.Shutdown), not SIGKILLed at
+     logout.
+
+     CFBundleShortVersionString must be numeric-ish, so it is the tag part of
+     `git describe` only; the full stamp (with commit and -dirty) survives
+     verbatim in CFBundleGetInfoString.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleName</key>
+	<string>@NAME@</string>
+	<key>CFBundleDisplayName</key>
+	<string>@NAME@</string>
+	<key>CFBundleExecutable</key>
+	<string>@EXEC@</string>
+	<key>CFBundleIdentifier</key>
+	<string>@ID@</string>
+	<key>CFBundleIconFile</key>
+	<string>@ICON@</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@SHORT@</string>
+	<key>CFBundleVersion</key>
+	<string>@BUILD@</string>
+	<key>CFBundleGetInfoString</key>
+	<string>@NAME@ @GITVER@</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>@COPYRIGHT@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.reference</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>@MINOS@</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsSuddenTermination</key>
+	<false/>
+</dict>
+</plist>

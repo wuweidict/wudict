@@ -13,19 +13,34 @@ the product; this page is the convenience.
 ## macOS — a LaunchAgent
 
 The Makefile generates a `launchctl` LaunchAgent from
-`launchctl/com.wuweidict.wudict.plist.in` and manages it for you:
+`launchctl/com.legbehindneck.wudict.in` and manages it for you:
 
 | Command | What it does                                      |
 |---|---------------------------------------------------|
 | `make mac-agent-install` | generate the plist, register the agent            |
 | `make mac-agent-start` | `launchctl bootstrap gui/$UID <plist>`            |
-| `make mac-agent-stop` | `launchctl bootout gui/$UID/com.wuweidict.wudict` |
+| `make mac-agent-stop` | `launchctl bootout gui/$UID/com.legbehindneck.wudict` |
 | `make mac-agent-restart` | rebuild the binary, then `kickstart -k`           |
 | `make mac-agent-status` | `launchctl print gui/$UID/<label>`                |
 | `make mac-agent-uninstall` | stop it and delete the plist                      |
 
 The agent launches when you log in. Search is available the moment the
 desktop is.
+
+### …or the app, if you'd rather see it
+
+`make mac-app-install` builds **wuDict.app** into `~/Applications` (the
+release carries a prebuilt universal copy as `wudict-macos-app.zip`). It is
+the same server, started by double-clicking instead of by launchd, and it
+shows a **menu-bar icon** — running/not running, open, rescan, quit — where
+the agent shows nothing at all.
+
+The two are alternatives, not layers: both bind the same port, so the second
+one to start just opens the browser at the first and exits — so if the agent
+already holds the port, the app opens a tab and quits without ever showing an
+icon. Pick the agent if
+you want it up before you ask for it; pick the app if you want to see it and
+be able to stop it.
 
 ## Linux — a systemd user unit
 
@@ -54,15 +69,26 @@ Just the binary, without the unit: `make linux-install`
 ## Windows — the honest path
 
 No launchd or systemd here; the dependable pattern is the **Startup
-folder**:
+folder**. The installer offers it as a checkbox — *Start wuDict when I
+sign in* — and that is all the checkbox does: it drops a shortcut there,
+so you can remove it later without a tool.
+
+By hand, if you did not use the installer:
 
 1. Put `wudict.exe` wherever you keep it, e.g. `C:\tools\wudict\`
 2. `Win+R` → `shell:startup` → 
-3. Drop a shortcut to `wudict.exe` there (include `--no-browser` in its
-   command line if you'd rather open the page yourself)
+3. Drop a shortcut to `wudict.exe` there (add `--no-browser` to its
+   command line unless you want a tab at every sign-in)
 
-One logon later the dictionary wall is up, silently. Task Scheduler does
-the same with more ceremony and a "run at startup" trigger.
+One logon later the dictionary wall is up, silently — and *silently* is
+literal: started from a shortcut rather than a terminal, `wudict.exe`
+closes the console window Windows gave it and shows a **tray icon**
+instead, so there is no black box left on your desktop and still
+something to click when you want to stop it. Its log goes to
+`%LOCALAPPDATA%\wudict\wudict.log`.
+
+Task Scheduler does the same with more ceremony and a "run at startup"
+trigger.
 
 ## Android — nothing to run
 

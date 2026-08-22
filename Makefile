@@ -99,6 +99,56 @@ cross: ## Cross-compile all release targets into dist/ (purego flavour: pure-Go 
 	    -o $(BUILD_DIR)/$(BINARY)-$$suffix$$ext $(CMD) || exit 1; \
 	done
 
+# ---- tray (D74, D76) ----------------------------------------------------
+# There is nothing to build here. The tray icon is off unless the app was
+# launched from a desktop, and every platform — Windows included, since D76 —
+# reads that from the running process rather than from a second artifact.
+
+.PHONY: icons
+icons: ## Regenerate the committed tray PNGs + macOS .icns from internal/server/web/favicon.svg (needs rsvg-convert)
+	@sh tools/make-icons.sh
+
+# ---- macOS .app bundle (D75) --------------------------------------------
+# The bundle is the only macOS launch path that tells the binary a person
+# started it: internal/tray looks for ".app/Contents/MacOS/" in its own
+# os.Executable(). Nothing else about the product changes — a bare `wudict`
+# already serves, and a second launch already finds the port taken, opens the
+# browser and exits.
+#
+# The bundle NAME is derived by tools/make-app.sh from `wudict --version`, so
+# it cannot drift from cli.ProductName the way a copy of the name here would.
+# The script reports the path it built in $(BUILD_DIR)/.app-path, which is how
+# the install target addresses a name Make does not know.
+APP_BIN     ?= $(abspath $(BINARY))
+APP_ID      ?= com.legbehindneck.wudict
+APP_DEST    ?= $(HOME)/Applications
+MACOS_MIN   ?= 12.0
+CODESIGN_ID ?= -
+
+.PHONY: mac-app
+mac-app: build ## Build the double-clickable macOS .app into dist/ (menu-bar icon, no Dock icon)
+	@APP_BIN="$(APP_BIN)" APP_ID="$(APP_ID)" MACOS_MIN="$(MACOS_MIN)" BUILD_DIR="$(BUILD_DIR)" \
+	  CODESIGN_ID="$(CODESIGN_ID)" sh tools/make-app.sh
+
+.PHONY: mac-app-install
+mac-app-install: mac-app ## Install that .app into ~/Applications (per-user, no sudo; override APP_DEST=)
+	@app=$$(cat $(BUILD_DIR)/.app-path); name=$$(basename "$$app"); \
+	  mkdir -p "$(APP_DEST)"; \
+	  rm -rf "$(APP_DEST)/$$name"; \
+	  cp -R "$$app" "$(APP_DEST)/$$name"; \
+	  echo "installed $(APP_DEST)/$$name"; \
+	  echo "next: open '$(APP_DEST)/$$name'"
+
+# ---- Windows installer (D76, P86) -------------------------------------------
+# One .exe, installed per-user with no admin prompt. Needs Inno Setup 6, so it
+# runs on Windows (CI does it in build-cgo.yml); everywhere else the target
+# exists to tell you that, which is D10's point.
+WIN_EXE ?= $(abspath $(BINARY)).exe
+
+.PHONY: win-installer
+win-installer: ## Compile the Windows per-user installer into dist/ (needs Inno Setup 6)
+	@WIN_EXE="$(WIN_EXE)" BUILD_DIR="$(BUILD_DIR)" sh tools/make-installer.sh
+
 # ---- Android (D52, D53) -----------------------------------------------------
 # The app is android/: a WebView shell around the same binary, shipped inside
 # the APK as libwudict.so, which the shell execs as a child process.
@@ -351,26 +401,9 @@ purge: ## zap all local cached dictionaries in ~/.wudict/db
 version: ## Print the version stamp used for builds
 	@echo $(VERSION)
 
-.PHONY: push
-push:  ## sync remotes
-	git push origin
-	git push hz
-	git push leg
-	git push iq
-# 	git push od
-	git push wwd
-
-.PHONY: push-tags
-push-tags:  ## push tags
-	git push origin --tags
-	git push hz --tags
-	git push leg --tags
-	git push iq --tags
-	git push wwd --tags
-# 	git push wfrt --tags
 
 .PHONY: remotes
-remotes: ## git git remotes
+remotes: ## git remotes
 	git remote -v
 	echo '---'
 	git --no-pager branch -vv

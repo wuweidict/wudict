@@ -11,10 +11,10 @@
 
 [project]
 
-site_name = "WuWeiDict"
-site_description = "WuWeiDict (wudict) — one small binary that turns every dictionary you own into a fast, private, offline-first search server in your browser. Supports MDX/MDD, StarDict, Slob, DSL, BGL and its own portable library format."
-site_author = "The WuWeiDict contributors"
-site_url = "https://wudict.FIXME.TODO.com"
+site_name = "wuDict"
+site_description = "wuDict (wudict) — one small binary that turns every dictionary you own into a fast, private, offline-first search server in your browser. Supports MDX/MDD, StarDict, Slob, DSL, BGL and its own portable library format."
+site_author = "The wuDict contributors"
+site_url = "https://wudict.legbehindneck.com"
 
 copyright = """
 Copyright &copy; 2026 The WuWeiDict contributors

@@ -681,7 +681,7 @@ func TestSetupConsentFlow(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-	if !strings.Contains(rec.Body.String(), "Point WuWeiDict at your dictionaries") {
+	if !strings.Contains(rec.Body.String(), "Point wuDict at your dictionaries") {
 		t.Fatal("prepared dictionaries must not suppress the setup page")
 	}
 
@@ -714,7 +714,7 @@ func TestSetupConsentFlow(t *testing.T) {
 	// and the app page is served now that dictionaries are in use
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-	if strings.Contains(rec.Body.String(), "Point WuWeiDict at your dictionaries") {
+	if strings.Contains(rec.Body.String(), "Point wuDict at your dictionaries") {
 		t.Error("setup page still shown after dictionaries were enrolled")
 	}
 }

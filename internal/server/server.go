@@ -1241,7 +1241,9 @@ func (s *Server) externalSpxToWav(raw []byte) ([]byte, error) {
 	if err := os.WriteFile(spxPath, raw, 0o644); err != nil {
 		return nil, err
 	}
-	if outb, err := exec.Command(s.Speexdec, spxPath, wavPath).CombinedOutput(); err != nil {
+	dec := exec.Command(s.Speexdec, spxPath, wavPath)
+	hideWindow(dec)
+	if outb, err := dec.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("%s: %v (%s)", s.Speexdec, err, strings.TrimSpace(string(outb)))
 	}
 	data, err := os.ReadFile(wavPath)

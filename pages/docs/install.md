@@ -36,6 +36,16 @@ Every platform below starts from [the releases page](https://github.com/wuweidic
     The first launch opens the system _Gatekeeper_ prompt; click **Open**
     the one time it asks.
 
+    **Or skip the terminal entirely.** The same release carries
+    `wudict-macos-app.zip`, which unzips to **wuDict.app** — the identical
+    binary in a bundle, universal, so there is no chip to pick. Drag it to
+    *Applications* and open it. It puts a **menu-bar icon** up instead of a
+    Dock icon, and that icon is the whole interface: it tells you the server
+    is running, opens it in the browser, rescans your dictionaries and quits
+    it. Nothing is printed anywhere — its log is `~/Library/Logs/wudict.log`.
+    From a clone of the source, `make mac-app-install` builds and installs the
+    same bundle into `~/Applications`.
+
 === "Windows"
 
     Download `wudict-windows-amd64-purego.exe`, rename it to `wudict.exe`,
@@ -52,6 +62,23 @@ Every platform below starts from [the releases page](https://github.com/wuweidic
 
     Windows Defender may pause on the first run of an unsigned binary;
     choose **More info → Run anyway** once.
+
+    **Or use the installer.** The same release carries
+    `wudict-setup-<version>.exe`. It installs **for you only**, so it never
+    asks for an administrator password, and it offers four things you can
+    take or leave: a desktop shortcut, *start when I sign in*, adding `wudict`
+    to your `PATH`, and offering wuDict in **Open with** for `.mdx`, `.dsl`,
+    `.slob` and `.bgl` files. Uninstall from *Settings → Apps* like anything
+    else. From a clone of the source, `make win-installer` builds it (needs
+    [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
+
+    There is **one** `wudict.exe`, and it behaves differently depending on how
+    you start it — which is the point. Run from PowerShell or `cmd`, it is an
+    ordinary command-line program: it prints, it pipes, it returns an exit
+    code. Double-clicked, or started from a shortcut or by opening a
+    dictionary file, it closes the console window it was given and puts a
+    **tray icon** in the notification area instead. Its log then goes to
+    `%LOCALAPPDATA%\wudict\wudict.log`.
 
 === "Linux"
 

@@ -389,3 +389,74 @@ together — the first was achievable with a compensating scroll, and the pair i
 what pins the promotion design. Two of them boot with `overflow-anchor:none`
 injected so that Chromium's native scroll anchoring cannot be what is holding
 the position.
+
+### P84 — Somewhere to see it, and somewhere to stop it — 2026-08-22 — COMPLETE (uncommitted)
+
+A non-technical user starting WuWeiDict had no way to tell the server was running and no way to stop it short of `kill`. This adds an optional tray icon that is **off on every existing launch path** — terminal, launchd agent, systemd unit, Android — and on only when the binary can tell it was launched from a desktop, or when asked with `--tray`/`TRAY=1`.
+
+Built defensively because the library requires it. Read from `github.com/gogpu/systray@v0.2.8`'s source rather than its README: `New()`, `Show()` and `SetMenu()` all discard their platform errors, `Run()` is the only call that returns one and it blocks, Linux `Run()` is a bare `<-t.quit`, and failing to register with the StatusNotifierWatcher is a `slog.Warn` after which `Create()` returns nil. So on GNOME without the AppIndicator extension every call reports success and the process hangs forever on an invisible icon. Our own preflight is the only thing standing between that and a user. The spike also answered the macOS main-thread question by reading `internal/init.go` — the library already calls `runtime.LockOSThread()` unconditionally, so no `darwin` init of ours is needed; the side effect is that importing it pins the main goroutine for *every* wudict command.
+
+Shipped:
+
+- **`internal/tray`** (new, 7 files) — machine T as an explicit transition table with `Degraded`/`Gone` absorbing; `Wrap(cfg, serve)` starting `serve()` before anything platform-facing and returning its error unchanged; `recover()` around both `Start` and `Run`; a cancellable `os.Exit` watchdog armed only against a hung message loop. The platform sits behind a 3-method interface, so **17 tests drive the whole machine with no desktop, no D-Bus and no window server** — preflight failure, `Start` error, `Start` panic, `Run` returning early, Quit fired twice, the server ending on its own, menu shape, and every legal and illegal transition. `go test -race -count=2` clean.
+- **Preflight per platform** — Linux asks D-Bus `NameHasOwner("org.kde.StatusNotifierWatcher")`, bounded at 3 s with a buffered result channel so a timeout cannot leak a blocked goroutine; macOS refuses outside an `.app` bundle and under `SSH_CONNECTION`; Windows passes unconditionally.
+- **`internal/logx`** — `SetOutput(io.Writer)`/`Output()`, mutex-guarded, backing all six former `os.Stderr` sites. Redirecting makes `Interactive()` report false, so `Progress`/`ClearLine` self-silence into a log file exactly as they already did into a pipe.
+- **`internal/cli/cli.go`** — `--tray`/`--no-tray`; the shutdown path refactored to one `sync.Once`-guarded `stop()` reachable from both a signal and the tray; `httpSrv.Serve` extracted into a `serve` closure; `printStartup` and three raw `Fprintf(os.Stderr, …)` sites moved onto `logx`; `openHeadlessLog()`; and the seam itself, `return tray.Wrap(…, serve)`, which is a pass-through whenever the tray is off.
+- **`internal/config`** — `TRAY` through the existing precedence ladder as a `*bool` (tri-state: unset means "decide from the launch"), plus its line in the generated `wudict.toml`.
+- **`internal/server`** — `Reveal(path)` exported so the tray's "Open dictionary folder" drives the same action as `/api/reveal` without going through the mux.
+- **`tools/make-icons.sh` + `internal/tray/icons/`** — two committed PNGs rendered from `favicon.svg`. They live under `internal/tray/` because `go:embed` cannot reach outside its package directory; the plan said `packaging/icons/` and that path could not have worked.
+- **Makefile** — `make icons`, ~~`make build-windows-gui`, and `cross` now emitting `wudictw-windows-{amd64,arm64}.exe` alongside the console binaries~~ (**removed 2026-08-22 by D76/P86**: one `.exe`).
+
+Verified: `make check` green; tag-less `go build ./...`; `go vet -tags purego ./...`; builds clean for darwin, linux, windows, freebsd and android; and the Android assertion — `GOOS=android go list -deps ./internal/cli` shows **no** `gogpu`, `godbus` or `goffi`, which is what `//go:build !android` buys without a new build tag. `make build-windows-gui` produces a real 13 MB `wudictw.exe` (that target existed only between P84 and P86). Nothing committed.
+
+**Not verified here, by design:** no icon has been drawn on a screen. The library's macOS path sets `NSApplicationActivationPolicyAccessory`, so `--tray` from a terminal should produce a menu-bar item before P85 exists — that is the user's next hands-on check, along with `wudict serve` in a terminal being byte-identical to before, and `DBUS_SESSION_BUS_ADDRESS= wudict serve --tray` on Linux printing one line and serving normally.
+
+**Deferred, sketched in D74 and the plan file:** P85 (macOS `.app` bundle — `packaging/darwin/Info.plist.in` + `tools/make-app.sh` + `make mac-app`, `LSUIElement=1`, and the `com.legbehindneck.wudict` bundle-id question) and P86 (Inno per-user installer, "Start at login", `.mdx/.dsl/.slob/.bgl` associations — which need an "open this file" entry point the binary does not have yet — and a native notification for the degraded-GUI-launch case, which today has no liveness indicator at all).
+
+### P85 — A thing you can double-click — 2026-08-22 — COMPLETE (uncommitted)
+
+P84 built a tray icon nobody could reach: on macOS it only appears when the binary can tell a person launched it, and the only signal for that is an `.app` bundle path. This is the bundle. It changes no product behaviour — a bare `wudict` already serves, a second launch already opens the browser at the first and exits — it only produces the layout and the plist that make macOS treat the binary as an app.
+
+Worth recording because it inverts the obvious assumption: **the bundle is not what makes the tray possible.** The library's darwin path is pure runtime AppKit — `[NSStatusBar systemStatusBar]`, `setActivationPolicy:Accessory` — with no `NSBundle` or `Info.plist` reference anywhere, so `wudict serve --tray` draws a menu-bar item on an unbundled binary today. The bundle is what makes it *automatic*.
+
+Shipped:
+
+- **`packaging/darwin/Info.plist.in`** — the template, in the same `<!-- TEMPLATE -->`-stripped style as `launchctl/*.plist.in`. `LSUIElement` (menu bar, no Dock), `LSMinimumSystemVersion` 12.0 (Go 1.26's own floor), `NSSupportsSuddenTermination` false (open SQLite handles), and a comment on every key that is not self-evident.
+- **`tools/make-app.sh`** — builds `dist/<name>.app`, `cp`ing the binary (never symlinking: `GUILaunched()` calls `EvalSymlinks` and a link would resolve out of the bundle), rendering the plist, `plutil -lint`ing it, failing on any unsubstituted `@TOKEN@`, and ad-hoc signing. **Name and version are read from `wudict --version`**, so the bundle cannot drift from `cli.ProductName`; the derived path is written to `dist/.app-path` because Make cannot know a name it did not choose.
+- **`make mac-app` / `make mac-app-install`** — the second installs into `~/Applications`: per-user, no sudo, matching the per-user preference already set for the Windows installer. `APP_BIN`, `APP_ID`, `APP_DEST`, `MACOS_MIN`, `CODESIGN_ID` override.
+- **`tools/make-icons.sh` + `packaging/darwin/wudict.icns`** — ten sizes through `iconutil`, rendered from the one SVG (D70), committed. Skips with a note where `iconutil` does not exist.
+- **`.github/workflows/build-cgo.yml`** — a `macos-app` job that `lipo`s the two darwin artifacts into one **universal** bundle and `ditto`s it to `wudict-macos-app.zip`; `release` now waits on it, so the zip lands on the release page with the binaries.
+- **Docs** — `pages/docs/install.md` (the no-terminal route), `pages/docs/service.md` (app vs LaunchAgent, and what happens when both want the port), `README.md`.
+
+Verified on this machine: `make mac-app` produces `dist/wuDict.app`; `plutil -p` shows all 17 keys substituted with `CFBundleIdentifier = com.legbehindneck.wudict`, `CFBundleShortVersionString = 2.9.0` from `v2.9-dirty`, `LSUIElement = true`; `codesign --verify --strict` reports *valid on disk* and *satisfies its Designated Requirement*; the executable is a real Mach-O at `Contents/MacOS/wudict`; the workflow parses.
+
+**Not verified here, by design:** nothing has been opened. `open dist/wuDict.app` → a menu-bar icon, no Dock icon, a browser tab, and `~/Library/Logs/wudict.log` filling with the banner is the user's check.
+
+**Still deferred:** P86 (Windows Inno per-user installer, "Start at login", `.mdx/.dsl/.slob/.bgl` associations — which need an "open this file" entry point the binary still does not have — and a native notification for the degraded-GUI-launch case).
+
+### P86 — One `.exe`, and an installer that does not ask for your password — 2026-08-22 — COMPLETE (uncommitted)
+
+Two things at once, because the second was blocked on the first. P84 had accepted a second Windows binary — `wudictw.exe`, linked `-H windowsgui` — on the grounds that "no console window" is a linker flag. **It is; but keeping the window is not.** A console-subsystem `wudict.exe` can ask who else is attached to its console and give the window back when the answer is "nobody", which is exactly the double-click case. So there is now **one `.exe`**, and the installer has one thing to install, one thing to associate and one thing to put on `PATH`. See **D76**.
+
+Shipped — the one-`.exe` half:
+
+- **`internal/tray/platform_windows.go`** — rewritten around `GetConsoleProcessList` (count `1` ⇒ Windows made this console for us alone ⇒ GUI launch), `FreeConsole`, `ProcessIdToSessionId` (session 0 has no interactive desktop; preflight used to pass unconditionally) and `MessageBoxW`. All via `syscall.NewLazyDLL` — `x/sys/windows` exports none of the first three — so no new dependency.
+- **`internal/cli/cli.go`** — `GUILaunched()` read **once** and carried as `tray.Config.GUI`, because `FreeConsole` changes its answer; the headless log opened **before** the console is released, because a black window beats total silence; detaching confined to the serve path.
+- **`internal/tray/tray.go`** — `degrade()` now raises a native modal when `cfg.GUI`, on a detached goroutine. Under D74 this was a nice-to-have; without a console it is the only remaining indicator. `notify` is implemented on Windows (`MessageBoxW`) and macOS (`osascript display alert`, with AppleScript string escaping), and is a no-op elsewhere.
+- **`internal/server/hidewindow_{windows,other}.go`** — `speexdec` is spawned with `CREATE_NO_WINDOW`. A console-less parent starting a console child gets a **new** console window for it, so without this a detached server flashes a black box on every `.spx` decode.
+- **Makefile** — `GUI_LDFLAGS`, `build-windows-gui` and the `cross` `wudictw` branch deleted.
+
+Shipped — the installer:
+
+- **`packaging/windows/wudict.iss`** — Inno Setup 6, `PrivilegesRequired=lowest` (no UAC, installs into `%LOCALAPPDATA%\Programs`), fixed `AppId` GUID, `CloseApplications=force` so an upgrade can replace a running server, and four unchecked-or-checked optional tasks: Desktop shortcut, **Start at sign-in** (a `{userstartup}` shortcut with `--no-browser`, not a `Run` key), user-`PATH` entry (added by `[Registry]`, removed surgically in `[Code]` — `uninsdeletevalue` on `Path` would delete the whole variable), and file associations.
+- **Associations** for `.mdx/.dsl/.slob/.bgl` as a ProgId joined to each extension's `OpenWithProgids`. Not the default handler: since Windows 10 only the user can set that, and writing the key anyway gets it reverted with a warning notice.
+- **`wudict <dictfile>`** — the entry point the associations point at, and the product change P84 and P85 both listed as missing. Serves the **folder** holding the file (companions only pair up through a folder scan), tested last in `Main`'s `default:` case behind a format-registry name check *and* a regular-file `stat`, so a typo is still an unknown command. Table-driven test in `internal/cli/openfile_test.go` covers `.mdd` (readable, not a dictionary), a directory named `dir.mdx`, a missing file and a bare word.
+- **`tools/version.sh`** — extracted from `make-app.sh`; both packagers now read the name and version from `wudict --version`, so they exist once, in `internal/cli`.
+- **`tools/make-installer.sh` + `make win-installer`** — finds `iscc` on `PATH` or in either standard install location, and says how to get it where it is absent.
+- **`packaging/windows/wudict.ico`** — six sizes from the same SVG (D70), packed by `tools/make-icons.sh` with twelve lines of `python3`, since a post-Vista `.ico` entry may be a PNG verbatim. Committed.
+- **`.github/workflows/build-cgo.yml`** — a `windows-installer` job downstream of `build`, which `choco install`s Inno if the runner image ever stops shipping it; `release` waits on it too.
+- **Docs** — `pages/docs/install.md`, `pages/docs/service.md`, `README.md`.
+
+Verified on this machine: `go build ./...` clean for darwin, windows and linux; `go vet ./internal/cli/ ./internal/dict/` clean; `gofmt` clean; the new `TestOpenFileArgs` passes and `wudict nonsense` still exits 2 with *unknown command*; `make icons` regenerates a structurally valid 6-entry `.ico` (verified by unpacking the directory and checking every offset lands on a PNG signature inside the file); the workflow parses and `release.needs` is `[build, macos-app, windows-installer]`; `make check` green.
+
+**Not verified here, by design:** no Windows machine was involved. The installer has not been compiled (`iscc` is Windows-only — CI does it), no console has been released, and no `MessageBoxW` has been seen. The user's checks are: a double-clicked `wudict.exe` shows a tray icon and **no** black window; `wudict lookup x | more` from `cmd.exe` still pipes and still returns to the prompt afterwards; the installer runs without a UAC prompt; and a `.mdx` offers wuDict under "Open with".
