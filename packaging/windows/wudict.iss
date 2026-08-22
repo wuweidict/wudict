@@ -2,13 +2,15 @@
 ;
 ; SPDX-License-Identifier: GPL-3.0-or-later
 ;
-; The Windows installer (P86 / D76). Compile with Inno Setup 6:
+; The Windows installer (P86 / D76). Compiled by tools\make-installer.ps1,
+; which locates ISCC.exe and fills the defines below in from the built binary
+; (`wudict --version`), so nothing here carries a second copy of the product
+; name or the version:
 ;
-;   iscc /DSourceExe=..\..\wudict.exe /DAppName=wuDict /DAppVersion=v2.9 \
-;        /DNumVersion=2.9.0 /DOutputDir=..\..\dist packaging\windows\wudict.iss
+;   .\tools\make-installer.ps1 -Exe .\wudict.exe -OutDir .\dist
 ;
-; `make win-installer` fills those in from the built binary (tools/version.sh),
-; so nothing here carries a second copy of the product name or the version.
+; or `make win-installer`. Every define has a default, so opening this file in
+; the Inno Setup IDE and pressing Compile also works.
 ;
 ; ONE executable is installed, not two (D76). wudict.exe is a console-subsystem
 ; binary that decides at runtime whether a person or a shell started it, so the

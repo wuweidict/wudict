@@ -145,28 +145,30 @@ jobs:
           merge-multiple: true
 
       - name: Ensure Inno Setup 6
-        shell: bash
+        shell: pwsh
         run: |
-          set -eu
           # Preinstalled on the windows-2022 image, but pinning the run to that
           # promise would make an image change a release outage.
-          if [ -x "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ] || command -v iscc >/dev/null 2>&1; then
-            echo "Inno Setup already present"
-          else
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if ((Test-Path -LiteralPath $iscc) -or (Get-Command 'iscc.exe' -ErrorAction SilentlyContinue)) {
+            Write-Host "Inno Setup already present"
+          } else {
             choco install innosetup -y --no-progress
-          fi
+          }
 
       - name: Compile the installer
-        shell: bash
+        shell: pwsh
         run: |
-          set -eu
-          exe=$(ls artifacts/wudict-windows-amd64-cgo.exe 2>/dev/null || true)
-          if [ -z "$exe" ]; then
-            echo "::warning title=No installer::the windows/amd64 build did not produce a binary — skipping"
+          $exe = 'artifacts\wudict-windows-amd64-cgo.exe'
+          if (-not (Test-Path -LiteralPath $exe)) {
+            Write-Host "::warning title=No installer::the windows/amd64 build did not produce a binary — skipping"
             exit 0
-          fi
-          cp "$exe" wudict.exe
-          WIN_EXE="$PWD/wudict.exe" BUILD_DIR="$PWD/dist" sh tools/make-installer.sh
+          }
+          Copy-Item -LiteralPath $exe -Destination 'wudict.exe' -Force
+          # Process-scoped, so a runner image whose default policy tightens
+          # cannot turn "the script is right there" into a release outage.
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          .\tools\make-installer.ps1 -Exe "$PWD\wudict.exe" -OutDir "$PWD\dist"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

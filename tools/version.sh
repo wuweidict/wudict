@@ -3,18 +3,22 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Print the product identity of a built binary as shell assignments, so the
-# packagers can be derived from the binary instead of carrying a second copy
-# of the name and version that can drift from cli.ProductName / cli.Version:
+# Print the product identity of a built binary as shell assignments, so a
+# packager can be derived from the binary instead of carrying a second copy of
+# the name and version that can drift from cli.ProductName / cli.Version:
 #
 #   eval "$(sh tools/version.sh ./wudict)"
-#   WUDICT_NAME='wuDict'         # CFBundleName, Inno AppName
+#   WUDICT_NAME='wuDict'         # CFBundleName
 #   WUDICT_VERSION='v0.9-4-gabc' # what a human is shown
 #   WUDICT_NUM='0.9.0'           # what Info.plist and VERSIONINFO demand: x.y.z
 #
 # `wudict --version` prints "<ProductName> <Version>" on its first line. If the
 # binary cannot run (cross-built for another architecture) the fallbacks below
-# keep the packagers working rather than failing on a cosmetic string.
+# keep the packager working rather than failing on a cosmetic string.
+#
+# Used by tools/make-app.sh. The Windows installer asks the same binary the
+# same question from PowerShell (tools/make-installer.ps1) rather than dragging
+# a POSIX shell onto Windows to read three strings.
 set -eu
 
 bin=${1:?usage: version.sh <binary>}

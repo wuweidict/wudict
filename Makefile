@@ -140,14 +140,18 @@ mac-app-install: mac-app ## Install that .app into ~/Applications (per-user, no 
 	  echo "next: open '$(APP_DEST)/$$name'"
 
 # ---- Windows installer (D76, P86) -------------------------------------------
-# One .exe, installed per-user with no admin prompt. Needs Inno Setup 6, so it
-# runs on Windows (CI does it in build-cgo.yml); everywhere else the target
-# exists to tell you that, which is D10's point.
+# One .exe, installed per-user with no admin prompt. ISCC.exe is Windows-only,
+# so the script that drives it is PowerShell — the shell native to the only OS
+# that can run the tool, the same rule that keeps tools/make-app.sh in sh for
+# codesign and plutil. Everywhere else the target exists to say so, which is
+# D10's point. PWSH=powershell.exe falls back to Windows PowerShell 5.1.
 WIN_EXE ?= $(abspath $(BINARY)).exe
+PWSH    ?= pwsh
 
 .PHONY: win-installer
 win-installer: ## Compile the Windows per-user installer into dist/ (needs Inno Setup 6)
-	@WIN_EXE="$(WIN_EXE)" BUILD_DIR="$(BUILD_DIR)" sh tools/make-installer.sh
+	@$(PWSH) -NoProfile -ExecutionPolicy Bypass -File tools/make-installer.ps1 \
+	  -Exe "$(WIN_EXE)" -OutDir "$(BUILD_DIR)"
 
 # ---- Android (D52, D53) -----------------------------------------------------
 # The app is android/: a WebView shell around the same binary, shipped inside

@@ -85,6 +85,42 @@ them again — for the current page only, never remembered);
 ⇔ toggles a wide layout; ◐ cycles auto/light/dark
 theme. Search URLs are bookmarkable.
 
+## Run as an app (macOS)
+
+`make mac-app-install` builds **wuDict.app** and installs it into
+`~/Applications` (no sudo, no admin prompt):
+
+```sh
+make mac-app            # dist/wuDict.app — universal-ready, ad-hoc signed
+make mac-app-install    # copy it to ~/Applications (APP_DEST= to relocate)
+```
+
+The bundle is the same binary; what it changes is the launch. `LSUIElement`
+keeps it out of the Dock and it puts a **menu-bar icon** up instead — running
+state, open in browser, rescan, open the dictionary folder, quit. That icon is
+the only interface, so its log goes to `~/Library/Logs/wudict.log`. Overrides:
+`APP_ID=` (bundle identifier), `CODESIGN_ID=` (a Developer ID instead of the
+ad-hoc signature), `MACOS_MIN=`.
+
+## Run as an app (Windows)
+
+There is **one** `wudict.exe`. From `cmd` or PowerShell it is an ordinary
+command-line program — it prints, pipes and returns an exit code. Double-clicked,
+started from a shortcut, or used to open a dictionary file, it releases the
+console window Windows handed it and shows a **tray icon** instead, logging to
+`%LOCALAPPDATA%\wudict\wudict.log`.
+
+`make win-installer` compiles the per-user installer (needs
+[Inno Setup 6](https://jrsoftware.org/isinfo.php); CI builds it for every
+release). It never asks for an administrator password and offers a desktop
+shortcut, *start at sign-in*, a `PATH` entry, and **Open with → wuDict** for
+`.mdx`, `.dsl`, `.slob` and `.bgl`.
+
+Opening a dictionary file — from the installer's association or by hand as
+`wudict path\to\some.mdx` — serves the **folder** that file lives in and opens
+the browser there. Dictionaries travel with companion files, so a folder is the
+smallest thing that can be opened whole.
+
 ## Run as a service (macOS)
 
 `wudict` can be installed as a `launchctl` LaunchAgent using Makefile targets:
