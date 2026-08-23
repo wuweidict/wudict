@@ -116,7 +116,7 @@ WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes
 OutputDir={#OutputDir}
-OutputBaseFilename={#AppName}-{#NumVersion}-Windows-x64-setup
+OutputBaseFilename=wudict-Windows-x64-setup-{#NumVersion}
 LicenseFile=..\..\LICENSE
 
 [Languages]
