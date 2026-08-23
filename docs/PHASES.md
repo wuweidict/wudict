@@ -448,7 +448,7 @@ Shipped — the one-`.exe` half:
 
 Shipped — the installer:
 
-- **`packaging/windows/wudict.iss`** — Inno Setup 6, `PrivilegesRequired=lowest` (no UAC, installs into `%LOCALAPPDATA%\Programs`), fixed `AppId` GUID, `CloseApplications=force` so an upgrade can replace a running server, and four unchecked-or-checked optional tasks: Desktop shortcut, **Start at sign-in** (a `{userstartup}` shortcut with `--no-browser`, not a `Run` key), user-`PATH` entry (added by `[Registry]`, removed surgically in `[Code]` — `uninsdeletevalue` on `Path` would delete the whole variable), and file associations.
+- **`packaging/windows/wudict.iss`** — Inno Setup 6, `PrivilegesRequired=lowest` (no UAC, installs into `%LOCALAPPDATA%\Programs`; **P86b below makes this a choice, all-users first**), fixed `AppId` GUID, `CloseApplications=force` so an upgrade can replace a running server, and four unchecked-or-checked optional tasks: Desktop shortcut, **Start at sign-in** (a `{userstartup}` shortcut with `--no-browser`, not a `Run` key), user-`PATH` entry (added by `[Registry]`, removed surgically in `[Code]` — `uninsdeletevalue` on `Path` would delete the whole variable), and file associations.
 - **Associations** for `.mdx/.dsl/.slob/.bgl` as a ProgId joined to each extension's `OpenWithProgids`. Not the default handler: since Windows 10 only the user can set that, and writing the key anyway gets it reverted with a warning notice.
 - **`wudict <dictfile>`** — the entry point the associations point at, and the product change P84 and P85 both listed as missing. Serves the **folder** holding the file (companions only pair up through a folder scan), tested last in `Main`'s `default:` case behind a format-registry name check *and* a regular-file `stat`, so a typo is still an unknown command. Table-driven test in `internal/cli/openfile_test.go` covers `.mdd` (readable, not a dictionary), a directory named `dir.mdx`, a missing file and a bare word.
 - **`tools/version.sh`** — extracted from `make-app.sh`; the packagers read the name and version from `wudict --version`, so they exist once, in `internal/cli`. The Windows side restates the four-line *parse* in PowerShell rather than shelling out to `sh` for it: a copy of the parse is cheap, a bash dependency on Windows is not.
@@ -485,10 +485,21 @@ Knock-on changes, all of them forced by the new mode rather than chosen:
 - `{userstartup}` → `{autostartup}` — the old constant is the *elevating* account's profile in an admin install, which need not be the installer's.
 - PATH split into two `[Registry]` entries with complementary `Check`s, because the machine variable is a different key and not merely a different root; `[Code]` helpers now take root + key. Uninstall removes `{app}` from **both** variables and never asks which mode it was — fewer states, not more.
 - Associations `HKCU` → `HKA`.
-- `ArchitecturesInstallIn64BitMode=x64compatible`, or `HKLM\Software\Classes` writes land in `Wow6432Node` where Explorer cannot see them and `{autopf}` becomes `Program Files (x86)`. That identifier is Inno 6.3, so `make-installer.ps1`'s floor moved 6 → 6.3.
+- `ArchitecturesAllowed` and `ArchitecturesInstallIn64BitMode`, both `x64compatible`, as `Examples\64Bit.iss` sets them for a single x64 payload. Without the second, `HKLM\Software\Classes` writes land in `Wow6432Node` where Explorer cannot see them and `{autopf}` becomes `Program Files (x86)`. That identifier is Inno 6.3, so `make-installer.ps1`'s floor moved 6 → 6.3.
 - `UsedUserAreasWarning=no`, because a compile-time warning cannot see the `Check` that makes the one HKCU entry correct.
 - `[Run]` unchanged: `postinstall` already implies `runasoriginaluser`, so the server still starts as the installing user.
 
 Verified on the Windows box (Inno Setup 6.7.1): compiles with **zero warnings** to `dist\wudict-setup-0.9.3.exe`. **Not verified, deliberately:** running it. An all-users install writes to `Program Files`, the machine PATH and HKLM on a real machine — that is the user's to run. Worth watching on the first run: the mode page appears with "Install for all users" selected, an all-users install prompts once for UAC and lands in `C:\Program Files\wuDict`, a per-user install prompts not at all, and `where wudict` resolves after a new shell in both.
+
+Then the script was read end to end against `jrsoftware/issrc` — `Examples/`, `Files/Default.isl` — which is what turned up the rest:
+
+- **`ChangesAssociations=yes` was missing**, and `[Code]` hand-imported `SHChangeNotify` from `shell32.dll` (twice, `setuponly` and `uninstallonly`) to do the directive's job at the two moments the directive already covers. Import, both declarations and `CurStepChanged` deleted; one line replaces them.
+- **The PATH `Check`s were wrapper functions**, written as if `Check` took a single name. It takes boolean expressions, and `Example3.iss` writes `Check: IsAdminInstallMode` / `not IsAdminInstallMode` inline; the wrappers are gone and the duplicated sentinel search collapsed into one `PathIndex`.
+- **`AllowNoIcons=yes` was dead** — its checkbox lives on the Start Menu Folder page, which `DisableProgramGroupPage=yes` suppresses two lines below.
+- **Not adopted:** `WizardStyle=modern dynamic`, which every current example uses. `dynamic` is 6.6 (2025-11-11); the 6.3 floor is there for correctness and is not worth moving for the wizard's colours.
+
+The install-mode page itself needs no `[CustomMessages]`: `Default.isl` already carries `PrivilegesRequiredOverrideText1`, `…AllUsersRecommended` and `…CurrentUser`, and `PrivilegesRequired=admin` is what makes the all-users button the recommended one.
+
+Net: 263 → 260 lines (bytes up, 12657 → 13081 — comment density), two fewer `[Code]` routines and both `shell32.dll` declarations gone.
 
 Docs updated: `README.md`, `pages/docs/install.md`.
