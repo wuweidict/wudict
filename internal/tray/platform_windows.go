@@ -7,7 +7,6 @@
 package tray
 
 import (
-	"fmt"
 	"syscall"
 	"unsafe"
 )
@@ -84,18 +83,23 @@ func DetachConsole() {
 	_, _, _ = procFreeConsole.Call()
 }
 
-// notify is the last resort for a GUI launch whose tray failed: no console (we
-// just closed it), no Dock icon, no menu bar — a message box is the only thing
-// left that a user will actually see. Modal, so the caller runs it detached.
-func notify(cfg Config, why string) {
-	text, err := syscall.UTF16PtrFromString(fmt.Sprintf(
-		"%s is running at %s, but could not show an icon in the notification area (%s).\n\n"+
-			"Use the browser tab. To stop it, end wudict.exe in Task Manager.",
-		cfg.name(), cfg.URL, why))
+// Alert shows a modal message box. It is the last channel a GUI launch has:
+// the console was closed by DetachConsole, stderr goes nowhere, and the log
+// file is not something anyone is watching. Modal, so callers who must keep
+// running start it detached.
+func Alert(title, body string) {
+	// A modal box on the session 0 desktop is one nobody can see and nobody
+	// can dismiss, and MessageBoxW does not return until it is — so a service
+	// or a "run whether the user is logged on or not" task would hang here
+	// forever instead of exiting with its error. Say nothing rather than that.
+	if sessionZero() {
+		return
+	}
+	text, err := syscall.UTF16PtrFromString(body)
 	if err != nil {
 		return
 	}
-	caption, err := syscall.UTF16PtrFromString(cfg.name())
+	caption, err := syscall.UTF16PtrFromString(title)
 	if err != nil {
 		return
 	}
@@ -104,3 +108,6 @@ func notify(cfg Config, why string) {
 		uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(caption)),
 		uintptr(mbIconWarning|mbSetForeground|mbTopMost))
 }
+
+// stopHint completes "To stop it, ..." for this platform.
+const stopHint = "end wudict.exe in Task Manager"

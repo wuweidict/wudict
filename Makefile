@@ -144,14 +144,22 @@ mac-app-install: mac-app ## Install that .app into ~/Applications (per-user, no 
 # so the script that drives it is PowerShell — the shell native to the only OS
 # that can run the tool, the same rule that keeps tools/make-app.sh in sh for
 # codesign and plutil. Everywhere else the target exists to say so, which is
-# D10's point. PWSH=powershell.exe falls back to Windows PowerShell 5.1.
-WIN_EXE ?= $(abspath $(BINARY)).exe
-PWSH    ?= pwsh
+# D10's point.
+#
+# This target passes NO paths. It is the one recipe in this file that may run
+# under a make whose shell is cmd.exe, and $(abspath) there yields whatever
+# path flavour that make believes in — C:/... from GnuWin32 make, /c/... from
+# an MSYS one, and PowerShell can resolve only the first. The script derives
+# every path from its own location instead, which is native by construction.
+# Pass overrides through ARGS: make win-installer ARGS="-Exe C:\src\wudict.exe"
+#
+# powershell.exe (Windows PowerShell 5.1) is on every Windows; pwsh is an
+# optional install, so it is not the default. PWSH=pwsh works if you have it.
+PWSH ?= powershell
 
 .PHONY: win-installer
 win-installer: ## Compile the Windows per-user installer into dist/ (needs Inno Setup 6)
-	@$(PWSH) -NoProfile -ExecutionPolicy Bypass -File tools/make-installer.ps1 \
-	  -Exe "$(WIN_EXE)" -OutDir "$(BUILD_DIR)"
+	@$(PWSH) -NoProfile -ExecutionPolicy Bypass -File tools/make-installer.ps1 $(ARGS)
 
 # ---- Android (D52, D53) -----------------------------------------------------
 # The app is android/: a WebView shell around the same binary, shipped inside

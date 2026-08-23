@@ -72,6 +72,9 @@ func GUILaunched() bool { return false }
 // in the executable header rather than by how the process was started.
 func DetachConsole() {}
 
-// notify has nothing to do here: GUILaunched is always false on Linux, so a
+// Alert has nothing to do here: GUILaunched is always false on Linux, so a
 // degraded tray always has a terminal, a pipe or a journal behind it.
-func notify(Config, string) {}
+func Alert(string, string) {}
+
+// stopHint completes "To stop it, ..." for this platform.
+const stopHint = "press Ctrl-C in its terminal"

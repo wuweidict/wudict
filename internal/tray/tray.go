@@ -197,6 +197,17 @@ func (cfg Config) items(quit func()) []Item {
 	return items
 }
 
+// notify composes the one message a GUI launch gets when the tray fails, and
+// hands it to the platform's dialog. The wording lives here rather than in the
+// platform files so those carry only the transport and the single clause that
+// genuinely differs between them: how you stop a process on that OS.
+func notify(cfg Config, why string) {
+	Alert(cfg.name(), fmt.Sprintf(
+		"%s is running at %s, but could not show an icon (%s).\n\n"+
+			"Use the browser tab. To stop it, %s.",
+		cfg.name(), cfg.URL, why, stopHint))
+}
+
 // platform is the OS-facing half, behind an interface so machine T is testable
 // without a desktop.
 type platform interface {

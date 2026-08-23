@@ -12,7 +12,7 @@
          only, where the toolbar is a row of verbs among other apps' verbs
          ("Read aloud", "Translate") and a product name would read as the odd
          one out. The share sheet keeps app_name. -->
-     <string name="lookup_label">wuDict search</string>
+     <string name="lookup_label">wuDict</string>
      <string name="lookup_starting">Looking up “%1$s”…</string>
      <string name="lookup_empty">Nothing to look up</string>
      <string name="lookup_open_app">Open in wuDict</string>

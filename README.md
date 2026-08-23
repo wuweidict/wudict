@@ -110,16 +110,15 @@ started from a shortcut, or used to open a dictionary file, it releases the
 console window Windows handed it and shows a **tray icon** instead, logging to
 `%LOCALAPPDATA%\wudict\wudict.log`.
 
-`make win-installer` compiles the per-user installer (needs
-[Inno Setup 6](https://jrsoftware.org/isinfo.php); CI builds it for every
-release). It never asks for an administrator password and offers a desktop
-shortcut, *start at sign-in*, a `PATH` entry, and **Open with → wuDict** for
-`.mdx`, `.dsl`, `.slob` and `.bgl`.
+`make win-installer` compiles the installer (needs
+[Inno Setup 6.3+](https://jrsoftware.org/isinfo.php); CI builds it for every
+release). The wudict setup wizard has options to add a desktop shortcut,
+*start at sign-in*, add to `PATH`, and **Open with → wuDict** for `.mdx`,
+`.dsl`, `.slob` and `.bgl`.
 
 Opening a dictionary file — from the installer's association or by hand as
-`wudict path\to\some.mdx` — serves the **folder** that file lives in and opens
-the browser there. Dictionaries travel with companion files, so a folder is the
-smallest thing that can be opened whole.
+`wudict path\to\some.mdx` — serves the **parent folder** and opens
+the browser there.
 
 ## Run as a service (macOS)
 
@@ -153,7 +152,7 @@ make linux-uninstall
 
 The ststemd unit expects the executable to be at `/usr/local/bin/wudict`.
 
-To keep  the service running when you are not logged in:
+To keep the service running when you are not logged in:
 
 ```sh
 sudo loginctl enable-linger "$(id -un)"

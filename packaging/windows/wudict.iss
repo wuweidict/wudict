@@ -46,14 +46,37 @@ AppPublisherURL=https://github.com/legbehindneck/wudict
 AppSupportURL=https://github.com/legbehindneck/wudict/issues
 AppUpdatesURL=https://github.com/legbehindneck/wudict/releases
 
-; Per-user, always. PrivilegesRequired=lowest means no UAC prompt, which is the
-; difference between "double-click and it works" and "ask your administrator";
-; with it, {autopf} resolves to %LOCALAPPDATA%\Programs, the location Microsoft
-; documents for user-scoped applications. Nothing outside the user's own hive
-; and profile is touched, so no architecture directives are needed either — the
-; installer never sees Program Files or the WOW64 registry split.
-PrivilegesRequired=lowest
+; Both install modes, all users first. PrivilegesRequired is where the mode
+; dialog starts, so admin here makes "Install for all users" the preselected
+; answer and leaves "Install for me only" one click away — and that second mode
+; still asks for no administrator password and still puts everything in the
+; user's own profile, exactly as this installer did before. Allowing the dialog
+; also allows /ALLUSERS and /CURRENTUSER for scripted installs, and
+; UsePreviousPrivileges (yes by default) makes an upgrade reuse whichever mode
+; the first install chose instead of asking again.
+;
+; Almost nothing below names a mode: {autopf} is Program Files or
+; %LOCALAPPDATA%\Programs, {group} and {autodesktop} are the All Users ones or
+; the user's own, HKA is HKLM or HKCU. The single genuine exception is PATH,
+; which is not merely a different root but a different key in the two hives —
+; hence the two [Registry] lines with complementary Checks.
+PrivilegesRequired=admin
+PrivilegesRequiredOverridesAllowed=dialog
 DefaultDirName={autopf}\{#AppName}
+
+; 64-bit install mode, which only starts to matter now that HKLM is reachable:
+; in the default 32-bit mode every HKLM\Software\Classes write below would be
+; redirected into Wow6432Node where 64-bit Explorer cannot see it, and {autopf}
+; would resolve to "Program Files (x86)" for an x64 binary. x64compatible also
+; covers Arm64 Windows 11, which runs x64 under emulation. The identifier was
+; introduced in Inno Setup 6.3; tools\make-installer.ps1 refuses older ones.
+ArchitecturesInstallIn64BitMode=x64compatible
+
+; The HKCU PATH entry below is a "user area", which the compiler warns about in
+; an administrative-mode script because it usually is a mistake. This one is
+; not: it is guarded by a Check that fires only in the mode where HKCU is the
+; right hive. A compile-time warning cannot see a Check, so it is turned off.
+UsedUserAreasWarning=no
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 DisableProgramGroupPage=yes
@@ -66,8 +89,8 @@ DisableProgramGroupPage=yes
 CloseApplications=force
 RestartApplications=no
 
-; The PATH entry below writes to HKCU\Environment; this broadcasts the change
-; so already-open Explorer-launched shells pick it up.
+; The PATH entries below write to the machine or the user environment; this
+; broadcasts the change so already-open Explorer-launched shells pick it up.
 ChangesEnvironment=yes
 
 SetupIconFile=wudict.ico
@@ -84,7 +107,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon";  Description: "Create a &desktop shortcut"; Flags: unchecked
-Name: "startup";      Description: "Start {#AppName} when I sign in"; Flags: unchecked
+Name: "startup";      Description: "Start {#AppName} at sign-in"; Flags: unchecked
 Name: "addtopath";    Description: "Add {#AppName} to my &PATH (so `wudict` works in a terminal)"
 Name: "associate";    Description: "Offer {#AppName} in ""Open with"" for dictionary files"
 
@@ -96,44 +119,63 @@ Source: "wudict.ico";   DestDir: "{app}"; Flags: ignoreversion
 Name: "{group}\{#AppName}";       Filename: "{app}\wudict.exe"; IconFilename: "{app}\wudict.ico"; Comment: "Serve your dictionaries in the browser"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\wudict.exe"; IconFilename: "{app}\wudict.ico"; Tasks: desktopicon
 ; A Startup-folder shortcut rather than a Run registry key: it is the one place
-; a user can find and delete an autostart entry without a tool. --no-browser
-; because a tab that opens itself at every sign-in is a nuisance; the tray icon
-; is the liveness indicator there (D74).
-Name: "{userstartup}\{#AppName}"; Filename: "{app}\wudict.exe"; Parameters: "--no-browser"; IconFilename: "{app}\wudict.ico"; Tasks: startup
+; a user can find and delete an autostart entry without a tool. {autostartup},
+; so an all-users install starts it for whoever signs in and a per-user install
+; only for that one user. Never {userstartup}: in an elevated install that is
+; the profile of whoever's administrator credentials the UAC prompt collected,
+; which may not be the person installing. --no-browser because a tab that opens
+; itself at every sign-in is a nuisance; the tray icon is the liveness
+; indicator there (D74).
+Name: "{autostartup}\{#AppName}"; Filename: "{app}\wudict.exe"; Parameters: "--no-browser"; IconFilename: "{app}\wudict.ico"; Tasks: startup
 
 [Registry]
-; PATH. preservestringtype keeps an existing REG_SZ from being widened, and
-; uninsdeletevalue is deliberately NOT used: it would delete the whole Path.
-; Removal is surgical, in CurUninstallStepChanged below.
+; PATH. Which variable this is depends on the install mode, and the two do not
+; share a key, so HKA cannot express it — two entries with complementary Checks
+; do. The machine one lives outside HKLM\Software and is therefore never
+; WOW64-redirected. preservestringtype keeps an existing REG_SZ from being
+; widened, and uninsdeletevalue is deliberately NOT used: it would delete the
+; whole Path. Removal is surgical, in CurUninstallStepChanged below.
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
+    ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
+    Flags: preservestringtype; Tasks: addtopath; Check: NeedsAddMachinePath
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
     ValueData: "{olddata};{app}"; Flags: preservestringtype; \
-    Tasks: addtopath; Check: NeedsAddPath('{app}')
+    Tasks: addtopath; Check: NeedsAddUserPath
 
-; File types. This registers a ProgId and adds it to each extension's
-; OpenWithProgids list — it does NOT seize the default handler. That is not
+; File types, under HKA — HKLM for an all-users install so every account sees
+; the entry, HKCU otherwise. Explorer merges the two into HKCR either way.
+; This registers a ProgId and adds it to each extension's OpenWithProgids list — it does NOT seize the default handler. That is not
 ; politeness: since Windows 10 the default association can only be changed by
 ; the user in Settings, and an installer that writes the key anyway gets its
 ; choice reverted and the user shown a "an app caused a problem" notice.
 ; Appearing in "Open with" is the whole of what an installer is allowed to do.
-Root: HKCU; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; \
+Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; \
     ValueData: "Dictionary"; Flags: uninsdeletekey; Tasks: associate
-Root: HKCU; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; \
+Root: HKA; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; \
     ValueData: "{app}\wudict.ico,0"; Tasks: associate
-Root: HKCU; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; \
+Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; \
     ValueData: """{app}\wudict.exe"" ""%1"""; Tasks: associate
 
-Root: HKCU; Subkey: "Software\Classes\.mdx\OpenWithProgids";  ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
-Root: HKCU; Subkey: "Software\Classes\.dsl\OpenWithProgids";  ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
-Root: HKCU; Subkey: "Software\Classes\.slob\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
-Root: HKCU; Subkey: "Software\Classes\.bgl\OpenWithProgids";  ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\.mdx\OpenWithProgids";  ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\.dsl\OpenWithProgids";  ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\.slob\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\.bgl\OpenWithProgids";  ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
 
 [Run]
+; postinstall implies runasoriginaluser, which is load-bearing once this can be
+; an elevated install: the server must come up as the person who installed it,
+; not as the administrator whose credentials the UAC prompt took, or it would
+; read that account's dictionaries and write that account's config.
 Filename: "{app}\wudict.exe"; Description: "Start {#AppName} now"; Flags: nowait postinstall skipifsilent
 
 [Code]
 const
   SHCNE_ASSOCCHANGED = $08000000;
   SHCNF_IDLIST       = $00000000;
+  // The two PATH variables. The machine one is deliberately not under
+  // HKLM\Software, so no WOW64 view question arises for it.
+  MachinePathKey = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
+  UserPathKey    = 'Environment';
 
 // Declared twice on purpose: Inno's Pascal Script keeps separate import tables
 // for the installer and the uninstaller, and an import without setuponly /
@@ -144,14 +186,13 @@ procedure SHChangeNotifyUninst(wEventId: Integer; uFlags: Cardinal; dwItem1, dwI
   external 'SHChangeNotify@shell32.dll stdcall uninstallonly';
 
 // True when Dir is not already one of the semicolon-separated entries of the
-// user's Path. Compared with sentinels on both ends so "C:\wu" never matches
-// inside "C:\wudict".
-function NeedsAddPath(Param: string): Boolean;
+// PATH held at Root\Key. Compared with sentinels on both ends so "C:\wu" never
+// matches inside "C:\wudict".
+function NeedsAdd(Root: Integer; const Key, Dir: string): Boolean;
 var
-  Existing, Dir: string;
+  Existing: string;
 begin
-  Dir := ExpandConstant(Param);
-  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Existing) then
+  if not RegQueryStringValue(Root, Key, 'Path', Existing) then
   begin
     Result := True;
     Exit;
@@ -159,12 +200,26 @@ begin
   Result := Pos(';' + Uppercase(Dir) + ';', ';' + Uppercase(Existing) + ';') = 0;
 end;
 
-procedure RemoveFromPath(const Dir: string);
+// The two Checks behind the [Registry] PATH entries. Exactly one can be true,
+// so the task adds {app} to one variable and never to both.
+function NeedsAddMachinePath: Boolean;
+begin
+  Result := IsAdminInstallMode and
+            NeedsAdd(HKEY_LOCAL_MACHINE, MachinePathKey, ExpandConstant('{app}'));
+end;
+
+function NeedsAddUserPath: Boolean;
+begin
+  Result := (not IsAdminInstallMode) and
+            NeedsAdd(HKEY_CURRENT_USER, UserPathKey, ExpandConstant('{app}'));
+end;
+
+procedure RemoveFrom(Root: Integer; const Key, Dir: string);
 var
   Existing: string;
   P: Integer;
 begin
-  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Existing) then
+  if not RegQueryStringValue(Root, Key, 'Path', Existing) then
     Exit;
   // Search the sentinel-wrapped copy, then index the original: the wrapper is
   // one character longer at the front, so a hit at P in the wrapper is the
@@ -178,9 +233,9 @@ begin
   while (Length(Existing) > 0) and (Existing[1] = ';') do
     Delete(Existing, 1, 1);
   if Length(Existing) = 0 then
-    RegDeleteValue(HKEY_CURRENT_USER, 'Environment', 'Path')
+    RegDeleteValue(Root, Key, 'Path')
   else
-    RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Existing);
+    RegWriteExpandStringValue(Root, Key, 'Path', Existing);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -190,10 +245,19 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Dir: string;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    RemoveFromPath(ExpandConstant('{app}'));
+    // Both hives, without asking which mode this was. {app} names this one
+    // installation, so removing it wherever it appears is correct, idempotent,
+    // and also tidies up after someone who installed one way and then the
+    // other. An unelevated uninstaller simply fails the machine write, which
+    // is precisely the case where there is nothing there to remove.
+    Dir := ExpandConstant('{app}');
+    RemoveFrom(HKEY_LOCAL_MACHINE, MachinePathKey, Dir);
+    RemoveFrom(HKEY_CURRENT_USER, UserPathKey, Dir);
     SHChangeNotifyUninst(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, 0, 0);
   end;
 end;

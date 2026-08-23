@@ -48,18 +48,18 @@ func GUILaunched() bool {
 // in the executable header rather than by how the process was started.
 func DetachConsole() {}
 
-// notify is the last resort for a bundle launch whose tray failed. LSUIElement
-// means there is no Dock icon either, so nothing on screen would say the
-// server is up. The dialog belongs to osascript, not to us, which is why it
-// appears at all from a process macOS treats as an accessory.
-func notify(cfg Config, why string) {
-	msg := fmt.Sprintf("%s is running at %s, but could not show a menu-bar icon (%s).\n\n"+
-		"Use the browser tab. To stop it, quit \"wudict\" from Activity Monitor.",
-		cfg.name(), cfg.URL, why)
+// Alert shows a modal dialog. It is the last channel a GUI launch has:
+// LSUIElement means there is no Dock icon either, so nothing else on screen
+// would say anything at all. The dialog belongs to osascript, not to us, which
+// is why it appears from a process macOS treats as an accessory.
+func Alert(title, body string) {
 	script := fmt.Sprintf("display alert %s message %s as warning",
-		appleQuote(cfg.name()), appleQuote(msg))
+		appleQuote(title), appleQuote(body))
 	_ = exec.Command("osascript", "-e", script).Run()
 }
+
+// stopHint completes "To stop it, ..." for this platform.
+const stopHint = `quit "wudict" from Activity Monitor`
 
 // appleQuote renders s as an AppleScript string literal. Three characters can
 // end or corrupt one — the escape, the quote, and a raw newline, which

@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/logx"
 	"github.com/wuweidict/wudict/internal/server"
 )
 
@@ -90,7 +90,10 @@ func sameFolders(want []string, inst *runningInstance) bool {
 // with older settings — is about to appear in their browser. Anything quieter
 // would leave them debugging why their new --dict-dir had no effect.
 func announceRunning(inst *runningInstance, url string, wantDirs []string, willOpen bool) {
-	out := os.Stderr
+	// logx.Output(), not os.Stderr: a GUI launch has already given its console
+	// back, and this banner is the only record of why that launch did nothing.
+	// It matches printStartup, which formats its own block the same way.
+	out := logx.Output()
 	const bar = "========================================================================"
 	fmt.Fprintf(out, "\n%s\n", bar)
 	fmt.Fprintf(out, "  wudict IS ALREADY RUNNING  --  this launch is doing nothing\n")

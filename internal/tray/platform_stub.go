@@ -24,7 +24,10 @@ func (stubPlatform) Start(Config, []Item) error { return errNoTray }
 func (stubPlatform) Run() error                 { return errNoTray }
 func (stubPlatform) Stop()                      {}
 
-// DetachConsole and notify exist so every platform file answers the same four
+// DetachConsole and Alert exist so every platform file answers the same four
 // questions. On a platform with no tray at all there is nothing to answer.
-func DetachConsole()        {}
-func notify(Config, string) {}
+func DetachConsole()       {}
+func Alert(string, string) {}
+
+// stopHint completes "To stop it, ..." for this platform.
+const stopHint = "press Ctrl-C in its terminal"

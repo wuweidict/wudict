@@ -148,13 +148,12 @@ jobs:
         shell: pwsh
         run: |
           # Preinstalled on the windows-2022 image, but pinning the run to that
-          # promise would make an image change a release outage.
-          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          if ((Test-Path -LiteralPath $iscc) -or (Get-Command 'iscc.exe' -ErrorAction SilentlyContinue)) {
-            Write-Host "Inno Setup already present"
-          } else {
-            choco install innosetup -y --no-progress
-          }
+          # promise would make an image change a release outage. -Locate is the
+          # script's own compiler search, so CI carries no second copy of where
+          # Inno Setup might live.
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          $iscc = .\tools\make-installer.ps1 -Locate
+          if ($iscc) { Write-Host "Inno Setup: $iscc" } else { choco install innosetup -y --no-progress }
 
       - name: Compile the installer
         shell: pwsh
@@ -164,11 +163,14 @@ jobs:
             Write-Host "::warning title=No installer::the windows/amd64 build did not produce a binary — skipping"
             exit 0
           }
+          # wudict.exe and dist\ in the repository root are exactly what the
+          # script defaults to, so it is called with no arguments — the same
+          # invocation `make win-installer` uses, and one less thing to drift.
           Copy-Item -LiteralPath $exe -Destination 'wudict.exe' -Force
           # Process-scoped, so a runner image whose default policy tightens
           # cannot turn "the script is right there" into a release outage.
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          .\tools\make-installer.ps1 -Exe "$PWD\wudict.exe" -OutDir "$PWD\dist"
+          .\tools\make-installer.ps1
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

@@ -63,26 +63,28 @@ Every platform below starts from [the releases page](https://github.com/wuweidic
     Windows Defender may pause on the first run of an unsigned binary;
     choose **More info → Run anyway** once.
 
-    **Or use the installer.** The same release carries
-    `wudict-setup-<version>.exe`. It installs **for you only**, so it never
-    asks for an administrator password, and it offers four things you can
-    take or leave: a desktop shortcut, *start when I sign in*, adding `wudict`
-    to your `PATH`, and offering wuDict in **Open with** for `.mdx`, `.dsl`,
-    `.slob` and `.bgl` files. Uninstall from *Settings → Apps* like anything
-    else. From a clone of the source, `make win-installer` builds it (needs
-    [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
+    **Or use the installer.** The release includes
+    `wudict-setup-<version>.exe`. The setup wizard offers to install
+    **for all users** (the default, needs administrator
+    permissions), or **for current user only**, which keeps
+    everything in the user profile. Install options include: a desktop shortcut, 
+    *start at sign-in*, adding `wudict`
+    to your `PATH`, and adding wuDict in **Open with** for `.mdx`, `.dsl`,
+    `.slob` and `.bgl` files. For an unattended install, `/ALLUSERS` or `/CURRENTUSER` picks the
+    mode and skips that page. From the repository root `make win-installer`
+    builds it (needs [Inno Setup 6.3+](https://jrsoftware.org/isinfo.php)).
 
     There is **one** `wudict.exe`, and it behaves differently depending on how
-    you start it — which is the point. Run from PowerShell or `cmd`, it is an
+    you start it. When started from PowerShell or `cmd`, it behaves as an
     ordinary command-line program: it prints, it pipes, it returns an exit
-    code. Double-clicked, or started from a shortcut or by opening a
-    dictionary file, it closes the console window it was given and puts a
-    **tray icon** in the notification area instead. Its log then goes to
+    code. When double-clicked, or started from a shortcut or by opening a
+    dictionary file, it detaches from the console window and adds a
+    **tray icon** in the notification area. Its log then goes to
     `%LOCALAPPDATA%\wudict\wudict.log`.
 
 === "Linux"
 
-    One downloaded file degrades to nothing. For Debian/Ubuntu and friends:
+    For Debian/Ubuntu and the like:
 
     ``` sh title="Linux (amd64)" hl_lines="1"
     chmod +x ~/Downloads/wudict-linux-amd64-purego
@@ -100,9 +102,9 @@ Every platform below starts from [the releases page](https://github.com/wuweidic
 
 === "Android"
 
-    Grab **`wudict-android-arm64.apk`** from the releases page and
-    install it with your file manager (approve _install unknown apps_ for
-    that one source once). It is a dependency-free WebView shell with the
+    Download **`wudict-android-arm64.apk`** from the releases page and
+    install it with your file manager (approve _install unknown apps_). 
+    It is a dependency-free WebView shell with the
     server compiled in — it starts the server and shows the app in one.
 
 !!! tip "Two flavours on the releases page"
@@ -116,20 +118,19 @@ Every platform below starts from [the releases page](https://github.com/wuweidic
     | `.spx` audio  | decoded **in-process** | via external `speexdec` |
     | C toolchain   | —                      | —                       |
 
-    Take the `-cgo` build when it exists for your platform (macOS and
-    Linux have it). Take `-purego` when it does not, or when you would
-    rather keep everything pure Go — it runs the same, and still plays
-    `.spx` audio when the `speexdec` utility is installed (`brew install
+    The recommenced flavour is the `-cgo` build when it exists for your platform (macOS and
+    Linux have it). The `-purego` variant is a fallback that does not use C-compiled extensions 
+    — it offers the same functionality, but with slightly slower SQLite3 layer (purego)
+    and without the native `.spx` audio decoding,  so you'll need the external `speexdec` utility to be installed (`brew install
     speex`, `apt install speex`).
 
 ---
 
 ## Usage
 
-You have the binary. The next page takes you from **run** to _first
-dictionary found_ in under a minute:
+Once you downloaded `wudict` see:
 
-[Run it in 60 seconds](run.md){ .md-button .md-button--primary }
+[How to use](run.md){ .md-button .md-button--primary }
 
 ---
 
@@ -173,12 +174,12 @@ Debian/Ubuntu, MSYS2/MinGW on Windows).
     ```
 
     Produces the pure-Go binaries for macOS, Linux and Windows — the same
-    set the CI builds. The Android app builds with `make android-go` +
+    set the CI builds. To build Android app use `make android-go` +
     `make apk` (see the [Android guide](service.md#android-nothing-to-run)).
 
 ## What "no dependencies" means
 
 `wudict --help`, then `wudict` — and the app answers at
-[localhost:6888](http://localhost:6888). No database server to configure.
-No Node, no Python, no plugins. The only thing it asks of your machine is
+[localhost:6888](http://localhost:6888). There is no database server to configure.
+No Node, no Python, no plugins. The only thing `wudict` needs on your machine is
 a spare port and a folder to watch.

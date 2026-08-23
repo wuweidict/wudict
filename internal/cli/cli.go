@@ -302,13 +302,37 @@ ABOUT
 }
 
 // Main is the CLI entry point, called by the module-root main package.
+// guiDetached records that this process gave up its console (a double-clicked
+// wudict.exe, D76) and headlessLog where its output went instead. Set once, in
+// cmdServe, and read only by fail: after the detach, stderr is a hole in the
+// ground, so a fatal error has to be shown some other way or the user sees a
+// window flash and nothing else.
+var (
+	guiDetached bool
+	headlessLog string
+)
+
+// fail reports a fatal error and exits 1. One place, so the GUI case cannot be
+// handled on one path and forgotten on the other.
+func fail(err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "error:", err)
+	if guiDetached {
+		msg := err.Error()
+		if headlessLog != "" {
+			msg += "\n\nDetails: " + headlessLog
+		}
+		tray.Alert(ProductName, msg)
+	}
+	os.Exit(1)
+}
+
 func Main() {
 	if len(os.Args) < 2 {
 		// no arguments: start the server (documented default)
-		if err := cmdServe(nil); err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
-			os.Exit(1)
-		}
+		fail(cmdServe(nil))
 		return
 	}
 	cmd, args := os.Args[1], os.Args[2:]
@@ -355,10 +379,7 @@ func Main() {
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", cmd, usage())
 		os.Exit(2)
 	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
-	}
+	fail(err)
 }
 
 // openFileArgs turns a lone dictionary path into serve flags, or returns nil
@@ -644,7 +665,7 @@ func maybePackMedia(srcPath, dbPath, name string, full bool) error {
 	return nil
 }
 
-func cmdServe(args []string) error {
+func cmdServe(args []string) (err error) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	var dictDirs multiFlag
 	fs.Var(&dictDirs, "dict-dir", "folder with dictionaries; repeat for several (env/toml: DICT_DIR)")
@@ -719,9 +740,20 @@ func cmdServe(args []string) error {
 		// Order matters. Take the log first and give up the console second: if
 		// the log cannot be opened, keeping an ugly black window is worth more
 		// than a server that runs in total silence.
-		if f, err := openHeadlessLog(); err == nil {
+		if f, ferr := openHeadlessLog(); ferr == nil {
 			logx.SetOutput(f)
-			defer func() { logx.SetOutput(nil); f.Close() }()
+			guiDetached, headlessLog = true, f.Name()
+			// Whatever ends this run is written to the log while the file is
+			// still open — the restore below is what closes it, and Main's
+			// stderr is dead by then. The dialog Main raises says where to
+			// find this line.
+			defer func() {
+				if err != nil {
+					logx.Warn("%v", err)
+				}
+				logx.SetOutput(nil)
+				f.Close()
+			}()
 			tray.DetachConsole()
 		}
 	}
@@ -755,11 +787,14 @@ func cmdServe(args []string) error {
 	url := "http://" + cfg.Addr() + "/"
 	ln, lerr := net.Listen("tcp", cfg.Addr())
 	if lerr != nil {
-		if !strings.Contains(lerr.Error(), "address already in use") {
-			return lerr
-		}
-		// If already running then just open the browser tab instead
-		// of a port already in use error.
+		// Ask who is there rather than classify the error. The test this
+		// replaces matched the string "address already in use", which is the
+		// POSIX phrasing; Windows says "Only one usage of each socket address
+		// ... is normally permitted", so a second launch there never reached
+		// this branch — it returned a raw bind error, and after DetachConsole
+		// that error had nowhere to appear at all (D76). One HTTP probe on a
+		// path that has already failed costs less than a per-OS errno table
+		// and answers the question that actually matters.
 		if inst, ok := probeRunning(cfg.Addr()); ok {
 			announceRunning(inst, url, cfg.DictDirs, !cfg.NoBrowser)
 			if !cfg.NoBrowser {
@@ -767,9 +802,11 @@ func cmdServe(args []string) error {
 			}
 			return nil
 		}
-		return fmt.Errorf(`%s is already in use — another server (not wudict) is running.
+		return fmt.Errorf(`cannot listen on %s: %w
+Something else holds the port (it did not answer as a wudict).
 Hint: pick another port with --port, e.g.:  wudict --port %s
-      or find the process using it:        lsof -i :%s`, cfg.Addr(), nextPort(cfg.Port), cfg.Port)
+      or find what holds it:                %s`,
+			cfg.Addr(), lerr, nextPort(cfg.Port), portHolderCmd(cfg.Port))
 	}
 	defer ln.Close()
 
@@ -1017,6 +1054,16 @@ func nextPort(p string) string {
 		return strconv.Itoa(n + 1)
 	}
 	return "8809"
+}
+
+// portHolderCmd is the command that names the process holding a port on this
+// OS. Printed, not run: the hint is for a person, and running a diagnostic
+// tool on their behalf from a failed startup is not this program's business.
+func portHolderCmd(port string) string {
+	if runtime.GOOS == "windows" {
+		return "netstat -ano | findstr :" + port
+	}
+	return "lsof -i :" + port
 }
 
 func dirExists(p string) bool {
