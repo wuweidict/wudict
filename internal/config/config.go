@@ -103,7 +103,7 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
-	fileVals := r.vals
+	fileVals, fileLists := r.vals, r.lists
 	cfg.Source, cfg.Portable, cfg.Shadowed = r.path, r.portable, r.shadowed
 	cfg.Origins = map[string]string{}
 	get := func(key string) string {
@@ -122,10 +122,39 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 		cfg.Origins[key] = OriginDefault
 		return ""
 	}
-	if v := get("DICT_DIR"); v != "" {
-		if dirs := ParseList(v); len(dirs) > 0 {
-			cfg.DictDirs = dirs
+	// getList is get for a key naming several folders. The file layer is the
+	// one that can spell it as a TOML array, and that array is taken as it was
+	// parsed rather than re-serialised and split again — see resolved.lists.
+	// The other layers hand over one string, which ParseList splits as before.
+	getList := func(key string) []string {
+		if v, ok := flags[key]; ok && v != "" {
+			cfg.Origins[key] = OriginFlag
+			return ParseList(v)
 		}
+		if v := os.Getenv(key); v != "" {
+			cfg.Origins[key] = OriginEnv
+			return ParseList(v)
+		}
+		if l, ok := fileLists[key]; ok {
+			cfg.Origins[key] = OriginFile
+			return expandAll(l) // an explicit [] means "this file sets nothing"
+		}
+		if v := fileVals[key]; v != "" {
+			cfg.Origins[key] = OriginFile
+			// ONE folder, exactly as written. A file spells several folders as
+			// an array — that is what FormatList writes and what the template
+			// documents; the separator convention belongs to the environment,
+			// where it follows $PATH. Splitting here instead cut
+			// "C:\Users\me\Dicts" in half at the drive letter on any host
+			// whose separator is ':' , and cut a Unix folder whose name
+			// contains one anywhere.
+			return expandAll([]string{v})
+		}
+		cfg.Origins[key] = OriginDefault
+		return nil
+	}
+	if dirs := getList("DICT_DIR"); len(dirs) > 0 {
+		cfg.DictDirs = dirs
 	}
 	if v := get("DB_DIR"); v != "" {
 		cfg.DBDir = ExpandHome(v)
@@ -238,7 +267,15 @@ func candidates() []string {
 // exist but lost — reported so a shadowed file can be named instead of silently
 // ignored.
 type resolved struct {
-	vals     map[string]string
+	// vals holds every key as a string: a scalar fully decoded, an array as
+	// the raw TOML text it was written with (the keys still parsed from text —
+	// BROWSER_EXTENSIONS — read it, DICT_DIR does not).
+	vals map[string]string
+	// lists holds the keys written as a TOML array, already split and decoded.
+	// A list of paths must never be flattened back into one string and
+	// re-split: on Windows a path contains the characters that would be split
+	// on, and it is the round trip through text that doubled every backslash.
+	lists    map[string][]string
 	path     string
 	portable bool
 	shadowed []string
@@ -253,9 +290,10 @@ func loadFile(explicit string) (resolved, error) {
 		if err != nil {
 			return resolved{}, fmt.Errorf("config %s: %w", explicit, err)
 		}
-		return resolved{vals: parseTOML(string(data)), path: explicit}, nil
+		vals, lists := parseTOML(string(data))
+		return resolved{vals: vals, lists: lists, path: explicit}, nil
 	}
-	r := resolved{vals: map[string]string{}}
+	r := resolved{vals: map[string]string{}, lists: map[string][]string{}}
 	for _, p := range candidates() {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -265,7 +303,8 @@ func loadFile(explicit string) (resolved, error) {
 			r.shadowed = append(r.shadowed, p)
 			continue
 		}
-		r.vals, r.path = parseTOML(string(data)), p
+		r.vals, r.lists = parseTOML(string(data))
+		r.path = p
 	}
 	if d := exeDir(); d != "" && r.path != "" && r.path == filepath.Join(d, Name) {
 		r.portable = true
@@ -359,7 +398,35 @@ func EnsureConfigFile() (path string, created bool, err error) {
 // replacing an existing `KEY =` line (commented or not) and preserving
 // the rest of the file; the key is appended when absent.
 func SaveKey(path, key, value string) error {
-	return SaveKeyRaw(path, key, fmt.Sprintf("%q", value))
+	return SaveKeyRaw(path, key, QuoteTOML(value))
+}
+
+// QuoteTOML renders one value as TOML.
+//
+// A value containing a backslash is written as a LITERAL string ('…'), in
+// which backslashes have no meaning. That is where a Windows path belongs in a
+// TOML file: it is what someone opening wudict.toml expects to read and what
+// they would type by hand, and it takes escaping out of the round trip
+// altogether. Go's %q — a TOML basic string — would write
+// "C:\\Users\\me\\Dicts", and did.
+//
+// The literal form cannot hold a single quote (a literal string has no escapes
+// at all) or a control character (neither single-line form can), so those fall
+// back to %q, which decodeString reads back.
+func QuoteTOML(v string) string {
+	if strings.ContainsRune(v, '\\') && !strings.ContainsRune(v, '\'') && !hasControl(v) {
+		return "'" + v + "'"
+	}
+	return fmt.Sprintf("%q", v)
+}
+
+func hasControl(v string) bool {
+	for _, r := range v {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // SaveKeyRaw is SaveKey for a value that is already TOML syntax — an array
@@ -374,7 +441,22 @@ func SaveKeyRaw(path, key, raw string) error {
 	re := regexp.MustCompile(`(?m)^[ \t]*#?[ \t]*` + regexp.QuoteMeta(key) + `[ \t]*=.*$`)
 	s := string(data)
 	if loc := re.FindStringIndex(s); loc != nil {
-		s = s[:loc[0]] + line + s[loc[1]:]
+		// The pattern is line-anchored, but an array may be spread over
+		// several lines. Replacing only the first would leave its tail behind
+		// as orphan lines, so follow the value to wherever it closes.
+		end := loc[1]
+		if _, val, ok := strings.Cut(s[loc[0]:end], "="); ok {
+			_, depth := scanValue(strings.TrimSpace(val), 0)
+			for depth > 0 && end < len(s) && s[end] == '\n' {
+				stop := len(s)
+				if nl := strings.IndexByte(s[end+1:], '\n'); nl >= 0 {
+					stop = end + 1 + nl
+				}
+				_, depth = scanValue(strings.TrimSpace(s[end+1:stop]), depth)
+				end = stop
+			}
+		}
+		s = s[:loc[0]] + line + s[end:]
 	} else {
 		if s != "" && !strings.HasSuffix(s, "\n") {
 			s += "\n"
@@ -387,12 +469,137 @@ func SaveKeyRaw(path, key, raw string) error {
 	return os.WriteFile(path, []byte(s), 0o644)
 }
 
-// parseTOML handles the flat `KEY = "value"` subset used by our
-// config files (comments and bare values included).
-func parseTOML(s string) map[string]string {
-	out := map[string]string{}
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(line)
+// wudict.toml holds nothing but flat `KEY = value` lines, so this package
+// reads it itself rather than taking a TOML dependency. The one thing such a
+// reader must get right is quoting, because the character TOML gives a meaning
+// to — the backslash — is the character a Windows path is spelled with. This
+// used to strip the quotes and stop, so "C:\\Users\\me" (which is how the
+// writer, correctly, escapes C:\Users\me) was read back with both backslashes
+// still there.
+
+// scanValue returns the text of the value starting at s, with any trailing
+// comment removed, and the bracket depth left open at the end of it. Quotes
+// are tracked, so a '#' inside a string is data — a folder called "vol #2"
+// survives — and a depth above zero means an array continues on a later line.
+func scanValue(s string, depth int) (val string, newDepth int) {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\'':
+			j := strings.IndexByte(s[i+1:], '\'')
+			if j < 0 {
+				return strings.TrimRight(s, " \t"), depth // unterminated: as written
+			}
+			i += j + 1
+		case '"':
+			i++
+			for i < len(s) && s[i] != '"' {
+				if s[i] == '\\' {
+					i++
+				}
+				i++
+			}
+			if i >= len(s) {
+				return strings.TrimRight(s, " \t"), depth
+			}
+		case '[':
+			depth++
+		case ']':
+			if depth > 0 {
+				depth--
+			}
+		case '#':
+			return strings.TrimRight(s[:i], " \t"), depth
+		}
+	}
+	return strings.TrimRight(s, " \t"), depth
+}
+
+// decodeString turns one quoted TOML string into the text it denotes.
+//
+// A literal string ('…') is taken verbatim; that is the whole point of it, and
+// it is what QuoteTOML now writes for anything holding a backslash.
+//
+// In a basic string ("…") exactly two escapes are honoured, \\ and \", and
+// every other backslash is kept as written. That is deliberately not full
+// TOML. It reads back everything this package emits, since %q produces no
+// other escape for a path; and it is safe for a file edited by hand, where a
+// backslash is nearly always a Windows separator typed literally. A strict
+// reader turns "C:\temp\notes" into a tab and a newline and loses the folder,
+// which is a far worse failure than declining to interpret an escape nobody
+// meant to write.
+func decodeString(s string) string {
+	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
+		return s[1 : len(s)-1]
+	}
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return s // bare: a number, a bool, or an unquoted path
+	}
+	body := s[1 : len(s)-1]
+	if !strings.Contains(body, `\`) {
+		return body
+	}
+	var b strings.Builder
+	b.Grow(len(body))
+	for i := 0; i < len(body); i++ {
+		if body[i] == '\\' && i+1 < len(body) && (body[i+1] == '\\' || body[i+1] == '"') {
+			b.WriteByte(body[i+1])
+			i++
+			continue
+		}
+		b.WriteByte(body[i])
+	}
+	return b.String()
+}
+
+// decodeArray reads a TOML array of strings, splitting on the commas that are
+// OUTSIDE quotes so that a folder whose name contains one survives. It reports
+// false for anything that is not an array.
+func decodeArray(s string) ([]string, bool) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || s[0] != '[' || s[len(s)-1] != ']' {
+		return nil, false
+	}
+	body := s[1 : len(s)-1]
+	var out []string
+	start := 0
+	flush := func(end int) {
+		if e := strings.TrimSpace(body[start:end]); e != "" {
+			out = append(out, decodeString(e))
+		}
+	}
+	for i := 0; i < len(body); i++ {
+		switch body[i] {
+		case '\'':
+			if j := strings.IndexByte(body[i+1:], '\''); j >= 0 {
+				i += j + 1
+			}
+		case '"':
+			i++
+			for i < len(body) && body[i] != '"' {
+				if body[i] == '\\' {
+					i++
+				}
+				i++
+			}
+		case ',':
+			flush(i)
+			start = i + 1
+		}
+	}
+	flush(len(body))
+	return out, true
+}
+
+// parseTOML reads the flat `KEY = value` subset our config files use. It
+// returns scalars decoded, and separately the keys written as an array —
+// already split, so no caller has to reconstruct one from text. An array whose
+// bracket closes on a later line is gathered rather than ignored.
+func parseTOML(s string) (map[string]string, map[string][]string) {
+	vals := map[string]string{}
+	lists := map[string][]string{}
+	lines := strings.Split(s, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(strings.TrimSuffix(lines[i], "\r"))
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
 			continue
 		}
@@ -400,12 +607,31 @@ func parseTOML(s string) map[string]string {
 		if !ok {
 			continue
 		}
-		v = strings.TrimSpace(v)
-		if i := strings.Index(v, " #"); i >= 0 {
-			v = strings.TrimSpace(v[:i])
+		raw, depth := scanValue(strings.TrimSpace(v), 0)
+		for depth > 0 && i+1 < len(lines) {
+			i++
+			var next string
+			next, depth = scanValue(strings.TrimSpace(strings.TrimSuffix(lines[i], "\r")), depth)
+			raw = strings.TrimRight(raw+" "+next, " \t")
 		}
-		v = strings.Trim(v, `"'`)
-		out[strings.TrimSpace(k)] = v
+		key := strings.TrimSpace(k)
+		if l, isArray := decodeArray(raw); isArray {
+			lists[key] = l
+			vals[key] = raw // the raw array, for the keys still parsed from text
+			continue
+		}
+		vals[key] = decodeString(raw)
+	}
+	return vals, lists
+}
+
+// expandAll ~-expands folders and drops blanks, preserving order.
+func expandAll(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, ExpandHome(p))
+		}
 	}
 	return out
 }
@@ -423,21 +649,15 @@ func parseTOML(s string) map[string]string {
 // nothing but which root wins a tie — result ranking belongs to the panel).
 func ParseList(v string) []string {
 	v = strings.TrimSpace(v)
-	var parts []string
+	// An array is decoded, never split by hand: quoting and commas belong to
+	// one scanner. Everything else is a separator-joined list from a flag or
+	// the environment, where the value is a raw path and there is nothing to
+	// unquote — decoding it would eat the backslashes of C:\temp.
 	if strings.HasPrefix(v, "[") {
-		for _, raw := range strings.Split(strings.Trim(v, "[]"), ",") {
-			parts = append(parts, strings.Trim(strings.TrimSpace(raw), "\"'`"))
-		}
-	} else {
-		parts = strings.Split(v, string(os.PathListSeparator))
+		parts, _ := decodeArray(v)
+		return expandAll(parts)
 	}
-	var out []string
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, ExpandHome(p))
-		}
-	}
-	return out
+	return expandAll(strings.Split(v, string(os.PathListSeparator)))
 }
 
 // ParseOrigins reads BROWSER_EXTENSIONS: a list of browser-extension origins,
@@ -469,11 +689,11 @@ func ParseOrigins(v string) []string {
 // one folder (the common case stays readable), an array for several.
 func FormatList(dirs []string) string {
 	if len(dirs) == 1 {
-		return fmt.Sprintf("%q", dirs[0])
+		return QuoteTOML(dirs[0])
 	}
 	quoted := make([]string, len(dirs))
 	for i, d := range dirs {
-		quoted[i] = fmt.Sprintf("%q", d)
+		quoted[i] = QuoteTOML(d)
 	}
 	return "[" + strings.Join(quoted, ", ") + "]"
 }
