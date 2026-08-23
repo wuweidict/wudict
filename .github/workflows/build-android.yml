@@ -71,7 +71,7 @@ jobs:
         run: |
           VERSION="${{ inputs.tag }}"
           if [ -z "$VERSION" ]; then
-            VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
+            VERSION="$(git describe --tags --always --abbrev=0 2>/dev/null || echo dev)"
           fi
 
           # versionCode is the commit count
