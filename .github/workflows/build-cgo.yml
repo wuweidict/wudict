@@ -48,6 +48,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Tags, not just the tip commit. checkout's default fetch-depth of 1
+          # fetches NO tags, so the `git describe` below found nothing, VERSION
+          # fell back to "dev", and every downstream artifact that derives its
+          # version from the binary was stamped 0.0.0 — most visibly
+          # wudict-setup-0.0.0.exe. The release job already does this.
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -64,7 +71,16 @@ jobs:
         run: |
           BINARY="wudict-${{ matrix.goos }}-${{ matrix.goarch }}-cgo${{ matrix.ext }}"
           VERSION="${{ inputs.tag }}"
-          [ -z "$VERSION" ] && VERSION="$(git describe --abbrev=0 2>/dev/null || echo dev)"
+          # --tags so lightweight tags count too; --abbrev=0 yields the bare tag
+          # (v3.0) rather than v3.0-4-gdeadbee, which the installer's numeric
+          # VersionInfoVersion needs.
+          [ -z "$VERSION" ] && VERSION="$(git describe --tags --abbrev=0 2>/dev/null || echo dev)"
+          # Fail loudly instead of silently shipping 0.0.0 artifacts.
+          case "$VERSION" in
+            v[0-9]*|[0-9]*) : ;;
+            *) echo "::warning title=Unversioned build::no usable tag found — stamping '$VERSION'; installers will be named 0.0.0" ;;
+          esac
+          echo "version: $VERSION"
           go build -trimpath -tags sqlite_fts5 \
             -ldflags="-s -w -X github.com/wuweidict/wudict/internal/cli.Version=${VERSION}" \
             -o "${BINARY}" .

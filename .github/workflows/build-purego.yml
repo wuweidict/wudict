@@ -39,6 +39,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # checkout's default fetch-depth of 1 fetches no tags, so the
+          # `git describe` below would fall through to a bare commit SHA.
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v6
