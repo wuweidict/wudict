@@ -60,7 +60,7 @@ AppUpdatesURL=https://github.com/legbehindneck/wudict/releases
 ; the user's own, HKA is HKLM or HKCU. The single genuine exception is PATH,
 ; which is not merely a different root but a different key in the two hives —
 ; hence the two [Registry] lines with complementary Checks.
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 DefaultDirName={autopf}\{#AppName}
 
@@ -116,7 +116,7 @@ WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes
 OutputDir={#OutputDir}
-OutputBaseFilename=wudict-setup-{#NumVersion}
+OutputBaseFilename={#AppName}-{#NumVersion}-Windows-x64-setup
 LicenseFile=..\..\LICENSE
 
 [Languages]
