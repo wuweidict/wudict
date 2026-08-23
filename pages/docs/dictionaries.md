@@ -18,8 +18,8 @@ tags:
 | **Babylon**    | `.bgl`                              | gzip block stream; source/target charsets auto-detected; resources inside; prepared automatically on first open |
 | **WuWeiDict**  | wudict SQLite db (`text.db`)        | the app's own portable library — see below                                                                      |
 
-Source folders are **never modified**: the app reads them as needed, and
-generates optimized internal SQLite db file to speed up search and enable fuzzy searching (with/without accented characters, etc).
+Source dictionary files are **never modified**: the app reads them as needed, and
+generates optimized internal SQLite3 db file to speed up search and enable fuzzy searching (with/without accented characters, etc).
 
 ## Preview now, prepared quietly
 
@@ -31,8 +31,8 @@ background — a couple of megabytes — so accent-insensitive matching
 (`AUTO_INDEX=off`) and the dictionary still works, you simply lose the fuzzy search benefits.
 
 The two deeper search modes — **contains** and **full-text** — are
-per-dictionary switches in the ☰ panel, each will take extra megabytes
-if enable, so you can enable it on a per-dictionary basis.
+optional per-dictionary switches available in the ☰ panel, each will take more disk space
+if enabled, so you can enable it only for the dictionaries where you need these features.
 
 ## Internal WuWeiDict SQLite3 format
 
@@ -56,8 +56,8 @@ to the source file _if_ one is present.
 
 ## Replacing a dictionary's broken files (`res/`)
 
-Dictionaries carry their own stylesheets, scripts and audio, and wudict lets you override an existing file or replace a missing one
-by placing files in the dictionary's `res/`:
+Dictionaries carry their own stylesheets, scripts and audio, and wudict lets you override any existing file or replace a missing one
+by placing files in the dictionary's `res/` subfolder:
 
 ``` text
 ~/.wudict/db/Cambridge English Dictionary Online/

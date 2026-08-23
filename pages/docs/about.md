@@ -6,11 +6,9 @@ description: Why WuWeiDict exists — wu wei, effortless action, and the belief 
 # The idea
 
 Your tools should be as fast as your thought. They should just work, not get in the way, and be almost unnoticeable.
-And this is the challenge that WuWeiDict take on. You want to look up a word, and the answer is
-right there.
+And this is the challenge that WuWeiDict takes on. You want to look up a word, and the answer is right there.
 
-Results appear as soon as any dictionary has a hit, and more results appear
-as more hits are collected.
+Results appear as soon as any dictionary has a hit, and more results show up as more hits are collected.
 
 ## Your data is fully private
 
