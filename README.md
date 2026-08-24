@@ -21,7 +21,7 @@ once.
 1. Download the binary for your platform from
    [releases](https://github.com/wuweidict/wudict/releases), rename to `wudict`, 
    `chmod +x wudict` (macOS/Linux) and move to a folder in `$PATH`, e.g. `/usr/local/bin`.
-2. Run `wudict` or `./wudict` if the file is in the current folder. 
+2. Run `wudict` or `./wudict` if the file is in the current folder. On windows use the installer [`wudict-windows-x64-setup-<x.y.z>.exe`](https://github.com/wuweidict/wudict/releases/latest) or download the standalone executable `wudict-windows-amd64-cgo.exe` and then double-click to run. 
 3. By default `wudict` searches for dictionaries under `~/Dictionaries` (including subfolders); 
    if the dictionary folder is missing or
    empty, a setup page opens where you set custom folders with dictionaries.
