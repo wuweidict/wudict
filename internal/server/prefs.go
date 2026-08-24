@@ -13,8 +13,8 @@ import (
 
 // StateFile holds the part of the UI that describes the COLLECTION rather than
 // the browser looking at it: which dictionaries are searched, and in what
-// order. Everything that describes the browser instead — theme, wide mode, the
-// last dictionary picked in the dropdown — stays in localStorage, where it
+// order. Everything that describes the browser instead - theme, wide mode, the
+// last dictionary picked in the dropdown - stays in localStorage, where it
 // belongs.
 //
 // The split is not cosmetic. localStorage is keyed by origin, so
@@ -38,8 +38,8 @@ const prefsVersion = 1
 
 // DictPref is one dictionary's remembered state. The path is what makes this
 // survivable: ids are sha256(path)[:12] (see pathID), so moving a dictionary
-// folder changes every id at once. Recording the path — and, through it, the
-// file name — lets the state be re-attached instead of silently reset.
+// folder changes every id at once. Recording the path - and, through it, the
+// file name - lets the state be re-attached instead of silently reset.
 type DictPref struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
@@ -64,7 +64,7 @@ type Prefs struct {
 
 // LoadPrefs reads the state file. It never fails: a missing file is the normal
 // first run, and an unreadable or corrupt one must not stop the app from
-// serving dictionaries — the worst case is that the user re-curates a list.
+// serving dictionaries - the worst case is that the user re-curates a list.
 func LoadPrefs(path string) *Prefs {
 	p := &Prefs{path: path}
 	if path == "" {
@@ -140,7 +140,7 @@ func (p *Prefs) Replace(dicts []DictPref) error {
 }
 
 // samePath compares two dictionary paths the way the filesystem would be asked
-// to: absolute and cleaned. Case is kept significant — macOS and Windows would
+// to: absolute and cleaned. Case is kept significant - macOS and Windows would
 // disagree, and a false match is worse than a missed one here.
 func samePath(a, b string) bool {
 	if a == "" || b == "" {
@@ -267,7 +267,7 @@ func cleanAbs(p string) string {
 	return filepath.Clean(p)
 }
 
-// GET /api/prefs — the enabled set and the order, healed against the
+// GET /api/prefs - the enabled set and the order, healed against the
 // dictionaries that exist right now. "exists" is false on a first run, which
 // is the client's cue to adopt whatever an older build left in localStorage
 // (once) instead of starting the user over.
@@ -277,7 +277,7 @@ func (s *Server) handlePrefs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"exists": exists, "dicts": dicts})
 }
 
-// PUT /api/prefs — replace the order and enabled set.
+// PUT /api/prefs - replace the order and enabled set.
 func (s *Server) handleSavePrefs(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Dicts []DictPref `json:"dicts"`

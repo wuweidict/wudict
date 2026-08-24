@@ -6,7 +6,7 @@
 // reached with All-files access, exactly as D52 shipped it.
 //
 // One class of this name exists per flavour and NEVER in src/main, so the
-// Play build cannot compile — or even name — the intents and permissions
+// Play build cannot compile - or even name - the intents and permissions
 // below. That is the whole point of the split: the shell calls Storage, and
 // what Storage is depends on which APK is being built.
 package com.legbehindneck.wudict;
@@ -40,7 +40,7 @@ final class Storage {
     }
 
     /**
-     * Asks for the storage grant. Either way the server starts — it reports
+     * Asks for the storage grant. Either way the server starts - it reports
      * the folder as empty until files arrive.
      */
     static void ensureAccess(Activity a) {

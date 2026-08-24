@@ -13,12 +13,12 @@
 // moment the user stops writing and starts reading. It is taken HERE rather
 // than in the page for two reasons. Articles render in sandboxed iframes sized
 // to their content (frame.js), so a drag over an article is delivered to the
-// CHILD document and the page's own listeners never see it — while the WebView
+// CHILD document and the page's own listeners never see it - while the WebView
 // sees every touch in the window whichever document it lands in. And an IME is
 // a platform input concern, which is what this shell is for; the pages stay
 // unaware that Android exists (D54).
 //
-// Both windows onto the server — the app and the lookup popup (D67) — hold the
+// Both windows onto the server - the app and the lookup popup (D67) - hold the
 // same search field over the same articles, so both want the same rule.
 package com.legbehindneck.wudict;
 
@@ -57,7 +57,7 @@ final class Ime {
                     if (fired[0]) break;
                     float dy = Math.abs(e.getY() - down[1]);
                     // Vertical dominance is what keeps a drag INSIDE the search
-                    // field — selecting the word just typed — from being read
+                    // field - selecting the word just typed - from being read
                     // as a scroll. That gesture is horizontal, and it is the
                     // one case where the keyboard has to stay.
                     if (dy > slop && dy > Math.abs(e.getX() - down[0])) {

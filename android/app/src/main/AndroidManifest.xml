@@ -47,7 +47,7 @@
              user is reading rather than replacing it. taskAffinity="" plus
              excludeFromRecents keeps it out of the app's own task and out of
              the recents list: it is an answer, not a place. Both filters live
-             in src/main, so foss and play get them identically — nothing here
+             in src/main, so foss and play get them identically - nothing here
              touches storage. -->
         <activity
             android:name=".LookupActivity"
@@ -69,7 +69,7 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
 
-            <!-- Share ⋯ — for apps that suppress the toolbar, and for
+            <!-- Share ⋯ - for apps that suppress the toolbar, and for
                  passages selected across several paragraphs. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -77,7 +77,7 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
 
-            <!-- wudict://lookup?q=… — other apps and automation (Tasker,
+            <!-- wudict://lookup?q=… - other apps and automation (Tasker,
                  Termux, note apps). The scheme is already the page→shell
                  private channel (Storage.handleShellUri, host "import"), and
                  the hosts do not collide: in-page wudict:// URLs are

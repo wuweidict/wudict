@@ -21,7 +21,7 @@ import (
 // D7 answered "how does a user delete a dictionary?" with *the file manager
 // does that*, and gave every path a Reveal control to get there in one click.
 // That is a delegation, and it has a precondition: another custodian exists
-// and the user can reach it. Android falsifies the precondition — the library
+// and the user can reach it. Android falsifies the precondition - the library
 // and (in the Play flavour) the dictionaries themselves live in
 // /sdcard/Android/data/<pkg>/files, which DocumentsUI filters out of the
 // picker, which every third-party file manager is locked out of since Android
@@ -30,15 +30,15 @@ import (
 // storage*, both of which take the whole library and the config with them.
 //
 // So this is not "a delete button for Android". It is the missing primitive:
-// wudict had no removal at any layer — not in the API, not in the CLI, only
-// `clean` for orphans — and the desktop hid that behind Finder. The endpoint
+// wudict had no removal at any layer - not in the API, not in the CLI, only
+// `clean` for orphans - and the desktop hid that behind Finder. The endpoint
 // is offered exactly where the handoff is not (see removalOffered), the CLI
 // has it everywhere, and the desktop UI is unchanged.
 //
 // Two objects, never conflated:
 //
-//   - the PREPARED FOLDER (<db dir>/<name>/) — ours, D20-shaped, unambiguous.
-//   - the ORIGINAL FILES — a dictionary is rarely one file, so the set comes
+//   - the PREPARED FOLDER (<db dir>/<name>/) - ours, D20-shaped, unambiguous.
+//   - the ORIGINAL FILES - a dictionary is rarely one file, so the set comes
 //     from dict.SourceFiles and is shown to the user before anything happens.
 //
 // And the trap that sets the default: preparation is automatic (AUTO_INDEX).
@@ -46,7 +46,7 @@ import (
 // scanned folder frees space until the next search re-prepares it. Removing
 // both is therefore the default, and "index only" reports what will happen.
 
-// removal is what a removal did — reported back so the UI states outcomes
+// removal is what a removal did - reported back so the UI states outcomes
 // rather than assuming them, and so a partial failure is visible.
 type removal struct {
 	Name    string   `json:"name"`
@@ -62,7 +62,7 @@ type removal struct {
 //
 // dropPrepared+dropSource is "remove this dictionary". dropPrepared alone
 // frees the indexes and leaves a dictionary that will be re-indexed on next
-// use. dropSource alone is the Android-shaped case — reclaim the imported
+// use. dropSource alone is the Android-shaped case - reclaim the imported
 // original and keep the prepared dictionary, which D24 §4 already governs:
 // the source is the safety net, so it may only be cut once the media that
 // would be lost with it has been packed.
@@ -98,7 +98,7 @@ func (r *Registry) Remove(id string, dropPrepared, dropSource bool) (removal, er
 
 	if dropSource && len(sources) == 0 {
 		if !dropPrepared {
-			return rep, fmt.Errorf("%q has no original files — it is the prepared dictionary itself", rep.Name)
+			return rep, fmt.Errorf("%q has no original files - it is the prepared dictionary itself", rep.Name)
 		}
 		// "remove this dictionary" on a dictionary that IS the prepared folder:
 		// there is nothing else to remove, so this is that request satisfied,
@@ -115,7 +115,7 @@ func (r *Registry) Remove(id string, dropPrepared, dropSource bool) (removal, er
 		packed := prepared != "" && fileExists(store.MediaDBPath(prepared))
 		if !packed && !e.noPackableMedia() {
 			return rep, fmt.Errorf(
-				"pack media for %q first — its images and audio are still only in the original files", rep.Name)
+				"pack media for %q first - its images and audio are still only in the original files", rep.Name)
 		}
 		if prepared == "" {
 			return rep, fmt.Errorf("%q is not prepared, so deleting its files would delete the dictionary", rep.Name)
@@ -225,8 +225,8 @@ func (s *Server) handleRemoveLibrary(w http.ResponseWriter, r *http.Request) {
 
 // removalOffered is the exact complement of the Reveal control: the app offers
 // to delete a dictionary precisely when it cannot hand the user to a file
-// manager that would. On a desktop at the keyboard that is never — D7 stands
-// untouched — and on Android, where no file manager may open the app's own
+// manager that would. On a desktop at the keyboard that is never - D7 stands
+// untouched - and on Android, where no file manager may open the app's own
 // external files dir, it is always.
 func removalOffered(r *http.Request) bool {
 	return !(isLoopback(r) && revealPossible())

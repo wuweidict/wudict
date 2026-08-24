@@ -39,7 +39,7 @@ func TestRegistryOpenAndDiscover(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("want 2 dicts, got %v", got)
 	}
-	// case-insensitive sort: nested/a before b? full paths compared — dir/b vs dir/nested/a
+	// case-insensitive sort: nested/a before b? full paths compared - dir/b vs dir/nested/a
 	if filepath.Base(got[0]) != "b.faketest" || filepath.Base(got[1]) != "a.faketest" {
 		t.Errorf("unexpected order/content: %v", got)
 	}
@@ -162,7 +162,7 @@ func TestExcludeDirAndSameDir(t *testing.T) {
 }
 
 // TestDiscoverAllDedupe: overlapping roots are normal once several are allowed
-// — a parent and its own subfolder, a repeat, a symlink pointing at a folder
+// - a parent and its own subfolder, a repeat, a symlink pointing at a folder
 // already listed. Each dictionary must appear exactly once (two ids would mean
 // two panel rows and doubled search results), attributed to the first root
 // that offered it.
@@ -232,7 +232,7 @@ func TestDiscoverFollowsSymlinkedRoot(t *testing.T) {
 // The same folder reached by a different spelling must collapse to one entry:
 // otherwise it shows as several rows, is walked several times, and is written
 // several times into wudict.toml. Discovery already guarantees the
-// dictionaries themselves are never listed twice — this is about the folders.
+// dictionaries themselves are never listed twice - this is about the folders.
 func TestDedupeDirs(t *testing.T) {
 	real := t.TempDir()
 	link := filepath.Join(t.TempDir(), "shortcut")

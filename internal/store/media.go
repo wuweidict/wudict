@@ -70,7 +70,7 @@ func (m *Media) Resource(name string) (io.ReadCloser, string, error) {
 
 // References are found with the shared HTML tokenizer (internal/htmlref), not
 // a pattern over the markup. The regex this replaced accepted quoted values
-// only — its own comment claimed "unquoted attributes are rare in dictionary
+// only - its own comment claimed "unquoted attributes are rare in dictionary
 // markup", which is simply untrue: OALD10 writes `href=plaintiff__gb_1.ogg"`
 // on every pronunciation link, and every such asset was silently left out of
 // the pack. It also matched inside <script> strings and comments, packing
@@ -79,7 +79,7 @@ func (m *Media) Resource(name string) (io.ReadCloser, string, error) {
 // ReferencedAssets returns the relative resource names an already-prepared
 // dictionary's articles refer to. Packing uses it to include files that live
 // beside the .mdx rather than inside the .mdd (a repack's stylesheet and
-// scripts) — but only the ones actually referenced: dictionary folders often
+// scripts) - but only the ones actually referenced: dictionary folders often
 // hold several dictionaries, so sweeping the directory would pack a neighbour's
 // assets.
 //

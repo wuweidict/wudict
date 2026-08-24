@@ -7,19 +7,19 @@
 // House style for everything a user can read on the terminal:
 //
 //   - **Name the dictionary.** A message about one dictionary starts with its
-//     name in quotes — `"Espasa Calpe": …`. Bare lines like
+//     name in quotes - `"Espasa Calpe": …`. Bare lines like
 //     `ingest: 6931 unresolved link targets` are useless when 55 dictionaries
 //     are being prepared at once; use Dict() to build the prefix.
 //   - **Levels.** V() is verbose-only detail (timings, per-entry problems,
 //     background work). Warn() is a real degradation the user should know
 //     about but that does not stop anything. Status() is progress on a slow
 //     foreground operation. Errors are returned, never printed, by library
-//     packages — the CLI and the server decide what reaches the terminal.
+//     packages - the CLI and the server decide what reaches the terminal.
 //   - **Lowercase, no trailing period**, and prefer naming the thing over
 //     naming the function that failed.
 //   - **Destination.** Everything here goes to stderr, because stdout carries
 //     results. SetOutput moves the whole channel to a file for the one case
-//     that has no stderr worth writing to — a GUI launch (D74).
+//     that has no stderr worth writing to - a GUI launch (D74).
 package logx
 
 import (
@@ -39,7 +39,7 @@ var Enabled = os.Getenv("WUDICT_VERBOSE") != "" || os.Getenv("VERBOSE") != ""
 // pointing at nothing useful, and a double-clicked wudict.exe is about to
 // close the console Windows made for it (D76). SetOutput is the only way to
 // move it, it is called at most once per
-// process, and a terminal session never calls it — a console is never taken
+// process, and a terminal session never calls it - a console is never taken
 // away from a user who has one (D74, machine C).
 var (
 	mu         sync.RWMutex
@@ -89,7 +89,7 @@ func Warn(format string, args ...any) {
 }
 
 // Status reports progress on a slow foreground operation (preparing a search
-// index on first open). One line, no timestamp — it is for humans watching a
+// index on first open). One line, no timestamp - it is for humans watching a
 // wait, not for logs.
 func Status(format string, args ...any) {
 	fmt.Fprintf(dest(), format+"\n", args...)

@@ -13,7 +13,7 @@ package store
 //
 // It is the default because it cannot be wrong (D29): FTS5 is mandatory
 // for store's schema, and this driver always has it. Opt into the faster
-// cgo driver with -tags sqlite_fts5 (driver_cgo.go, D4) — passing that tag
+// cgo driver with -tags sqlite_fts5 (driver_cgo.go, D4) - passing that tag
 // on a machine without a C compiler falls back here rather than breaking.
 // The legacy -tags purego also lands here, which is what it always meant.
 

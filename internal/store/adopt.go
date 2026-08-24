@@ -23,12 +23,12 @@ type Adopted struct {
 }
 
 // AdoptLoose brings databases written by the pre-folder flat layout into the
-// current one — a `<slug>-<hash8>.text.db` (with its `.media.db`, if any)
+// current one - a `<slug>-<hash8>.text.db` (with its `.media.db`, if any)
 // becomes `<name>/{text.db, media.db, info.txt}`.
 //
 // It is a **rename**, never a re-index: the data is already prepared, and
 // refusing to use it would force the user to prepare the same dictionary
-// twice. Nothing is deleted, and nothing is overwritten — if the dictionary
+// twice. Nothing is deleted, and nothing is overwritten - if the dictionary
 // has meanwhile been prepared into a folder of its own, the loose file is left
 // exactly where it is (FindOrphans then reports it as superseded, which is the
 // one case where deleting it loses nothing).

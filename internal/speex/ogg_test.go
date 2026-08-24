@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// buildPage assembles one raw Ogg page (CRC left zero — the reader doesn't
+// buildPage assembles one raw Ogg page (CRC left zero - the reader doesn't
 // verify it).
 func buildPage(htype byte, serial, seq uint32, granule int64, laces, body []byte) []byte {
 	p := []byte("OggS")

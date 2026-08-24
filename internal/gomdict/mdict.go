@@ -187,7 +187,7 @@ func (mdict *Mdict) GetKeyWordEntriesSize() int64 {
 }
 
 // EntryCount returns the headword count from the key-block meta, available
-// after New() (readKeyBlockMeta) without the full BuildIndex — used for
+// after New() (readKeyBlockMeta) without the full BuildIndex - used for
 // the cheap metadata probe. Zero when the layout does not expose it (v3).
 func (mdict *Mdict) EntryCount() int64 {
 	if mdict.keyBlockMeta != nil {

@@ -16,16 +16,16 @@ package store
 //	    info.txt
 //
 // One dictionary is one folder, so it can be copied, moved, zipped or handed
-// to someone else as a single unit — and dropped into a dictionary folder to
+// to someone else as a single unit - and dropped into a dictionary folder to
 // be used elsewhere (dict.Discover recognizes the bundle by its text.db).
 //
 // Two registry levels, one source of truth:
-//   - level 1 (inventory): the folder names — `ls` is the library listing;
+//   - level 1 (inventory): the folder names - `ls` is the library listing;
 //   - level 2 (authoritative): each text.db's meta table.
 //
 // info.txt sits between them as a *derived receipt*: regenerated from the
 // text.db meta after every ingest (WriteInfo) and never edited by hand. It
-// carries exactly one fact of its own — `source`, the path this folder was
+// carries exactly one fact of its own - `source`, the path this folder was
 // claimed for, written before the ingest starts. That is the ownership record
 // (meta's own source_path is only what a format reader chose to report, and
 // may be relative, stale or absent); everything else in the receipt is copied
@@ -45,6 +45,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/wuweidict/wudict/internal/dict"
 )
 
 // Names of the files inside a prepared-dictionary folder.
@@ -84,7 +86,7 @@ func MediaSibling(textDB string) string {
 // FolderName derives a library folder name from a source file name: the file
 // name with its extension dropped (a compression suffix drops the one under
 // it too, so "big.dsl.dz" → "big"), sanitized for every platform we build for.
-// Spaces and case are preserved — the point is that the folder is recognizably
+// Spaces and case are preserved - the point is that the folder is recognizably
 // the dictionary the user already knows.
 func FolderName(srcPath string) string {
 	name := filepath.Base(srcPath)
@@ -117,7 +119,7 @@ func FolderName(srcPath string) string {
 
 // formatTag is the disambiguating suffix for same-named sources in different
 // formats: "AHD5-2017.slob" and "AHD5-2017.mdx" become "AHD5-2017" and
-// "AHD5-2017 (mdx)" — whichever was prepared second takes the tag.
+// "AHD5-2017 (mdx)" - whichever was prepared second takes the tag.
 func formatTag(srcPath string) string {
 	ext := strings.ToLower(filepath.Ext(srcPath))
 	if ext == ".dz" || ext == ".gz" {
@@ -206,7 +208,7 @@ func LookupDir(srcPath string) (string, bool) {
 // ClaimDir returns the library folder for a source file, creating and
 // claiming it when needed. Ingest calls this; everything else calls LookupDir.
 //
-// The claim is the os.Mkdir itself — atomic, so two concurrent first-time
+// The claim is the os.Mkdir itself - atomic, so two concurrent first-time
 // ingests of same-named sources cannot both take the same folder: the loser
 // sees IsExist, reads the recorded owner, and moves to the next candidate.
 func ClaimDir(srcPath string) (string, error) {
@@ -252,13 +254,13 @@ func claimFrom(candidates []string, claim string) (string, error) {
 // writeClaim stamps a minimal receipt so the folder's owner is knowable before
 // its text.db exists. WriteInfo replaces it with the full receipt after ingest.
 func writeClaim(dir, srcPath string) error {
-	body := fmt.Sprintf("# wudict — preparing this dictionary…\nsource = %s\nclaimed = %s\n",
+	body := fmt.Sprintf("# wudict - preparing this dictionary…\nsource = %s\nclaimed = %s\n",
 		srcPath, time.Now().UTC().Format(time.RFC3339))
 	return os.WriteFile(InfoPath(dir), []byte(body), 0o644)
 }
 
 // SourceChanged reports whether a source file no longer matches what its
-// prepared text.db was built from — the job the old content-hash file name
+// prepared text.db was built from - the job the old content-hash file name
 // used to do. Cheap first (size + mtime), and only when those differ does it
 // re-hash the first 1 MiB, so a mere touch or copy does not force a re-index.
 // A missing source is NOT "changed": the prepared dictionary stands on its own.
@@ -288,7 +290,7 @@ func SourceChanged(textDB, srcPath string) bool {
 }
 
 // PreparedFor returns the text.db already prepared for a source file, if one
-// exists and still matches the source. Purely read-only — the caller decides
+// exists and still matches the source. Purely read-only - the caller decides
 // whether to fall back to the direct backend or to (re)build.
 func PreparedFor(srcPath string) (string, bool) {
 	dir, ok := LookupDir(srcPath)
@@ -354,7 +356,7 @@ func Library() ([]LibEntry, error) {
 		e := LibEntry{
 			Dir:      dir,
 			TextDB:   textDB,
-			Name:     meta["name"],
+			Name:     dict.DisplayText(meta["name"]), // as store.Open: repair an over-escaped title without a re-ingest
 			Format:   meta["format"],
 			Source:   meta["source_path"],
 			FullText: meta["ingest_level"] != string(LevelHeadwords),
@@ -410,13 +412,13 @@ func WriteInfo(dir string) error {
 	if meta["ingest_level"] != string(LevelHeadwords) {
 		level = "full text (exact · prefix · contains · full-text)"
 	}
-	media := "not packed — resources come from the original files"
+	media := "not packed - resources come from the original files"
 	if fi, err := os.Stat(MediaDBPath(dir)); err == nil {
 		media = fmt.Sprintf("%s (%s)", MediaDBName, humanSize(fi.Size()))
 	}
 	// The claim written by ClaimDir is the ownership record and wins here: it
 	// is the path this folder was prepared FROM, while meta's source_path is
-	// whatever the format reader chose to report — which may be relative,
+	// whatever the format reader chose to report - which may be relative,
 	// stale, or empty. Overwriting the claim with it would orphan the folder
 	// from its own source (LookupDir would never find it again).
 	source := ""
@@ -430,14 +432,14 @@ func WriteInfo(dir string) error {
 	if src == "" {
 		src = "(unknown)"
 	} else if _, err := os.Stat(src); err != nil {
-		src += "  [no longer on disk — this folder is now the only copy]"
+		src += "  [no longer on disk - this folder is now the only copy]"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# wudict — prepared dictionary\n")
+	fmt.Fprintf(&b, "# wudict - prepared dictionary\n")
 	fmt.Fprintf(&b, "# This folder is one dictionary. Copy, move or zip it as a unit;\n")
 	fmt.Fprintf(&b, "# drop it into your dictionary folder to use it on another machine.\n")
-	fmt.Fprintf(&b, "# Regenerated automatically — edits are overwritten.\n\n")
-	fmt.Fprintf(&b, "name = %s\n", meta["name"])
+	fmt.Fprintf(&b, "# Regenerated automatically - edits are overwritten.\n\n")
+	fmt.Fprintf(&b, "name = %s\n", dict.DisplayText(meta["name"])) // the receipt is read by people, so it shows the decoded title
 	fmt.Fprintf(&b, "format = %s\n", meta["format"])
 	fmt.Fprintf(&b, "entries = %s\n", meta["entry_count"])
 	fmt.Fprintf(&b, "index = %s\n", level)

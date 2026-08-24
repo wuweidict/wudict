@@ -114,7 +114,7 @@ func (o *oggReader) readPage() error {
 		o.eos = true
 	}
 	// A lacing value below 255 terminates a packet, so counting them counts the
-	// packets that complete here — libogg's ogg_page_packets, which speexdec's
+	// packets that complete here - libogg's ogg_page_packets, which speexdec's
 	// padding arithmetic is written against.
 	for _, lace := range segTable {
 		if lace < 255 {

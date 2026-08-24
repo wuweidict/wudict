@@ -7,7 +7,7 @@
 package tray
 
 // Android and anything else the library does not implement. Wrap never reaches
-// these — preflight refuses first — but they exist so the package compiles
+// these - preflight refuses first - but they exist so the package compiles
 // everywhere the app does, with no tray dependency linked in.
 
 func newPlatform() platform { return stubPlatform{} }

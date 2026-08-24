@@ -28,7 +28,7 @@ func TestOpenWrapsEOF(t *testing.T) {
 }
 
 // TestOpenNeverPanics: corrupt and truncated files must produce errors,
-// not panics — the registered opener may blow up internally; Open must
+// not panics - the registered opener may blow up internally; Open must
 // contain it.
 func TestOpenNeverPanics(t *testing.T) {
 	RegisterFormat(".panics", func(path string) (Dictionary, error) {

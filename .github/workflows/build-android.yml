@@ -63,7 +63,7 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.15729638"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.15729638" >> "$GITHUB_ENV"
 
-      - name: Build the Go server as libwudict.so (cgo — FTS5 + speex)
+      - name: Build the Go server as libwudict.so (cgo - FTS5 + speex)
         run: make android-go
 
       - name: Compute version
@@ -88,7 +88,7 @@ jobs:
         run: |
           if [ -z "$KS_B64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::signing secrets incomplete — building a debug APK"
+            echo "::notice::signing secrets incomplete - building a debug APK"
             exit 0
           fi
           KS="$RUNNER_TEMP/wudict.keystore"
@@ -99,7 +99,7 @@ jobs:
           # as an opaque failure at the very end of a five-minute build.
           keytool -list -keystore "$KS" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null
 
-          # KEYSTORE must be a PATH — build.gradle does file(System.getenv("KEYSTORE")).
+          # KEYSTORE must be a PATH - build.gradle does file(System.getenv("KEYSTORE")).
           echo "KEYSTORE=$KS" >> "$GITHUB_ENV"
           echo "enabled=true" >> "$GITHUB_OUTPUT"
 
@@ -127,7 +127,7 @@ jobs:
 
       - name: Collect and verify the APK
         run: |
-          # Named to the house pattern — wudict-<os>-<arch>, as in
+          # Named to the house pattern - wudict-<os>-<arch>, as in
           # wudict-linux-arm64-purego and wudict-darwin-arm64-cgo. No version:
           # NO release asset in this repo carries one, because the tag already
           # does. No -v8a: the other assets say plain arm64. No flavour: the
@@ -141,7 +141,7 @@ jobs:
             OUT="wudict-android-arm64-debug.apk"
           fi
           if [ ! -f "$SRC" ]; then
-            echo "expected $SRC — Gradle produced:"
+            echo "expected $SRC - Gradle produced:"
             find android/app/build/outputs/apk -name '*.apk' -print
             exit 1
           fi
@@ -161,7 +161,7 @@ jobs:
           # grep for "v0.1" matches an existing "v0.10" and silently skips
           # creating the tag that was actually asked for.
           if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" > /dev/null 2>&1; then
-            echo "Tag ${TAG} already exists — skipping."
+            echo "Tag ${TAG} already exists - skipping."
           else
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -174,7 +174,7 @@ jobs:
         if: ${{ steps.signing.outputs.enabled == 'true' }}
         run: |
           if gh release view "${TAG}" > /dev/null 2>&1; then
-            echo "Release ${TAG} exists — replacing assets."
+            echo "Release ${TAG} exists - replacing assets."
             gh release upload "${TAG}" "$APK" --clobber
           else
             echo "Creating release ${TAG}."

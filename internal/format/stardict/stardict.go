@@ -104,7 +104,7 @@ func Open(ifoPath string) (*Dict, error) {
 		parseSyn(synData, len(d.entries), d.synonyms)
 	}
 
-	// No headword index is built at open — both the raw (ensureExact) and the
+	// No headword index is built at open - both the raw (ensureExact) and the
 	// accent-folded (ensureFold) indexes are built lazily on first use, so an
 	// open only for resources or the ingest scan builds nothing. Runtime
 	// readers (GoldenDict, aard2) keep no in-memory headword index at all; our

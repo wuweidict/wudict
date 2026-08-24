@@ -11,7 +11,7 @@ import (
 )
 
 // fakeDecoder stands in for libspeex so the padding arithmetic and the WAV
-// framing can be tested without the codec — and therefore under purego too.
+// framing can be tested without the codec - and therefore under purego too.
 // Every sample it returns is its own index in the stream, so a test can say
 // exactly which samples survived the chop.
 type fakeDecoder struct {
@@ -54,7 +54,7 @@ func spxHeader(rate, mode, channels, frameSize, framesPerPacket int) []byte {
 // The granule positions are the point. With frameSize 320 and one frame per
 // packet the three audio packets decode to 960 samples, but the pages claim
 // only g3 of them: 200 (skip 100 + lookahead 100) are leading padding and 50
-// are trailing. Output length is always the final granule — which is what the
+// are trailing. Output length is always the final granule - which is what the
 // numbers below are chosen to demonstrate.
 func spxStream(channels int) []byte {
 	const serial = 0x5150

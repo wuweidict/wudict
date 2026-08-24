@@ -227,7 +227,7 @@ func TestQuitShutsDownExactlyOnce(t *testing.T) {
 	go func() {
 		done <- Wrap(cfg, func() error { <-serveDone; return nil })
 	}()
-	// Wait for the menu, then fire Quit twice — a double click on the item
+	// Wait for the menu, then fire Quit twice - a double click on the item
 	// must not shut the server down twice.
 	deadline := time.After(2 * time.Second)
 	for {
@@ -306,7 +306,7 @@ func TestMenuShape(t *testing.T) {
 }
 
 func TestTooltip(t *testing.T) {
-	if got := baseConfig(nil).tooltip(); got != "wuDict — serving on http://127.0.0.1:8080/" {
+	if got := baseConfig(nil).tooltip(); got != "wuDict - serving on http://127.0.0.1:8080/" {
 		t.Errorf("tooltip = %q", got)
 	}
 	if got := (Config{}).tooltip(); got != "wuDict" {

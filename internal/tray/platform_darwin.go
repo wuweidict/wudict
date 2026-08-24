@@ -62,7 +62,7 @@ func Alert(title, body string) {
 const stopHint = `quit "wudict" from Activity Monitor`
 
 // appleQuote renders s as an AppleScript string literal. Three characters can
-// end or corrupt one — the escape, the quote, and a raw newline, which
+// end or corrupt one - the escape, the quote, and a raw newline, which
 // AppleScript does not accept inside a literal at all.
 func appleQuote(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s) + `"`

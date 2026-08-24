@@ -126,7 +126,7 @@ func encodingByName(name string) encoding.Encoding {
 
 // decodeBytes converts bytes in the named encoding to a UTF-8 string,
 // tolerating invalid input (replacing offending bytes) so one bad byte never
-// aborts a whole article — mirroring pyglossary's "ignore"/"replace" decoding.
+// aborts a whole article - mirroring pyglossary's "ignore"/"replace" decoding.
 func decodeBytes(name string, b []byte) string {
 	switch strings.ToLower(name) {
 	case "", "utf-8", "utf8":

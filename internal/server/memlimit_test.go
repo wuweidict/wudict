@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	// The server package registers no formats — the CLI does. Without these a
+	// The server package registers no formats - the CLI does. Without these a
 	// sweep over a real corpus would silently discover only the handful of
 	// formats some other test happens to have pulled in, and measure nothing.
 	_ "github.com/wuweidict/wudict/internal/format/bgl"
@@ -29,14 +29,14 @@ import (
 )
 
 // A soft memory limit has exactly one lever: collect harder. Set below what
-// the program genuinely keeps live, that means collecting continuously —
+// the program genuinely keeps live, that means collecting continuously -
 // re-tracing a live set that never shrinks, burning CPU (and on a phone,
 // battery and heat) to free nothing. That is the failure mode D64's Android
 // MEMORY_LIMIT default has to be proved clear of, and it cannot be proved by
 // reading code: it depends on how large the live set actually is under a real
 // corpus.
 //
-// So this measures it. Off by default and never part of `make check` — it
+// So this measures it. Off by default and never part of `make check` - it
 // wants a dictionary library on disk and minutes of wall time:
 //
 //	WUDICT_PERF_CORPUS=~/Downloads/Language \
@@ -128,11 +128,11 @@ func sweep(t *testing.T, corpus string) {
 		t.Log(row)
 		// also unbuffered, because a sweep over a real corpus runs for tens of
 		// minutes and testing's log is only flushed when the test ends: without
-		// this, a run that is interrupted — or one later limit that hangs —
+		// this, a run that is interrupted - or one later limit that hangs -
 		// throws away every row already measured.
 		fmt.Fprintln(os.Stderr, row)
 		if r.Entries == 0 {
-			t.Fatalf("no dictionaries discovered under %s — the measurement would be meaningless", corpus)
+			t.Fatalf("no dictionaries discovered under %s - the measurement would be meaningless", corpus)
 		}
 	}
 
@@ -148,11 +148,11 @@ func sweep(t *testing.T, corpus string) {
 	// A row that fails these is a limit this program must not ship on Android.
 	for _, r := range rows[1:] {
 		if r.gcFraction() > 0.25 {
-			t.Errorf("limit %d MB: GC took %.1f%% of CPU (baseline %.1f%%) — below the live set",
+			t.Errorf("limit %d MB: GC took %.1f%% of CPU (baseline %.1f%%) - below the live set",
 				r.LimitMB, 100*r.gcFraction(), 100*base.gcFraction())
 		}
 		if base.WallSec > 0 && r.WallSec > 1.5*base.WallSec {
-			t.Errorf("limit %d MB: %.1fs vs %.1fs unlimited — the limit is being paid for in latency",
+			t.Errorf("limit %d MB: %.1fs vs %.1fs unlimited - the limit is being paid for in latency",
 				r.LimitMB, r.WallSec, base.WallSec)
 		}
 	}
@@ -289,7 +289,7 @@ type perfSnap struct {
 }
 
 // readPerf samples runtime/metrics rather than ReadMemStats, which stops the
-// world — measuring with an instrument that perturbs exactly the quantity
+// world - measuring with an instrument that perturbs exactly the quantity
 // being measured.
 func readPerf() perfSnap {
 	s := []metrics.Sample{

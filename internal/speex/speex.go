@@ -123,7 +123,7 @@ func DecodeToWAV(r io.Reader) ([]byte, error) {
 	// Padding. A Speex stream is a whole number of fixed-size frames, but the
 	// audio inside it is not: the encoder pads both ends, and the granule
 	// positions say by how much. Getting this wrong does not sound like an
-	// error — it sounds like a word whose last consonant is clipped — so the
+	// error - it sounds like a word whose last consonant is clipped - so the
 	// arithmetic below is speexdec's (speexdec.c:636 and :734-750), not an
 	// approximation of it:
 	//
@@ -166,7 +166,7 @@ func DecodeToWAV(r io.Reader) ([]byte, error) {
 		}
 		samples, err := dec.DecodePacket(pkt, nframes)
 		if err != nil {
-			break // tolerate a corrupt trailing frame — keep what decoded
+			break // tolerate a corrupt trailing frame - keep what decoded
 		}
 		switch {
 		case og.index == 1 && skip > 0:

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Runs the wudict server binary that ships inside the APK as
-// lib/arm64-v8a/libwudict.so — named like a library so the package manager
+// lib/arm64-v8a/libwudict.so - named like a library so the package manager
 // extracts it to the filesystem (with extractNativeLibs=true) and it can be
 // exec'd (D52). This is the same pattern Syncthing-Fork and InviZible Pro
 // ship in production; the alternative (JNI) would force an NDK and glue code
@@ -11,7 +11,7 @@
 //
 // The binary is the same program `make android-go` cross-compiles; only its
 // environment is arranged here. HOME and the prepared library come from
-// AppDirs — the app's own external files dir, so that a phone with no root
+// AppDirs - the app's own external files dir, so that a phone with no root
 // can still reach wudict.toml and the db dir (D62). TMPDIR stays on internal
 // storage. Which dictionary folders exist is the flavour's decision and
 // belongs to Storage, not here.
@@ -39,7 +39,7 @@ class ServerProcess {
 
     static final String HOST = "127.0.0.1";
     // Fixed port (D52): UI prefs live in localStorage, which is keyed by
-    // origin — a random port would forget them on every launch.
+    // origin - a random port would forget them on every launch.
     static final int PORT = 6888;
 
     interface Listener {
@@ -57,7 +57,7 @@ class ServerProcess {
     // This used to be a `private static ServerProcess` inside MainActivity,
     // started in onCreate and read back as "non-null means ready". D67 made
     // that untrue in two ways at once: a lookup popup must work with
-    // MainActivity dead, and two activities can now ask at the same time —
+    // MainActivity dead, and two activities can now ask at the same time -
     // during which non-null means *starting*. So the field lives here as a
     // state machine with a waiting list, and a start in flight is joined
     // rather than duplicated.
@@ -76,7 +76,7 @@ class ServerProcess {
      * (a folder that was not there yet, a port a stale child was still holding)
      * may well be gone by the next attempt.
      *
-     * <p>Callbacks arrive on whichever thread settles the start — the
+     * <p>Callbacks arrive on whichever thread settles the start - the
      * activities hop to the main thread themselves, as they must anyway for the
      * adopt path, which answers inline.
      */
@@ -120,7 +120,7 @@ class ServerProcess {
 
     /**
      * A window is gone. {@code mayStop} is the caller's answer to "is this
-     * window's own reason for the server ending too?" — MainActivity passes
+     * window's own reason for the server ending too?" - MainActivity passes
      * {@code isFinishing()}, the lookup popup always passes false: a popup
      * closing must never stop the server (D67), it drops to
      * {@link PowerSignal#BACKGROUND} instead, so the next lookup from any app
@@ -154,7 +154,7 @@ class ServerProcess {
     private void run(Listener listener) {
         // A previous run's child can outlive the app process: Android kills
         // the app, but an exec'd child is reparented to init and keeps
-        // running — still holding 6888, still serving the same library. Only
+        // running - still holding 6888, still serving the same library. Only
         // a clean finish reaches onDestroy and stop(). Spawning a second
         // server then means a bind failure and a misleading wait, when a
         // perfectly good one is already there, so adopt it instead.
@@ -194,7 +194,7 @@ class ServerProcess {
         // branch and keeps MADV_FREE, which leaves every reclaimed page counted
         // in RSS until the kernel is short of memory. Measured on device: after
         // shedding a 464k-headword preview backend the Go heap was empty and
-        // VmRSS still read 184 MB. On Android the number is the outcome — the
+        // VmRSS still read 184 MB. On Android the number is the outcome - the
         // low-memory killer, the vendor "RAM hog" watchdogs and the user's own
         // battery screen all read RSS/PSS, so memory we have released but are
         // still charged for is memory we did not release. Costs a page-fault
@@ -215,7 +215,7 @@ class ServerProcess {
         } else if (process.isAlive()) {
             listener.onFailed("port " + PORT + " never opened");
         } else {
-            // The child is gone, so its last line of output is the diagnosis —
+            // The child is gone, so its last line of output is the diagnosis -
             // a bad --db-dir, a port already held, a permission refusal. Saying
             // "port never opened" instead would send the user hunting for a
             // network problem that does not exist.
@@ -225,8 +225,8 @@ class ServerProcess {
         }
     }
 
-    // seedConfig writes the dictionary folders into ~/.wudict/wudict.toml —
-    // HOME is the app's own directory (AppDirs) — instead of passing
+    // seedConfig writes the dictionary folders into ~/.wudict/wudict.toml -
+    // HOME is the app's own directory (AppDirs) - instead of passing
     // --dict-dir. The distinction is not cosmetic: a flag is the
     // HIGHEST config layer, so Config.EditableInFile("DICT_DIR") would be
     // false and the ☰ panel would (correctly) refuse to change the folders,
@@ -241,7 +241,7 @@ class ServerProcess {
     // Consequence worth stating, since Storage.dictDirs can now answer with a
     // microSD card's folder as well: the volumes present at FIRST launch are
     // the ones seeded. A card inserted later is not added behind the user's
-    // back — doing so would mean the shell parsing and rewriting a config file
+    // back - doing so would mean the shell parsing and rewriting a config file
     // that belongs to the user, in Java, to re-implement what the ☰ panel and
     // /setup already do. Its folder is app-specific external storage, so it is
     // readable in every flavour with no permission: the user pastes the path
@@ -254,7 +254,7 @@ class ServerProcess {
             if (list.length() > 0) list.append(", ");
             list.append('"').append(d.getAbsolutePath()).append('"');
         }
-        String toml = "# WuWeiDict — written by the Android shell on first launch.\n"
+        String toml = "# WuWeiDict - written by the Android shell on first launch.\n"
                 + "# Priority: CLI flag > environment variable > this file > default.\n"
                 + "# The app passes no --dict-dir, so the ☰ panel can edit this.\n"
                 + "\n"
@@ -264,7 +264,7 @@ class ServerProcess {
             Files.write(cfg.toPath(), toml.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
             // Not fatal: the server falls back to $HOME/Dictionaries, which is
-            // appPrivate — reachable, just without the shared folder.
+            // appPrivate - reachable, just without the shared folder.
             Log.w(TAG, "could not seed " + cfg, e);
         }
     }
@@ -312,8 +312,8 @@ class ServerProcess {
     }
 
     // Waits for the server to accept a connection. Watching the child as well
-    // as the port matters: a server that dies on startup — the common failure,
-    // since it is the run that creates the config and the library folders —
+    // as the port matters: a server that dies on startup - the common failure,
+    // since it is the run that creates the config and the library folders -
     // would otherwise hold the "Starting…" screen for the full minute before
     // reporting the wrong thing.
     private static boolean awaitPort(Process child) {
@@ -339,7 +339,7 @@ class ServerProcess {
         Process p = process;
         if (p != null) {
             // No graceful shutdown: Java's destroy() is a hard kill. That is
-            // safe here — SQLite commits are transactional, so the library
+            // safe here - SQLite commits are transactional, so the library
             // cannot be corrupted by it.
             p.destroy();
         }

@@ -36,7 +36,7 @@ typedef struct {
 // Speex stereo is INTENSITY stereo: the codec itself always decodes one mono
 // signal, and each packet carries an in-band request holding that frame's
 // left/right balance. Decoding a stereo file therefore needs no second
-// decoder — only this handler, which keeps the balance in d->stereo for
+// decoder - only this handler, which keeps the balance in d->stereo for
 // speex_decode_stereo_int to apply. Without it the in-band bits are merely
 // skipped by libspeex's default handler, which is why a stereo stream decodes
 // to plausible-sounding mono even when nothing here knows it is stereo.
@@ -96,8 +96,8 @@ static void spxdec_free(spxdec_t* d) {
 }
 
 // spxdec_decode decodes up to `frames` frames from one packet into `out`
-// (frames*frame_size*channels int16 samples). Returns samples written —
-// interleaved when channels == 2 — or -2 on a corrupt frame.
+// (frames*frame_size*channels int16 samples). Returns samples written -
+// interleaved when channels == 2 - or -2 on a corrupt frame.
 static int spxdec_decode(spxdec_t* d, char* packet, int len, int frames, short* out) {
 	speex_bits_read_from(&d->bits, packet, len);
 	int n = 0;
@@ -143,11 +143,11 @@ func New(mode, channels int) (*Decoder, error) {
 // FrameSize is the number of samples PER CHANNEL produced per decoded frame.
 func (d *Decoder) FrameSize() int { return int(C.spxdec_frame_size(d.h)) }
 
-// Channels is 1 or 2 — the number the decoder was actually built with, which
+// Channels is 1 or 2 - the number the decoder was actually built with, which
 // is what DecodePacket interleaves.
 func (d *Decoder) Channels() int { return int(C.spxdec_channels(d.h)) }
 
-// Lookahead is the codec's algorithmic delay in samples per channel — the
+// Lookahead is the codec's algorithmic delay in samples per channel - the
 // leading samples the caller must drop to align the output with the encoder's
 // input (speexdec does the same, via SPEEX_GET_LOOKAHEAD).
 func (d *Decoder) Lookahead() int { return int(C.spxdec_lookahead(d.h)) }

@@ -4,8 +4,8 @@
 
 // Everything the server is allowed to know about the device's mood is decided
 // here, in one function, from fields that are the only inputs (D64). One place,
-// because these inputs contradict each other — the app can be visible while the
-// device is hot, backgrounded while charging — and a set of independent
+// because these inputs contradict each other - the app can be visible while the
+// device is hot, backgrounded while charging - and a set of independent
 // callbacks each pushing its own state would make the last event win rather
 // than the strictest condition.
 //

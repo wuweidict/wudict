@@ -11,8 +11,8 @@ import (
 )
 
 // ReportPrepared prints the one line that closes a "preparing search index…"
-// status: how many entries were indexed, how long it took, and — only when
-// there were any — how many redirects pointed at headwords that do not exist
+// status: how many entries were indexed, how long it took, and - only when
+// there were any - how many redirects pointed at headwords that do not exist
 // in the source. Shared by the formats that prepare themselves on first open
 // (DSL, BGL) so both read identically.
 func ReportPrepared(name string, rep Report, took time.Duration) {

@@ -24,7 +24,7 @@ func deleteReq(t *testing.T, s *Server, path string) *httptest.ResponseRecorder 
 
 // idOf finds a dictionary's id by file name. Not pathID(path): discovery
 // reports the path it resolved, which on macOS is /private/var where the test
-// wrote to /var — the ids are only equal for the registry's own spelling.
+// wrote to /var - the ids are only equal for the registry's own spelling.
 func idOf(t *testing.T, s *Server, base string) string {
 	t.Helper()
 	for _, e := range s.reg.all() {
@@ -65,7 +65,7 @@ func TestRemovalNotOfferedOnADesktop(t *testing.T) {
 	}
 }
 
-// Where there is no file manager — Android, and any remote browser — it is
+// Where there is no file manager - Android, and any remote browser - it is
 // offered, and canDelete says so.
 func TestRemovalOfferedWithoutAFileManager(t *testing.T) {
 	s := newTestServer(t)

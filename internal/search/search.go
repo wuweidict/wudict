@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package search fans one query out over many dictionaries concurrently
-// (draego's "all" mode, minus its sequential per-request DB opens —
+// (draego's "all" mode, minus its sequential per-request DB opens -
 // FTS-audit #6: dictionaries stay open, queries run in parallel).
 package search
 
@@ -45,7 +45,7 @@ type Hit struct {
 //
 // It is wrong for a phone, where eight concurrent SQLite readers means eight
 // page caches, eight threads the scheduler must place, and a burst of parallel
-// I/O that reads to the platform exactly like a misbehaving app — for a query
+// I/O that reads to the platform exactly like a misbehaving app - for a query
 // whose answer a human then spends seconds reading. The Android startup path
 // sets this to the same number as GOMAXPROCS (D64).
 const defaultWorkers = 8
@@ -101,7 +101,7 @@ func All(ctx context.Context, dicts []dict.Dictionary, mode Mode, term string, p
 // Stream queries every dictionary concurrently (bounded) and invokes emit
 // once per dictionary as its query completes. emit calls are serialized
 // (safe to write to a shared response) but arrive in completion order, not
-// input order — i is the dictionary's index in dicts so the caller can
+// input order - i is the dictionary's index in dicts so the caller can
 // place each result in its preference-ordered slot. Blocks until done.
 func Stream(ctx context.Context, dicts []dict.Dictionary, mode Mode, term string, perDict int, emit func(i int, h Hit)) {
 	openers := make([]Opener, len(dicts))
@@ -114,7 +114,7 @@ func Stream(ctx context.Context, dicts []dict.Dictionary, mode Mode, term string
 
 // Opener lazily opens one dictionary. StreamOpen calls it inside the worker
 // goroutine so the caller can flush its "begin" line before paying any open
-// cost. On open failure the worker emits a Hit with Err set and a zero Meta —
+// cost. On open failure the worker emits a Hit with Err set and a zero Meta -
 // the caller supplies the dictionary id out of band (by slot index).
 type Opener func() (dict.Dictionary, error)
 
@@ -153,7 +153,7 @@ func StreamOpen(ctx context.Context, openers []Opener, mode Mode, term string, p
 			//
 			// What it costs to miss this is not a wasted CPU slice. open() on a
 			// direct backend materialises that dictionary's whole in-memory
-			// index — measured on a phone (docs/PERF.md §8.7), three abandoned
+			// index - measured on a phone (docs/PERF.md §8.7), three abandoned
 			// fan-outs over 24 preview dictionaries took 90s each and drove RSS
 			// to 1.0 GB, all of it for output nobody would read. Stopping here
 			// bounds the damage of a cancelled search to the opens already in

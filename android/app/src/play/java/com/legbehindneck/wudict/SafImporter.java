@@ -8,7 +8,7 @@
 //
 // It mirrors the WHOLE picked subtree rather than filtering by extension, and
 // that is not laziness. Every format here is a bundle whose parts are found by
-// path arithmetic in the Go code — .mdx beside its .mdd, StarDict's
+// path arithmetic in the Go code - .mdx beside its .mdd, StarDict's
 // .ifo/.idx/.dict.dz/.syn, a DSL beside its _abrv and its res/ folder of
 // media (internal/format/stardict/stardict.go:153,402 and
 // internal/format/dsl/dsl.go:121). Relative layout has to survive the copy
@@ -104,7 +104,7 @@ final class SafImporter {
     // ── the work ─────────────────────────────────────────────────────────
 
     private static final class Batch {
-        final String folder;     // DESTINATION subfolder under appDicts — ours, always non-null
+        final String folder;     // DESTINATION subfolder under appDicts - ours, always non-null
         final String source;     // what the user's folder is CALLED on their device, or null
         final List<Item> items;
         final boolean deletable; // a tree grant may allow removing the user's own files
@@ -167,8 +167,8 @@ final class SafImporter {
         File root = new File(AppDirs.appDicts(a), batch.folder);
         sweepPartials(root);
         // Only what is NOT already here counts against free space. Summing the
-        // whole batch made a re-import of a folder that is 95 % imported —
-        // the normal way a user adds one dictionary — refuse itself with "not
+        // whole batch made a re-import of a folder that is 95 % imported -
+        // the normal way a user adds one dictionary - refuse itself with "not
         // enough space" for bytes it was never going to write.
         long need = 0;
         for (Item it : batch.items) {
@@ -273,14 +273,14 @@ final class SafImporter {
         return true;
     }
 
-    // These are the USER'S OWN FILES on shared storage, not our temporaries —
+    // These are the USER'S OWN FILES on shared storage, not our temporaries -
     // the copy this import just made is the app's permanent library and the
     // only bytes the server can ever read (D62). So removal is offered, never
     // done; taking it up turns the import into a move, which is what keeps a
     // multi-GB collection from existing twice.
     //
     // Two rules the wording has to satisfy, both learned from the shipped
-    // version being unanswerable ("keep or delete SOURCES — which files?").
+    // version being unanswerable ("keep or delete SOURCES - which files?").
     // FIRST, the question names the folder as the user's own device shows it
     // and states what deleting frees, because "sources" is our word and a
     // number of gigabytes is the only part of this the user actually cares

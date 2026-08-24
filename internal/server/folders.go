@@ -22,7 +22,7 @@ import (
 
 // configInfo is what the panel's "Folders & configuration" section shows: the
 // folders being scanned, where prepared dictionaries live, which config file
-// is in effect — and, for each, WHICH layer set it. Everything here is
+// is in effect - and, for each, WHICH layer set it. Everything here is
 // otherwise visible only on the terminal at startup, which a user who opened
 // the app in a browser never sees.
 type configInfo struct {
@@ -41,7 +41,7 @@ type configInfo struct {
 	DictDirEditable bool   `json:"dictDirEditable"`
 
 	// RevealLabel is the platform's own name for "show this in the file
-	// manager" — the phrase a user of that OS already recognises.
+	// manager" - the phrase a user of that OS already recognises.
 	RevealLabel string `json:"revealLabel"`
 	CanReveal   bool   `json:"canReveal"`
 
@@ -55,7 +55,7 @@ type configInfo struct {
 	// therefore carries no information: {prefix, label} pairs, first match
 	// wins. On a desktop that is one entry, the home directory shown as "~"
 	// (D48). DISPLAY ONLY: the clipboard and /api/reveal keep the absolute
-	// path, which is what a user pasting into a script — or the file manager —
+	// path, which is what a user pasting into a script - or the file manager -
 	// needs. A label is a NAME, not a path: "~" is one only where a shell
 	// would accept it, which is why the platform decides (see pathAliases).
 	PathAliases [][2]string `json:"pathAliases,omitempty"`
@@ -80,7 +80,7 @@ func revealLabel() string {
 // to show. The SERVER decides them because only the server knows which machine
 // it is on, and a label is a claim about that machine: "~" says "a shell here
 // would expand this", which is true on a desktop and false on Android, where
-// HOME is the app's external files dir — a directory with no shell, that cannot
+// HOME is the app's external files dir - a directory with no shell, that cannot
 // be typed anywhere, and that no file manager may open. Android instead gets
 // the names the Files app itself uses for the volumes, so a path the user reads
 // here is a path they can find. The page applies the pairs blindly (D54: the
@@ -196,7 +196,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		DictDirEditable: s.DictDirEditable,
 		RevealLabel:     revealLabel(),
 		// revealing opens a window on the machine running the server, which is
-		// only useful when that is also the machine at the keyboard — and only
+		// only useful when that is also the machine at the keyboard - and only
 		// works where there is something to open it with. Offering a control
 		// whose command does not exist (Android has no xdg-open) is worse than
 		// not offering it: the click fails, and the user concludes the files
@@ -287,7 +287,7 @@ var revealPossible = func() bool {
 	case "darwin", "windows":
 		return true // open(1) and explorer.exe are part of the OS
 	default:
-		// Linux, and Android — where there is no xdg-open, no file manager,
+		// Linux, and Android - where there is no xdg-open, no file manager,
 		// and (since Android 11) nothing that may open the app's data dir.
 		_, err := exec.LookPath("xdg-open")
 		return err == nil
@@ -311,7 +311,7 @@ func reveal(path string) error {
 	case "windows":
 		// Hand over the foreground right first, so the window that appears is
 		// focused instead of merely flashing in the taskbar. Only effective
-		// when this process holds that right — the tray menu, not the web
+		// when this process holds that right - the tray menu, not the web
 		// panel; see allowForeground in foreground_windows.go.
 		allowForeground()
 		// explorer exits with a non-zero status even on success, so Start()

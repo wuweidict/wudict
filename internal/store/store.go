@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package store is the ingested backend: the wudict canonical SQLite
-// format (docs/SPEC.md §2). One `text.db` per dictionary — inside its library
-// folder, see library.go — holds headwords, aliases, article HTML, and the
+// format (docs/SPEC.md §2). One `text.db` per dictionary - inside its library
+// folder, see library.go - holds headwords, aliases, article HTML, and the
 // FTS5 indexes powering the contains and full-text modes the direct backends
 // cannot offer.
 //
@@ -27,7 +27,7 @@ import (
 func init() {
 	// A prepared dictionary is a FOLDER whose main file is `text.db`
 	// (see library.go); `<name>.text.db` is the same database copied out of
-	// its folder. Registering bare ".db" — as this once did — made every
+	// its folder. Registering bare ".db" - as this once did - made every
 	// internal sidecar a public dictionary type: a `media.db` opened as a
 	// phantom dictionary, because for uuid pairing it carries the same
 	// user_version and meta table as a text.db.
@@ -52,8 +52,8 @@ type Store struct {
 	uuid       string // dict_uuid: what a sibling media.db must match
 
 	// The sibling media.db is opened on the first resource that asks for one,
-	// not at open. Most opens never serve a resource at all — a search touches
-	// text only — and the media database of a large dictionary is the bigger
+	// not at open. Most opens never serve a resource at all - a search touches
+	// text only - and the media database of a large dictionary is the bigger
 	// file of the pair, so eagerly attaching it meant a second SQLite handle,
 	// a second page cache and a second set of descriptors per dictionary, held
 	// for the life of the process, on the chance that an article referenced an
@@ -67,7 +67,7 @@ type Store struct {
 // foldVersionOf reads the folding version a database records.
 //
 // A database written before versioning existed carries no key, and was
-// necessarily built by version 1 — the folding in force when the key was
+// necessarily built by version 1 - the folding in force when the key was
 // introduced. Defaulting to 1 rather than 0 is the whole reason this does not
 // declare every existing library stale on the day it ships.
 func foldVersionOf(m map[string]string) int {
@@ -81,7 +81,7 @@ func foldVersionOf(m map[string]string) int {
 
 // FoldStale reports that a prepared database's trigram index was built by a
 // different text folding than the one running now, so "contains" may miss
-// words whose folding changed. Only the trigram index is affected — see
+// words whose folding changed. Only the trigram index is affected - see
 // dict.FoldVersion for why nothing else is.
 //
 // It is a fact ABOUT the data, not a verdict on it: a folding change usually
@@ -114,17 +114,21 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("%s: reading meta: %w", path, err)
 	}
+	// DisplayText on the way out, not on the way in: these strings were copied
+	// from the source dictionary's header at ingest time, and a library
+	// prepared before that leniency existed still holds whatever escaping the
+	// dictionary shipped. Decoding here repairs those without a re-ingest.
 	s.meta = dict.Meta{
-		Name:        m["name"],
+		Name:        dict.DisplayText(m["name"]),
 		Format:      "wudict:" + m["format"],
 		Path:        path,
-		Description: m["description"],
+		Description: dict.DisplayText(m["description"]),
 	}
 	s.ftsOK = m["ingest_level"] != string(LevelHeadwords)
 	s.srcPath = m["source_path"]
 	// feature-detect the trigram "contains" index rather than gating on
 	// schema version, so older .text.db (and standalone native dicts whose
-	// source is gone) keep opening — they simply lack the contains mode.
+	// source is gone) keep opening - they simply lack the contains mode.
 	var trig int
 	db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='entry_trigram'`).Scan(&trig)
 	s.hasTrigram = trig > 0
@@ -201,7 +205,7 @@ func ReadMeta(dbPath string) (map[string]string, error) {
 func (s *Store) Meta() dict.Meta { return s.meta }
 
 // SourcePath returns the foreign source this database was prepared from
-// (empty when unrecorded). The file may no longer exist — a prepared
+// (empty when unrecorded). The file may no longer exist - a prepared
 // dictionary stands on its own.
 func (s *Store) SourcePath() string { return s.srcPath }
 
@@ -210,7 +214,7 @@ func (s *Store) Caps() dict.Caps {
 }
 
 // ContainsStale reports that the trigram index was built by a different text
-// folding than the running one. Contains stays enabled — see FoldStale.
+// folding than the running one. Contains stays enabled - see FoldStale.
 func (s *Store) ContainsStale() bool { return s.staleFold }
 
 func (s *Store) Close() error {
@@ -306,14 +310,14 @@ func (s *Store) Exact(word string, limit int) ([]dict.Result, error) {
 // notSubEntry excludes MDict-style sub-entries from browsing results.
 //
 // Repacked dictionaries store expandable sections as ordinary headwords with an
-// "@" prefix — LDOCE6 No-Voice ships 95,162 of them against 65,382 real words,
+// "@" prefix - LDOCE6 No-Voice ships 95,162 of them against 65,382 real words,
 // so 59 % of its "entries" are `@collocations_woman`, `@examples_woman` and the
 // like. They exist to be fetched by a link inside an article, never to be
 // browsed: leaving them in makes a `contains` search for "woman" return five
 // sub-entries before the word itself, and inflates every entry count.
 //
 // They stay reachable by EXACT lookup, which is how an article's link fetches
-// one. A bare "@" (the symbol as a headword) is not hidden — only "@" followed
+// one. A bare "@" (the symbol as a headword) is not hidden - only "@" followed
 // by something, which is what the convention produces.
 const notSubEntry = ` AND %s NOT LIKE '@_%%' `
 
@@ -335,7 +339,7 @@ func buildExactMatch(input, column string) string {
 }
 
 // Prefix returns exact matches if any, else prefix matches ordered by
-// headword (LIKE input escaped — FTS-audit #5).
+// headword (LIKE input escaped - FTS-audit #5).
 func (s *Store) Prefix(word string, limit int) ([]dict.Result, error) {
 	word = strings.TrimSpace(word)
 	if word == "" {
@@ -364,7 +368,7 @@ func (s *Store) Prefix(word string, limit int) ([]dict.Result, error) {
 
 // Fuzzy is the accent/case-insensitive prefix-phrase engine (FTS5 unicode61
 // remove_diacritics tokenizer, ordered by headword). It is no longer a
-// standalone search mode — its behaviour is folded into Prefix, which calls
+// standalone search mode - its behaviour is folded into Prefix, which calls
 // it as the accent-insensitive fallback (FTS-audit #4).
 func (s *Store) Fuzzy(word string, limit int) ([]dict.Result, error) {
 	match := buildMatch(word, "w")
@@ -404,7 +408,7 @@ func (s *Store) Contains(word string, limit int) ([]dict.Result, error) {
 		}
 	}
 	// short query (< 3 chars) or trigram miss: LIKE substring on the raw
-	// headword (accent-sensitive — acceptable for the <3-char contains edge).
+	// headword (accent-sensitive - acceptable for the <3-char contains edge).
 	return s.collect(s.db.Query(`
 		SELECT e.w, e.m FROM entry e WHERE e.w LIKE ?1 ESCAPE '\'`+subEntryFilter("e.w")+`ORDER BY e.w LIMIT ?2`,
 		"%"+escapeLike(word)+"%", n))
@@ -430,7 +434,7 @@ func (s *Store) Keywords(offset, n int) []string {
 	}
 	// n<=0 is "no limit" (dict.Keywords), which SQLite spells as a negative
 	// LIMIT. This used to pass clamp(n), capping every browse at 500 and
-	// turning "no limit" into "500" — maxLimit exists to bound HTTP SEARCH
+	// turning "no limit" into "500" - maxLimit exists to bound HTTP SEARCH
 	// results (FTS-audit #7), and Keywords is not reachable over HTTP at all.
 	limit := n
 	if limit <= 0 {

@@ -7,8 +7,8 @@
 //
 // # Why a tokenizer and not a regular expression
 //
-// This package exists because two separate call sites — the server's /res/
-// rewriter and the media packer — each grew their own regular expression over
+// This package exists because two separate call sites - the server's /res/
+// rewriter and the media packer - each grew their own regular expression over
 // article HTML, and both encoded the same wrong assumption: that attribute
 // values are quoted. They are frequently not. Real dictionary HTML is
 // hand-written, machine-repacked or scraped, and this is ordinary in it:
@@ -17,7 +17,7 @@
 //
 // The opening quote is missing. Every browser resolves that by the WHATWG
 // tokenizer's "attribute value (unquoted) state", which ends the value at
-// whitespace and keeps the stray quote — so the value is `plaintiff__gb_1.ogg"`.
+// whitespace and keeps the stray quote - so the value is `plaintiff__gb_1.ogg"`.
 // A `href="([^"]+)"` pattern simply does not see the attribute at all, leaves
 // it alone, and the reference escapes to the page origin.
 //
@@ -25,7 +25,7 @@
 // dictionaries: unquoted values (legal HTML), spaces around `=`, `>` inside a
 // quoted value, `src=` written inside a JavaScript string, and `href=` written
 // in prose or inside a comment. None of those are edge cases you can patch
-// one at a time — they are the difference between matching text and parsing a
+// one at a time - they are the difference between matching text and parsing a
 // document. So this package parses.
 //
 // # The state machine
@@ -47,7 +47,7 @@
 //	Text                     | in <style> | CSS: url(...) references rewritten.
 //	Text                     | in <script>| NEVER touched. A `src="…"` inside a
 //	                         |            | script is a string literal, not
-//	                         |            | markup — the regexes rewrote it.
+//	                         |            | markup - the regexes rewrote it.
 //	Text                     | otherwise  | emitted as-is. Prose that mentions
 //	                         |            | href="…" is not a reference either.
 //	Comment, Doctype         | any        | emitted as-is.
@@ -56,13 +56,13 @@
 //	                         |            | Whatever is left is emitted so the
 //	                         |            | function never loses bytes.
 //
-// Attribute classification, per element+attribute, is NOT decided here — it is
+// Attribute classification, per element+attribute, is NOT decided here - it is
 // policy, and the two call sites want different answers. See Ref and Rewriter.
 //
 // # Fidelity
 //
 // A Rewriter whose URL function returns its input unchanged reproduces
-// well-formed input byte for byte — original quoting, attribute order,
+// well-formed input byte for byte - original quoting, attribute order,
 // whitespace and case all survive, because an element with no changed value is
 // emitted as its original bytes rather than re-serialised.
 //
@@ -111,7 +111,7 @@ type Ref struct {
 // expensive no-op that still round-trips exactly.
 type Rewriter struct {
 	// URL maps one reference to its replacement. Return the input unchanged
-	// to leave it alone — that is not merely allowed, it is the case that
+	// to leave it alone - that is not merely allowed, it is the case that
 	// preserves the original bytes.
 	URL func(Ref) string
 
@@ -231,7 +231,7 @@ var urlAttr = map[string]bool{
 	"background": true, "longdesc": true, "usemap": true,
 }
 
-// isURLAttr accepts a bare name or a prefixed one — data-src, xlink:href,
+// isURLAttr accepts a bare name or a prefixed one - data-src, xlink:href,
 // data-original-src. The separator is required, so "metadata" is not "data"
 // and "srcdoc" is not "src".
 func isURLAttr(name string) bool {
@@ -250,7 +250,7 @@ func isSrcset(name string) bool {
 }
 
 // Refs returns every reference in doc, in document order, with duplicates
-// kept — deduplication is the caller's policy.
+// kept - deduplication is the caller's policy.
 func (rw Rewriter) Refs(doc string) []Ref {
 	var out []Ref
 	inner := rw.URL

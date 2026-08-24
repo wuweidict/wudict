@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // WuWeiDict's Android shell (D52): a WebView over the wudict server binary
-// that ships inside the APK as libwudict.so. The Go program is unchanged —
+// that ships inside the APK as libwudict.so. The Go program is unchanged -
 // ServerProcess execs it as a child and it answers on 127.0.0.1:6888.
 package com.legbehindneck.wudict;
 
@@ -28,7 +28,7 @@ import android.window.OnBackInvokedDispatcher;
 
 public class MainActivity extends Activity {
 
-    /** Optional query to run on load — set by the lookup popup's handoff (D67). */
+    /** Optional query to run on load - set by the lookup popup's handoff (D67). */
     static final String EXTRA_QUERY = "com.legbehindneck.wudict.QUERY";
 
     private FrameLayout root;
@@ -65,7 +65,7 @@ public class MainActivity extends Activity {
         applyWindowInsets();
         syncBarAppearance();
         // Where dictionaries come from is the one thing that differs between
-        // the FOSS and Play builds (D62), and it lives entirely in Storage —
+        // the FOSS and Play builds (D62), and it lives entirely in Storage -
         // a class that exists once per flavour and never in this source set.
         watchThermal();
         Storage.ensureAccess(this);
@@ -84,7 +84,7 @@ public class MainActivity extends Activity {
     // ── window insets ────────────────────────────────────────────────────
     // Android 15 forces edge-to-edge on apps targeting API 35+, and Android 16
     // DISABLED the windowOptOutEdgeToEdgeEnforcement escape hatch for apps
-    // targeting API 36 — which is us. So opting out is not available and the
+    // targeting API 36 - which is us. So opting out is not available and the
     // window really does extend under the status bar and the gesture bar.
     //
     // The page is a website: it has a position:fixed top bar and a fullscreen
@@ -111,7 +111,7 @@ public class MainActivity extends Activity {
         root.requestApplyInsets();
     }
 
-    // API 26–29: no forced edge-to-edge, so these are normally all zero — the
+    // API 26–29: no forced edge-to-edge, so these are normally all zero - the
     // decor has already inset the content view. Kept for cutout devices on 28/29.
     @SuppressWarnings("deprecation")
     private static void legacyPadding(View v, WindowInsets insets) {
@@ -120,7 +120,7 @@ public class MainActivity extends Activity {
     }
 
     // The bars are transparent under edge-to-edge, so their icons are drawn
-    // over OUR padding — they have to contrast with the window background,
+    // over OUR padding - they have to contrast with the window background,
     // which follows the system's day/night mode (values-night/colors.xml).
     private void syncBarAppearance() {
         boolean night = (getResources().getConfiguration().uiMode
@@ -162,7 +162,7 @@ public class MainActivity extends Activity {
         @Override
         public void onPageFinished(WebView view, String url) {
             // The Play flavour adds its import control here. Nothing in
-            // web/index.html knows what Android is — the D54 rule (the shell
+            // web/index.html knows what Android is - the D54 rule (the shell
             // absorbs the platform, not the page), applied to the DOM.
             Storage.onPageFinished(view);
             if (openPanelOnLoad) {
@@ -173,7 +173,7 @@ public class MainActivity extends Activity {
     }
 
     // Back. Apps targeting API 35+ get predictive back enabled by default, and
-    // for those onBackPressed() is NO LONGER CALLED — the plain override below
+    // for those onBackPressed() is NO LONGER CALLED - the plain override below
     // is dead code on any modern device, which would have made the button exit
     // the app instead of walking the SPA's history. Registering the callback
     // only while there is history to walk keeps the system's own
@@ -206,7 +206,7 @@ public class MainActivity extends Activity {
     // ── power ────────────────────────────────────────────────────────────
     // The decision itself lives in Power (D64: one place decides), because the
     // lookup popup (D67) is a second window that can be visible. What stays
-    // here is the thermal subscription — the app's own window is where it is
+    // here is the thermal subscription - the app's own window is where it is
     // worth paying for, and a popup that lives for a few seconds would learn
     // nothing from one.
 
@@ -239,7 +239,7 @@ public class MainActivity extends Activity {
     // step is being killed, so drop everything and leave it dropped: onStart
     // will restore the state when the user comes back.
     //
-    // TRIM_MEMORY_RUNNING_CRITICAL (15) is the opposite case — the app is
+    // TRIM_MEMORY_RUNNING_CRITICAL (15) is the opposite case - the app is
     // VISIBLE and the whole device is short. It is the only such signal we
     // ever get: the server's own heap-pressure handling measures our heap
     // against our ceiling, which says nothing about a shortage caused by
@@ -248,7 +248,7 @@ public class MainActivity extends Activity {
     // the user simply keeps reading, and a restricted state that never lifts
     // would leave the app single-threaded for the rest of the session. The
     // intermediate running levels (LOW, MODERATE) are advisory and are left
-    // alone — shedding there would fight the user's actual work.
+    // alone - shedding there would fight the user's actual work.
     //
     // Recent platform versions have narrowed which of these levels an app
     // targeting a modern API still receives, so this is treated as a bonus
@@ -336,7 +336,7 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Opens the ☰ panel — the screen that lists dictionaries with their sizes
+     * Opens the ☰ panel - the screen that lists dictionaries with their sizes
      * and, on this platform, can remove them (D63). Driven by clicking the
      * page's own control rather than by a wudict:// URL or an added API,
      * because the panel's opener already does everything that must happen
@@ -361,7 +361,7 @@ public class MainActivity extends Activity {
         unwatchThermal();
         // The server is bound to the app's lifetime (D52): finishing kills
         // it; swiping the task away kills the process group, which includes
-        // the child. Recreation keeps it — and so does a lookup popup that is
+        // the child. Recreation keeps it - and so does a lookup popup that is
         // still up, which is why the decision is ServerProcess's and not this
         // activity's (D67).
         ServerProcess.release(isFinishing());

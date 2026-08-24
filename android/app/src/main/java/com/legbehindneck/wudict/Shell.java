@@ -7,7 +7,7 @@
 // navigation that is NOT ours goes instead.
 //
 // It lives here rather than in MainActivity because there are now two windows
-// onto the same server — the app and the selection-lookup popup (D67) — and a
+// onto the same server - the app and the selection-lookup popup (D67) - and a
 // second copy of this policy is a second thing to keep in step. Nothing here
 // knows about either activity's layout or lifecycle.
 package com.legbehindneck.wudict;
@@ -39,11 +39,11 @@ final class Shell {
 
     /**
      * A search the page will run on load. `?q=…&mode=…&dict=…` is the SPA's own
-     * deep-link shape (web/index.html, applyURL) — the shell adds no API and the
+     * deep-link shape (web/index.html, applyURL) - the shell adds no API and the
      * page learns nothing about Android (D54).
      *
-     * <p>Every component is encoded here, so a caller's text — a selection from
-     * another app, a URI from an intent — can carry anything at all.
+     * <p>Every component is encoded here, so a caller's text - a selection from
+     * another app, a URI from an intent - can carry anything at all.
      */
     static String searchUrl(String q, String mode, String dict) {
         StringBuilder b = new StringBuilder(PAGE_URL).append("?q=").append(enc(q));
@@ -52,7 +52,7 @@ final class Shell {
         return b.toString();
     }
 
-    // URLEncoder writes ' ' as '+', which URLSearchParams reads back as ' ' —
+    // URLEncoder writes ' ' as '+', which URLSearchParams reads back as ' ' -
     // the same pair the page already uses for its own links.
     private static String enc(String s) {
         try {
@@ -111,7 +111,7 @@ final class Shell {
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog,
                                           boolean isUserGesture, Message resultMsg) {
-                // window.open() has no URL in this callback — the only way to
+                // window.open() has no URL in this callback - the only way to
                 // learn it is to hand the transport a throwaway WebView and read
                 // the navigation it is about to make.
                 WebView sink = new WebView(view.getContext());

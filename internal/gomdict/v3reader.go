@@ -112,7 +112,7 @@ func (mdict *MdictBase) scanV3Blocks() error {
 // Key data block layout:
 //
 //	[4-byte BE] number of key blocks
-//	[8-byte BE] total decompressed size (unused — we read block-by-block)
+//	[8-byte BE] total decompressed size (unused - we read block-by-block)
 //	For each block:
 //	  [4-byte BE] decompressed size
 //	  [4-byte BE] compressed size

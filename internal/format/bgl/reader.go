@@ -5,7 +5,7 @@
 // Package bgl is the direct backend for Babylon BGL dictionaries. A BGL file
 // is a small header followed by a gzip stream of typed blocks (metadata,
 // word/definition entries, embedded resources). It has no random-access index,
-// so — like the DSL backend — Open transparently ingests into a cached
+// so - like the DSL backend - Open transparently ingests into a cached
 // text.db; embedded resources are served from a lazily-scanned map.
 //
 // The block/entry/definition parser is ported from pyglossary's babylon_bgl
@@ -518,7 +518,7 @@ func (r *Reader) probeIDKey(typ byte, data []byte) {
 // Larousse's "Gran Diccionario de la Lengua Española" does: every key is a
 // string like "E310420", the real headword sits in the definition's title
 // field, and the word is repeated among the alternates. Left alone, all 86,916
-// of its entries index and display under their id — headwords the user cannot
+// of its entries index and display under their id - headwords the user cannot
 // read and the contains/full-text indexes, which cover the headword column
 // only, cannot search. Its articles cross-link by id (bword://E310420), which
 // is why the id is demoted to an alternate rather than dropped.
@@ -528,8 +528,8 @@ func (r *Reader) probeIDKey(typ byte, data []byte) {
 // alternates, and the key must not be. Measured across an 18-file BGL corpus
 // that separates the one id-keyed dictionary (99.0% of its sample) from every
 // other (<=1.1%). Two dictionaries contain entries that match the rule
-// individually — Merriam-Webster Collegiate's "A"/"Å", Larousse Compact's
-// "about time"/"time" — and a per-entry rule would wrongly rewrite them; a
+// individually - Merriam-Webster Collegiate's "A"/"Å", Larousse Compact's
+// "about time"/"time" - and a per-entry rule would wrongly rewrite them; a
 // whole-file rule ignores them.
 func (r *Reader) decideIDKey() bool {
 	if len(r.probes) < idProbeMin {

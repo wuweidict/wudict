@@ -70,7 +70,7 @@ func testMdx(t *testing.T) string {
 	return p
 }
 
-// BenchmarkExactWarm measures a repeated in-process lookup — with the record
+// BenchmarkExactWarm measures a repeated in-process lookup - with the record
 // block cache this should be microseconds; without it, each op re-opened the
 // file and re-decompressed the whole record block (~1 ms, per the audit).
 func BenchmarkExactWarm(b *testing.B) {
@@ -173,7 +173,7 @@ func TestIntegrationResource(t *testing.T) {
 	}
 }
 
-// MDict serves files sitting next to the .mdx — that is how repacks ship their
+// MDict serves files sitting next to the .mdx - that is how repacks ship their
 // stylesheet and scripts (LDOCE6 keeps LDOCE6.css and entry.js loose, with no
 // .mdd at all). Packed resources still win; the disk is only consulted on a
 // miss, and only for things a dictionary legitimately loads.

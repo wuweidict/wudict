@@ -16,13 +16,13 @@ import (
 
 // `clean` and `text` need to know which of a dictionary's classes are blocks
 // and which are hidden, and the only place that is written down is the
-// dictionary's own stylesheet — a resource of the same dictionary, named by the
+// dictionary's own stylesheet - a resource of the same dictionary, named by the
 // article's own <link>. This reads it once per dictionary and keeps the reduced
 // table (class → display, a few hundred entries, 10–25 KB) on the entry.
 //
 // In memory, never on disk. The table is derived data whose source can change
-// under it — re-preparing or repacking a dictionary would silently invalidate a
-// persisted copy — and rebuilding it costs about what reading it back would: a
+// under it - re-preparing or repacking a dictionary would silently invalidate a
+// persisted copy - and rebuilding it costs about what reading it back would: a
 // blob read and one linear pass, ~1–3 ms all told, once. Persisting it would
 // mean a fourth artifact in the library folder (D20 fixes three) plus a
 // cache-coherence protocol, to save a millisecond.
@@ -119,8 +119,8 @@ func (e *entry) readStyles(body string) htmlref.Styles {
 // other href is a stylesheet we do not host and cannot read.
 //
 // Only the first article of a dictionary is ever scanned. Dictionaries link
-// their stylesheet from every entry — it is emitted by the converter, not
-// written per article — so scanning more would cost a tokenizer pass per
+// their stylesheet from every entry - it is emitted by the converter, not
+// written per article - so scanning more would cost a tokenizer pass per
 // request to discover the same one name.
 func stylesheetNames(body, id string) []string {
 	prefix := "/res/" + id + "/"

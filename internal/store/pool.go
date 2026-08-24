@@ -16,8 +16,8 @@ import (
 // numbers here bound that (D64).
 const (
 	// idleConns is how many connections a dictionary keeps warm. One, because
-	// concurrency across dictionaries is what this program does — a hundred at
-	// once, bounded by the search fan-out — while concurrency WITHIN one
+	// concurrency across dictionaries is what this program does - a hundred at
+	// once, bounded by the search fan-out - while concurrency WITHIN one
 	// dictionary is a single user typing.
 	idleConns = 1
 
@@ -29,7 +29,7 @@ const (
 
 // pageCacheKiB is the per-connection page cache, 0 meaning the driver's own
 // default (2 MiB). Android halves it: the cache buys throughput on a scan, and
-// scans are what this app does least — a lookup is an index seek and a row.
+// scans are what this app does least - a lookup is an index seek and a row.
 var pageCacheKiB = func() int {
 	if runtime.GOOS == "android" {
 		return 1024

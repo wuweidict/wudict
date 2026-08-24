@@ -48,8 +48,8 @@ type Report struct {
 }
 
 // Plan is what to build for one dictionary. Finding a headword (exact,
-// prefix, accent-insensitive) always works and costs almost nothing — around
-// 2 MB on a 40k-entry dictionary — so it has no switch. The two indexes that
+// prefix, accent-insensitive) always works and costs almost nothing - around
+// 2 MB on a 40k-entry dictionary - so it has no switch. The two indexes that
 // do cost something are opt-in per dictionary.
 type Plan struct {
 	FullText bool // index article text as well as headwords (the largest index)
@@ -326,7 +326,7 @@ func bodyEncoding() string {
 // syncFile flushes a finished ingest temp to disk. dsnIngest runs with
 // synchronous=OFF for speed, so pages may linger in the OS cache; fsyncing
 // before the atomic rename ensures an interrupted shutdown cannot leave a
-// torn database at the final path. Best-effort — failures are non-fatal.
+// torn database at the final path. Best-effort - failures are non-fatal.
 func syncFile(path string) {
 	if f, err := os.Open(path); err == nil {
 		_ = f.Sync()
@@ -336,8 +336,8 @@ func syncFile(path string) {
 
 // tempDBName returns a per-call unique scratch path for an ingest target
 // (renamed onto dbPath atomically on success). Uniqueness lets concurrent
-// ingests of the same dictionary — e.g. a background warm racing an
-// on-demand open — proceed without clobbering each other's temp file.
+// ingests of the same dictionary - e.g. a background warm racing an
+// on-demand open - proceed without clobbering each other's temp file.
 func tempDBName(dbPath string) string {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
@@ -362,7 +362,7 @@ func htmlEscape(s string) string {
 	return r.Replace(s)
 }
 
-// sourceHash hashes the first 1 MiB of the source file — cheap identity
+// sourceHash hashes the first 1 MiB of the source file - cheap identity
 // check for stale-DB detection.
 func sourceHash(path string) string {
 	f, err := os.Open(path)

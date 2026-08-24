@@ -16,11 +16,11 @@ import (
 
 // Article formats for /api/search (D61). An article body is the dictionary's
 // own HTML, and wudict's page renders it with the dictionary's own CSS and
-// scripts. A client that is NOT that page — a browser extension showing a
-// hover popup, a script, another front-end — wants neither, and pays heavily
+// scripts. A client that is NOT that page - a browser extension showing a
+// hover popup, a script, another front-end - wants neither, and pays heavily
 // for both. Measured over 748 KB of real articles: `clean` is 1.9x smaller than
 // raw and `text` 2.6x, and `clean` removes every stylesheet and script request
-// an article would otherwise force — 82 of them for one LDOCE entry. Reducing
+// an article would otherwise force - 82 of them for one LDOCE entry. Reducing
 // here rather than in every client saves the bytes on the wire instead of after
 // it, and means the reduction is written once.
 const (
@@ -42,8 +42,8 @@ func parseFormat(s string) (string, error) {
 }
 
 // cleanKeep is what survives `clean`: structure, emphasis and media. Chosen so
-// a definition keeps the distinctions that carry meaning — sense lists,
-// examples set apart by emphasis, tables of inflections, pronunciation audio —
+// a definition keeps the distinctions that carry meaning - sense lists,
+// examples set apart by emphasis, tables of inflections, pronunciation audio -
 // while losing everything that only carries a look.
 var cleanKeep = map[string]bool{
 	"p": true, "div": true, "br": true, "hr": true, "span": true,
@@ -59,7 +59,7 @@ var cleanKeep = map[string]bool{
 }
 
 // cleanDrop is removed WITH its content, because that content is not prose.
-// Everything not in either map is unwrapped — its tags go, its text stays —
+// Everything not in either map is unwrapped - its tags go, its text stays -
 // so an unknown or custom element can never silently swallow a definition.
 var cleanDrop = map[string]bool{
 	"script": true, "style": true, "link": true, "meta": true, "base": true,
@@ -120,7 +120,7 @@ func cleanURL(v, base string) (string, bool) {
 		return "", false // protocol-relative: resolves against the HOST page
 	case strings.HasPrefix(t, "/"):
 		// wudict's own root-absolute refs (/res/…, D14). Correct inside our
-		// page, meaningless in a client that renders this anywhere else — so
+		// page, meaningless in a client that renders this anywhere else - so
 		// the payload is made self-contained here rather than each client
 		// being told to rewrite it.
 		return base + t, true
@@ -134,7 +134,7 @@ func cleanURL(v, base string) (string, bool) {
 // blockTagFor is the element to emit for one the dictionary's CSS displays as
 // a block. Only elements that carry no meaning of their own are renamed: a
 // <span> is a hook for a class and nothing else, and an unknown element was
-// going to be unwrapped anyway. Everything the keep-list names is left alone —
+// going to be unwrapped anyway. Everything the keep-list names is left alone -
 // renaming an <a> to a <div> would trade a boundary for a link, and a <td> for
 // its table.
 func blockTagFor(tag string) string {
@@ -154,7 +154,7 @@ func attrValue(attrs []html.Attribute, name string) string {
 }
 
 // cleanPolicy is the reduction, plus whatever the dictionary's own stylesheet
-// says about layout (st, possibly nil — see internal/htmlref/css.go). Without
+// says about layout (st, possibly nil - see internal/htmlref/css.go). Without
 // it the tag skeleton is all there is to go on, and for a dictionary written as
 // nested <span class="…"> that is nothing: every sense, example and collocation
 // runs into the next, and content the stylesheet hid becomes visible.
@@ -195,7 +195,7 @@ func cleanPolicy(base string, st htmlref.Styles) htmlref.Policy {
 			}
 			switch st.Class(class) {
 			case htmlref.DisplayNone:
-				// The dictionary hides this — LDOCE's <span class="FIELD">TT
+				// The dictionary hides this - LDOCE's <span class="FIELD">TT
 				// </span> field codes, which surface as "TTTRAVEL" the moment
 				// the stylesheet is dropped. Hidden is what the author meant.
 				return htmlref.TagDrop, tag
@@ -211,7 +211,7 @@ func cleanPolicy(base string, st htmlref.Styles) htmlref.Policy {
 // audioObject rescues the one thing dropping <object> would otherwise throw
 // away. A DSL dictionary's pronunciation is emitted as
 // `<object type="audio/x-wav" data="beat.mp3">`, so dropping the element for
-// being an embedding vector — which it is — would silently remove audio from
+// being an embedding vector - which it is - would silently remove audio from
 // every DSL dictionary in the library. Rewritten to a plain <audio>, the
 // content survives in a form that needs no plugin, no script and no client
 // knowledge of how DSL happens to spell it.
@@ -253,7 +253,7 @@ func applyFormat(body, format, base string, st htmlref.Styles) string {
 }
 
 // originOf is the base a client reached us on, so absolutised references point
-// back at the address that actually worked for them — not at a hard-coded
+// back at the address that actually worked for them - not at a hard-coded
 // 127.0.0.1 that would be wrong for anyone running wudict on another host.
 func originOf(r *http.Request) string {
 	scheme := "http"

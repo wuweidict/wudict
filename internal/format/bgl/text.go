@@ -24,7 +24,7 @@ var (
 )
 
 // stripHTMLTags replaces runs of HTML tags with a single space (used to turn
-// an HTML-bearing headword into plain text — Babylon does not render keys).
+// an HTML-bearing headword into plain text - Babylon does not render keys).
 func stripHTMLTags(s string) string { return reStripTags.ReplaceAllString(s, " ") }
 
 func removeControlChars(s string) string { return reControlChars.ReplaceAllString(s, "") }
@@ -132,7 +132,7 @@ func stripDollarIndexes(b []byte) []byte {
 		}
 		d1 += d0 + 1
 
-		if d1 == d0+1 { // "$$" — a run of dollar signs
+		if d1 == d0+1 { // "$$" - a run of dollar signs
 			out = append(out, b[i:d0]...)
 			i = d1 + 1
 			for i < len(b) && b[i] == '$' {

@@ -30,7 +30,7 @@ var fileOpeners = map[string]opener{}
 
 // RegisterFormat wires a file extension to a format package. Called from
 // format package init(); the cmd package blank-imports each format. The key
-// may be a multi-part suffix (e.g. ".dsl.dz") — matchKey prefers the longest
+// may be a multi-part suffix (e.g. ".dsl.dz") - matchKey prefers the longest
 // match, so a StarDict companion ".dict.dz" is not mistaken for a ".dz" dict.
 func RegisterFormat(ext string, fn opener) {
 	openers[strings.ToLower(ext)] = fn
@@ -45,8 +45,8 @@ func RegisterFileName(name string, fn opener) {
 // DISCOVER as dictionaries.
 //
 // Not everything readable is a dictionary. An .mdd is MDict's resource
-// container — the same key-block file format as an .mdx, holding file bytes
-// instead of articles — so `wudict keys x.mdd` and `wudict res x.mdd name`
+// container - the same key-block file format as an .mdx, holding file bytes
+// instead of articles - so `wudict keys x.mdd` and `wudict res x.mdd name`
 // are exactly as meaningful there as on an .mdx, and a user who has only the
 // .mdd must not be told to go and find an .mdx that may not exist. But a
 // folder scan must not turn every companion .mdd into a dictionary in the
@@ -63,7 +63,7 @@ func RegisterInspectable(ext string, fn opener) {
 
 // openerFor resolves the opener for an explicitly named path: an exact
 // base-name registration first (bundle main files), then the longest matching
-// dictionary suffix, and only then an inspect-only container — so a real
+// dictionary suffix, and only then an inspect-only container - so a real
 // format always wins.
 func openerFor(path string) (opener, bool) {
 	if fn, ok := fileOpeners[strings.ToLower(filepath.Base(path))]; ok {
@@ -185,7 +185,7 @@ func recoverOpen(path string, err *error) {
 	}
 }
 
-// excludedDirs are subtrees Discover never walks — canonical absolute paths.
+// excludedDirs are subtrees Discover never walks - canonical absolute paths.
 // The generated-database directory is registered here at startup: it is the
 // app's private library, never a discovery root, so a dict dir that happens to
 // contain (or equal an ancestor of) it cannot list prepared dictionaries twice.
@@ -215,7 +215,7 @@ func CanonPath(dir string) string {
 // spelling, keeping the first spelling and the original order.
 //
 // Discovery already guarantees a dictionary is never listed twice, so this is
-// not about correctness of results — it is about not showing the user four
+// not about correctness of results - it is about not showing the user four
 // rows for one folder, not walking that folder four times, and not writing
 // duplicates into wudict.toml.
 //
@@ -223,7 +223,7 @@ func CanonPath(dir string) string {
 // case-variant spelling on a case-insensitive filesystem, a hard link and a
 // bind mount, none of which string comparison sees. Paths that do not exist
 // (an unmounted drive, a folder yet to be created) fall back to comparing
-// canonical strings — they must still be deduped, and must still be kept.
+// canonical strings - they must still be deduped, and must still be kept.
 func DedupeDirs(dirs []string) []string {
 	var out []string
 	var infos []os.FileInfo
@@ -291,13 +291,13 @@ type RootScan struct{ New, Total int }
 // with each dictionary appearing exactly once.
 //
 // Deduplication is by CANONICAL path (symlinks resolved), because overlapping
-// roots are normal once more than one is allowed — "~/Dicts" alongside
+// roots are normal once more than one is allowed - "~/Dicts" alongside
 // "~/Dicts/Spanish", or a symlinked shortcut to a folder already listed.
 // Without it the same dictionary would get two registry ids: two rows in the
 // panel and two copies of every hit in an all-dictionaries search.
 //
 // A root that cannot be walked (an unmounted drive, a deleted folder) is
-// skipped rather than failing the scan — the other roots must keep working —
+// skipped rather than failing the scan - the other roots must keep working -
 // and reported through the returned per-root counts, which say how many
 // dictionaries each root contributed *first* (earlier roots win a tie).
 func DiscoverAll(roots []string) (paths []string, perRoot []RootScan, err error) {
@@ -360,7 +360,7 @@ func Discover(root string) ([]string, error) {
 
 // IsDictionaryFile reports whether path names a file this build can serve as a
 // dictionary: a registered main file or suffix, and not an inspect-only
-// container (an .mdd is readable but is not a dictionary — see inspectOpeners).
+// container (an .mdd is readable but is not a dictionary - see inspectOpeners).
 // It is a name test, not a probe: no bytes are read.
 //
 // Used by the "open this file with wudict" entry point the desktop file

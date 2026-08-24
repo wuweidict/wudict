@@ -12,8 +12,8 @@ import (
 	"testing"
 )
 
-// The budget is spent in two steps — a reservation from what is already known,
-// then a correction once the open has happened — and the interesting property
+// The budget is spent in two steps - a reservation from what is already known,
+// then a correction once the open has happened - and the interesting property
 // is what a refusal does NOT do: a dictionary too big for the remainder is
 // declined without consuming the remainder, so one oversized dictionary early
 // in the user's preference order cannot starve the cheap ones behind it.
@@ -45,7 +45,7 @@ func TestFanoutBudgetPacksRatherThanStops(t *testing.T) {
 	if got := f.left.Load(); got != 40 {
 		t.Errorf("a failed open kept its reservation: left = %d, want 40", got)
 	}
-	// Overshoot is allowed to go negative — that is what closes the fan-out to
+	// Overshoot is allowed to go negative - that is what closes the fan-out to
 	// everything after the dictionary that blew the budget.
 	if !f.admit(0) {
 		t.Fatal("still budget left")
@@ -71,7 +71,7 @@ func TestNilFanoutAdmitsEverything(t *testing.T) {
 
 // End to end on a real registry: the first search of a never-opened dictionary
 // cannot be priced (nothing is known about it yet), so it is admitted and then
-// charged — and that charge is what closes the fan-out. The second search knows
+// charged - and that charge is what closes the fan-out. The second search knows
 // the price and refuses before paying it, which is the whole point.
 func TestSearchBudgetRefusesUnpreparedDictionariesOnceSpent(t *testing.T) {
 	isolatedDBDir(t)
@@ -116,7 +116,7 @@ func TestSearchBudgetRefusesUnpreparedDictionariesOnceSpent(t *testing.T) {
 	}
 
 	// Second fan-out, same registry: the one that is still open is free and
-	// must never be refused — the cap exists to stop memory being created, and
+	// must never be refused - the cap exists to stop memory being created, and
 	// declining what is already resident costs results for no saving.
 	f2 := reg.fanout()
 	first := reg.all()[0]
@@ -126,7 +126,7 @@ func TestSearchBudgetRefusesUnpreparedDictionariesOnceSpent(t *testing.T) {
 
 	// Now the priced path, which is what the cap is actually for: evict the one
 	// dictionary whose cost is known, and it must be refused BEFORE it is
-	// opened rather than after — no bytes materialised, and the estimate
+	// opened rather than after - no bytes materialised, and the estimate
 	// reported so the client can say what it declined and how much it would
 	// have cost.
 	price := first.lastWeight.Load()
@@ -155,8 +155,8 @@ func TestSearchBudgetRefusesUnpreparedDictionariesOnceSpent(t *testing.T) {
 
 // Over HTTP, a capped search must still answer for every dictionary it was
 // asked about. A silently missing slot is the failure mode that would make this
-// cap dishonest — the user would read "no results" where the truth is "not
-// looked" — so the refusal travels as a DEFERRED slot: named, priced, carrying
+// cap dishonest - the user would read "no results" where the truth is "not
+// looked" - so the refusal travels as a DEFERRED slot: named, priced, carrying
 // no error, and answerable by asking for that dictionary on its own, which is
 // the tap the client offers and which this test performs.
 func TestCappedSearchReportsWhatItDeclined(t *testing.T) {
@@ -174,7 +174,7 @@ func TestCappedSearchReportsWhatItDeclined(t *testing.T) {
 	s := New(reg)
 
 	// Warm the prices first, then shed the backends. A fan-out is parallel, so
-	// the FIRST search of a cold library cannot be capped by cost — every opener
+	// the FIRST search of a cold library cannot be capped by cost - every opener
 	// reads "unknown" before any of them has settled a charge, and unknown is
 	// admitted. That is by design (§8.2: a price has to be paid once to be
 	// learned); the cap bites from the second search on, which is the state this
@@ -223,11 +223,11 @@ func TestCappedSearchReportsWhatItDeclined(t *testing.T) {
 		}
 	}
 	if answered == 0 || declined == 0 {
-		t.Fatalf("answered %d, declined %d — want some of each under a one-dictionary budget", answered, declined)
+		t.Fatalf("answered %d, declined %d - want some of each under a one-dictionary budget", answered, declined)
 	}
 
 	// The remedy the client offers is a tap, and a tap is a search of one
-	// dictionary. It must answer under the same budget that just deferred it —
+	// dictionary. It must answer under the same budget that just deferred it -
 	// otherwise the offer is a lie and the dictionary is unreachable by every
 	// path the app has.
 	one := searchStream(t, s, "/api/search?q=beta&mode=prefix&dict="+deferredID)
@@ -257,7 +257,7 @@ func TestCappedSearchReportsWhatItDeclined(t *testing.T) {
 }
 
 // The budget must never touch a prepared dictionary. It holds no headword
-// index, so refusing it would drop results and save nothing — and on Android,
+// index, so refusing it would drop results and save nothing - and on Android,
 // where the cap is on by default, prepared is the steady state the whole
 // library is heading for.
 func TestSearchBudgetNeverCapsPreparedDictionaries(t *testing.T) {

@@ -4,7 +4,7 @@
 
 // Look up a word that was selected in some OTHER app (D67).
 //
-// One activity behind three filters — the selection toolbar
+// One activity behind three filters - the selection toolbar
 // (ACTION_PROCESS_TEXT), the share sheet (ACTION_SEND text/plain) and
 // wudict://lookup?q= (ACTION_VIEW, for other apps and automation). They differ
 // only in where the string comes from; everything after that is the same, and
@@ -40,7 +40,7 @@ import android.widget.Toast;
 
 public class LookupActivity extends Activity {
 
-    // A selection can be a whole paragraph — PROCESS_TEXT hands over whatever
+    // A selection can be a whole paragraph - PROCESS_TEXT hands over whatever
     // was highlighted, and a "select all" in a reader is megabytes. Two caps,
     // because they answer different questions: the first bounds the work of
     // normalising a hostile CharSequence at all, the second is what a search
@@ -69,7 +69,7 @@ public class LookupActivity extends Activity {
         Intent i = getIntent();
         query = clean(text(i));
         if (query == null) {
-            // Nothing survived — a selection of whitespace, or a wudict:// URI
+            // Nothing survived - a selection of whitespace, or a wudict:// URI
             // with no q. A blank floating window over someone else's app would
             // be worse than saying so and getting out of the way.
             Toast.makeText(this, R.string.lookup_empty, Toast.LENGTH_SHORT).show();
@@ -126,7 +126,7 @@ public class LookupActivity extends Activity {
     private static CharSequence text(Intent i) {
         if (i == null) return null;
         CharSequence cs = i.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT);
-        // The read-only variant is what a non-editable view sends — a web page,
+        // The read-only variant is what a non-editable view sends - a web page,
         // a reader, a received message: the majority of real lookups.
         if (cs == null) cs = i.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT_READONLY);
         if (cs == null) cs = i.getCharSequenceExtra(Intent.EXTRA_TEXT); // ACTION_SEND
@@ -166,7 +166,7 @@ public class LookupActivity extends Activity {
         s = s.replaceAll("\\s+", " ").trim();
         if (s.length() > QUERY_LIMIT) {
             int end = QUERY_LIMIT;
-            // Never cut between a surrogate pair — half a code point is not text.
+            // Never cut between a surrogate pair - half a code point is not text.
             if (Character.isHighSurrogate(s.charAt(end - 1))) end--;
             s = s.substring(0, end).trim();
         }
@@ -189,8 +189,8 @@ public class LookupActivity extends Activity {
 
     // ── the window ───────────────────────────────────────────────────────
 
-    // A floating window is sized to its CONTENT — the decor measures the
-    // content view with AT_MOST — so the size has to be stated in pixels on
+    // A floating window is sized to its CONTENT - the decor measures the
+    // content view with AT_MOST - so the size has to be stated in pixels on
     // the content view itself, not asked for with MATCH_PARENT and a
     // Window.setLayout. Doing only the latter is what produced a window the
     // height of the handoff row: the content wrapped, and the WebView, being
@@ -204,7 +204,7 @@ public class LookupActivity extends Activity {
     //
     // Wide enough to read an article, never wider than a tablet's comfortable
     // column, and short enough that the app underneath is still visibly there
-    // — the whole point being that the user keeps their place in it.
+    // - the whole point being that the user keeps their place in it.
     private void sizeWindow() {
         Rect bounds = windowBounds();
         int max = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,

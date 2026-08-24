@@ -4,7 +4,7 @@ name: Build+Release (cgo)
 # (-tags sqlite_fts5, CGO_ENABLED=1). Unlike build-release.yml (pure-Go
 # modernc cross-compiled from one ubuntu box), each target is built on its
 # OWN native runner because cgo cannot cross the host arch/OS. Produces
-# workflow artifacts only — it does not create a GitHub Release, so it never
+# workflow artifacts only - it does not create a GitHub Release, so it never
 # collides with the purego release assets.
 #
 # C toolchains are preinstalled on all these GitHub-hosted images
@@ -73,7 +73,7 @@ jobs:
           # Fail loudly instead of silently shipping 0.0.0 artifacts.
           case "$VERSION" in
             v[0-9]*|[0-9]*) : ;;
-            *) echo "::warning title=Unversioned build::no usable tag found — stamping '$VERSION'; installers will be named 0.0.0" ;;
+            *) echo "::warning title=Unversioned build::no usable tag found - stamping '$VERSION'; installers will be named 0.0.0" ;;
           esac
           echo "version: $VERSION"
           go build -trimpath -tags sqlite_fts5 \
@@ -83,7 +83,7 @@ jobs:
       - name: Warn on experimental build failure
         if: failure() && matrix.experimental
         shell: bash
-        run: echo "::warning title=Experimental target failed::${{ matrix.goos }}/${{ matrix.goarch }} (cgo) failed to build — continuing. Use the purego build-release.yml binary for this target."
+        run: echo "::warning title=Experimental target failed::${{ matrix.goos }}/${{ matrix.goarch }} (cgo) failed to build - continuing. Use the purego build-release.yml binary for this target."
 
       - name: Upload artifact
         if: success()
@@ -117,7 +117,7 @@ jobs:
           set -eu
           slices=$(ls artifacts/wudict-darwin-*-cgo 2>/dev/null || true)
           if [ -z "$slices" ]; then
-            echo "::warning title=No .app::no darwin binaries were produced — skipping the bundle"
+            echo "::warning title=No .app::no darwin binaries were produced - skipping the bundle"
             exit 0
           fi
           # lipo -create accepts a single input, so a half-failed matrix still
@@ -171,11 +171,11 @@ jobs:
         run: |
           $exe = 'artifacts\wudict-windows-amd64-cgo.exe'
           if (-not (Test-Path -LiteralPath $exe)) {
-            Write-Host "::warning title=No installer::the windows/amd64 build did not produce a binary — skipping"
+            Write-Host "::warning title=No installer::the windows/amd64 build did not produce a binary - skipping"
             exit 0
           }
           # wudict.exe and dist\ in the repository root are exactly what the
-          # script defaults to, so it is called with no arguments — the same
+          # script defaults to, so it is called with no arguments - the same
           # invocation `make win-installer` uses, and one less thing to drift.
           Copy-Item -LiteralPath $exe -Destination 'wudict.exe' -Force
           # Process-scoped, so a runner image whose default policy tightens
@@ -224,7 +224,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           if gh release view "${TAG}" > /dev/null 2>&1; then
-            echo "Release ${TAG} exists — replacing native assets."
+            echo "Release ${TAG} exists - replacing native assets."
             gh release upload "${TAG}" artifacts/* --clobber
           else
             echo "Creating release ${TAG}."

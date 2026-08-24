@@ -18,7 +18,7 @@
 //
 // That is not caution for its own sake. github.com/gogpu/systray is a thin,
 // error-suppressing wrapper: New() discards the platform's Create error, Show()
-// discards its error, and Run() — the only call that returns one — blocks. On
+// discards its error, and Run() - the only call that returns one - blocks. On
 // Linux, Run() is literally a receive on a quit channel, and registering with
 // the StatusNotifierWatcher is non-fatal even when it fails. So on GNOME
 // without the AppIndicator extension every call "succeeds" and the process
@@ -56,12 +56,12 @@ const exitGrace = 3 * time.Second
 type State int
 
 const (
-	Off       State = iota // not enabled — terminal, zero cost
+	Off       State = iota // not enabled - terminal, zero cost
 	Preflight              // asking the OS whether a tray is possible
 	Starting               // building the icon and menu
 	Running                // Run() is pumping the platform message loop
 	Stopping               // Quit chosen; draining the server
-	Degraded               // any failure or panic — never retried
+	Degraded               // any failure or panic - never retried
 	Gone                   // stopped cleanly
 )
 
@@ -87,7 +87,7 @@ func (s State) String() string {
 
 // allowed is the whole transition table. Degraded and Gone have no outgoing
 // edges, which is what makes a second failure arriving after the first unable
-// to resurrect the machine — and what makes "never retried" structural rather
+// to resurrect the machine - and what makes "never retried" structural rather
 // than a rule somebody has to remember.
 var allowed = map[State][]State{
 	Off:       {Preflight},
@@ -111,7 +111,7 @@ func (m *machine) state() State {
 }
 
 // to advances the machine and reports whether the transition was legal. An
-// illegal transition is refused, never applied — callers use the false return
+// illegal transition is refused, never applied - callers use the false return
 // to decide whether they are the one who gets to report the failure.
 func (m *machine) to(next State) bool {
 	m.mu.Lock()
@@ -137,7 +137,7 @@ type Item struct {
 
 // Config is everything the tray knows about the server. The callbacks are
 // supplied by the caller, so this package depends on neither the registry nor
-// the HTTP layer — and Quit runs in-process, which keeps a remotely reachable
+// the HTTP layer - and Quit runs in-process, which keeps a remotely reachable
 // kill switch out of the mux entirely.
 type Config struct {
 	Enabled  bool   // false → Wrap is a pass-through
@@ -171,7 +171,7 @@ func (cfg Config) tooltip() string {
 	if cfg.URL == "" {
 		return cfg.name()
 	}
-	return cfg.name() + " — serving on " + cfg.URL
+	return cfg.name() + " - serving on " + cfg.URL
 }
 
 // items builds the menu. Optional entries are dropped rather than greyed when
@@ -274,7 +274,7 @@ func Wrap(cfg Config, serve func() error) error {
 		defer close(done)
 		select {
 		case e := <-serveErr:
-			// The server ended on its own — Ctrl-C, SIGTERM, a listener
+			// The server ended on its own - Ctrl-C, SIGTERM, a listener
 			// error. The tray follows it, never the reverse.
 			result = e
 		case <-quit:
@@ -285,7 +285,7 @@ func Wrap(cfg Config, serve func() error) error {
 			case e := <-serveErr:
 				result = e
 			case <-time.After(shutdownGrace):
-				logx.Warn("shutdown timed out after %s — exiting anyway", shutdownGrace)
+				logx.Warn("shutdown timed out after %s - exiting anyway", shutdownGrace)
 			}
 			m.to(Gone)
 		}
@@ -293,14 +293,14 @@ func Wrap(cfg Config, serve func() error) error {
 		p.Stop()
 		// Run() may never return: the Quit() the library documents does not
 		// exist, and Remove() unblocking Run() is an implementation detail of
-		// this version of it. Bound the wait rather than trust it — but arm the
+		// this version of it. Bound the wait rather than trust it - but arm the
 		// exit only against a Run() that genuinely hangs, so a well-behaved
 		// library reaches the ordinary return path and its error survives.
 		go func() {
 			select {
 			case <-runReturned:
 			case <-time.After(exitGrace):
-				logx.Warn("tray message loop did not stop — exiting")
+				logx.Warn("tray message loop did not stop - exiting")
 				if result != nil {
 					os.Exit(1)
 				}
@@ -352,15 +352,15 @@ func runSafely(p platform) (err error) {
 
 // degrade reports the one line a user gets when the tray cannot be had, and
 // tells them how to stop the server without it. In a GUI launch this lands in
-// the log file rather than on a console (machine C, Headless) — the browser tab
+// the log file rather than on a console (machine C, Headless) - the browser tab
 // that opened at startup is then the only liveness indicator left, which is why
 // preflight refuses early rather than letting Starting fail silently.
 func degrade(cfg Config, why string) {
-	logx.Warn("tray unavailable (%s) — serving anyway at %s; press Ctrl-C or run 'kill %d' to stop",
+	logx.Warn("tray unavailable (%s) - serving anyway at %s; press Ctrl-C or run 'kill %d' to stop",
 		why, cfg.URL, os.Getpid())
 	// A GUI launch has nowhere else to look: no console (Windows closed its
 	// own before this could be called), no Dock icon (LSUIElement), and a log
-	// file nobody is watching. The server is up and the user cannot tell — so
+	// file nobody is watching. The server is up and the user cannot tell - so
 	// on that path only, say it in the one channel the OS always has. Detached,
 	// because every implementation is modal.
 	if cfg.GUI {

@@ -47,10 +47,10 @@ func TestTuningDefaults(t *testing.T) {
 				got>>20, memoryLimitDefault()>>20)
 		}
 	} else if got != 0 {
-		t.Errorf("searchMemoryDefault() = %d, want 0 (uncapped) off android — capping costs results", got)
+		t.Errorf("searchMemoryDefault() = %d, want 0 (uncapped) off android - capping costs results", got)
 	}
 
-	// defaults() must actually use them — the layering only holds if the
+	// defaults() must actually use them - the layering only holds if the
 	// platform answer is what a config file overrides, not something applied
 	// later behind its back.
 	d := defaults()

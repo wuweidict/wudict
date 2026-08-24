@@ -37,7 +37,7 @@ var (
 
 // preflight refuses only where there is no desktop to put an icon on.
 // Shell_NotifyIconW is part of the OS on every supported Windows, so there is
-// nothing to probe for — the notification area exists even when the user has
+// nothing to probe for - the notification area exists even when the user has
 // collapsed it behind the chevron. Session 0 is the exception: it has been
 // isolated from every interactive desktop since Vista, so a service or a "run
 // whether the user is logged on or not" scheduled task would otherwise pump a
@@ -56,7 +56,7 @@ func sessionZero() bool {
 	return ok != 0 && session == 0
 }
 
-// GUILaunched reports whether this process owns its console — see above.
+// GUILaunched reports whether this process owns its console - see above.
 //
 // It must be read BEFORE DetachConsole, and its answer carried in Config.GUI:
 // once the console is gone the same call reports false.
@@ -74,7 +74,7 @@ func GUILaunched() bool {
 // the server runs. It is a no-op unless this process owns its console: a
 // console shared with the shell that launched us is the user's, not ours.
 //
-// After this, writes to stderr fail silently — which is why the caller moves
+// After this, writes to stderr fail silently - which is why the caller moves
 // logx to a file FIRST and only detaches if that succeeded (D76).
 func DetachConsole() {
 	if !GUILaunched() {
@@ -89,7 +89,7 @@ func DetachConsole() {
 // running start it detached.
 func Alert(title, body string) {
 	// A modal box on the session 0 desktop is one nobody can see and nobody
-	// can dismiss, and MessageBoxW does not return until it is — so a service
+	// can dismiss, and MessageBoxW does not return until it is - so a service
 	// or a "run whether the user is logged on or not" task would hang here
 	// forever instead of exiting with its error. Say nothing rather than that.
 	if sessionZero() {

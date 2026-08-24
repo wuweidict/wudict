@@ -18,7 +18,7 @@ import (
 // image toolchain. D70: the mark is never redrawn, only rendered.
 //
 // GOOS=android satisfies the linux build constraint too, so the !android above
-// is what keeps godbus and goffi out of the APK — no new build tag, no second
+// is what keeps godbus and goffi out of the APK - no new build tag, no second
 // CI dimension.
 var (
 	//go:embed icons/tray.png

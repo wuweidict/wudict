@@ -212,7 +212,7 @@ func TestParseOrigins(t *testing.T) {
 }
 
 // AUTO_INDEX is on|off since the "fuzzy" search mode it was named after was
-// retired — but an existing wudict.toml saying "fuzzy" must keep working.
+// retired - but an existing wudict.toml saying "fuzzy" must keep working.
 func TestAutoIndexValues(t *testing.T) {
 	for _, c := range []struct {
 		in   string
@@ -277,7 +277,7 @@ func TestParseWorkersAndSize(t *testing.T) {
 }
 
 // isolate points the three search anchors at empty temporary directories, so a
-// test sees only the files it creates — never the developer's real ~/.wudict
+// test sees only the files it creates - never the developer's real ~/.wudict
 // or /etc. Returns the executable and home directories, in search order.
 func isolate(t *testing.T) (exe, home string) {
 	t.Helper()
@@ -296,7 +296,7 @@ func isolate(t *testing.T) (exe, home string) {
 	return exe, home
 }
 
-// Where the config file is looked for, which one wins, and — the point of D32 —
+// Where the config file is looked for, which one wins, and - the point of D32 -
 // where a new one is written.
 func TestConfigLocation(t *testing.T) {
 	write := func(t *testing.T, path, body string) {

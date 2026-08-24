@@ -40,8 +40,8 @@ type runningInstance struct {
 // The identity check is the whole point: a port can be held by anything, and
 // pointing the user's browser at an unknown local service on the strength of a
 // port number would be worse than the plain error. Only a response carrying
-// our Server header counts; anything else — a different app, no answer, a
-// timeout — leaves the caller to report the port as simply occupied.
+// our Server header counts; anything else - a different app, no answer, a
+// timeout - leaves the caller to report the port as simply occupied.
 func probeRunning(addr string) (*runningInstance, bool) {
 	client := &http.Client{Timeout: 700 * time.Millisecond}
 	host := addr
@@ -67,7 +67,7 @@ func probeRunning(addr string) (*runningInstance, bool) {
 
 // sameFolders reports whether the running instance is serving exactly the
 // folders this launch asked for. When it is not, the flags just typed are not
-// merely ignored — they name a different library, which is what the user
+// merely ignored - they name a different library, which is what the user
 // actually needs to be told.
 func sameFolders(want []string, inst *runningInstance) bool {
 	if len(want) != len(inst.Roots) {
@@ -86,8 +86,8 @@ func sameFolders(want []string, inst *runningInstance) bool {
 }
 
 // announceRunning prints the "this launch did nothing" banner. Loud on
-// purpose: the user asked for a program to start, and instead an older one —
-// with older settings — is about to appear in their browser. Anything quieter
+// purpose: the user asked for a program to start, and instead an older one -
+// with older settings - is about to appear in their browser. Anything quieter
 // would leave them debugging why their new --dict-dir had no effect.
 func announceRunning(inst *runningInstance, url string, wantDirs []string, willOpen bool) {
 	// logx.Output(), not os.Stderr: a GUI launch has already given its console

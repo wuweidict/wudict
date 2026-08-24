@@ -13,7 +13,7 @@ import (
 )
 
 // Article bodies dominate a prepared dictionary: measured on a 40k-entry
-// dictionary, the HTML in `entry.m` was 69 MB of a 72 MB database — the search
+// dictionary, the HTML in `entry.m` was 69 MB of a 72 MB database - the search
 // indexes themselves were 2 MB. Storing that text verbatim is why a text.db
 // could be several times the size of the file it came from.
 //
@@ -25,8 +25,8 @@ import (
 //
 // Discrimination is by a one-byte sentinel: article HTML never begins with
 // NUL, so a body whose first byte is 0x00 is compressed and anything else is
-// literal text. That keeps mixed rows legal — old databases stay readable with
-// no migration and no schema version bump — and needs no per-database flag on
+// literal text. That keeps mixed rows legal - old databases stay readable with
+// no migration and no schema version bump - and needs no per-database flag on
 // the read path.
 const compressedMark = 0x00
 
@@ -50,8 +50,8 @@ func CompressBodies() bool { return compressBodies }
 // dictionary at level 6 is the longest sustained CPU burn this program ever
 // does, and sustained CPU is precisely what drains a battery and heats a
 // device into thermal throttling. Level 1 costs roughly a tenth of the CPU for
-// article HTML — highly repetitive markup, which deflate's cheapest settings
-// already handle well — in exchange for a database on the order of a tenth
+// article HTML - highly repetitive markup, which deflate's cheapest settings
+// already handle well - in exchange for a database on the order of a tenth
 // larger. Storage is the resource a phone has most of. (D64)
 //
 // Read-side is unaffected: DEFLATE decoding does not depend on the level a

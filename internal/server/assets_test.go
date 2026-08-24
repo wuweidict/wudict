@@ -11,7 +11,7 @@ import (
 )
 
 // index.html and frame.js are two halves of one protocol, shipped in one
-// binary — and the browser used to cache them independently, index.html fresh
+// binary - and the browser used to cache them independently, index.html fresh
 // from "/" and frame.js for a week at a fixed URL. Any change to the message
 // between them then broke silently, and only inside iframe-rendered
 // dictionaries. This pins the fix: the page names each script by a hash of its
@@ -49,7 +49,7 @@ func TestAssetCacheHeaders(t *testing.T) {
 		return rec
 	}
 	if got := get("/").Header().Get("Cache-Control"); got != "no-cache" {
-		t.Errorf(`GET / Cache-Control = %q, want "no-cache" — a stale page would ask for stale scripts`, got)
+		t.Errorf(`GET / Cache-Control = %q, want "no-cache" - a stale page would ask for stale scripts`, got)
 	}
 	for _, p := range []string{"/assets/frame.js?v=abc123", "/assets/mark.min.js?v=abc123"} {
 		rec := get(p)
@@ -62,7 +62,7 @@ func TestAssetCacheHeaders(t *testing.T) {
 	}
 }
 
-// "no-cache" means revalidate, not "do not store" — but revalidation needs a
+// "no-cache" means revalidate, not "do not store" - but revalidation needs a
 // validator, and without one the browser could only re-download the whole
 // 100 KB page on every load. This pins the validator AND the freshness
 // guarantee D45 depends on: the page still revalidates every time, it just
@@ -99,7 +99,7 @@ func TestIndexRevalidatesWithoutResending(t *testing.T) {
 		t.Errorf("304 carried %d bytes of body", again.Body.Len())
 	}
 	if got := again.Header().Get("Cache-Control"); got != "no-cache" {
-		t.Errorf("304 Cache-Control = %q — the next load must still revalidate", got)
+		t.Errorf("304 Cache-Control = %q - the next load must still revalidate", got)
 	}
 
 	// A GET compares entity-tags WEAKLY, so a cache may echo ours back as
@@ -115,7 +115,7 @@ func TestIndexRevalidatesWithoutResending(t *testing.T) {
 	// A validator we did not issue must send the page.
 	stale := get(`"deadbeef"`)
 	if stale.Code != 200 || stale.Body.Len() == 0 {
-		t.Errorf("stale If-None-Match = %d, %d bytes — want the page", stale.Code, stale.Body.Len())
+		t.Errorf("stale If-None-Match = %d, %d bytes - want the page", stale.Code, stale.Body.Len())
 	}
 
 	// The stamp is substituted into the page, so it is part of what the browser

@@ -17,7 +17,7 @@ import (
 // The names here come from real containers and from what a hostile one could
 // hold: MDX stores `\audio\x.spx`, and nothing validates what a .mdd author
 // puts in a key. Anything that could escape the current directory must reduce
-// to a plain file name or to "" — never to a path with a separator in it.
+// to a plain file name or to "" - never to a path with a separator in it.
 func TestResBasename(t *testing.T) {
 	tests := []struct {
 		name string
@@ -113,7 +113,7 @@ func TestResDest(t *testing.T) {
 		{name: "explicit path", out: "a/b/c.png", res: "x.png", stdout: pipeW, wantDest: "a/b/c.png"},
 		{name: "explicit path beats terminal", out: "out.png", res: "x.png", stdout: nil, wantDest: "out.png"},
 		// A directory means "in there", under the SAFE name, and is still not
-		// "derived" — the user chose the location.
+		// "derived" - the user chose the location.
 		{name: "directory target", out: "/tmp/dir", res: `\audio\x.png`, stdout: pipeW, wantDest: filepath.Join("/tmp/dir", "x.png")},
 		{name: "directory target unusable name", out: "/tmp/dir", res: "..", stdout: pipeW, wantErr: true},
 		// No -o: a pipe keeps today's behaviour exactly.

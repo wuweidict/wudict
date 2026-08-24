@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Command wudict is WuWeiDict's entry point — the only one.
+// Command wudict is WuWeiDict's entry point - the only one.
 //
 // Go names an installed binary after the last element of its package path, so
 // the module path github.com/wuweidict/wudict makes

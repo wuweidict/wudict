@@ -366,7 +366,7 @@ func (mdict *MdictBase) decodeKeyBlockInfo(data []byte) error {
 			return errors.New("decoded key block info data size not equals to key block meta indicates key block info size")
 		}
 	} else {
-		// v1.x: no compression, no header to skip — the buffer is already the data
+		// v1.x: no compression, no header to skip - the buffer is already the data
 		decompressKeyInfoBuffer = keyBlockInfoDecryptedBuffer
 	}
 
@@ -602,8 +602,8 @@ func (mdict *MdictBase) decodeKeyEntries(keyBlockDataCompressBuffer []byte) erro
 
 func (mdict *MdictBase) splitKeyBlock(keyBlock []byte) []*MDictKeywordEntry {
 	// The terminator width follows the *encoding*, never the file type. MDD key
-	// lists are UTF-16 in v1/v2 — which is why readDictHeader forces the
-	// encoding to UTF-16 for those — but v3 is UTF-8 throughout, MDD included,
+	// lists are UTF-16 in v1/v2 - which is why readDictHeader forces the
+	// encoding to UTF-16 for those - but v3 is UTF-8 throughout, MDD included,
 	// and there the keys are single-byte with a single-NUL terminator. Deriving
 	// the width from fileType==MDD scanned a v3 MDD key block at a two-byte
 	// stride, walked past every terminator and then off the end of the block.
@@ -1098,7 +1098,7 @@ const recordBlockCacheCap = 8
 
 // decompressedRecordBlock returns the decompressed record block at startOffset,
 // caching it (bounded FIFO) so adjacent lookups and inline resources that share
-// a block skip the re-open + re-decompress — the dominant per-lookup cost. The
+// a block skip the re-open + re-decompress - the dominant per-lookup cost. The
 // returned slice is shared read-only; callers only sub-slice it, never mutate.
 func (mdict *MdictBase) decompressedRecordBlock(startOffset, compLen int64, info *MdictRecordBlockInfoListItem) ([]byte, error) {
 	mdict.blkMu.Lock()

@@ -21,7 +21,7 @@ import (
 // phone a background process that keeps a core awake is a battery complaint,
 // a thermal event, and eventually a kill by the platform's low-memory daemon.
 //
-// The Go side does not detect any of this — it cannot: the signals are
+// The Go side does not detect any of this - it cannot: the signals are
 // Android's (onStop, onTrimMemory, thermal status, power-save mode) and live
 // in the JVM the server was exec'd away from (D52). The shell reports them
 // through POST /api/power and the server obeys. Everything here is therefore
@@ -32,10 +32,10 @@ const (
 	// PowerActive: someone is looking at the screen. Normal behaviour.
 	PowerActive Power = iota
 	// PowerBackground: the app is not visible. Nothing new is indexed and
-	// every reopenable handle is dropped — but prepared databases stay open,
+	// every reopenable handle is dropped - but prepared databases stay open,
 	// because they cost ~nothing and returning must be instant.
 	PowerBackground
-	// PowerRestricted: the platform is unhappy — memory pressure, a thermal
+	// PowerRestricted: the platform is unhappy - memory pressure, a thermal
 	// warning, or battery saver. Everything closes, including prepared
 	// databases; the process keeps only its listener.
 	PowerRestricted
@@ -77,7 +77,7 @@ var warmEnabled = runtime.GOOS != "android"
 func CurrentPower() Power { return Power(powerState.Load()) }
 
 // activeProcs is the GOMAXPROCS to restore when active. Zero means "this
-// platform's scheduler is not ours to manage" — the desktop case, where the
+// platform's scheduler is not ours to manage" - the desktop case, where the
 // runtime's own default (every core) is right and quietly halving it would be
 // a performance regression nobody asked for.
 var activeProcs atomic.Int32
@@ -104,13 +104,13 @@ func applyProcs(p Power) {
 }
 
 // memLimitConfigured is the ceiling the configuration asked for, which is not
-// always the ceiling in force — see relaxMemoryLimit.
+// always the ceiling in force - see relaxMemoryLimit.
 var memLimitConfigured atomic.Int64
 
 // memLimit mirrors the soft heap ceiling passed to the runtime, because the
 // janitor needs the number: a limit alone turns memory pressure into CONTINUOUS
 // GC (the runtime's only lever is to collect harder), which on a phone is the
-// worst possible answer — maximum CPU, maximum heat, for a live set that will
+// worst possible answer - maximum CPU, maximum heat, for a live set that will
 // not shrink no matter how often it is traced. Knowing the limit lets us shed
 // caches as the limit is approached, so the collector is handed garbage to
 // reclaim instead of being asked to trace a working set that is genuinely too
@@ -162,20 +162,20 @@ func memoryPressure() bool {
 }
 
 // A ceiling can simply be wrong. It is a number chosen before the workload was
-// known — a fraction of the device's RAM (config.memoryLimitDefault) — and the
+// known - a fraction of the device's RAM (config.memoryLimitDefault) - and the
 // workload is a library this program did not choose: ONE unprepared dictionary
 // can hold a 400 MB headword index, which is larger than the whole ceiling a
 // phone is given. Measured against the real corpus (D64), a limit below what
 // the process genuinely holds does not bound anything. It pins the collector at
-// ~45% of CPU — just under the runtime's own 50% limiter — for as long as the
+// ~45% of CPU - just under the runtime's own 50% limiter - for as long as the
 // work lasts, freeing nothing, which on a phone is the precise combination of
 // battery drain and heat this whole mechanism exists to prevent. Being killed
 // by the low-memory daemon is a better outcome than that, and staying under the
 // ceiling was never among the outcomes on offer.
 //
 // So the ceiling yields. After relaxAfterPasses consecutive janitor passes that
-// began under pressure — by which point everything sheddable has been shed
-// several times over and it has not helped — the limit is raised above the
+// began under pressure - by which point everything sheddable has been shed
+// several times over and it has not helped - the limit is raised above the
 // measured footprint, and the collector goes back to ordinary work. It is
 // restored the moment the footprint falls far enough below the configured value
 // that restoring it would not immediately re-create the pressure.
@@ -204,7 +204,7 @@ func relaxMemoryLimit() bool {
 }
 
 // restoreMemoryLimit puts the configured ceiling back once the footprint has
-// fallen clear of it — strictly clear, or restoring would re-enter the state
+// fallen clear of it - strictly clear, or restoring would re-enter the state
 // relaxMemoryLimit just left.
 func restoreMemoryLimit() {
 	cfg := memLimitConfigured.Load()
@@ -227,7 +227,7 @@ func restoreMemoryLimit() {
 // one. It is the janitor's reason to keep waking after everything reclaimable
 // is gone: restoring the configured ceiling only ever happens inside a pass,
 // and measured on a real phone (docs/PERF.md §8.5) the passes stop exactly
-// when they are needed — the fan-out that forced the relax ends, the heap
+// when they are needed - the fan-out that forced the relax ends, the heap
 // drains, nothing is left to reclaim, and without this the process would run
 // under a 6 GB ceiling it was granted for one search, for the rest of its life.
 func limitRelaxed() bool {
@@ -273,8 +273,8 @@ func (r *Registry) SetPower(p Power) {
 }
 
 // shed drops every handle that can be rebuilt on demand. everything also closes
-// prepared databases, which hold no headword map — only file descriptors and a
-// SQLite page cache — and so are worth closing solely under real pressure.
+// prepared databases, which hold no headword map - only file descriptors and a
+// SQLite page cache - and so are worth closing solely under real pressure.
 func (r *Registry) shed(everything bool) int64 {
 	var freed int64
 	for _, c := range r.reclaimables() {
@@ -295,7 +295,7 @@ func (r *Registry) shed(everything bool) int64 {
 // Loopback-only, like every other control that acts on the machine rather than
 // on the library: on a desktop this server may be answering a browser on
 // another host, and a remote page must not be able to put someone else's
-// process to sleep. POST because it changes state — a GET here would be
+// process to sleep. POST because it changes state - a GET here would be
 // followed by every link prefetcher on the network.
 func (s *Server) handlePower(w http.ResponseWriter, r *http.Request) {
 	if !isLoopback(r) {

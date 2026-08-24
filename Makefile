@@ -1,4 +1,4 @@
-# wudict — developer UI & manifest (Decision D10)
+# wudict - developer UI & manifest (Decision D10)
 # Every meaningful action lives here; `make` alone shows this menu.
 # New capabilities MUST land with a target.
 
@@ -13,18 +13,18 @@ BUILD_DIR  := dist
 # wudict builds in two flavours; `build`/`install`/`check` use cgo:
 #
 #   cgo  (what `make build` does): CGO_ENABLED=1 -tags sqlite_fts5
-#     * mattn/go-sqlite3 — fast FTS5 (D4)
+#     * mattn/go-sqlite3 - fast FTS5 (D4)
 #     * built-in libspeex .spx decoder (internal/speex + internal/speex/clib)
 #     Requires a C compiler.
 #
 #   purego (`make build-purego`, `make cross` releases): CGO_ENABLED=0 -tags purego
-#     * modernc.org/sqlite — pure Go, no C toolchain
+#     * modernc.org/sqlite - pure Go, no C toolchain
 #     * NO built-in speex; .spx audio falls back to the external `speexdec`
 #       binary (SPEEX_BACKEND=external has the same effect on a cgo build)
 #
 # The sqlite_fts5 tag IS the cgo selector (D29): store/driver_cgo.go is
 # `sqlite_fts5 && cgo`, so dropping the tag no longer yields a mattn build
-# without FTS5 — it yields the pure-Go driver, which always has FTS5. The
+# without FTS5 - it yields the pure-Go driver, which always has FTS5. The
 # purego flavour's tag is now redundant but kept: it lands in the same place.
 # A tag-less `go build`/`go install` therefore always works.
 GO_TAGS      := sqlite_fts5
@@ -63,11 +63,11 @@ help: ## Show this help
 # ---- build & run --------------------------------------------------------
 
 .PHONY: build
-build: ## Build the host binary — cgo flavour (built-in sqlite FTS5 + built-in speex .spx decoder)
+build: ## Build the host binary - cgo flavour (built-in sqlite FTS5 + built-in speex .spx decoder)
 	CGO_ENABLED=1 go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
 
 .PHONY: build-purego
-build-purego: ## Build the host binary — purego flavour (*slower* pure-Go sqlite, external speexdec)
+build-purego: ## Build the host binary - purego flavour (*slower* pure-Go sqlite, external speexdec)
 	CGO_ENABLED=0 go build $(PUREGO_FLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
 
 .PHONY: install
@@ -101,7 +101,7 @@ cross: ## Cross-compile all release targets into dist/ (purego flavour: pure-Go 
 
 # ---- tray (D74, D76) ----------------------------------------------------
 # There is nothing to build here. The tray icon is off unless the app was
-# launched from a desktop, and every platform — Windows included, since D76 —
+# launched from a desktop, and every platform - Windows included, since D76 -
 # reads that from the running process rather than from a second artifact.
 
 .PHONY: icons
@@ -111,7 +111,7 @@ icons: ## Regenerate the committed tray PNGs + macOS .icns from internal/server/
 # ---- macOS .app bundle (D75) --------------------------------------------
 # The bundle is the only macOS launch path that tells the binary a person
 # started it: internal/tray looks for ".app/Contents/MacOS/" in its own
-# os.Executable(). Nothing else about the product changes — a bare `wudict`
+# os.Executable(). Nothing else about the product changes - a bare `wudict`
 # already serves, and a second launch already finds the port taken, opens the
 # browser and exits.
 #
@@ -141,14 +141,14 @@ mac-app-install: mac-app ## Install that .app into ~/Applications (per-user, no 
 
 # ---- Windows installer (D76, P86) -------------------------------------------
 # One .exe, installed per-user with no admin prompt. ISCC.exe is Windows-only,
-# so the script that drives it is PowerShell — the shell native to the only OS
+# so the script that drives it is PowerShell - the shell native to the only OS
 # that can run the tool, the same rule that keeps tools/make-app.sh in sh for
 # codesign and plutil. Everywhere else the target exists to say so, which is
 # D10's point.
 #
 # This target passes NO paths. It is the one recipe in this file that may run
 # under a make whose shell is cmd.exe, and $(abspath) there yields whatever
-# path flavour that make believes in — C:/... from GnuWin32 make, /c/... from
+# path flavour that make believes in - C:/... from GnuWin32 make, /c/... from
 # an MSYS one, and PowerShell can resolve only the first. The script derives
 # every path from its own location instead, which is native by construction.
 # Pass overrides through ARGS: make win-installer ARGS="-Exe C:\src\wudict.exe"
@@ -166,7 +166,7 @@ win-installer: ## Compile the Windows per-user installer into dist/ (needs Inno 
 # the APK as libwudict.so, which the shell execs as a child process.
 #
 # `android-go` is the CGO flavour (D53): mattn FTS5 + built-in speex .spx
-# decoder, cross-compiled with the NDK — desktop parity on-device. The
+# decoder, cross-compiled with the NDK - desktop parity on-device. The
 # external linker is given -Wl,-z,max-page-size=16384 (verified: PT_LOAD
 # alignment 0x4000), so the 16 KiB page-size mandate is met.
 # `android-go-purego` is the NDK-less fallback (slower sqlite, no .spx audio).
@@ -212,11 +212,11 @@ apk: android-go ## Build the FOSS debug APK (needs Android SDK: ANDROID_HOME or 
 	@echo "android/app/build/outputs/apk/foss/debug/$(BINARY)-foss-debug.apk"
 
 .PHONY: apk-foss-release
-apk-foss-release: android-go ## Build the FOSS release APK (signed only if a keystore is exported — see build-android.yml)
+apk-foss-release: android-go ## Build the FOSS release APK (signed only if a keystore is exported - see build-android.yml)
 	cd android && ./gradlew assembleFossRelease
 	@# The APK is left where Gradle put it, deliberately: a copy under dist/
 	@# survives a FAILED build, so `adb install dist/wudict.apk` would then
-	@# silently install the previous one — exactly when you are debugging and
+	@# silently install the previous one - exactly when you are debugging and
 	@# least likely to notice. archivesName already gives it a real name; the
 	@# echo is only so you do not have to remember the path.
 	@echo "android/app/build/outputs/apk/foss/release/$(BINARY)-foss-release.apk"
@@ -295,7 +295,7 @@ check: tidy vet test ## Pre-commit gate: tidy + vet + test
 #
 # The plist is GENERATED, never committed: launchd expands nothing in
 # ProgramArguments (no ~, no $HOME, no PATH lookup), so argv[0] must be a
-# literal absolute path — a checked-in plist is only correct on the machine
+# literal absolute path - a checked-in plist is only correct on the machine
 # that wrote it. launchctl/*.plist.in is the template.
 
 LABEL    := com.legbehindneck.wudict
@@ -328,7 +328,7 @@ mac-agent-uninstall: ## Stop the agent and remove its plist
 
 .PHONY: mac-agent-start
 mac-agent-start: ## Load and start the launchd agent
-	@test -f $(PLIST) || { echo "no plist at $(PLIST) — run: make mac-agent-install"; exit 2; }
+	@test -f $(PLIST) || { echo "no plist at $(PLIST) - run: make mac-agent-install"; exit 2; }
 	launchctl bootstrap $(GUI) $(PLIST)
 
 .PHONY: mac-agent-stop
@@ -348,7 +348,7 @@ mac-agent-status: ## Show the agent's launchd state (pid, exit status, ...)
 # ~/.wudict and binds 127.0.0.1, so it belongs to the user's session, not to
 # root. Only copying the binary into $(PREFIX)/bin needs sudo.
 #
-# The unit file *must* be generated — ExecStart must be an absolute
+# The unit file *must* be generated - ExecStart must be an absolute
 # path and systemd doesn't do ~ expansion.
 
 PREFIX      ?= /usr/local
@@ -384,7 +384,7 @@ linux-service-uninstall: ## Stop/disable the service and remove its unit (keeps 
 
 .PHONY: linux-service-start
 linux-service-start: ## Enable and start the service now
-	@test -f $(UNIT) || { echo "no unit at $(UNIT) — run: make linux-service-install"; exit 2; }
+	@test -f $(UNIT) || { echo "no unit at $(UNIT) - run: make linux-service-install"; exit 2; }
 	systemctl --user enable --now $(UNIT_NAME)
 
 .PHONY: linux-service-stop

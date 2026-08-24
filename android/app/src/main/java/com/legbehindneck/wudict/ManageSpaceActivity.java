@@ -12,7 +12,7 @@ import android.os.Bundle;
  * The second door onto per-dictionary removal (D63).
  *
  * <p>Settings → Apps → WuWeiDict offers "Clear storage", which deletes the
- * whole library, the config and every imported file at once — the only storage
+ * whole library, the config and every imported file at once - the only storage
  * operation Android defines on an app's own data, and far too blunt for a user
  * who wants one dictionary gone. Declaring {@code android:manageSpaceActivity}
  * replaces that button with "Manage space" and hands the request to us.

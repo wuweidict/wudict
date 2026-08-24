@@ -147,7 +147,7 @@ func TestReaderParsesEntriesAndResources(t *testing.T) {
 		t.Errorf("entry 1: %+v", got[1])
 	}
 
-	// resources (embedded type-2 block) — streamed separately
+	// resources (embedded type-2 block) - streamed separately
 	res, names, err := scanResources(p)
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +212,7 @@ func titledEntry(key, title, body string, alts ...string) []byte {
 
 // writeProbeBGL assembles a dictionary of `n` titled entries. When `idKeys` is
 // set the keys are internal identifiers and the real word appears only in the
-// title and the alternates — the Larousse "Gran Diccionario" shape; otherwise
+// title and the alternates - the Larousse "Gran Diccionario" shape; otherwise
 // the key is itself the word and the title is a decorated variant of it, which
 // is what most BGLs do and what must NOT trip the detector.
 func writeProbeBGL(t *testing.T, dir string, n int, idKeys bool) string {

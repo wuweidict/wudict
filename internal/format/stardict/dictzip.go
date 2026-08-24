@@ -142,7 +142,7 @@ func (d *dzReader) chunk(i int) ([]byte, error) {
 	out := make([]byte, d.chunkLen)
 	n, err := io.ReadFull(fr, out)
 	// the final chunk is shorter; a chunk stream may also end without a
-	// terminating block — both surface as EOF errors after valid data
+	// terminating block - both surface as EOF errors after valid data
 	if err != nil && n == 0 {
 		return nil, fmt.Errorf("dictzip chunk %d: %w", i, err)
 	}

@@ -11,7 +11,7 @@ import (
 
 // The Android labels are derived from the paths actually in play: a device
 // with no card is never told about one, and the app's own directory is shown
-// under the volume that holds it — which is where the Files app shows it too.
+// under the volume that holds it - which is where the Files app shows it too.
 func TestAndroidAliases(t *testing.T) {
 	pkg := "/storage/emulated/0/Android/data/com.legbehindneck.wudict/files"
 	for _, c := range []struct {

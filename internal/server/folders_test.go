@@ -159,7 +159,7 @@ func TestConfigEndpointAndSetupPage(t *testing.T) {
 	if info["canReveal"] != false {
 		t.Error("a non-loopback request must not be offered reveal")
 	}
-	// ...while the same call from localhost is — on a machine that has a file
+	// ...while the same call from localhost is - on a machine that has a file
 	// manager, which a build server may not, so state the world under test
 	// rather than inheriting it (D63 made canReveal depend on it).
 	restore := revealPossible
@@ -200,7 +200,7 @@ func firstLines(s string) string {
 	return s
 }
 
-// The registry must collapse a folder given twice, however it is spelled —
+// The registry must collapse a folder given twice, however it is spelled -
 // straight from config/flags (NewRegistry) and from the setup page (SetDirs).
 func TestRegistryDedupesFolders(t *testing.T) {
 	isolatedDBDir(t)
@@ -312,7 +312,7 @@ func TestServerIdentityHeader(t *testing.T) {
 
 // The panel's switches: each feature goes on and off independently, naming
 // one must not disturb the others, and a dictionary whose source is gone
-// cannot be changed at all (its prepared data is the only copy — which is why
+// cannot be changed at all (its prepared data is the only copy - which is why
 // none of this needs a confirmation prompt).
 func TestFeatureTogglesBothWays(t *testing.T) {
 	isolatedDBDir(t)
@@ -331,7 +331,7 @@ func TestFeatureTogglesBothWays(t *testing.T) {
 		return getDicts(t, s, "/api/dicts")[0].Caps
 	}
 	// default: a DSL prepares itself so it can be searched at all, but only
-	// the cheap headword index — both heavy indexes start off
+	// the cheap headword index - both heavy indexes start off
 	if c := caps(); c.Contains || c.FTS {
 		t.Fatalf("neither heavy index may be built by default: %+v", c)
 	}
@@ -352,7 +352,7 @@ func TestFeatureTogglesBothWays(t *testing.T) {
 	if c := caps(); c.Contains || c.FTS {
 		t.Fatalf("after contains=0: %+v", c)
 	}
-	// and back on again — stripping is reversible while the source is there
+	// and back on again - stripping is reversible while the source is there
 	sse(t, s, "/api/ingest?dict="+id+"&fts=1&contains=1")
 	if c := caps(); !c.Contains || !c.FTS {
 		t.Fatalf("re-enabling both: %+v", c)
@@ -413,7 +413,7 @@ func init() {
 }
 
 // Background indexing must respect INDEX_WORKERS. Before this bound existed, a
-// single "all dictionaries" search started one ingest per dictionary — measured
+// single "all dictionaries" search started one ingest per dictionary - measured
 // at 500 MB and 424 % CPU for four real dictionaries, extrapolating to 18 GB
 // for a 100-dictionary library (docs/PERF.md M1).
 func TestIndexingConcurrencyIsBounded(t *testing.T) {
@@ -466,7 +466,7 @@ func TestIndexingConcurrencyIsBounded(t *testing.T) {
 // Preview eviction: unprepared dictionaries hold an in-memory headword index
 // (~350 B per headword), so the registry caps how much of that may stay open
 // and closes the least recently used. Prepared dictionaries answer from disk
-// and must never be evicted — there is nothing to reclaim and reopening costs.
+// and must never be evicted - there is nothing to reclaim and reopening costs.
 func TestPreviewEviction(t *testing.T) {
 	isolatedDBDir(t)
 	dir := t.TempDir()
@@ -540,7 +540,7 @@ func TestPreviewEviction(t *testing.T) {
 }
 
 // A PREPARED dictionary answers text from SQLite, but opens its source again
-// when a resource misses media.db — a full direct backend holding the same
+// when a resource misses media.db - a full direct backend holding the same
 // ~350 B per headword. That handle must be budgeted and released like any
 // other, and releasing it must not break the dictionary: text keeps working,
 // and the next resource request reopens it.
@@ -594,7 +594,7 @@ func TestResourceHandleIsEvictable(t *testing.T) {
 		t.Error("weight should be zero once released")
 	}
 
-	// the dictionary still works — text comes from SQLite …
+	// the dictionary still works - text comes from SQLite …
 	if res, err := d.Prefix("bet", 5); err != nil || len(res) == 0 {
 		t.Errorf("text lookup must survive releasing the resource handle: %v %v", res, err)
 	}
@@ -607,7 +607,7 @@ func TestResourceHandleIsEvictable(t *testing.T) {
 
 // O1: a trigram index built by an older dict.FoldVersion is reported through
 // /api/dicts, keeps working, and is repaired by re-requesting the same
-// feature — the panel's "click to rebuild".
+// feature - the panel's "click to rebuild".
 func TestStaleFoldIsReportedAndRebuildable(t *testing.T) {
 	isolatedDBDir(t)
 	dir := t.TempDir()
@@ -660,7 +660,7 @@ func TestStaleFoldIsReportedAndRebuildable(t *testing.T) {
 	}
 }
 
-// sqliteDriver names whichever SQLite driver this build registered — mattn
+// sqliteDriver names whichever SQLite driver this build registered - mattn
 // under cgo, modernc under purego (D29). The store package picks it at compile
 // time and keeps the name private, so a test that needs to write to a
 // text.db asks the sql package what got registered.

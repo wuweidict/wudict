@@ -17,16 +17,16 @@ import (
 // the permission removes the prompt, so the pass has to be issued here instead.
 //
 // Why an extension origin may be trusted with it at all: `Origin` is set by the
-// browser and cannot be forged by page script — `fetch` refuses to let a page
-// set it, and XHR strips it — and no web page can ever be served from
+// browser and cannot be forged by page script - `fetch` refuses to let a page
+// set it, and XHR strips it - and no web page can ever be served from
 // chrome-extension:// or moz-extension://. So "the request came from an
 // installed extension" is a fact the header can carry, unlike the value of any
 // other header. What it cannot carry is WHICH extension on Firefox, where
 // moz-extension://<uuid> is regenerated per installation; hence the grant is by
 // scheme, with BROWSER_EXTENSIONS to pin exact origins when that is wanted.
 //
-// The grant covers the read-only client API only — /api/dicts, /api/search,
-// /res/ — never prefs, config, library, ingest, rescan, reveal or power. An
+// The grant covers the read-only client API only - /api/dicts, /api/search,
+// /res/ - never prefs, config, library, ingest, rescan, reveal or power. An
 // extension can therefore read dictionaries, which is the whole point, and can
 // do nothing to the installation.
 
@@ -63,7 +63,7 @@ func extensionOrigin(origin string) bool {
 }
 
 // allowOrigin decides whether this request's Origin gets the header. With
-// BROWSER_EXTENSIONS unset, any extension may read dictionaries — the same
+// BROWSER_EXTENSIONS unset, any extension may read dictionaries - the same
 // reach any extension could take for itself by declaring the host permission,
 // so the setting is a tightening, not the security boundary.
 func (s *Server) allowOrigin(origin string) bool {
@@ -82,7 +82,7 @@ func (s *Server) allowOrigin(origin string) bool {
 }
 
 // setCORS applies the headers for one request. Vary: Origin goes on
-// unconditionally — the response differs by Origin whether or not this one was
+// unconditionally - the response differs by Origin whether or not this one was
 // allowed, and a cache that does not know that will serve the allowed response
 // to a denied origin.
 func (s *Server) setCORS(w http.ResponseWriter, r *http.Request) bool {
@@ -92,7 +92,7 @@ func (s *Server) setCORS(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	// Echoed, never "*": with a concrete origin the browser enforces the
-	// allowlist for us on every response. Never Allow-Credentials either —
+	// allowlist for us on every response. Never Allow-Credentials either -
 	// there are no cookies to send, and turning it on would make a future
 	// one reachable cross-origin.
 	w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -109,7 +109,7 @@ func (s *Server) withCORS(h http.HandlerFunc) http.HandlerFunc {
 
 // handlePreflight answers OPTIONS on the granted routes. The extension's own
 // requests are CORS-simple (GET plus a safelisted `accept`) and never preflight,
-// but ServeMux would answer a future one with 405 — a failure that says nothing
+// but ServeMux would answer a future one with 405 - a failure that says nothing
 // about what is wrong.
 func (s *Server) handlePreflight(w http.ResponseWriter, r *http.Request) {
 	if s.setCORS(w, r) {

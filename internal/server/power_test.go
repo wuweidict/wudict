@@ -17,8 +17,8 @@ import (
 )
 
 // restorePower puts the process-global power knobs back the way the rest of
-// the package expects to find them. Everything here is deliberately global —
-// it governs a process, not a request — so every test that moves one must put
+// the package expects to find them. Everything here is deliberately global -
+// it governs a process, not a request - so every test that moves one must put
 // it back or it will be testing the previous test's leftovers.
 func restorePower(t *testing.T) {
 	t.Helper()
@@ -142,7 +142,7 @@ func TestPowerShedsOnBackground(t *testing.T) {
 		t.Errorf("background left %d bytes of preview memory", b)
 	}
 	// and the dictionary still answers: eviction is a memory decision, never
-	// a functional one — the next query reopens the file.
+	// a functional one - the next query reopens the file.
 	reg.SetPower(PowerActive)
 	hits := searchStream(t, s, "/api/search?q=beta&mode=prefix&dict=all")
 	if len(hits) != 1 || len(hits[0].Results) != 1 {
@@ -152,7 +152,7 @@ func TestPowerShedsOnBackground(t *testing.T) {
 
 // Indexing is the most expensive thing this program does. Starting one because
 // a search happened to land as the screen went off is exactly how an app gets
-// flagged as a battery hog — and the refusal must be a deferral, so the next
+// flagged as a battery hog - and the refusal must be a deferral, so the next
 // search once the user is back still builds it.
 func TestAutoIndexDeferredWhenNotActive(t *testing.T) {
 	restorePower(t)
@@ -194,8 +194,8 @@ func TestAutoIndexDeferredWhenNotActive(t *testing.T) {
 }
 
 // The janitor exists to enforce a budget. With nothing open there is no budget
-// to enforce, and a periodic wakeup to discover that — every twenty seconds,
-// forever, in a process that outlives its window — is a battery cost for
+// to enforce, and a periodic wakeup to discover that - every twenty seconds,
+// forever, in a process that outlives its window - is a battery cost for
 // nothing. needsSweep is what lets it block instead.
 func TestJanitorIdlesWithNothingToReclaim(t *testing.T) {
 	restorePower(t)
@@ -210,7 +210,7 @@ func TestJanitorIdlesWithNothingToReclaim(t *testing.T) {
 	}
 	reg.SetPreviewBudget(1) // absurdly small: anything open exceeds it
 	if reg.needsSweep() {
-		t.Fatal("nothing is open yet — there is nothing to sweep")
+		t.Fatal("nothing is open yet - there is nothing to sweep")
 	}
 	s := New(reg)
 	searchStream(t, s, "/api/search?q=beta&mode=prefix&dict=all")
@@ -231,7 +231,7 @@ func TestJanitorIdlesWithNothingToReclaim(t *testing.T) {
 }
 
 // A ceiling below what the program genuinely holds cannot be obeyed, and trying
-// costs ~45% of CPU indefinitely (D64, measured). It must therefore yield —
+// costs ~45% of CPU indefinitely (D64, measured). It must therefore yield -
 // but only after shedding has been given several passes to prove it cannot fix
 // this, so a transient spike never permanently raises the ceiling.
 func TestRelaxLiftsAnImpossibleCeiling(t *testing.T) {
@@ -253,7 +253,7 @@ func TestRelaxLiftsAnImpossibleCeiling(t *testing.T) {
 		t.Fatalf("ceiling did not yield after %d passes: %d", relaxAfterPasses, raised)
 	}
 	if memoryPressure() {
-		t.Error("the raised ceiling is still under pressure — the headroom is too small to end the thrash")
+		t.Error("the raised ceiling is still under pressure - the headroom is too small to end the thrash")
 	}
 	if got := memLimitConfigured.Load(); got != impossible {
 		t.Errorf("relaxing forgot what was configured: %d", got)
@@ -311,7 +311,7 @@ func TestRestoreWaitsForRoom(t *testing.T) {
 // A raised ceiling is unfinished business: the janitor must keep taking passes
 // until it can hand it back, even when there is nothing left to reclaim and no
 // pressure to report. Measured on a phone (PERF §8.5) that is precisely the
-// state the passes stopped in — one heavy search raised the ceiling to 6 GB,
+// state the passes stopped in - one heavy search raised the ceiling to 6 GB,
 // the heap then drained, and nothing ever asked for the configured 384 MB back.
 func TestJanitorKeepsGoingWhileTheCeilingIsRaised(t *testing.T) {
 	restorePower(t)
@@ -338,7 +338,7 @@ func TestJanitorKeepsGoingWhileTheCeilingIsRaised(t *testing.T) {
 }
 
 // Pressure is measured against the limit the process was given, so a limit
-// below what is already mapped must read as pressure — that is the signal that
+// below what is already mapped must read as pressure - that is the signal that
 // turns "collect harder forever" into "shed something and hand the collector
 // real garbage".
 func TestMemoryPressureFollowsTheLimit(t *testing.T) {

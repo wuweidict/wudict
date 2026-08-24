@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // The WuWeiDict app module (D52): a WebView shell around the wudict server
-// binary. There are deliberately no dependencies — the UI is served by the
+// binary. There are deliberately no dependencies - the UI is served by the
 // Go server, the shell is one activity and one process launcher.
 plugins {
     id 'com.android.application'
@@ -30,7 +30,7 @@ android {
 
     // Names the APK after the product instead of AGP's generic app-<variant>:
     // wudict-release.apk / wudict-debug.apk. archivesName is the supported
-    // route on AGP 9 — the old applicationVariants.outputs.outputFileName
+    // route on AGP 9 - the old applicationVariants.outputs.outputFileName
     // hook is GONE (verified: "unknown property 'applicationVariants'"), and
     // renaming through the new Variant API needs a custom task wired to the
     // APK artifact, which is a lot of build logic to buy a file name. The
@@ -65,7 +65,7 @@ android {
     //
     // The split is by SOURCE SET, not by a runtime flag: `Storage` exists once
     // per flavour and never in src/main, so the Play build cannot so much as
-    // name MANAGE_EXTERNAL_STORAGE — which is what an automated policy scan
+    // name MANAGE_EXTERNAL_STORAGE - which is what an automated policy scan
     // looks for. applicationId is deliberately shared: the two builds are the
     // same app, and cross-updating between them is prevented by the signing
     // key, not by the id.

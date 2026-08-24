@@ -42,7 +42,7 @@ final class Storage {
 
     /**
      * The folders the server scans: the import target, plus "Dictionaries" on
-     * any other app-specific external volume — i.e. a microSD card, which needs
+     * any other app-specific external volume - i.e. a microSD card, which needs
      * no permission and no typed path. Nothing else is readable in this
      * flavour, which is exactly the point.
      */
@@ -52,7 +52,7 @@ final class Storage {
 
     /**
      * First run only: if nothing has been imported yet, explain and offer the
-     * picker. Declining is fine — the server starts either way and reports an
+     * picker. Declining is fine - the server starts either way and reports an
      * empty library, and the import control stays available on both pages.
      *
      * "Nothing yet" means every scanned folder is empty, not just the import
@@ -72,7 +72,7 @@ final class Storage {
     /**
      * The in-page trigger. MainActivity.openExternal already inspects every
      * navigation, so a link to wudict://import is caught there and never
-     * leaves the WebView — no JavascriptInterface, no new HTTP surface, and
+     * leaves the WebView - no JavascriptInterface, no new HTTP surface, and
      * nothing added to the server or to the page's own source.
      */
     static boolean handleShellUri(Activity a, Uri uri) {
@@ -87,8 +87,8 @@ final class Storage {
         if (requestCode != REQ_TREE) return;
         if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) return;
         Uri tree = data.getData();
-        // Persist the grant so a later re-import of the same folder — to pick
-        // up dictionaries added since — needs no second trip through the picker.
+        // Persist the grant so a later re-import of the same folder - to pick
+        // up dictionaries added since - needs no second trip through the picker.
         try {
             a.getContentResolver().takePersistableUriPermission(
                     tree, Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -109,12 +109,12 @@ final class Storage {
      *
      * BOTH pages need it, and the setup page needs it more. A first run where
      * the user taps "Later" lands on /setup with an empty library, and its own
-     * only affordance is a free-text path box — which in this flavour can name
+     * only affordance is a free-text path box - which in this flavour can name
      * nothing the app is allowed to read. Without a control there, the sole
      * way back to the picker is relaunching the app.
      *
      * Anchors are STATIC markup in both pages (the panel header; the Save
-     * button), never a node the page builds after an async fetch — setup.html
+     * button), never a node the page builds after an async fetch - setup.html
      * fills its folder rows only once /api/config answers, so anchoring there
      * would be a race this has no way to win. The same rule rules out the
      * dictionary list itself, tempting as it is: loadDicts rebuilds it, and a
@@ -129,8 +129,8 @@ final class Storage {
                     + "if(document.getElementById('shellImportBtn'))return;"
                     + "var go=function(){location.href='wudict://import';};"
                     // index.html: a WORDED, full-width row at the top of the ☰
-                    // panel, not an icon in .headacts. That strip is chrome —
-                    // theme and close — and a user scans it for "get me out of
+                    // panel, not an icon in .headacts. That strip is chrome -
+                    // theme and close - and a user scans it for "get me out of
                     // here", so the one function without which this app is
                     // empty was the least findable thing in it. A glyph there
                     // cost nothing to miss; the row costs one line of panel and
@@ -154,7 +154,7 @@ final class Storage {
                     + "if(ar)ph.insertBefore(b,ar);else ph.appendChild(b);"
                     + "return;}"
                     // setup.html: a worded button before Save, which is itself
-                    // disabled until a folder holds something — so on a fresh
+                    // disabled until a folder holds something - so on a fresh
                     // install this is the only live control on the page, and it
                     // looks like it. #rows identifies the page: #save alone is
                     // not proof of which page we are on.
@@ -212,7 +212,7 @@ final class Storage {
             a.startActivityForResult(i, REQ_TREE);
         } catch (ActivityNotFoundException e) {
             // A device with no documents provider at all. Nothing to fall back
-            // to — say so rather than fail silently.
+            // to - say so rather than fail silently.
             Log.w(TAG, "no document picker on this device", e);
             new AlertDialog.Builder(a)
                     .setMessage(R.string.import_no_picker)

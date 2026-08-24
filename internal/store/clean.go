@@ -16,7 +16,7 @@ import (
 // the pre-folder flat layout.
 //
 // A prepared dictionary whose source file merely VANISHED is deliberately NOT
-// an orphan — the folder is the user's only copy of that dictionary now, and
+// an orphan - the folder is the user's only copy of that dictionary now, and
 // deleting it would be data loss. Nor is a dictionary whose source CHANGED:
 // re-indexing overwrites its text.db in place, so nothing is superseded.
 type Orphan struct {
@@ -58,7 +58,7 @@ func FindOrphans() ([]Orphan, error) {
 		case strings.HasSuffix(name, ".text.db"):
 			// a loose database is real data, never garbage: AdoptLoose moves it
 			// into a folder at startup. One survives that only when the same
-			// dictionary already has a prepared folder — then it is a true
+			// dictionary already has a prepared folder - then it is a true
 			// duplicate and deleting it loses nothing.
 			reason = "superseded by a prepared folder for the same dictionary"
 		case strings.HasSuffix(name, ".media.db"):

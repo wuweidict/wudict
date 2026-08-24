@@ -26,14 +26,14 @@ type Config struct {
 	NoBrowser bool     // NO_BROWSER=1: do not open a browser tab
 
 	// Tray is tri-state, so it is a pointer rather than a bool: unset means
-	// "decide from how the app was launched" — a GUI launch (a macOS .app, the
+	// "decide from how the app was launched" - a GUI launch (a macOS .app, the
 	// double-clicked wudict.exe) gets an icon, a terminal or a service does not.
 	// TRAY=1 or TRAY=0 overrides that decision in either direction (D74).
 	Tray          *bool  // TRAY
 	Verbose       bool   // VERBOSE=1: verbose logging
 	Speexdec      string // SPEEXDEC: path to the external speexdec binary (.spx audio)
 	SpeexBackend  string // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
-	AutoIndex     string // AUTO_INDEX: on|off — prepare a dictionary's index on first search
+	AutoIndex     string // AUTO_INDEX: on|off - prepare a dictionary's index on first search
 	UseCached     bool   // USE_CACHED=1: also list previously imported dictionaries from the db dir
 	NoCompress    bool   // NO_COMPRESS=1: store article text verbatim (bigger databases)
 	IndexWorkers  int    // INDEX_WORKERS: how many dictionaries may be indexed at once
@@ -53,13 +53,13 @@ type Config struct {
 
 	// Shadowed lists config files that exist further down the search order and
 	// therefore did nothing. Saying so out loud is the whole cure for "I
-	// edited it and nothing changed" — two binaries, two files, one silent winner.
+	// edited it and nothing changed" - two binaries, two files, one silent winner.
 	Shadowed []string
 
 	// Origins records which layer supplied each key: "flag", "env", "file" or
 	// "default". With four layers, "I edited wudict.toml and nothing changed"
-	// is the classic confusion — a flag or an environment variable outranks
-	// the file — so the UI can say where a value actually came from, and
+	// is the classic confusion - a flag or an environment variable outranks
+	// the file - so the UI can say where a value actually came from, and
 	// refuse to pretend that saving it will take effect.
 	Origins map[string]string
 }
@@ -86,7 +86,7 @@ func defaults() Config {
 		AutoIndex:    AutoIndexOn, // opt-out: prepare an index on first use
 		IndexWorkers: 1,           // one dictionary at a time: the machine has other work to do
 		// both are platform-dependent, and for reasons that are about the
-		// platform's opinion of us rather than its capability — see tuning.go
+		// platform's opinion of us rather than its capability - see tuning.go
 		PreviewMemory: previewMemoryDefault(),
 		MemoryLimit:   memoryLimitDefault(),
 		SearchMemory:  searchMemoryDefault(),
@@ -124,7 +124,7 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	}
 	// getList is get for a key naming several folders. The file layer is the
 	// one that can spell it as a TOML array, and that array is taken as it was
-	// parsed rather than re-serialised and split again — see resolved.lists.
+	// parsed rather than re-serialised and split again - see resolved.lists.
 	// The other layers hand over one string, which ParseList splits as before.
 	getList := func(key string) []string {
 		if v, ok := flags[key]; ok && v != "" {
@@ -142,7 +142,7 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 		if v := fileVals[key]; v != "" {
 			cfg.Origins[key] = OriginFile
 			// ONE folder, exactly as written. A file spells several folders as
-			// an array — that is what FormatList writes and what the template
+			// an array - that is what FormatList writes and what the template
 			// documents; the separator convention belongs to the environment,
 			// where it follows $PATH. Splitting here instead cut
 			// "C:\Users\me\Dicts" in half at the drive letter on any host
@@ -209,7 +209,7 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 }
 
 // Name is the configuration file, spelled the same in every location. It used
-// to be "config.toml" — the most generic filename there is, shared with Rust,
+// to be "config.toml" - the most generic filename there is, shared with Rust,
 // Hugo and half the checkouts on a developer's disk. The old bare "./config.toml"
 // candidate turned that collision into a live defect: running wudict from such
 // a directory parsed a stranger's file, suppressed creation of our own, and
@@ -264,12 +264,12 @@ func candidates() []string {
 
 // resolved is the outcome of the search: the file that was read, whether it is
 // the portable one next to the executable, and which lower-priority candidates
-// exist but lost — reported so a shadowed file can be named instead of silently
+// exist but lost - reported so a shadowed file can be named instead of silently
 // ignored.
 type resolved struct {
 	// vals holds every key as a string: a scalar fully decoded, an array as
-	// the raw TOML text it was written with (the keys still parsed from text —
-	// BROWSER_EXTENSIONS — read it, DICT_DIR does not).
+	// the raw TOML text it was written with (the keys still parsed from text -
+	// BROWSER_EXTENSIONS - read it, DICT_DIR does not).
 	vals map[string]string
 	// lists holds the keys written as a TOML array, already split and decoded.
 	// A list of paths must never be flattened back into one string and
@@ -282,7 +282,7 @@ type resolved struct {
 }
 
 // loadFile reads the first wudict.toml found. An explicit path is taken as
-// given and must exist — a typo there must fail loudly rather than fall back to
+// given and must exist - a typo there must fail loudly rather than fall back to
 // a different file. Missing candidates are not an error.
 func loadFile(explicit string) (resolved, error) {
 	if explicit != "" {
@@ -314,7 +314,7 @@ func loadFile(explicit string) (resolved, error) {
 
 const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 # Priority: CLI flag > environment variable > this file > built-in default.
-# All keys are optional — uncomment a line to override its default.
+# All keys are optional - uncomment a line to override its default.
 
 # DICT_DIR    = "~/Dictionaries"      # folder with dictionaries (.mdx, .ifo, .slob, .dsl, .bgl)
 #                                     # several folders: ["~/Dictionaries", "/Volumes/Ext/Dicts"]
@@ -332,7 +332,7 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 #                                     #         uses the dictionary's own format directly
 # INDEX_WORKERS = "1"                 # how many dictionaries may be prepared at once. Each one
 #                                     # saturates a core and holds a few hundred bytes per headword,
-#                                     # so the default is one — the machine stays usable.
+#                                     # so the default is one - the machine stays usable.
 #                                     # "auto" (or 0) = every core.
 # PREVIEW_MEMORY = "1GB"              # how much RAM dictionaries that are NOT yet prepared may hold
 #                                     # open. Each costs ~350 bytes per headword; the least recently
@@ -343,8 +343,8 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 #                                     # not searched rather than opened. Prepared dictionaries are
 #                                     # never capped. "0" = no cap. Android defaults to the memory
 #                                     # limit, where one query could otherwise get the app killed.
-# MEMORY_LIMIT  = "0"                 # soft ceiling, e.g. "4GB": Go collects harder — and sheds its
-#                                     # caches — rather than growing past it. "0" = no ceiling.
+# MEMORY_LIMIT  = "0"                 # soft ceiling, e.g. "4GB": Go collects harder - and sheds its
+#                                     # caches - rather than growing past it. "0" = no ceiling.
 #                                     # Android defaults to a fraction of the device's RAM.
 # NO_COMPRESS = "0"                   # "1" = store article text uncompressed (databases roughly 3x larger,
 #                                     #       marginally faster reads; only worth it with disk to spare)
@@ -352,27 +352,27 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 #                                     #       (set from the setup page: "Use these dictionaries")
 # BROWSER_EXTENSIONS = []             # which browser extensions may read this server from a web page
 #                                     # they run in. Blank = any installed extension may look words up
-#                                     # (it can read dictionaries and nothing else — never your
+#                                     # (it can read dictionaries and nothing else - never your
 #                                     # settings or library). List origins to allow only those:
 #                                     # ["chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
 `
 
 // EnsureConfigFile makes sure a config file exists, generating the fully
-// commented template on first run. It writes exactly one place —
-// ~/.wudict/wudict.toml — and never beside the executable.
+// commented template on first run. It writes exactly one place -
+// ~/.wudict/wudict.toml - and never beside the executable.
 //
 // It used to prefer the executable's directory and fall back to the home
 // directory "if that is not writable". Writability was answering a question it
 // cannot answer: it was being read as "this directory is ours". It is not.
-// `go install` lands in ~/go/bin and Homebrew in /opt/homebrew/bin — both
-// user-writable, both shared with every other program on the machine — so the
+// `go install` lands in ~/go/bin and Homebrew in /opt/homebrew/bin - both
+// user-writable, both shared with every other program on the machine - so the
 // probe succeeded exactly where it should have failed, and the fallback never
 // fired on the two most common installs. Guessing harder (matching /opt, /usr,
 // …) only lengthens a denylist that is incomplete by construction.
 //
 // So the rule is inverted, and now complete: portable mode is something the
 // user DECLARES, by putting a wudict.toml next to the binary. When they have,
-// this function is never reached — the search found it and saves go there (D32).
+// this function is never reached - the search found it and saves go there (D32).
 //
 // Returns the path and whether it was created now.
 func EnsureConfigFile() (path string, created bool, err error) {
@@ -407,7 +407,7 @@ func SaveKey(path, key, value string) error {
 // which backslashes have no meaning. That is where a Windows path belongs in a
 // TOML file: it is what someone opening wudict.toml expects to read and what
 // they would type by hand, and it takes escaping out of the round trip
-// altogether. Go's %q — a TOML basic string — would write
+// altogether. Go's %q - a TOML basic string - would write
 // "C:\\Users\\me\\Dicts", and did.
 //
 // The literal form cannot hold a single quote (a literal string has no escapes
@@ -429,8 +429,8 @@ func hasControl(v string) bool {
 	return false
 }
 
-// SaveKeyRaw is SaveKey for a value that is already TOML syntax — an array
-// from FormatList, say — so lists round-trip through the same
+// SaveKeyRaw is SaveKey for a value that is already TOML syntax - an array
+// from FormatList, say - so lists round-trip through the same
 // uncomment-in-place, comments-preserved edit as scalars.
 func SaveKeyRaw(path, key, raw string) error {
 	data, err := os.ReadFile(path)
@@ -472,15 +472,15 @@ func SaveKeyRaw(path, key, raw string) error {
 // wudict.toml holds nothing but flat `KEY = value` lines, so this package
 // reads it itself rather than taking a TOML dependency. The one thing such a
 // reader must get right is quoting, because the character TOML gives a meaning
-// to — the backslash — is the character a Windows path is spelled with. This
+// to - the backslash - is the character a Windows path is spelled with. This
 // used to strip the quotes and stop, so "C:\\Users\\me" (which is how the
 // writer, correctly, escapes C:\Users\me) was read back with both backslashes
 // still there.
 
 // scanValue returns the text of the value starting at s, with any trailing
 // comment removed, and the bracket depth left open at the end of it. Quotes
-// are tracked, so a '#' inside a string is data — a folder called "vol #2"
-// survives — and a depth above zero means an array continues on a later line.
+// are tracked, so a '#' inside a string is data - a folder called "vol #2"
+// survives - and a depth above zero means an array continues on a later line.
 func scanValue(s string, depth int) (val string, newDepth int) {
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
@@ -591,7 +591,7 @@ func decodeArray(s string) ([]string, bool) {
 }
 
 // parseTOML reads the flat `KEY = value` subset our config files use. It
-// returns scalars decoded, and separately the keys written as an array —
+// returns scalars decoded, and separately the keys written as an array -
 // already split, so no caller has to reconstruct one from text. An array whose
 // bracket closes on a later line is gathered rather than ignored.
 func parseTOML(s string) (map[string]string, map[string][]string) {
@@ -640,19 +640,19 @@ func expandAll(in []string) []string {
 //
 //	["~/Dicts", "/Volumes/Ext/Dicts"]   wudict.toml array
 //	~/Dicts:/Volumes/Ext/Dicts          environment (os.PathListSeparator,
-//	                                    ';' on Windows — ':' would collide
+//	                                    ';' on Windows - ':' would collide
 //	                                    with drive letters, and this is a path
 //	                                    list, so it follows $PATH convention)
 //	~/Dicts                             a single folder, exactly as before
 //
 // Entries are ~-expanded and blanks dropped; order is preserved (it decides
-// nothing but which root wins a tie — result ranking belongs to the panel).
+// nothing but which root wins a tie - result ranking belongs to the panel).
 func ParseList(v string) []string {
 	v = strings.TrimSpace(v)
 	// An array is decoded, never split by hand: quoting and commas belong to
 	// one scanner. Everything else is a separator-joined list from a flag or
 	// the environment, where the value is a raw path and there is nothing to
-	// unquote — decoding it would eat the backslashes of C:\temp.
+	// unquote - decoding it would eat the backslashes of C:\temp.
 	if strings.HasPrefix(v, "[") {
 		parts, _ := decodeArray(v)
 		return expandAll(parts)
@@ -668,7 +668,7 @@ func ParseList(v string) []string {
 //
 // It deliberately does NOT split on os.PathListSeparator the way ParseList does:
 // that is ':' on Unix, and every value here contains one. A trailing '/' is
-// dropped — an origin has no path, but it is the obvious thing to type.
+// dropped - an origin has no path, but it is the obvious thing to type.
 func ParseOrigins(v string) []string {
 	v = strings.TrimSpace(v)
 	if strings.HasPrefix(v, "[") {
@@ -708,8 +708,8 @@ func ExpandHome(p string) string {
 	return p
 }
 
-// AUTO_INDEX values. "fuzzy" is the pre-D16 spelling of "on" — the mode it
-// named was retired, the setting was not — and is still accepted so an
+// AUTO_INDEX values. "fuzzy" is the pre-D16 spelling of "on" - the mode it
+// named was retired, the setting was not - and is still accepted so an
 // existing wudict.toml keeps working.
 const (
 	AutoIndexOn  = "on"
@@ -731,7 +731,7 @@ func (c Config) AutoIndexEnabled() bool { return c.AutoIndex != AutoIndexOff }
 
 // ParseWorkers reads INDEX_WORKERS: a count, or "auto"/"all"/"max"/"0"/"-1"
 // for every core. Preparing a dictionary saturates a core and allocates a few
-// hundred bytes per headword, so the default is ONE — a background convenience
+// hundred bytes per headword, so the default is ONE - a background convenience
 // must not take the machine away from the person using it. The result is
 // clamped to [1, NumCPU].
 func ParseWorkers(v string) int {

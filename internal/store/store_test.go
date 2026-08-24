@@ -62,7 +62,7 @@ func TestFolderName(t *testing.T) {
 	}
 }
 
-// Same file name, different formats — the case that exists in real libraries
+// Same file name, different formats - the case that exists in real libraries
 // (AHD5-2017.slob and AHD5-2017.mdx). Each must own its own folder, and each
 // must keep resolving to its own folder afterwards.
 func TestClaimDirCollision(t *testing.T) {
@@ -148,7 +148,7 @@ func TestLibraryListingAndReceipt(t *testing.T) {
 		byName[e.Name] = e
 	}
 	if byName["Live"].Contains {
-		t.Error("contains must be off by default — it doubles a ~2 MB index for a mode most never use")
+		t.Error("contains must be off by default - it doubles a ~2 MB index for a mode most never use")
 	}
 	if !byName["Live"].SourceExists {
 		t.Error("Live: SourceExists should be true")
@@ -179,7 +179,7 @@ func TestLibraryListingAndReceipt(t *testing.T) {
 
 // A format reader may report a relative, stale or empty source path in its
 // meta (several real ones do). The folder must still know what it was prepared
-// from — the claim written at allocation time is the ownership record — or the
+// from - the claim written at allocation time is the ownership record - or the
 // prepared dictionary is orphaned from its source and silently rebuilt forever.
 func TestOwnershipSurvivesBogusReaderPath(t *testing.T) {
 	t.Setenv("WUDICT_DB_DIR", t.TempDir())
@@ -396,7 +396,7 @@ func TestFuzzyAccentInsensitive(t *testing.T) {
 
 func TestContains(t *testing.T) {
 	s := testStore(t)
-	// substring in the MIDDLE of a headword (trigram, ≥3 chars) — not a prefix
+	// substring in the MIDDLE of a headword (trigram, ≥3 chars) - not a prefix
 	res, err := s.Contains("razon", 10)
 	if err != nil {
 		t.Fatalf("Contains razon: %v", err)
@@ -750,7 +750,7 @@ func TestBodyCompressionRoundTrip(t *testing.T) {
 		}
 	}
 	SetCompressBodies(true)
-	// long, repetitive text must actually shrink — otherwise the whole point
+	// long, repetitive text must actually shrink - otherwise the whole point
 	big := strings.Repeat("<p>palabra significado ejemplo</p>", 100)
 	if enc := encodeBody(big); len(enc) >= len(big)/2 {
 		t.Errorf("compression barely helped: %d → %d bytes", len(big), len(enc))
@@ -812,7 +812,7 @@ func TestSearchIdenticalWithAndWithoutCompression(t *testing.T) {
 			}
 		}
 		if len(a) == 0 {
-			t.Errorf("query %d returned nothing — the comparison proves nothing", i)
+			t.Errorf("query %d returned nothing - the comparison proves nothing", i)
 		}
 	}
 }
@@ -860,7 +860,7 @@ func TestDefaultPlanOmitsTrigram(t *testing.T) {
 	}
 }
 
-// MDict repacks store expandable sections as "@"-prefixed headwords — 59 % of
+// MDict repacks store expandable sections as "@"-prefixed headwords - 59 % of
 // LDOCE6 No-Voice is `@collocations_woman` and friends. They must be fetchable
 // by exact lookup (that is how an article's link pulls one in) and invisible
 // everywhere else, or a search for "woman" returns five sections before the
@@ -942,7 +942,7 @@ func TestSubEntriesHiddenFromBrowsing(t *testing.T) {
 }
 
 // Packing must include the files an article references that live BESIDE the
-// source rather than inside the .mdd — but only referenced ones: a dictionary
+// source rather than inside the .mdd - but only referenced ones: a dictionary
 // folder often holds several dictionaries, and sweeping it would pack a
 // neighbour's assets.
 func TestReferencedAssets(t *testing.T) {
@@ -1073,7 +1073,7 @@ func TestFoldStale(t *testing.T) {
 }
 
 // The whole point of O1: a database folded by different rules must be
-// recognisable on open, and must keep answering — a stale index is inaccurate
+// recognisable on open, and must keep answering - a stale index is inaccurate
 // for one class of characters, not broken.
 func TestStaleFoldDetectedOnOpen(t *testing.T) {
 	s := testStore(t)

@@ -59,8 +59,8 @@ func TestDictProvenance(t *testing.T) {
 	}
 }
 
-// TestLibraryIsOptIn: the library is never a discovery root by default — that
-// is what kept the setup page hidden — and USE_CACHED turns it on. A prepared
+// TestLibraryIsOptIn: the library is never a discovery root by default - that
+// is what kept the setup page hidden - and USE_CACHED turns it on. A prepared
 // dictionary whose source is gone then opens with the wudict: prefix stripped.
 func TestLibraryIsOptIn(t *testing.T) {
 	isolatedDBDir(t)
@@ -78,7 +78,7 @@ func TestLibraryIsOptIn(t *testing.T) {
 		t.Errorf("library folder = %q, want %q (mirrors the source file name)", filepath.Base(dir), "x")
 	}
 
-	// default: opted out — an empty dictionary folder means an empty registry,
+	// default: opted out - an empty dictionary folder means an empty registry,
 	// so the first-run setup page shows.
 	off, err := NewRegistry([]string{t.TempDir()}, false)
 	if err != nil {
@@ -286,7 +286,7 @@ func TestDictsAndSearch(t *testing.T) {
 	if len(dicts) != 1 || dicts[0].Name != "Server Test Dict" {
 		t.Fatalf("dicts: %+v", dicts)
 	}
-	// a DSL prepares itself (it has no native index) — the cheap headword
+	// a DSL prepares itself (it has no native index) - the cheap headword
 	// index only, plus a shareable DBPath (D7)
 	if !dicts[0].Caps.Prefix || dicts[0].DBPath == "" {
 		t.Errorf("caps/dbpath: %+v", dicts[0])
@@ -378,7 +378,7 @@ func init() {
 
 // TestAutoIndexOnFirstSearch: a direct-only dictionary (no contains) must gain
 // an index in the background the first time it is searched, so a later
-// contains query — including accent-folded — succeeds without any explicit
+// contains query - including accent-folded - succeeds without any explicit
 // "enable" step.
 func TestAutoIndexOnFirstSearch(t *testing.T) {
 	dir := t.TempDir()
@@ -416,7 +416,7 @@ func TestAutoIndexOnFirstSearch(t *testing.T) {
 	if len(hits) != 1 || hits[0].Skipped || len(hits[0].Results) != 1 || hits[0].Results[0].Headword != "córazon" {
 		t.Fatalf("auto-index did not become available: %+v", hits)
 	}
-	// and it built the cheap index only — contains stays off until asked for
+	// and it built the cheap index only - contains stays off until asked for
 	dicts2 := getDicts(t, s, "/api/dicts")
 	if dicts2[0].Caps.Contains {
 		t.Error("auto-index must not build a trigram index")
@@ -589,7 +589,7 @@ func TestUnknownDict(t *testing.T) {
 
 // TestMediaDBIsNeverADictionary: the reported bug, end to end. A full ingest
 // leaves a media.db beside the text.db in the library folder; with the library
-// opted in, the dictionary must be listed exactly once — never a second,
+// opted in, the dictionary must be listed exactly once - never a second,
 // phantom "wudict:…" row for the sidecar.
 func TestMediaDBIsNeverADictionary(t *testing.T) {
 	isolatedDBDir(t)
@@ -738,7 +738,7 @@ func isolatedDBDir(t *testing.T) string {
 // TestMain isolates the whole package from the user's real library. Tests set
 // WUDICT_DB_DIR per-test, but background work started by a test (Registry.Warm,
 // auto-index, DSL auto-preparation) can outlive it and read the variable after
-// t.Setenv has restored it — which would prepare dictionaries into the real
+// t.Setenv has restored it - which would prepare dictionaries into the real
 // ~/.wudict/db. Setting it for the process makes that fallback a temp dir.
 func TestMain(m *testing.M) {
 	tmp, err := os.MkdirTemp("", "wudict-server-tests")
@@ -795,7 +795,7 @@ func TestSetupMultipleFolders(t *testing.T) {
 	if len(roots) != 3 || roots[0].Count != 2 || roots[1].Count != 1 || roots[2].Count != 0 {
 		t.Errorf("per-root counts = %+v, want 2/1/0 (earlier root wins a tie)", roots)
 	}
-	// the nested folder holds a dictionary but contributed none — the UI must
+	// the nested folder holds a dictionary but contributed none - the UI must
 	// be able to say "already listed", not "empty"
 	if roots[2].Total != 1 {
 		t.Errorf("nested root Total = %d, want 1", roots[2].Total)
@@ -867,7 +867,7 @@ func newDictWithResources(t *testing.T, files map[string][]byte) *Server {
 	return New(reg)
 }
 
-// A dictionary can ship a damaged bundled resource — one real case in a
+// A dictionary can ship a damaged bundled resource - one real case in a
 // 105-dictionary corpus is a Cambridge slob whose jquery.js carries 12,186 NUL
 // bytes, which makes it unparseable and silently kills the dictionary's own
 // tab script. Two guarantees are being tested: wudict serves the bytes
@@ -993,7 +993,7 @@ func TestResourceOverrideFromLibraryFolder(t *testing.T) {
 }
 
 // The name comes from a URL, so it must not be able to reach outside the
-// override directory — by "..", by an absolute path, or by both.
+// override directory - by "..", by an absolute path, or by both.
 func TestResourceOverrideRejectsEscapes(t *testing.T) {
 	s := newDictWithResources(t, map[string][]byte{"beat.mp3": []byte("BUNDLED")})
 	id := getDicts(t, s, "/api/dicts")[0].ID
@@ -1006,7 +1006,7 @@ func TestResourceOverrideRejectsEscapes(t *testing.T) {
 	}
 	textDB, _ := preparedTextDB(e.Path)
 	lib := filepath.Dir(textDB)
-	// a real, readable file one level above the override dir — the exact
+	// a real, readable file one level above the override dir - the exact
 	// thing a traversal would be reaching for
 	secret := filepath.Join(lib, "info.txt")
 	if err := os.WriteFile(secret, []byte("SECRET"), 0o644); err != nil {
@@ -1097,7 +1097,7 @@ func TestSearchFormats(t *testing.T) {
 		t.Errorf("clean lost the definition text: %q", clean)
 	}
 	// DSL spells pronunciation as <object type="audio/x-wav">, which `clean`
-	// drops as an embedding vector — so it must arrive as a plain <audio>
+	// drops as an embedding vector - so it must arrive as a plain <audio>
 	// instead, or every DSL dictionary silently loses its audio.
 	if !strings.Contains(clean, `<audio src="http://example.com/res/`) {
 		t.Errorf("clean dropped the pronunciation instead of rewriting it: %q", clean)
@@ -1123,7 +1123,7 @@ func TestSearchFormats(t *testing.T) {
 	}
 }
 
-// The reduction is the whole point, so assert it actually reduces — on markup
+// The reduction is the whole point, so assert it actually reduces - on markup
 // shaped like a real dictionary article rather than on a toy string.
 func TestCleanFormatStripsChromeAndScripts(t *testing.T) {
 	body := `<link rel="stylesheet" href="/res/abc/style.css">` +

@@ -121,7 +121,7 @@ func TestSanitizeResistsEvasion(t *testing.T) {
 		got := Sanitize(in, p)
 		for _, bad := range []string{"alert", "onclick", "script", "ONCLICK", "SCRIPT"} {
 			if containsFold(got, bad) {
-				t.Errorf("Sanitize(%q) = %q — still contains %q", in, got, bad)
+				t.Errorf("Sanitize(%q) = %q - still contains %q", in, got, bad)
 			}
 		}
 	}
@@ -291,7 +291,7 @@ func TestTextAppliesStyles(t *testing.T) {
 			}
 		})
 	}
-	// The same input without a stylesheet is the old, wrong answer — asserted
+	// The same input without a stylesheet is the old, wrong answer - asserted
 	// so the fixture cannot silently stop demonstrating the bug.
 	if got := Text(`<span class="Sense">one</span><span class="Sense">two</span>`, nil); got != "onetwo" {
 		t.Errorf("unstyled Text = %q, want %q", got, "onetwo")

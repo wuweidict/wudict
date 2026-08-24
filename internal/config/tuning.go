@@ -20,7 +20,7 @@ import (
 // The reason they differ is not that a phone is slower. It is that a phone
 // judges its apps. Sustained CPU is a battery complaint and a thermal event;
 // resident memory above what the platform thinks reasonable is a kill by the
-// low-memory daemon — and on many vendor builds, a lasting entry in some
+// low-memory daemon - and on many vendor builds, a lasting entry in some
 // battery-abuse list that no amount of later good behaviour undoes. A desktop
 // rewards a program for using the machine it is running on. Android punishes
 // exactly the same behaviour.
@@ -53,7 +53,7 @@ func MaxProcs() int {
 // 1 GB is a reasonable desktop answer and an absurd one on a phone, where it
 // exceeds what the whole app may resident before the platform intervenes. 64 MB
 // holds roughly 180k headwords of direct backends (docs/PERF.md §3.1: ~350 B
-// each) — several open dictionaries — and everything past that is evicted and
+// each) - several open dictionaries - and everything past that is evicted and
 // reopened on demand, which costs a fraction of a second and no battery to
 // speak of.
 func previewMemoryDefault() int64 {
@@ -65,9 +65,9 @@ func previewMemoryDefault() int64 {
 
 // searchMemoryDefault caps what a SINGLE search may bring into memory.
 //
-// Unset on a desktop. The failure it prevents is real there too — a `dict=all`
+// Unset on a desktop. The failure it prevents is real there too - a `dict=all`
 // query over an unprepared library held 6.3 GB against a 64 MB preview budget
-// (docs/PERF.md §8.2) — but the cost of preventing it is dictionaries reported
+// (docs/PERF.md §8.2) - but the cost of preventing it is dictionaries reported
 // as not searched, and on a machine with the RAM to spare that is a worse deal
 // than the memory. The key exists; the default declines to take it.
 //
@@ -76,7 +76,7 @@ func previewMemoryDefault() int64 {
 // one query materialise more than that guarantees the relax valve fires, which
 // is a mechanism for surviving an emergency rather than a way to run. Sized in
 // the weight model's own currency, which over-charges by ~1.7× (§8.3), so the
-// real peak this admits is well under the ceiling — deliberately.
+// real peak this admits is well under the ceiling - deliberately.
 func searchMemoryDefault() int64 {
 	if runtime.GOOS != "android" {
 		return 0
@@ -95,7 +95,7 @@ func searchMemoryDefault() int64 {
 // worse: the app is killed. The value is a fraction of physical memory, floored
 // so it cannot be smaller than a working set this program legitimately needs,
 // and capped so it never approaches what the platform considers a hog. It is a
-// ceiling on the GO heap only — the WebView's own memory, typically the larger
+// ceiling on the GO heap only - the WebView's own memory, typically the larger
 // half of the app, is not ours to bound.
 func memoryLimitDefault() int64 {
 	if runtime.GOOS != "android" {

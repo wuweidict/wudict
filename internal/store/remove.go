@@ -17,13 +17,13 @@ import (
 // from inside the app: `clean` deletes orphans, the panel's switches drop an
 // index or a media.db, and everything else was left to the file manager. That
 // delegation has no counterparty on Android, where the library lives in
-// app-private external storage that no file manager may open — so the app is
+// app-private external storage that no file manager may open - so the app is
 // the only process on the device that can free those bytes.
 //
 // This is the whole file-deleting surface of that feature, kept in one place
 // and behind one guard: **the folder's parent must be the library root**.
 // Everything directly under the db dir is ours by construction (D20: one
-// dictionary is one folder), and nothing else may be passed here — the caller
+// dictionary is one folder), and nothing else may be passed here - the caller
 // resolves a dictionary to a folder, this refuses anything that is not one.
 
 // RemovePrepared deletes one prepared dictionary's folder and reports the
@@ -32,7 +32,7 @@ import (
 // Guards, in order: the path must resolve to a direct child of the library
 // root; it must be a real directory, not a symlink (which would let a link
 // planted in the library delete a tree outside it); and it must not be the
-// library root itself. The folder's contents are not inspected — a folder with
+// library root itself. The folder's contents are not inspected - a folder with
 // no readable text.db is exactly the incomplete/interrupted case `clean`
 // reports, and refusing to remove it would leave the one thing a user most
 // wants gone.
@@ -59,7 +59,7 @@ func RemovePrepared(dir string) (int64, error) {
 	}
 	// Lstat, not Stat: a symlink named like a dictionary folder must be
 	// rejected rather than followed, because os.RemoveAll on the link would
-	// delete the link but a caller could not tell that from success — and the
+	// delete the link but a caller could not tell that from success - and the
 	// library never contains one.
 	fi, err := os.Lstat(abs)
 	if err != nil {

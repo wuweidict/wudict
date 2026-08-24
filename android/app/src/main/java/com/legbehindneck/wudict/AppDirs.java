@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Where the app keeps what it owns (D62): the config, the prepared library,
-// and — in the Play flavour — the imported dictionaries themselves.
+// and - in the Play flavour - the imported dictionaries themselves.
 //
 // The answer is the app's EXTERNAL files dir, /sdcard/Android/data/<pkg>/files,
 // not the internal one. Both are app-private and permission-free, but internal
@@ -12,7 +12,7 @@
 // platform with no command line to reach them from. The external dir is
 // reachable over USB/MTP and adb (third-party file managers are locked out of
 // Android/data since Android 11, so it is better, not perfect), and it is the
-// larger volume — which matters when a prepared library is gigabytes.
+// larger volume - which matters when a prepared library is gigabytes.
 //
 // Cost accepted: the external files dir is deleted when the app is uninstalled.
 package com.legbehindneck.wudict;
@@ -70,7 +70,7 @@ final class AppDirs {
 
     /**
      * "Dictionaries" under every app-specific external volume that is mounted
-     * and writable — the import target first, then a microSD card if the
+     * and writable - the import target first, then a microSD card if the
      * device has one. All of these are permission-free on every API level, so
      * a user whose corpus outgrows internal flash can drop files on the card
      * over USB and have them found with nothing to configure and nothing to
@@ -130,7 +130,7 @@ final class AppDirs {
     // An install that predates this change keeps its internal root: its
     // prepared library is already there and may be gigabytes, so moving it is
     // not something to do behind the user's back at startup. The marker is a
-    // db dir with content — the config file alone is not one, because it is
+    // db dir with content - the config file alone is not one, because it is
     // written on the very first launch and would pin every install forever.
     // A fresh install (or one that never prepared anything) goes external, and
     // the tiny config file follows it so an edited DICT_DIR is not lost.
@@ -163,7 +163,7 @@ final class AppDirs {
 
     // Moves ~/.wudict/wudict.toml from the old root to the new one. Copy and
     // delete, not rename: the two roots are different mounts, so rename fails.
-    // Best effort throughout — a failure here costs the user their DICT_DIR
+    // Best effort throughout - a failure here costs the user their DICT_DIR
     // edits, not their data, and the server will seed a fresh config.
     private static void migrateConfig(File from, File to) {
         File old = new File(new File(from, ".wudict"), "wudict.toml");

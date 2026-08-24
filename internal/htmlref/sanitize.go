@@ -17,18 +17,18 @@ import (
 //
 // Why this is a second walker rather than more hooks on Rewriter: the two have
 // opposite contracts. Rewrite promises the ORIGINAL BYTES wherever a value did
-// not change — original quoting, original attribute order, malformed input
-// round-tripped verbatim — because it edits articles that will be rendered with
+// not change - original quoting, original attribute order, malformed input
+// round-tripped verbatim - because it edits articles that will be rendered with
 // the dictionary's own CSS, where any drift is a visual bug. Sanitize promises
 // the reverse: nothing survives that was not explicitly allowed, so it must
 // re-serialise everything. A walker asked for both would keep neither. They
-// share this package, and rawTextTag, because they share the WHATWG tokenizer —
+// share this package, and rawTextTag, because they share the WHATWG tokenizer -
 // the part worth having exactly once.
 //
 // Measured on the real corpus (q=speed, 9 heavy dictionaries, 748 KB of raw
 // article): `clean` is 1.9x smaller, `text` 2.6x. The first cut of `clean`
 // managed only 1.5x, because stripping attributes leaves the tag skeleton
-// standing — 3,237 of one LDOCE entry's 3,796 elements are <span>, and a
+// standing - 3,237 of one LDOCE entry's 3,796 elements are <span>, and a
 // classless <span></span> is 13 bytes of nothing. Unwrapping those (Policy.Bare)
 // is what took LDOCE from 63% of raw to 41%.
 
@@ -42,7 +42,7 @@ const (
 	// <font> or an unknown custom element loses its markup, never its text.
 	TagUnwrap
 	// TagDrop removes the element, its attributes, its content and its end
-	// tag — for anything whose text is not prose.
+	// tag - for anything whose text is not prose.
 	TagDrop
 )
 
@@ -71,14 +71,14 @@ type Policy struct {
 	// Bare names elements worth keeping only for their attributes. Dictionary
 	// markup is overwhelmingly <span class="…">: in one LDOCE article, 3,237
 	// of 3,796 elements are spans, and once class and style are filtered away
-	// each is a 13-byte <span></span> carrying nothing at all — 42 KB of pure
+	// each is a 13-byte <span></span> carrying nothing at all - 42 KB of pure
 	// skeleton in a single entry. An element listed here with no surviving
 	// attributes is unwrapped instead of emitted. Only elements with no layout
 	// meaning of their own belong here; a bare <div> still starts a block.
 	Bare func(tag string) bool
 
 	// Replace returns markup to emit in place of an element Tag dropped, so a
-	// policy can keep content that only an unsafe element was carrying — a DSL
+	// policy can keep content that only an unsafe element was carrying - a DSL
 	// dictionary's pronunciation, which arrives as
 	// <object type="audio/x-wav" data="…">, becoming a plain <audio>. The
 	// element's subtree is still discarded; the returned markup is emitted
@@ -95,7 +95,7 @@ func (p Policy) act(tag string) TagAction {
 
 // Sanitize rewrites doc under p. Malformed markup is resolved by the tokenizer
 // exactly as a browser resolves it, and anything it cannot continue past is
-// DISCARDED rather than emitted — the opposite of Rewrite's rule, and
+// DISCARDED rather than emitted - the opposite of Rewrite's rule, and
 // deliberate: a sanitiser that passes through what it failed to parse is not a
 // sanitiser.
 func Sanitize(doc string, p Policy) string {
@@ -112,7 +112,7 @@ func Sanitize(doc string, p Policy) string {
 	// Open elements whose end tag is not simply their own: unwrapped ones
 	// (emit "", the end tag is suppressed) and renamed ones (emit the new
 	// name). One stack rather than two, because their relative order is what
-	// decides where a renamed element closes — `<span>x<span class="Sense">y
+	// decides where a renamed element closes - `<span>x<span class="Sense">y
 	// </span>z</span>` must put z outside the block, and two stacks consulted
 	// in a fixed order cannot tell which </span> came first.
 	var pending []pendingEnd
@@ -297,7 +297,7 @@ func blockTag(name string) bool {
 //
 // st is the dictionary's own CSS reduced to class → display, or nil. Without
 // it the only boundaries available are the block TAGS, and a dictionary whose
-// entry is one <span> per sense — which is most of them — collapses into a
+// entry is one <span> per sense - which is most of them - collapses into a
 // single line. With it, the classes the stylesheet displays as blocks break the
 // line too, and the ones it hides contribute nothing.
 func Text(doc string, st Styles) string {
@@ -307,8 +307,8 @@ func Text(doc string, st Styles) string {
 	z := html.NewTokenizer(strings.NewReader(doc))
 	var b strings.Builder
 	b.Grow(len(doc) / 4)
-	// The subtree being skipped — a raw-text element or one the stylesheet
-	// hides — and our depth within it, so a nested span cannot end it early.
+	// The subtree being skipped - a raw-text element or one the stylesheet
+	// hides - and our depth within it, so a nested span cannot end it early.
 	skip, skipDepth := "", 0
 	// Open elements that started a block because of their CLASS. Their end tag
 	// carries no class, so the boundary has to be remembered here; nearest
@@ -411,7 +411,7 @@ func classAttr(attrs []html.Attribute) string {
 }
 
 // squeeze reduces every run of whitespace to a single space, preserving one
-// leading and trailing space where there was any — inline elements depend on
+// leading and trailing space where there was any - inline elements depend on
 // it, and "<b>a</b> <i>b</i>" must not come out as "ab".
 func squeeze(s string) string {
 	var b strings.Builder

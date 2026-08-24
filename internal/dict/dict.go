@@ -10,6 +10,7 @@ package dict
 
 import (
 	"errors"
+	"html"
 	"io"
 )
 
@@ -26,8 +27,8 @@ var (
 type Caps struct {
 	Exact    bool
 	Prefix   bool // starts-with (accent-insensitive on ingested backends)
-	Contains bool // substring/typo-tolerant headword match (FTS5 trigram) — ingested backend only
-	FTS      bool // FTS5 over headwords + article text — ingested backend only
+	Contains bool // substring/typo-tolerant headword match (FTS5 trigram) - ingested backend only
+	FTS      bool // FTS5 over headwords + article text - ingested backend only
 }
 
 // Meta describes one opened dictionary.
@@ -37,6 +38,33 @@ type Meta struct {
 	Path        string // source path (or .text.db path for ingested)
 	Description string
 	EntryCount  int
+}
+
+// DisplayText decodes the character references a dictionary's human-readable
+// header fields still carry, and is the one place that leniency lives.
+//
+// A header value is XML, so its parser undoes the five predefined entities and
+// stops - which is right, and not enough. Two dictionaries in a 93-title MDX
+// corpus arrive still escaped: one titles itself "Webster&#x27;s" (a numeric
+// character reference, outside the XML predefined set), the other
+// "Learner&amp;#x27;s" - HTML-escaped by its builder and then XML-escaped over
+// the top. Both are the dictionary's fault; neither is a reason to show a user
+// "&#x27;" where an apostrophe belongs.
+//
+// Decoding therefore runs to a fixed point, bounded at two passes: enough for
+// one layer of over-escaping, never a loop over hostile input. Apply it only
+// to text shown as text - a name or a description. Header fields whose
+// entities are OUTPUT rather than displayed (StyleSheet, article markup) must
+// keep exactly the escaping they were written with.
+func DisplayText(s string) string {
+	for i := 0; i < 2; i++ {
+		u := html.UnescapeString(s)
+		if u == s {
+			break
+		}
+		s = u
+	}
+	return s
 }
 
 // Result is one matched entry, rendered to HTML.
@@ -65,7 +93,7 @@ type Dictionary interface {
 	//	offset past the last headword: nil, never an error
 	//
 	// The three of those used to be unstated, and the implementations had
-	// drifted into disagreeing about all of them — two panicked on a negative
+	// drifted into disagreeing about all of them - two panicked on a negative
 	// n, a third silently capped every answer at 500. Use KeywordRange to
 	// resolve the window so a fourth backend cannot invent a fourth reading.
 	Keywords(offset, n int) []string
@@ -131,7 +159,7 @@ type Reader interface {
 //
 // The bound is computed against the REMAINING count rather than as offset+n,
 // so a caller passing a huge n cannot overflow the sum into a negative slice
-// index — which is the same arithmetic that made `keys -n -1` panic in
+// index - which is the same arithmetic that made `keys -n -1` panic in
 // makeslice.
 func KeywordRange(total, offset, n int) (lo, hi int, ok bool) {
 	if offset < 0 {

@@ -9,7 +9,7 @@ import "testing"
 // The cases are whole ELEMENTS, not bare `href="…"` fragments as they once
 // were. That is not cosmetic: the rewriter parses a document now instead of
 // matching text in it, so an attribute has to be attached to something. The
-// old shape was itself a symptom — a pattern that matches `href="…"` anywhere
+// old shape was itself a symptom - a pattern that matches `href="…"` anywhere
 // also matches it in prose, in a comment and inside a <script> string, and did.
 func TestRewriteEntryHTML(t *testing.T) {
 	const id = "001598b628f5"
@@ -29,8 +29,8 @@ func TestRewriteEntryHTML(t *testing.T) {
 		{"object data", `<object data="ame/abet.mp3"></object>`, `<object data="` + R + `ame/abet.mp3"></object>`},
 
 		// ── the reported bug: a dropped opening quote ───────────────────────
-		// The tokenizer reads this exactly as a browser does — unquoted value,
-		// ending at whitespace, stray quote included — and Clean removes the
+		// The tokenizer reads this exactly as a browser does - unquoted value,
+		// ending at whitespace, stray quote included - and Clean removes the
 		// quote, which RFC 3986 forbids in a URI anyway. The old regex, which
 		// required a quoted value, could not see the attribute at all.
 		{"unquoted with dropped opening quote (OALD10)",
@@ -103,7 +103,7 @@ func TestRewriteEntryHTML(t *testing.T) {
 
 // The original client-side bug: chained rewriting prefixed already-rewritten
 // URLs again (/res/{d}/res/{d}/… → 404). The Go rewriter must be idempotent,
-// including over the repair — running it twice must not keep re-serialising.
+// including over the repair - running it twice must not keep re-serialising.
 func TestRewriteEntryHTMLIdempotent(t *testing.T) {
 	const id = "001598b628f5"
 	for _, in := range []string{
@@ -120,7 +120,7 @@ func TestRewriteEntryHTMLIdempotent(t *testing.T) {
 }
 
 // An article that references nothing must come back exactly as it went in,
-// byte for byte — the rewriter parses and re-emits every article on every
+// byte for byte - the rewriter parses and re-emits every article on every
 // search, so any drift here corrupts every dictionary at once.
 func TestRewriteEntryHTMLPreservesUntouchedMarkup(t *testing.T) {
 	const id = "001598b628f5"

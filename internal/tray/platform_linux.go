@@ -14,7 +14,7 @@ import (
 )
 
 // The freedesktop StatusNotifierItem host. If nobody owns this name there is
-// no tray on this desktop — GNOME without the AppIndicator extension, a bare
+// no tray on this desktop - GNOME without the AppIndicator extension, a bare
 // compositor, a session with no panel yet.
 const watcherName = "org.kde.StatusNotifierWatcher"
 
@@ -24,8 +24,8 @@ const watcherName = "org.kde.StatusNotifierWatcher"
 const probeTimeout = 3 * time.Second
 
 // preflight is the whole reason this package exists. The library reports no
-// error on Linux — registering with the watcher fails with a slog.Warn and
-// Create() returns nil anyway — and Run() is a bare channel receive. Start a
+// error on Linux - registering with the watcher fails with a slog.Warn and
+// Create() returns nil anyway - and Run() is a bare channel receive. Start a
 // tray on a desktop that has no watcher and the process pumps a message loop
 // forever for an icon nobody can see. Asking D-Bus directly is the difference
 // between knowing and guessing.

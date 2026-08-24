@@ -14,7 +14,7 @@ import java.net.URL;
  * Tells the server how much of the device it may use (D64).
  *
  * The server is an exec'd POSIX child with no JVM and no Binder handle (D52),
- * so it cannot see a lifecycle callback, a thermal event or a battery state —
+ * so it cannot see a lifecycle callback, a thermal event or a battery state -
  * every one of those is an Android API, and the shell is the only part of this
  * app that has one. So the shell watches, and forwards a single verdict over
  * the loopback API the server already serves. Nothing is added to the Go

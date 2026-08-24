@@ -16,7 +16,7 @@ const winPath = `C:\Users\name\Downloads\mdict`
 
 // The defect: DICT_DIR was written escaped ("C:\\Users\\…") and read back with
 // the escaping still in it, so the setup page's input showed a doubled
-// backslash for every separator — and on a platform where '\' is not a path
+// backslash for every separator - and on a platform where '\' is not a path
 // separator, the doubled path did not exist at all.
 func TestWindowsPathRoundTrip(t *testing.T) {
 	for _, dirs := range [][]string{
@@ -128,7 +128,7 @@ func TestArrayForms(t *testing.T) {
 func TestFlagAndEnvPathsAreNotDecoded(t *testing.T) {
 	// A backslash the environment supplies is data, not an escape. The path
 	// carries no os.PathListSeparator, because in THIS layer that character
-	// does separate folders — on Windows ';', which a path cannot contain.
+	// does separate folders - on Windows ';', which a path cannot contain.
 	const envPath = `C:\Users\name\Downloads\mdict`
 	p := filepath.Join(t.TempDir(), Name)
 	if err := os.WriteFile(p, []byte("SERVER_PORT = \"1\"\n"), 0o644); err != nil {
@@ -165,7 +165,7 @@ func TestFlagAndEnvPathsAreNotDecoded(t *testing.T) {
 }
 
 // A drive letter is followed by the character that separates folders in the
-// environment. The FILE layer must not split on it — a single folder there is
+// environment. The FILE layer must not split on it - a single folder there is
 // one folder, whatever it contains, on every host.
 func TestFileScalarIsOneFolder(t *testing.T) {
 	for _, dir := range []string{winPath, `\\srv\share\dicts`, "/mnt/vol:1/dicts"} {

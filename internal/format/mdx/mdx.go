@@ -54,7 +54,7 @@ func probe(filename string) (dict.Meta, error) {
 		Name:        dictName(md, filename),
 		Format:      "mdx",
 		Path:        filename,
-		Description: strings.TrimSpace(md.Description()),
+		Description: dict.DisplayText(strings.TrimSpace(md.Description())),
 		EntryCount:  int(md.EntryCount()),
 	}, nil
 }
@@ -105,7 +105,7 @@ func Open(filename string) (*Dict, error) {
 		stylesheet: parseStylesheet(md.StyleSheet()),
 	}
 	// Decode every headword to UTF-8 at open (entries carry the decoded key
-	// everywhere). No headword index is built here — both the raw
+	// everywhere). No headword index is built here - both the raw
 	// (ensureExact) and accent-folded (ensureFold) indexes are lazy, so an open
 	// that only serves resources or feeds the ingest scan builds nothing.
 	// Runtime readers keep no in-memory headword index; our ingested SQLite
@@ -117,14 +117,14 @@ func Open(filename string) (*Dict, error) {
 		Name:        dictName(md, filename),
 		Format:      "mdx",
 		Path:        filename,
-		Description: strings.TrimSpace(md.Description()),
+		Description: dict.DisplayText(strings.TrimSpace(md.Description())),
 		EntryCount:  len(entries),
 	}
 
 	for _, f := range companionMdds(filename) {
 		rmd, rents, err := openIndexed(f)
 		if err != nil {
-			logx.Warn("%smedia file %s cannot be read: %v — its audio and images will be missing",
+			logx.Warn("%smedia file %s cannot be read: %v - its audio and images will be missing",
 				logx.Dict(d.meta.Name), filepath.Base(f), err)
 			continue
 		}
@@ -319,8 +319,8 @@ func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
 	if !ok {
 		// Not packed: MDict also serves files sitting next to the .mdx, which
 		// is how repacks ship their stylesheet and scripts (LDOCE6 keeps
-		// LDOCE6.css and entry.js loose). Only reached on a MISS — the packed
-		// path never touches the disk — and a stat costs ~1 µs against a
+		// LDOCE6.css and entry.js loose). Only reached on a MISS - the packed
+		// path never touches the disk - and a stat costs ~1 µs against a
 		// ~100 µs HTTP round trip, so this is free where it matters.
 		return d.looseFile(name)
 	}
@@ -472,7 +472,10 @@ func isFile(p string) bool {
 }
 
 func dictName(md *gomdict.Mdict, filename string) string {
-	title := strings.TrimSpace(md.Title())
+	// DisplayText, not the raw title: an MDX header is XML, and a builder that
+	// HTML-escaped the title before writing it leaves "Learner&#x27;s" behind
+	// once the XML layer is undone (dict.DisplayText).
+	title := strings.TrimSpace(dict.DisplayText(md.Title()))
 	if title == "Title (No HTML code allowed)" { // MdxBuilder placeholder
 		title = ""
 	}

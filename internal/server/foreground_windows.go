@@ -12,7 +12,7 @@ import "syscall"
 // SetForegroundWindow succeeds only for a process that is already foreground,
 // was launched by the foreground process, or received the last input event.
 // Everything else gets its taskbar button flashed instead. AllowSetForegroundWindow
-// is the sanctioned way to hand that right to someone else — and it is subject
+// is the sanctioned way to hand that right to someone else - and it is subject
 // to the same rule, so it only works when WE hold the right to give away.
 //
 // That makes this exactly half a fix, deliberately:
@@ -30,8 +30,8 @@ import "syscall"
 //
 // stdlib syscall, not golang.org/x/sys/windows.NewLazySystemDLL, on purpose:
 // the point of NewLazySystemDLL is to force a System32-only search so a planted
-// DLL beside the .exe cannot win. user32.dll is a KnownDLL — LoadLibraryW takes
-// it from the \KnownDlls section object and never consults the search order —
+// DLL beside the .exe cannot win. user32.dll is a KnownDLL - LoadLibraryW takes
+// it from the \KnownDlls section object and never consults the search order -
 // so that hardening buys nothing here, and this way x/sys stays out of go.mod
 // as a direct requirement. Do not "upgrade" this without a DLL that needs it.
 var (
@@ -40,7 +40,7 @@ var (
 )
 
 // ASFW_ANY: (DWORD)-1, "the next process to ask may take the foreground".
-// Not the child's PID, which would be the obvious choice and would be wrong —
+// Not the child's PID, which would be the obvious choice and would be wrong -
 // explorer.exe almost always hands the request to the ALREADY RUNNING shell
 // process and exits, so the window is created by a process whose id we never
 // see. Granting it to whoever asks next is the only form that covers that.

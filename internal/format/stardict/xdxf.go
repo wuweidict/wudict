@@ -13,7 +13,7 @@ import (
 
 // xdxfToHTML converts XDXF article markup (StarDict sametypesequence 'x')
 // to HTML. It maps the common tags and drops unknown ones, keeping their
-// text content — dictionaries in the wild use loose XDXF, so the parser
+// text content - dictionaries in the wild use loose XDXF, so the parser
 // is tolerant. Reference semantics: pyglossary/pyglossary/xdxf.
 func xdxfToHTML(src string) string {
 	dec := xml.NewDecoder(strings.NewReader("<root>" + src + "</root>"))

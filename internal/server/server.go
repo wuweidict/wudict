@@ -60,7 +60,7 @@ type Server struct {
 
 	// Version identifies this build in the Server response header. A second
 	// launch uses that header to recognise an already-running wudict on
-	// the port — without it, "the port is busy" says nothing about WHO holds
+	// the port - without it, "the port is busy" says nothing about WHO holds
 	// it, and sending the user's browser to an unknown local service would be
 	// worse than an error message.
 	Version string
@@ -72,7 +72,7 @@ type Server struct {
 	indexOnce sync.Once
 	indexPage []byte
 	// indexETag identifies indexPage by its content, computed with it. The
-	// page's Cache-Control is no-cache — revalidate every time — which without
+	// page's Cache-Control is no-cache - revalidate every time - which without
 	// a validator to revalidate AGAINST meant re-sending 100 KB on every load,
 	// including a plain reload.
 	indexETag string
@@ -103,8 +103,8 @@ type Server struct {
 	nulSeen sync.Map
 
 	// AutoIndex, when true (config AUTO_INDEX=on, the default), prepares a
-	// dictionary's headword index the first time it is searched — silently,
-	// in the background — so accent-insensitive search works on the next
+	// dictionary's headword index the first time it is searched - silently,
+	// in the background - so accent-insensitive search works on the next
 	// query without the user ever asking. The heavier indexes (contains,
 	// full-text) and media stay opt-in per dictionary.
 	AutoIndex bool
@@ -121,7 +121,7 @@ func New(reg *Registry) *Server {
 	s := &Server{reg: reg, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /", s.handleIndex)
 	// The three read-only routes the browser extension uses, and the only ones
-	// that answer a cross-origin request — see cors.go (D69). Everything below
+	// that answer a cross-origin request - see cors.go (D69). Everything below
 	// stays same-origin: an extension can read dictionaries, and can neither
 	// read the user's preferences nor touch the library.
 	s.mux.HandleFunc("GET /api/dicts", s.withCORS(s.handleDicts))
@@ -138,7 +138,7 @@ func New(reg *Registry) *Server {
 	s.mux.HandleFunc("GET /api/prefs", s.handlePrefs)
 	s.mux.HandleFunc("PUT /api/prefs", s.handleSavePrefs)
 	s.mux.HandleFunc("GET /api/reveal", s.handleReveal)
-	// what the platform is doing to us (D64) — the Android shell's channel for
+	// what the platform is doing to us (D64) - the Android shell's channel for
 	// onStop / onTrimMemory / thermal / battery-saver, which the exec'd server
 	// has no other way of learning
 	s.mux.HandleFunc("POST /api/power", s.handlePower)
@@ -150,7 +150,7 @@ func New(reg *Registry) *Server {
 	// so the URL changes whenever the file does and a week-long cache is safe.
 	// It was NOT safe before. Both scripts are embedded in the same binary as
 	// index.html and are versioned with it, but the browser cached them
-	// SEPARATELY — index.html fresh from "/", frame.js up to a week stale —
+	// SEPARATELY - index.html fresh from "/", frame.js up to a week stale -
 	// so any change to the protocol between the two broke silently and only
 	// for dictionaries rendered in an iframe. D41 renamed frame.js's lookup
 	// message from "lookup" to "ref"/"pick"; a cached frame.js kept posting
@@ -235,7 +235,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, setupPage(s.reg.Dirs(), 0))
 		return
 	}
-	// "no-cache" means REVALIDATE, not "never store" — and revalidation needs
+	// "no-cache" means REVALIDATE, not "never store" - and revalidation needs
 	// something to revalidate against. Without a validator the browser had no
 	// way to ask "still the same?", so every load, every reload, re-sent the
 	// whole 100 KB page. With one, an unchanged page costs a 304 and no body,
@@ -257,7 +257,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 // page returns index.html with the build version stamped into the About box.
 func (s *Server) page() []byte { s.buildPage(); return s.indexPage }
 
-// pageETag identifies that page by its content — the same content addressing
+// pageETag identifies that page by its content - the same content addressing
 // D45 applies to the scripts, turned around: there the URL carries the hash so
 // the answer can be cached forever, here the validator carries it so the
 // question is cheap to ask.
@@ -289,7 +289,7 @@ func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // setupPage renders the folder chooser/editor. The intro names a single
-// folder, but never repeats a list the editable rows below already show —
+// folder, but never repeats a list the editable rows below already show -
 // four long paths in a sentence pushed the actual controls off the screen.
 func setupPage(dirs []string, serving int) string {
 	var intro string
@@ -325,7 +325,7 @@ func htmlEscape(s string) string {
 }
 
 // handleLibrary lists the previously imported dictionaries kept in the db dir
-// — the ones the setup page offers to use, and the basis of the USE_CACHED
+// - the ones the setup page offers to use, and the basis of the USE_CACHED
 // choice. Reading it never enrolls them: listing is not consent.
 func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	entries, err := store.Library()
@@ -363,7 +363,7 @@ func (s *Server) setUseCached(on bool) error {
 // handleSetup drives the first-run choices. With a path it validates a
 // dictionary folder and, with save=1, switches the registry to it live and
 // persists DICT_DIR. With useCached=1 it enrolls the previously imported
-// dictionaries (persisting USE_CACHED) — on its own, or together with a
+// dictionaries (persisting USE_CACHED) - on its own, or together with a
 // folder. Clicking a Use button IS the "don't ask again": the setup page only
 // appears while the registry is empty.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
@@ -468,12 +468,12 @@ func (s *Server) resolveDirs(raw []string) ([]string, int, error) {
 			p = abs
 		}
 		if dict.SameDir(p, store.DefaultDBDir()) {
-			return nil, 0, fmt.Errorf("%s is wudict's own library folder — choose the folder holding your dictionary files", p)
+			return nil, 0, fmt.Errorf("%s is wudict's own library folder - choose the folder holding your dictionary files", p)
 		}
 		dirs = append(dirs, p)
 	}
 	// the same folder spelled two ways (a symlink, a case variant) must not be
-	// saved twice — string comparison alone would not catch either
+	// saved twice - string comparison alone would not catch either
 	dirs = dict.DedupeDirs(dirs)
 	if len(dirs) == 0 {
 		return nil, 0, fmt.Errorf("no folder given")
@@ -511,7 +511,7 @@ type dictInfo struct {
 
 	// ContainsStale: the trigram index was built by an older text folding, so
 	// substring search may miss words whose folding changed. Reported, not
-	// acted on — the mode keeps working, and the panel offers a rebuild.
+	// acted on - the mode keeps working, and the panel offers a rebuild.
 	ContainsStale bool `json:"containsStale,omitempty"`
 
 	// provenance (panel display): where the dictionary came from and what
@@ -521,14 +521,14 @@ type dictInfo struct {
 	TextDB   string   `json:"textDB,omitempty"`    // prepared text.db, if present
 	MediaDB  string   `json:"mediaDB,omitempty"`   // packed media.db, if present
 	Folder   string   `json:"folder,omitempty"`    // library folder holding them (the transferable unit)
-	DBSize   int64    `json:"dbSize,omitempty"`    // bytes of text.db — what the indexes actually cost
+	DBSize   int64    `json:"dbSize,omitempty"`    // bytes of text.db - what the indexes actually cost
 	MediaSz  int64    `json:"mediaSize,omitempty"` // bytes of media.db
 	HasMedia bool     `json:"hasMedia,omitempty"`  // packable binary resources exist (drives "pack media")
 }
 
 // dictMsg is one NDJSON line of /api/dicts:
 //
-//	{"t":"begin","total":N}   how many rows follow — known from the registry alone
+//	{"t":"begin","total":N}   how many rows follow - known from the registry alone
 //	{"t":"dict","dict":{…}}   one resolved row, in completion order
 //	{"t":"end"}               every row sent
 type dictMsg struct {
@@ -542,7 +542,7 @@ type dictMsg struct {
 // parallel, but delivering it as one array made time-to-first-row the *sum* of
 // every dictionary's resolution instead of the slowest single one. With ~100
 // dictionaries that gap is the entire startup wait, during which the client
-// knew nothing at all — not even how many dictionaries were coming.
+// knew nothing at all - not even how many dictionaries were coming.
 //
 // So `total` goes out first, from cheap entry ids with no opens at all: the
 // client can say "0 of 105" immediately and unblock search the instant the
@@ -565,7 +565,7 @@ func (s *Server) handleDicts(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	// unlike handleSearch, whose callback is serialized by StreamOpen, the
-	// workers below write concurrently — so this one needs the mutex.
+	// workers below write concurrently - so this one needs the mutex.
 	var mu sync.Mutex
 	writeLine := func(m dictMsg) {
 		mu.Lock()
@@ -603,13 +603,13 @@ func (s *Server) dictInfoFor(e *entry) dictInfo {
 	info := s.baseDictInfo(e)
 	addProvenance(&info, e.Path)
 	if e.noPackableMedia() {
-		info.HasMedia = false // a prior pack found nothing — stop offering it
+		info.HasMedia = false // a prior pack found nothing - stop offering it
 	}
 	return info
 }
 
 func (s *Server) baseDictInfo(e *entry) dictInfo {
-	// a prepared dictionary answers the whole row from its own meta — no
+	// a prepared dictionary answers the whole row from its own meta - no
 	// probe, no direct open, and it works for every format (the library
 	// folder is located from the source PATH, so the name is not needed to
 	// find it).
@@ -624,7 +624,7 @@ func (s *Server) baseDictInfo(e *entry) dictInfo {
 			}
 		}
 	}
-	// only probe formats with a real cheap prober — otherwise dict.Probe
+	// only probe formats with a real cheap prober - otherwise dict.Probe
 	// falls back to a full dict.Open outside the entry's memoization (and
 	// can trigger DSL auto-ingest), racing the background warm.
 	if dict.HasProber(e.Path) {
@@ -674,7 +674,7 @@ func preparedTextDB(entryPath string) (string, bool) {
 // addProvenance fills the panel's "where did this come from" fields cheaply
 // (stat only): the foreign source and its media companions, the cached
 // text.db/media.db, and whether any packable media exists. entryPath is the
-// registry entry's path — a foreign source, or a .text.db for a standalone
+// registry entry's path - a foreign source, or a .text.db for a standalone
 // native dictionary (which has no source).
 func addProvenance(info *dictInfo, entryPath string) {
 	native := store.IsTextDB(entryPath)
@@ -710,7 +710,7 @@ func addProvenance(info *dictInfo, entryPath string) {
 	info.DBPath = info.TextDB // keep the legacy field consistent (never a bogus name)
 
 	// packable media: an already-packed media.db, external companions, or a
-	// SLOB (which embeds resources — not cheaply enumerable, so assume it may).
+	// SLOB (which embeds resources - not cheaply enumerable, so assume it may).
 	info.HasMedia = info.MediaDB != "" || len(info.MediaSrc) > 0 ||
 		(info.Source != "" && strings.HasSuffix(strings.ToLower(info.Source), ".slob"))
 }
@@ -778,7 +778,7 @@ type streamMsg struct {
 	// declined to materialise it (see fanout). It is NOT an error and must not
 	// be reported as one: the dictionary is fine, the query was wide, and
 	// asking for this one dictionary by itself answers it. Bytes is what the
-	// open was estimated to cost, for logs and tests — the UI does not show a
+	// open was estimated to cost, for logs and tests - the UI does not show a
 	// number, because a megabyte figure is not a decision the reader can make.
 	Deferred bool  `json:"deferred,omitempty"`
 	Bytes    int64 `json:"bytes,omitempty"`
@@ -849,7 +849,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		fl.Flush()
 	}
 
-	// Emit the slot layout FIRST, from cheap entry ids only — no opens on the
+	// Emit the slot layout FIRST, from cheap entry ids only - no opens on the
 	// request path. The client paints the empty accordion immediately; each
 	// dictionary's real name arrives with its "hit" as it completes. Opening
 	// (cold MDX ~180ms, cold SLOB ~1s) is deferred into the workers below, so
@@ -861,12 +861,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// Nil when uncapped, which is the desktop default.
 	//
 	// A query naming ONE dictionary has no fan-out to cap, and is never capped.
-	// The budget bounds the multiplication — N dictionaries materialised at
-	// once by a single `all` query — and a search of one is bounded by that one
+	// The budget bounds the multiplication - N dictionaries materialised at
+	// once by a single `all` query - and a search of one is bounded by that one
 	// dictionary. It is also, always, a direct demand: the user picked it in
 	// the selector, asked for `more…`, or opened a deferred section. Declining
 	// it would leave the dictionary unreachable through EVERY path the app has,
-	// which is worse than the memory by a wide margin — and the steady state is
+	// which is worse than the memory by a wide margin - and the steady state is
 	// still held by PREVIEW_MEMORY, the janitor and the relax valve, none of
 	// which this bypasses.
 	fan := s.reg.fanout()
@@ -930,7 +930,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.As(h.Err, &heavy):
 			// Deferred, not failed. The client renders a section the user can
-			// open, and opening it re-queries this dictionary alone — which is
+			// open, and opening it re-queries this dictionary alone - which is
 			// uncapped above, and which auto-indexes it so the deferral does
 			// not recur.
 			m.Deferred, m.Bytes = true, heavy.bytes
@@ -946,18 +946,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 // It overrides whatever the backend reports because Go's
 // mime.TypeByExtension returns text/plain for .css/.js on some platforms
 // (OS mime DB / Windows registry), and ingested media.db rows carry
-// whatever the ingest host happened to report — either makes browsers
+// whatever the ingest host happened to report - either makes browsers
 // refuse stylesheets/scripts under strict MIME checking.
 //
 // Values follow MDN's Common MIME types and IANA registrations: the modern
-// registered font types (font/woff, font/ttf, … — RFC 8081), text/javascript
+// registered font types (font/woff, font/ttf, … - RFC 8081), text/javascript
 // (RFC 9239, not the obsolete application/javascript), and
-// image/vnd.microsoft.icon — not the legacy application/x-font-* variants.
+// image/vnd.microsoft.icon - not the legacy application/x-font-* variants.
 // .spx is the one entry that describes the CONTAINER rather than what a
 // browser usually gets: handleResource transcodes Speex to WAV and sets
 // audio/wav itself, so this table is consulted for a .spx only on the paths
-// that ship the original bytes — a failed transcode, no decoder, or a
-// user-supplied override file — where the payload really is Ogg.
+// that ship the original bytes - a failed transcode, no decoder, or a
+// user-supplied override file - where the payload really is Ogg.
 var webMIME = map[string]string{
 	// images
 	".bmp": "image/bmp", ".gif": "image/gif", ".ico": "image/vnd.microsoft.icon",
@@ -975,7 +975,7 @@ var webMIME = map[string]string{
 	// documents
 	".pdf": "application/pdf",
 	// audio. .spx is Ogg-Speex here (see above). .webm can be audio or
-	// video — dictionaries ship audio, so default to that.
+	// video - dictionaries ship audio, so default to that.
 	".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg",
 	".oga": "audio/ogg", ".spx": "audio/ogg", ".wav": "audio/wav",
 	".m4a": "audio/mp4", ".m4b": "audio/mp4", ".aac": "audio/aac",
@@ -1056,7 +1056,7 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", m)
 	}
 	// A .spx that reached here could NOT be transcoded (no speexdec / failure)
-	// — it is unplayable raw Speex, so don't let a day-long cache entry mask
+	// - it is unplayable raw Speex, so don't let a day-long cache entry mask
 	// the fix once speexdec is installed. Everything else caches normally.
 	if isSpx {
 		w.Header().Set("Cache-Control", "no-store")
@@ -1064,7 +1064,7 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 	}
 	// A NUL byte cannot occur in JavaScript, CSS, HTML or JSON, so finding one
-	// is proof the stored blob is damaged — not a rendering problem, not a
+	// is proof the stored blob is damaged - not a rendering problem, not a
 	// wudict problem, and not something the user can see any other way. One
 	// real case in a 105-dictionary corpus: a Cambridge slob whose bundled
 	// jquery.js has 12,186 NULs in nine block-aligned holes, which makes it
@@ -1076,7 +1076,7 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 	if watch.seen {
 		if _, dup := s.nulSeen.LoadOrStore(id+"\x00"+name, true); !dup {
 			logx.Warn("%s%s is damaged: it contains NUL bytes and cannot parse. "+
-				"The dictionary is stored that way — wudict is serving it verbatim. "+
+				"The dictionary is stored that way - wudict is serving it verbatim. "+
 				"Drop a good copy at <library folder>/res/%s to override it.",
 				logx.Dict(e.Path), name, name)
 		}
@@ -1117,13 +1117,13 @@ func (n *nulWatcher) Read(p []byte) (int, error) {
 // The need is real and not hypothetical: a dictionary can ship a damaged
 // bundled resource (see the NUL check above), and there is otherwise no way to
 // fix it short of rewriting a multi-gigabyte container. This is deliberately
-// NOT special-cased to any file or format — any resource of any dictionary can
+// NOT special-cased to any file or format - any resource of any dictionary can
 // be shadowed, which is why it needs no knowledge of jQuery, Cambridge, or
 // what a working replacement would look like.
 //
 // The library folder is the right home: it is wudict's own space (never the
 // user's read-only dictionary folder), the panel already displays its path
-// with a "reveal" button, and it is the unit D20 made transferable — so an
+// with a "reveal" button, and it is the unit D20 made transferable - so an
 // override travels with the dictionary it repairs.
 func (s *Server) serveOverride(w http.ResponseWriter, r *http.Request, e *entry, name string) bool {
 	textDB, ok := preparedTextDB(e.Path)
@@ -1135,7 +1135,7 @@ func (s *Server) serveOverride(w http.ResponseWriter, r *http.Request, e *entry,
 	// folds to a name inside the directory rather than above it; `within` is a
 	// second, lexical check for anything that still lands outside. Both are
 	// verified by removing them: four traversal vectors leak without them.
-	// Neither resolves symlinks, and neither needs to — the only way a link
+	// Neither resolves symlinks, and neither needs to - the only way a link
 	// gets into this directory is the user putting it there, in wudict's own
 	// storage, reachable only from loopback.
 	rel := strings.TrimPrefix(path.Clean("/"+name), "/")
@@ -1185,7 +1185,7 @@ func (s *Server) spxToWav(dictID, name string, rc io.Reader) ([]byte, error) {
 		return data, nil
 	}
 	// single-flight per cache key: the loser waits on the mutex, then finds the
-	// winner's WAV in the re-check below — no duplicate decode, no two writers
+	// winner's WAV in the re-check below - no duplicate decode, no two writers
 	// racing wavPath. The guard is on the shared on-disk cache, so it is
 	// backend-agnostic.
 	muRaw, _ := s.spxLocks.LoadOrStore(wavPath, &sync.Mutex{})
@@ -1210,7 +1210,7 @@ func (s *Server) spxToWav(dictID, name string, rc io.Reader) ([]byte, error) {
 }
 
 // decodeSpx converts one Ogg-Speex stream to WAV. The in-process libspeex
-// decoder is used by default and trusted — there is no per-file fallback to
+// decoder is used by default and trusted - there is no per-file fallback to
 // speexdec (a file the built-in decoder can't handle, speexdec almost certainly
 // can't either). The external speexdec is used only when explicitly forced
 // (SPEEX_BACKEND=external) or when the in-process decoder is not compiled in
@@ -1298,7 +1298,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		var buf strings.Builder
 		enc := json.NewEncoder(&buf)
 		enc.SetEscapeHTML(false)
-		_ = enc.Encode(v) // Encode appends \n — harmless before the blank line
+		_ = enc.Encode(v) // Encode appends \n - harmless before the blank line
 		fmt.Fprintf(w, "event: %s\ndata: %s\n", event, buf.String())
 		fl.Flush()
 	}
@@ -1330,7 +1330,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 // assetTag is a short content hash, used as the ?v= of an embedded script so
 // its URL changes exactly when its bytes do. Content addressing rather than
 // the build version: a developer rebuild keeps Version at "dev", which would
-// leave a changed script behind a week-long cache under an unchanged URL —
+// leave a changed script behind a week-long cache under an unchanged URL -
 // the precise failure this replaces.
 func assetTag(b []byte) string {
 	sum := sha256.Sum256(b)

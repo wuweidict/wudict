@@ -8,20 +8,20 @@ import "strings"
 
 // A dictionary article's layout is not in its tags. LDOCE's `destination`
 // entry is 3,796 elements of which 3,237 are <span>, and every boundary a
-// reader sees — sense from sense, example from definition, one collocation
-// from the next — exists only because `ldoce.css` says
+// reader sees - sense from sense, example from definition, one collocation
+// from the next - exists only because `ldoce.css` says
 // `.ldoceEntry .Sense { display: block }`. Strip the stylesheet and the
 // classes, as Sanitize must, and the entry becomes one run of text:
 // "…going tosomebody's destination". The same stylesheet hides the internal
 // field codes (`.FIELD { display: none }`), so stripping it also UNCOVERS
-// content the dictionary never meant to show — "TTTRAVEL" is `<span
+// content the dictionary never meant to show - "TTTRAVEL" is `<span
 // class="FIELD">TT</span><span class="ACTIV">TRAVEL</span>`.
 //
 // So `clean` and `text` cannot decide layout from tag names alone; the
 // information they need is in the dictionary's own CSS, which is a resource of
 // the same dictionary. ParseCSS reduces a stylesheet to the only question those
-// two formats can act on — does this class start a new block, is it hidden, or
-// neither — and Styles answers it per element. Everything else in CSS is a
+// two formats can act on - does this class start a new block, is it hidden, or
+// neither - and Styles answers it per element. Everything else in CSS is a
 // look, which is exactly what these formats exist to discard.
 //
 // This is deliberately NOT a CSS engine. There is no cascade, no specificity,
@@ -46,7 +46,7 @@ type Display uint8
 
 const (
 	DisplayUnset  Display = iota // no rule seen (the zero value)
-	DisplayNone                  // display:none — the dictionary hides this
+	DisplayNone                  // display:none - the dictionary hides this
 	DisplayInline                // explicitly inline: no boundary
 	DisplayBlock                 // block, list-item, table-*, flex, grid: a boundary
 )
@@ -56,8 +56,8 @@ const (
 // that a dictionary without CSS costs exactly what it cost before.
 type Styles map[string]Display
 
-// Class resolves one element's `class` attribute — the whole space-separated
-// value — to the display its dictionary gives it. Highest precedence wins, so
+// Class resolves one element's `class` attribute - the whole space-separated
+// value - to the display its dictionary gives it. Highest precedence wins, so
 // class="collo COLLOC" is a block if either of them is.
 //
 // Written as an index walk rather than strings.Fields: this runs once per
@@ -97,7 +97,7 @@ const (
 )
 
 // ParseCSS folds one stylesheet into st, which may be nil, and returns the
-// result — so several stylesheets of one dictionary accumulate into one table.
+// result - so several stylesheets of one dictionary accumulate into one table.
 // Anything it cannot parse is skipped, never guessed at: this is a reduction,
 // and a wrong entry is worse than a missing one.
 func ParseCSS(css string, st Styles) Styles {
@@ -166,7 +166,7 @@ func (p *cssParser) apply(selectors string, d Display) {
 		}
 		// A compound like `.collo.COLLOC` applies only when BOTH classes are
 		// present, which a flat table cannot express. Recording it against each
-		// class over-applies — harmless for a boundary, and not harmless at all
+		// class over-applies - harmless for a boundary, and not harmless at all
 		// for `display:none`, which would drop content on the strength of half
 		// a selector. So the boundary is taken and the hiding is not.
 		if len(classes) > 1 && d == DisplayNone {
@@ -262,8 +262,8 @@ func (p *cssParser) skipSpace() {
 }
 
 // stripComments removes /* … */ once, up front, so no other scanner has to know
-// comments exist. A comment may legally sit between any two tokens — inside a
-// selector, inside a value — and handling it everywhere else would mean handling
+// comments exist. A comment may legally sit between any two tokens - inside a
+// selector, inside a value - and handling it everywhere else would mean handling
 // it everywhere.
 func stripComments(css string) string {
 	if !strings.Contains(css, "/*") {
@@ -352,7 +352,7 @@ func declDisplay(decl string) Display {
 
 // displayValue maps a display value to the three answers that matter. The
 // two-value syntax (`display: block flow`, `display: inline flow-root`) is read
-// from its outer role, which is the first keyword — except `none`, which is
+// from its outer role, which is the first keyword - except `none`, which is
 // only ever alone but is worth finding wherever it sits.
 func displayValue(v string) Display {
 	if i := strings.IndexByte(v, '!'); i >= 0 {
@@ -380,8 +380,8 @@ func displayValue(v string) Display {
 	return DisplayBlock
 }
 
-// finalClasses returns the classes of a selector's rightmost compound — the
-// part that names the element the rule actually styles — or nothing when the
+// finalClasses returns the classes of a selector's rightmost compound - the
+// part that names the element the rule actually styles - or nothing when the
 // selector is one this flat model must not pretend to understand.
 //
 // Refused, all for the same reason: the answer would depend on state or context

@@ -56,7 +56,7 @@ func OpenMDD(filename string) (*MDD, error) {
 	}
 	for _, e := range entries {
 		// MDD keys are stored as `\path\name`; normalise to the forward-slash,
-		// no-leading-separator form the rest of wudict uses for resources — so
+		// no-leading-separator form the rest of wudict uses for resources - so
 		// a name printed by `keys` is a name `res` accepts, unchanged.
 		name := strings.ReplaceAll(strings.TrimLeft(e.KeyWord, "\\/"), "\\", "/")
 		if name == "" {

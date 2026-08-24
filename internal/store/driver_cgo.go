@@ -6,13 +6,13 @@
 
 package store
 
-// The fast driver: mattn/go-sqlite3 (cgo — decision D4), selected by
+// The fast driver: mattn/go-sqlite3 (cgo - decision D4), selected by
 // -tags sqlite_fts5 as `make build` and `make install` pass.
 //
 // BOTH conditions are required, and neither is optional (D29). mattn
 // compiles SQLite *without* FTS5 unless the sqlite_fts5 tag sets
 // -DSQLITE_ENABLE_FTS5 in its own cgo CFLAGS, and store's base schema
-// always creates an FTS5 table (see ingest.go) — so a mattn build
+// always creates an FTS5 table (see ingest.go) - so a mattn build
 // missing that tag fails at runtime with "no such module: fts5". The
 // && cgo half keeps CGO_ENABLED=0 away from mattn's !cgo stub, whose
 // registered driver refuses every Open.

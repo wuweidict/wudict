@@ -15,9 +15,9 @@ import (
 // .mdd (possibly several, numbered); StarDict is an .ifo naming an .idx and a
 // .dict.dz beside it, with an optional res/ folder; DSL keeps abbreviations in
 // a _abrv file and media in a .files.zip. Two callers need to know which files
-// belong to one dictionary — the panel, to show what a dictionary is made of,
+// belong to one dictionary - the panel, to show what a dictionary is made of,
 // and removal (D63), to delete a dictionary without leaving its resources
-// behind or taking a neighbour's with it — so the knowledge lives here once,
+// behind or taking a neighbour's with it - so the knowledge lives here once,
 // beside the format registry, rather than in either caller.
 //
 // The rule that keeps this safe is the SHARED STEM: companions are named after
@@ -28,7 +28,7 @@ import (
 
 // stem returns the main file's path with its format suffix removed, which is
 // what every companion is named after. ".dz" is stripped first, so "x.dsl.dz"
-// and "x.dsl" both yield "x" — a compressed DSL's companions are named for the
+// and "x.dsl" both yield "x" - a compressed DSL's companions are named for the
 // dictionary, not for the compression.
 func stem(src string) string {
 	s := src
@@ -73,8 +73,8 @@ func CompanionMedia(src string) []string {
 			out = append(out, f)
 		}
 	case ".dsl", ".dsl.dz":
-		// "x.dsl.files.zip" beside "x.dsl" — and beside "x.dsl.dz" too, where
-		// the zip is named for the dictionary and not for the compression —
+		// "x.dsl.files.zip" beside "x.dsl" - and beside "x.dsl.dz" too, where
+		// the zip is named for the dictionary and not for the compression -
 		// or the shorter "x.files.zip".
 		uncompressed := strings.TrimSuffix(src, filepath.Ext(src)) // "x.dsl.dz" → "x.dsl"
 		for _, f := range []string{src + ".files.zip", uncompressed + ".files.zip", base + ".files.zip"} {
@@ -113,7 +113,7 @@ func indexCompanions(src string) []string {
 }
 
 // SourceFiles lists every file that makes up the dictionary whose main file is
-// src — the main file first, then its index companions, then its media — and
+// src - the main file first, then its index companions, then its media - and
 // only those that exist right now. It is the answer to "what would be deleted
 // if this dictionary's originals were removed" (D63), which is why the caller
 // SHOWS this list before acting on it: two entries can be wider than one

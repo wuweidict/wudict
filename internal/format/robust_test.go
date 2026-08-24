@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package format_test feeds corrupt and truncated files to every
-// registered format through dict.Open, which must return errors — never
+// registered format through dict.Open, which must return errors - never
 // panic, never hang (one bad file in a folder must not take anything
 // down).
 package format_test

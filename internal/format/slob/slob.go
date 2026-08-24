@@ -22,7 +22,7 @@ func init() {
 }
 
 // Dict is one opened .slob dictionary (direct backend). Lookup runs over
-// an in-memory copy of the ref list with exact/fold maps — no ICU
+// an in-memory copy of the ref list with exact/fold maps - no ICU
 // collation needed (see docs/FORMATS.md). Safe for concurrent readers.
 type Dict struct {
 	c         *container
@@ -38,7 +38,7 @@ func Open(path string) (*Dict, error) {
 	if err != nil {
 		return nil, err
 	}
-	// No headword index is built at open — neither exact nor folded. Both are
+	// No headword index is built at open - neither exact nor folded. Both are
 	// built lazily on first use (see ensureExact/ensureFold), so opening a slob
 	// only for its resources (native path) or for the ingest scan never pays
 	// for a lookup index. The official aard2/GoldenDict readers keep no
@@ -198,7 +198,7 @@ func (d *Dict) Keywords(offset, n int) []string {
 func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
 	// ensureExact/ensureFold, not a bare map read. Both indexes are built
 	// lazily on first use, and this read used to assume some earlier lookup
-	// had already triggered that — so on a Dict opened only to serve files it
+	// had already triggered that - so on a Dict opened only to serve files it
 	// consulted two nil maps and reported every resource missing. That is the
 	// normal case for a PREPARED dictionary: searches are answered from
 	// text.db, and the slob is reopened solely as the resource fallback
@@ -240,7 +240,7 @@ func (d *Dict) Resources() []string {
 
 // ---- ingest --------------------------------------------------------------
 
-// Reader scans blobs bin-by-bin (sequential decompression — refs order
+// Reader scans blobs bin-by-bin (sequential decompression - refs order
 // would thrash bins) and attaches every ref key of a blob as headwords:
 // first key = display headword, the rest become aliases.
 type Reader struct {

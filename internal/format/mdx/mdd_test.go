@@ -54,7 +54,7 @@ func TestMDDOpensAlone(t *testing.T) {
 	}
 }
 
-// Whatever `keys` prints, `res` must accept — unchanged. That contract is what
+// Whatever `keys` prints, `res` must accept - unchanged. That contract is what
 // makes the two commands usable together, and it is why names keep their
 // original case (lookup is case-insensitive) and forward slashes.
 func TestMDDKeysRoundTripThroughResource(t *testing.T) {
@@ -140,6 +140,6 @@ func TestMDDIsNotDiscovered(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(found) != 0 {
-		t.Errorf("discovery picked up %v — .mdd files are a dictionary's companions, not dictionaries", found)
+		t.Errorf("discovery picked up %v - .mdd files are a dictionary's companions, not dictionaries", found)
 	}
 }

@@ -69,7 +69,7 @@ func (tr *transformer) addHTML(s string) {
 func (tr *transformer) addText(s string) { tr.addHTML(escape(s)) }
 
 // addTextByte appends one raw input byte (escaped when HTML-special).
-// Bytes of multi-byte UTF-8 sequences pass through untouched — the
+// Bytes of multi-byte UTF-8 sequences pass through untouched - the
 // builder reassembles them; converting via string(c) would mangle them.
 func (tr *transformer) addTextByte(c byte) {
 	switch c {
@@ -152,7 +152,7 @@ func (tr *transformer) run() error {
 }
 
 // lexTag parses "[...]": tag name, optional attributes, then dispatch.
-// Malformed tags (unclosed, empty — e.g. a literal "[ ]" in article
+// Malformed tags (unclosed, empty - e.g. a literal "[ ]" in article
 // text) degrade to literal text instead of failing the entry.
 func (tr *transformer) lexTag() error {
 	open := tr.pos - 1 // position of '['

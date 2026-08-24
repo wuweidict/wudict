@@ -16,7 +16,7 @@ var identity = Rewriter{URL: func(r Ref) string { return r.URL }}
 
 // The fidelity contract. Every article the server serves goes through this
 // walk, so a byte of drift here corrupts every dictionary at once. Well-formed
-// input must survive exactly — original quoting, attribute order, tag case,
+// input must survive exactly - original quoting, attribute order, tag case,
 // whitespace, entities, comments and doctype included.
 func TestRoundTripPreservesWellFormedMarkup(t *testing.T) {
 	cases := []string{
@@ -83,7 +83,7 @@ func firstDiff(a, b string) int {
 	return min(len(a), len(b))
 }
 
-// Where the references are, and — just as importantly — where they are not.
+// Where the references are, and - just as importantly - where they are not.
 func TestRefSites(t *testing.T) {
 	cases := []struct {
 		name, in string
@@ -122,7 +122,7 @@ func TestRefSites(t *testing.T) {
 }
 
 // Ref carries the element, which is what makes an element-aware policy
-// possible at all — the thing the regexes could not do.
+// possible at all - the thing the regexes could not do.
 func TestRefCarriesElementAndAttribute(t *testing.T) {
 	refs := identity.Refs(`<link href="a.css"><a href="b">t</a><img src="c.png">`)
 	want := []struct{ tag, attr, url string }{

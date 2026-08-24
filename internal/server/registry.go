@@ -29,15 +29,15 @@ import (
 
 // upgraded serves queries from an ingested text.db while resolving
 // resources media.db → original source (D2 resolution order). The direct
-// source backend (`src`) is opened lazily — only when a resource actually
-// has to fall back to it — so opening an ingested dictionary costs just a
+// source backend (`src`) is opened lazily - only when a resource actually
+// has to fall back to it - so opening an ingested dictionary costs just a
 // cheap SQLite open instead of decompressing every key block and building
 // fold-maps for a backend we would only use for resource fallback.
 type upgraded struct {
 	*store.Store
 	srcPath string
 
-	// The source handle is opened only when a resource misses media.db — but
+	// The source handle is opened only when a resource misses media.db - but
 	// it is a full direct backend, so it holds the same ~350 bytes per headword
 	// as any preview (docs/PERF.md §3.1). It is therefore evictable on the same
 	// terms: no sync.Once, a recorded weight and last-use, and a release path.
@@ -69,7 +69,7 @@ func (u *upgraded) srcWeight() int64  { return u.srcW.Load() }
 func (u *upgraded) srcLastUse() int64 { return u.srcUse.Load() }
 
 // releaseSource closes the resource-fallback handle. The dictionary keeps
-// working — text comes from SQLite — and the handle reopens if another
+// working - text comes from SQLite - and the handle reopens if another
 // resource misses.
 func (u *upgraded) releaseSource() int64 {
 	u.srcMu.Lock()
@@ -140,7 +140,7 @@ func (u *upgraded) Close() error {
 // Preparing a dictionary costs a saturated core and a few hundred bytes of RAM
 // per headword (docs/PERF.md §3). Nothing bounded that: `maybeAutoIndex` fired
 // one goroutine per dictionary, so a single "all dictionaries" search over a
-// 100-dictionary library started 100 concurrent ingests — measured at 500 MB
+// 100-dictionary library started 100 concurrent ingests - measured at 500 MB
 // and 424 % CPU for FOUR dictionaries, extrapolating to the reported 18 GB and
 // 1000 % CPU for the full corpus.
 //
@@ -174,7 +174,7 @@ type entry struct {
 	// entry directly; every call site guards.
 	reg *Registry
 
-	openMu sync.Mutex // serialises opening; NOT sync.Once — an evicted
+	openMu sync.Mutex // serialises opening; NOT sync.Once - an evicted
 	// backend must be openable again
 	dMu sync.RWMutex
 	d   dict.Dictionary
@@ -184,7 +184,7 @@ type entry struct {
 	weight  atomic.Int64 // estimated bytes held by a preview backend (0 if cheap)
 
 	// lastWeight is weight, remembered across eviction. weight must go to zero
-	// when the backend is dropped — it is what the sweep totals — but the cost
+	// when the backend is dropped - it is what the sweep totals - but the cost
 	// of opening this dictionary again does not stop being known just because we
 	// closed it, and the fan-out cap needs that number BEFORE it pays it. First
 	// open of a dictionary is therefore uncapped (nothing is known about it yet)
@@ -197,7 +197,7 @@ type entry struct {
 	// and `text` article formats (see articlestyle.go). Derived on first use
 	// and forgotten whenever the backend it was read from is closed or
 	// replaced. styleDone distinguishes "not derived yet" from "derived, and
-	// this dictionary has no stylesheet" — the second must not retry.
+	// this dictionary has no stylesheet" - the second must not retry.
 	styleMu   sync.Mutex
 	styleDone bool
 	style     htmlref.Styles
@@ -218,27 +218,27 @@ func (e *entry) noPackableMedia() bool {
 // maybeAutoIndex prepares this dictionary's headword index in the background
 // the first time it is searched, unless it already has one. Attempted at most
 // once per process; failures (e.g. a read-only library, no ingest reader for
-// the format) are swallowed — auto-indexing is a silent convenience, never a
+// the format) are swallowed - auto-indexing is a silent convenience, never a
 // hard requirement.
 //
 // Automatic while it is cheap; on demand once it is not. This fires from a
 // SUCCESSFUL open only, which is what bounds it: a dictionary the fan-out cap
 // declined is not opened and is therefore not indexed here, deliberately. That
-// refusal is the ceiling past which preparation stops being automatic — on a
+// refusal is the ceiling past which preparation stops being automatic - on a
 // phone the alternative is queueing an hour of sustained ingest for
 // dictionaries the user has not asked for, which is the storm the cap exists to
 // prevent. What lifts it is the user opening that dictionary's section: the
 // resulting single-dictionary search is uncapped (handleSearch), so it opens,
 // so it lands here, so it is prepared and never deferred again. Meanwhile every
 // dictionary that DID fit is prepared in the background, and each one that
-// finishes drops to previewWeight 0 and frees budget for the next — the library
+// finishes drops to previewWeight 0 and frees budget for the next - the library
 // converges on its own, at a rate the cap chooses.
 //
 // Never while the process is not active: indexing is the single most expensive
 // thing this program does (a saturated core and hundreds of bytes per headword),
 // and starting it because a search landed just as the screen went off is exactly
 // how an app gets flagged as a battery hog. The attempt is un-marked when it
-// declines, so this stays a deferral rather than a silent cancellation — the
+// declines, so this stays a deferral rather than a silent cancellation - the
 // next search once the user is back does it.
 func (e *entry) maybeAutoIndex() {
 	if CurrentPower() != PowerActive {
@@ -269,13 +269,13 @@ func (e *entry) maybeAutoIndex() {
 // demandIndex prepares this dictionary's headword index because the user asked
 // for THIS dictionary: they chose it in the selector, followed a link into it,
 // or opened a section the fan-out cap had deferred. Same work as
-// maybeAutoIndex, one difference — the queue.
+// maybeAutoIndex, one difference - the queue.
 //
 // maybeAutoIndex waits on indexLimit, which is one worker and, on a library of
 // a hundred dictionaries, hours long. That is right for a convenience nobody
 // asked for and wrong here: the deferred dictionary is already in that queue,
 // somewhere, and leaving it there would mean "I opened this one" buys nothing
-// until this evening — the user would meet the same deferral on the same
+// until this evening - the user would meet the same deferral on the same
 // dictionary tomorrow. So a demand jumps to frontLimit, the lane setFeatures
 // uses for work a person is waiting on. At most one such ingest runs at a time,
 // alongside at most one background one; the ceiling on concurrent ingests goes
@@ -284,7 +284,7 @@ func (e *entry) maybeAutoIndex() {
 // Attempted once per process, like maybeAutoIndex and for the same reason: a
 // search runs on every keystroke, and a demand that re-queued an ingest per
 // keystroke would be a far worse defect than the one this fixes. A pending
-// background attempt for the same dictionary is not cancelled — whichever
+// background attempt for the same dictionary is not cancelled - whichever
 // arrives second finds the index built and returns immediately.
 func (e *entry) demandIndex() {
 	if CurrentPower() != PowerActive {
@@ -359,7 +359,7 @@ func (e *entry) open() (dict.Dictionary, error) {
 //
 // The preview budget cannot do this job and was never able to. It is enforced
 // by the janitor, between bursts, and it deliberately refuses to evict anything
-// used in the last minEvictIdle — which is every dictionary a `dict=all` search
+// used in the last minEvictIdle - which is every dictionary a `dict=all` search
 // just touched. Measured, that means a 64 MB budget coexisting with 6.3 GB held
 // (docs/PERF.md §8.2) on a desktop, and 1.71 GB on a 3.8 GB tablet (§8.6): the
 // budget bounds the *steady state* and nothing bounds the burst. This does.
@@ -369,7 +369,7 @@ func (e *entry) open() (dict.Dictionary, error) {
 // count, so "open at most N" is 50 MB or 3 GB depending on which N.
 //
 // What it costs is result completeness, and that is the honest name for it: a
-// dictionary the cap refuses is reported to the client as DEFERRED — its
+// dictionary the cap refuses is reported to the client as DEFERRED - its
 // section is still there, in preference order, and opening it searches it,
 // because a search naming one dictionary is not capped. That is the whole
 // remedy, and it is a tap: the same open prepares the dictionary in the
@@ -399,7 +399,7 @@ func (r *Registry) fanout() *fanout {
 // admit reserves est bytes, reporting whether the caller may open. A dictionary
 // whose known cost exceeds what is left is refused WITHOUT spending the
 // remainder, so one 961 MB monster early in the user's preference order costs
-// the rest of the list nothing — the fan-out packs what fits instead of
+// the rest of the list nothing - the fan-out packs what fits instead of
 // stopping at the first thing that does not.
 func (f *fanout) admit(est int64) bool {
 	if f == nil {
@@ -418,7 +418,7 @@ func (f *fanout) admit(est int64) bool {
 
 // settle corrects the reservation once the real weight is known. A first open
 // reserves nothing (est 0) and is charged in full here, which can drive the
-// budget negative — that is correct, and it is what refuses everything after it.
+// budget negative - that is correct, and it is what refuses everything after it.
 func (f *fanout) settle(est, actual int64) {
 	if f == nil {
 		return
@@ -432,7 +432,7 @@ func (f *fanout) settle(est, actual int64) {
 // carries the estimate so the caller can say what was declined and at what
 // price. This string is a LOG line and a test fixture; it is never rendered.
 // handleSearch matches this type and streams `deferred` instead, because the
-// user-facing statement is "not searched yet — open this to search it", and a
+// user-facing statement is "not searched yet - open this to search it", and a
 // megabyte figure over a budget nobody set is not something a reader can act on.
 type tooHeavy struct{ bytes int64 }
 
@@ -462,7 +462,7 @@ func (e *entry) openWithin(f *fanout) (dict.Dictionary, error) {
 		// A prepared dictionary is never capped: it answers from SQLite, holds
 		// no headword index, and costs this budget nothing. Worth one stat on
 		// the refusal path to be certain, because declining one would drop
-		// results for no memory saved at all — and the refusal path is by
+		// results for no memory saved at all - and the refusal path is by
 		// definition the rare one.
 		if _, prepared := preparedFor(e.Path); !prepared {
 			return nil, tooHeavy{bytes: est}
@@ -481,8 +481,8 @@ func (e *entry) openWithin(f *fanout) (dict.Dictionary, error) {
 // previewWeight estimates the resident cost of an open backend. A PREPARED
 // dictionary answers from SQLite and costs a few MB whatever its size, so it
 // weighs nothing here. A direct ("preview", D15) backend builds an in-memory
-// headword index on first use — measured at 300–500 bytes per headword across
-// MDX and SLOB (docs/PERF.md §3.1) — and that is what eviction reclaims.
+// headword index on first use - measured at 300–500 bytes per headword across
+// MDX and SLOB (docs/PERF.md §3.1) - and that is what eviction reclaims.
 func previewWeight(d dict.Dictionary, m dict.Meta) int64 {
 	if _, ok := d.(storeBacked); ok {
 		return 0 // answers from SQLite: the index lives on disk, not in RAM
@@ -493,7 +493,7 @@ func previewWeight(d dict.Dictionary, m dict.Meta) int64 {
 	return int64(m.EntryCount) * previewBytesPerEntry
 }
 
-// storeBacked matches anything answering from a prepared database — the
+// storeBacked matches anything answering from a prepared database - the
 // `upgraded`/`native` wrappers, and the formats that embed a *store.Store
 // directly because they have no native index (DSL, BGL). Type-switching on the
 // wrappers alone missed those, and a self-prepared dictionary would have been
@@ -505,7 +505,7 @@ type storeBacked interface{ SourcePath() string }
 // range). It is an estimate applied to a headword count, never a measurement of
 // this dictionary: re-measured against MDX in 2026-08 (PERF §8.3) the real cost
 // was 83 B/entry at open and 201 B/entry once a search had built the folded
-// index, so this over-charges that format by ~1.7×. Kept deliberately — on
+// index, so this over-charges that format by ~1.7×. Kept deliberately - on
 // Android over-charging sheds early, and under-charging is what gets a process
 // killed.
 const previewBytesPerEntry = 350
@@ -517,7 +517,7 @@ func (e *entry) evict() int64 { return e.drop(false) }
 
 // drop is evict, plus the option to close a backend that weighs nothing.
 // Weightless means "prepared": it answers from SQLite and holds no headword
-// map, so the budget has no reason to touch it — but its file descriptors and
+// map, so the budget has no reason to touch it - but its file descriptors and
 // page cache are still real, and under PowerRestricted they are worth giving
 // back. Returns the bytes the eviction accounting knows about, which for a
 // prepared dictionary is honestly zero.
@@ -537,7 +537,7 @@ func (e *entry) drop(force bool) int64 {
 	e.weight.Store(0)
 	e.dMu.Unlock()
 	// Outside dMu, so this lock is only ever taken before dMu and never after
-	// it — the derivation in entry.styles holds styleMu while it opens.
+	// it - the derivation in entry.styles holds styleMu while it opens.
 	e.forgetStyles()
 	time.AfterFunc(closeGrace, func() {
 		d.Close()
@@ -554,7 +554,7 @@ func (e *entry) drop(force bool) int64 {
 // scheduleReclaim hands freed pages back to the OS shortly after a batch of
 // closes. Coalesced deliberately: FreeOSMemory is a stop-the-world collection
 // plus a scavenge, and shedding a hundred dictionaries at once used to mean a
-// hundred of them back to back — a CPU spike indistinguishable, from the
+// hundred of them back to back - a CPU spike indistinguishable, from the
 // platform's point of view, from the runaway work this whole mechanism exists
 // to avoid.
 var reclaimArmed atomic.Bool
@@ -573,8 +573,8 @@ func scheduleReclaim() {
 
 // native is a standalone naturalized dictionary: a .text.db whose foreign
 // source is gone (the db dir is the native dictionary root). It presents like
-// `upgraded` — the internal wudict: format prefix stripped, Path set to the db
-// file — but has no source to fall back to, so resources come only from its
+// `upgraded` - the internal wudict: format prefix stripped, Path set to the db
+// file - but has no source to fall back to, so resources come only from its
 // attached media.db when present.
 type native struct {
 	*store.Store
@@ -608,7 +608,7 @@ func openUpgradedOrDirect(path string) (dict.Dictionary, error) {
 		return &native{Store: s, path: path}, nil
 	}
 	// a prepared folder for this source short-circuits the heavy direct
-	// backend entirely — no probe needed, since the folder is located from
+	// backend entirely - no probe needed, since the folder is located from
 	// the source path, not from the dictionary name.
 	if textDB, ok := store.PreparedFor(path); ok {
 		if s, err := store.Open(textDB); err == nil {
@@ -624,7 +624,7 @@ func openUpgradedOrDirect(path string) (dict.Dictionary, error) {
 }
 
 // Registry tracks all dictionaries: the foreign-format sources found under the
-// dictionary folder and — only when the user has opted in (USE_CACHED) — the
+// dictionary folder and - only when the user has opted in (USE_CACHED) - the
 // prepared dictionaries in the library (the db dir).
 //
 // The library is NOT a discovery root by default. It is the app's private
@@ -643,7 +643,7 @@ type Registry struct {
 
 	// previewBudget caps the memory unprepared dictionaries may hold open
 	// (PREVIEW_MEMORY; 0 = unlimited). Prepared ones answer from disk and are
-	// never evicted — there would be nothing to reclaim.
+	// never evicted - there would be nothing to reclaim.
 	previewBudget int64
 
 	// searchBudget caps how much preview memory ONE search may materialise
@@ -661,7 +661,7 @@ type Registry struct {
 	wake chan struct{}
 }
 
-// nudge tells the janitor something changed. Never blocks — it is called from
+// nudge tells the janitor something changed. Never blocks - it is called from
 // request paths, and a janitor that is already awake needs no telling.
 func (r *Registry) nudge() {
 	select {
@@ -671,7 +671,7 @@ func (r *Registry) nudge() {
 }
 
 // Option configures a Registry at construction. Prefs must be in place BEFORE
-// the first Warm, which is why this is an option and not a setter — a warm-up
+// the first Warm, which is why this is an option and not a setter - a warm-up
 // that pre-opened everything and only then learned what to skip would have
 // already paid the memory it was told to save.
 type Option func(*Registry)
@@ -721,7 +721,7 @@ func (r *Registry) UseCached() bool {
 	return r.useCached
 }
 
-// SetUseCached opts the library in or out and rescans (setup flow — no
+// SetUseCached opts the library in or out and rescans (setup flow - no
 // restart needed).
 func (r *Registry) SetUseCached(on bool) error {
 	r.mu.Lock()
@@ -756,7 +756,7 @@ func (r *Registry) Count() int {
 }
 
 // SetDirs re-points the registry at new dictionary folders and rescans
-// (used by the first-run setup flow — no restart needed).
+// (used by the first-run setup flow - no restart needed).
 func (r *Registry) SetDirs(dirs []string) error {
 	r.mu.Lock()
 	// one folder listed twice (a repeat, a trailing slash, a symlink) must not
@@ -793,8 +793,8 @@ func (r *Registry) Rescan() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	seen := map[string]bool{}
-	// Rebuilt, not appended to: an id that no longer discovers to anything —
-	// a dictionary deleted (D63) or a drive unmounted — must stop resolving.
+	// Rebuilt, not appended to: an id that no longer discovers to anything -
+	// a dictionary deleted (D63) or a drive unmounted - must stop resolving.
 	// Keeping it made `get` hand out an entry that is not in the list, so a
 	// removed dictionary stayed addressable by anyone still holding its id.
 	byID := make(map[string]*entry, len(paths))
@@ -867,8 +867,8 @@ func pathID(path string) string {
 }
 
 // Warm pre-opens dictionaries in the background so the first search does not
-// pay the open cost. It opens only the ones that are PREPARED — a SQLite handle
-// costing a few MB — and deliberately leaves unprepared ones alone: opening
+// pay the open cost. It opens only the ones that are PREPARED - a SQLite handle
+// costing a few MB - and deliberately leaves unprepared ones alone: opening
 // those builds an in-memory headword index (measured 300–500 B per headword),
 // and doing it for a whole library was several GB of resident memory for
 // dictionaries nobody had searched yet (docs/PERF.md M2). An unprepared
@@ -882,7 +882,7 @@ func pathID(path string) string {
 //
 // Not on a phone, and not while the app is away (warmEnabled, CurrentPower):
 // pre-opening is a bet that the user is about to search, paid in file
-// descriptors, SQLite page caches and — worst on Android — a burst of I/O
+// descriptors, SQLite page caches and - worst on Android - a burst of I/O
 // during the exact seconds the platform is measuring the app's launch cost.
 // The bet is good on a desktop that just started a long-lived server; it is a
 // bad one on a device that may be resuming an activity for a screen rotation.
@@ -992,7 +992,7 @@ func (r *Registry) previewBytes() int64 {
 //
 // Under memory pressure (see memoryPressure) the rules change: the target
 // becomes zero rather than the budget, and the idle grace is waived. That is
-// the ONLY correct response to approaching a soft heap limit — the alternative,
+// the ONLY correct response to approaching a soft heap limit - the alternative,
 // which is what a limit does on its own, is to collect continuously against a
 // live set that no amount of collecting will shrink.
 func (r *Registry) sweep() int64 {
@@ -1038,7 +1038,7 @@ func (r *Registry) sweep() int64 {
 //
 // This is the whole point of the event-driven janitor: a periodic timer in a
 // process that outlives its window is a wakeup the kernel must schedule, a core
-// it must bring out of idle, and — on a phone, every twenty seconds, forever —
+// it must bring out of idle, and - on a phone, every twenty seconds, forever -
 // a measurable battery cost for a function that in the overwhelmingly common
 // case finds nothing to free. A sleeping goroutine costs nothing at all.
 func (r *Registry) needsSweep() bool {
@@ -1052,7 +1052,7 @@ func (r *Registry) needsSweep() bool {
 		n++
 	}
 	if n == 0 {
-		// Nothing reclaimable. Ordinarily that is nothing to do — but under a
+		// Nothing reclaimable. Ordinarily that is nothing to do - but under a
 		// ceiling this workload cannot fit beneath, it is the one state that
 		// must still be acted on, because the correction left is to the ceiling
 		// rather than to the memory (adjustLimit). A ceiling already raised is
@@ -1131,7 +1131,7 @@ type features struct {
 // same atomic temp+rename as any ingest, so an interrupted change leaves the
 // previous data intact.
 //
-// Stripping is only ever offered while the SOURCE exists — that is what makes
+// Stripping is only ever offered while the SOURCE exists - that is what makes
 // it reversible, and it is why none of this needs a confirmation prompt. A
 // dictionary whose source is gone carries the only copy of its own text, so
 // its features are locked rather than dangerous.
@@ -1147,7 +1147,7 @@ func (e *entry) setFeatures(want features, progress store.Progress) error {
 	}
 	name := cur.Meta().Name
 	if store.IsTextDB(e.Path) {
-		return fmt.Errorf("%q is a prepared dictionary — its original files are gone, so its data cannot be rebuilt", name)
+		return fmt.Errorf("%q is a prepared dictionary - its original files are gone, so its data cannot be rebuilt", name)
 	}
 	dir, err := store.ClaimDir(e.Path)
 	if err != nil {
@@ -1172,14 +1172,14 @@ func (e *entry) setFeatures(want features, progress store.Progress) error {
 	case !fileExists(textDB):
 		err = e.rebuild(name, textDB, plan, progress)
 	case store.SourceChanged(textDB, e.Path):
-		logx.V("%ssource changed since it was prepared — re-indexing", logx.Dict(name))
+		logx.V("%ssource changed since it was prepared - re-indexing", logx.Dict(name))
 		err = e.rebuild(name, textDB, plan, progress)
 	case have.FullText != want.FullText || have.Contains != want.Contains:
 		err = e.rebuild(name, textDB, plan, progress)
 	case want.Contains && staleFold:
 		// asking for contains that is already "on" is how the panel requests a
 		// repair: the index is intact but was folded by older rules
-		logx.V("%stext folding changed since it was indexed — re-indexing", logx.Dict(name))
+		logx.V("%stext folding changed since it was indexed - re-indexing", logx.Dict(name))
 		err = e.rebuild(name, textDB, plan, progress)
 	}
 	if err != nil {
@@ -1249,7 +1249,7 @@ func (e *entry) reopen() error {
 		time.AfterFunc(closeGrace, func() {
 			old.Close()
 			// preparing is the memory high-water mark; hand the pages back
-			// rather than sitting on them until the next natural GC —
+			// rather than sitting on them until the next natural GC -
 			// coalesced with any other close landing at the same moment,
 			// since INDEX_WORKERS>1 makes that the normal case
 			scheduleReclaim()
@@ -1298,7 +1298,7 @@ func (e *entry) packMedia(cur dict.Dictionary, textDB, mediaDB string, progress 
 			}
 		}
 		if extra > 0 {
-			logx.V("%s%d referenced files are not packed in the .mdd — packing them from beside it",
+			logx.V("%s%d referenced files are not packed in the .mdd - packing them from beside it",
 				logx.Dict(cur.Meta().Name), extra)
 		}
 	}

@@ -140,7 +140,7 @@ func (r *Reader) processAlternativeKey(bWord []byte) string {
 }
 
 // plainTitle renders a definition's title field (0x18) as literal text, the
-// way processKey renders a key — Babylon draws a headword as text, not markup.
+// way processKey renders a key - Babylon draws a headword as text, not markup.
 // Empty when the entry carries no title.
 func (r *Reader) plainTitle(bTitle []byte) string {
 	if len(bTitle) == 0 {
@@ -156,8 +156,8 @@ func (r *Reader) plainTitle(bTitle []byte) string {
 
 // renderDefi turns a definition's collected fields into HTML, prepending the
 // part of speech, title and transcriptions. Port of reader_defi.processDefi
-// (the collect step is split out so a caller that also wants the title —
-// decodeEntry — pays for the field scan once).
+// (the collect step is split out so a caller that also wants the title -
+// decodeEntry - pays for the field scan once).
 func (r *Reader) renderDefi(f defiFields) string {
 	uDefi, _ := r.decodeCharsetTags(f.bDefi, r.targetEncoding)
 	uDefi = fixImgLinks(uDefi)

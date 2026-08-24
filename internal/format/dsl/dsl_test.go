@@ -240,7 +240,7 @@ func TestResourceZip(t *testing.T) {
 		t.Error("traversal must be rejected")
 	}
 	// caps: DSL prepares itself so it can be searched at all, but only the
-	// cheap headword index — full-text and contains stay opt-in (D24), the
+	// cheap headword index - full-text and contains stay opt-in (D24), the
 	// same as for a format with its own index
 	if c := d.Caps(); c.Contains || c.FTS {
 		t.Errorf("caps: %+v", c)

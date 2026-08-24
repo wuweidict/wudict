@@ -15,18 +15,18 @@ import (
 	"github.com/wuweidict/wudict/internal/store"
 )
 
-// `wudict rm` — the CLI half of D63.
+// `wudict rm` - the CLI half of D63.
 //
 // `clean` removes what the library should not contain; this removes what it
 // should, on purpose, by name. It is the one place where the two objects a
-// dictionary consists of — the prepared folder and the original files — are
+// dictionary consists of - the prepared folder and the original files - are
 // both deletable, and it is dry-run by default for exactly that reason: the
 // user names a dictionary, sees the concrete file list and the bytes, and then
 // repeats the command with -f.
 //
 // It deliberately does not talk to a running server: this is a local file
 // operation, and a running instance rescans on its own. Deleting a prepared
-// folder out from under a live server closes its handle at the next use — the
+// folder out from under a live server closes its handle at the next use - the
 // same thing that happens when a source is unmounted.
 
 func cmdRemove(args []string) error {
@@ -40,7 +40,7 @@ func cmdRemove(args []string) error {
 		return fmt.Errorf("usage: wudict rm [-f] [-keep-source|-keep-index] <name|path>")
 	}
 	if *keepSource && *keepIndex {
-		return fmt.Errorf("-keep-source and -keep-index cancel each other out — that would delete nothing")
+		return fmt.Errorf("-keep-source and -keep-index cancel each other out - that would delete nothing")
 	}
 	dropPrepared, dropSource := !*keepIndex, !*keepSource
 
@@ -58,7 +58,7 @@ func cmdRemove(args []string) error {
 		}
 		if len(allSources) > 0 && len(dict.CompanionMedia(allSources[0])) > 0 &&
 			!fileExists(store.MediaDBPath(preparedDir)) {
-			return fmt.Errorf("pack media for %q first (wudict ingest -full) — its images and audio are still only in the original files", name)
+			return fmt.Errorf("pack media for %q first (wudict ingest -full) - its images and audio are still only in the original files", name)
 		}
 	}
 
@@ -87,10 +87,10 @@ func cmdRemove(args []string) error {
 		total += n
 		fmt.Printf("original  %s  (%.1f MB)\n", p, mb(n))
 	}
-	fmt.Printf("%s — %.1f MB total\n", name, mb(total))
+	fmt.Printf("%s - %.1f MB total\n", name, mb(total))
 
 	if !*force {
-		fmt.Println("dry run — re-run with -f to delete")
+		fmt.Println("dry run - re-run with -f to delete")
 		return nil
 	}
 
@@ -110,7 +110,7 @@ func cmdRemove(args []string) error {
 	if failed > 0 {
 		return fmt.Errorf("%d deletions failed", failed)
 	}
-	fmt.Printf("deleted — %.1f MB freed\n", mb(total))
+	fmt.Printf("deleted - %.1f MB freed\n", mb(total))
 	if dropPrepared && !dropSource && len(allSources) > 0 {
 		fmt.Println("note: the original files are still in place, so this dictionary will be indexed again the next time it is searched")
 	}
@@ -120,7 +120,7 @@ func cmdRemove(args []string) error {
 // resolveRemoval turns one argument into (prepared folder, original files,
 // display name). The argument may be a library entry's name, its folder name,
 // the folder itself, a text.db inside it, or the path of an original
-// dictionary file — every string the app shows a user for a dictionary.
+// dictionary file - every string the app shows a user for a dictionary.
 func resolveRemoval(arg string) (prepared string, sources []string, name string, err error) {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {

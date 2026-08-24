@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// wudict CLI — Phase 1 surface: inspect and query dictionaries via
+// wudict CLI - Phase 1 surface: inspect and query dictionaries via
 // the direct backends. The HTTP server arrives in a later phase.
 package cli
 
@@ -50,8 +50,8 @@ import (
 var Version = "dev"
 
 // Product identity, in one place. The binary is `wudict`; the name people
-// read is WuWeiDict. Anything user-facing — CLI banner, web UI
-// About box, setup page — sources its wording from here or mirrors it.
+// read is WuWeiDict. Anything user-facing - CLI banner, web UI
+// About box, setup page - sources its wording from here or mirrors it.
 const (
 	ProductName = "wuDict"
 	Tagline     = "Search every dictionary you own, from one browser tab."
@@ -60,14 +60,14 @@ const (
 )
 
 func usage() string {
-	return fmt.Sprintf(`WuWeiDict %s — multi-format dictionary server
+	return fmt.Sprintf(`WuWeiDict %s - multi-format dictionary server
 MDict (.mdx/.mdd) · StarDict (.ifo) · Aard2 (.slob) · Lingvo DSL (.dsl/.dsl.dz) · WuWeiDict (.text.db)
 
 USAGE
   wudict [command] [flags] [args]
 
   Running wudict with no arguments (or with only flags) starts the
-  HTTP server — the same as the "serve" command.
+  HTTP server - the same as the "serve" command.
 
   wudict <dictfile>                       Serve the folder that holds that file
                                           and open it in the browser. This is what
@@ -82,7 +82,7 @@ COMMANDS
   contains [-n max] <dictfile> <word>     Substring headword search (FTS5 trigram; ingested dicts only)
   fts    [-n max] <dictfile> <query>      FTS5 full-text search (ingested dicts only)
   keys   [-offset N] [-n count] <dictfile>  List headwords (all by default).
-                                          On an .mdd, lists the files it holds —
+                                          On an .mdd, lists the files it holds -
                                           the same key/value format, so the same
                                           command. No .mdx needed.
   res    [-o out] [-f] <dictfile> <name>  Extract one resource (e.g. "audio/word.mp3").
@@ -151,7 +151,7 @@ SERVE FLAGS
 
   --index-workers <n>     How many dictionaries may be prepared at once. Preparing
                           one saturates a core and holds a few hundred bytes per
-                          headword, so the default is 1 — background work must not
+                          headword, so the default is 1 - background work must not
                           take the machine away from you. "auto" (or 0) = every core.
                           env: INDEX_WORKERS  toml: INDEX_WORKERS
                           default: 1
@@ -167,14 +167,14 @@ SERVE FLAGS
   SEARCH_MEMORY = "512MB" How much RAM ONE search may bring into memory by opening
                           dictionaries that are not yet prepared. Past it, the
                           remaining ones are reported as not searched instead of
-                          opened — the only setting here that changes what a
+                          opened - the only setting here that changes what a
                           search returns, and it never applies to prepared
                           dictionaries, which cost nothing to search. "0" = no cap.
                           env: SEARCH_MEMORY  toml: SEARCH_MEMORY
                           default: none (Android: the memory limit)
 
-  MEMORY_LIMIT = "4GB"    Soft heap ceiling: Go collects harder — and drops its
-                          caches — rather than growing past it. "0" = none.
+  MEMORY_LIMIT = "4GB"    Soft heap ceiling: Go collects harder - and drops its
+                          caches - rather than growing past it. "0" = none.
                           env: MEMORY_LIMIT   toml: MEMORY_LIMIT
                           default: none (Android: a fraction of device RAM)
 
@@ -195,7 +195,7 @@ SERVE FLAGS
   BROWSER_EXTENSIONS      Which browser extensions may look words up in this
                           server from the pages they run in. Blank = any
                           installed extension; it reaches the dictionary API
-                          (/api/dicts, /api/search, /res/) and nothing else —
+                          (/api/dicts, /api/search, /res/) and nothing else -
                           never your settings, preferences or library. Pin it
                           to exact origins to allow only those:
                             BROWSER_EXTENSIONS = ["chrome-extension://abc…"]
@@ -223,7 +223,7 @@ SERVE FLAGS
                           env/toml: VERBOSE=1  (works for all commands)
 
   --speexdec     <path>   Path to speexdec binary (.spx audio is
-                          transcoded to WAV — browsers cannot play Speex)
+                          transcoded to WAV - browsers cannot play Speex)
                           env: SPEEXDEC       toml: SPEEXDEC
                           default: speexdec found on PATH, else /usr/bin/speexdec
 
@@ -232,7 +232,7 @@ SERVE FLAGS
 
 CONFIG FILE SEARCH ORDER
   1. --config flag / CONFIG_PATH env var
-  2. <executable-dir>/wudict.toml   (portable mode — see below)
+  2. <executable-dir>/wudict.toml   (portable mode - see below)
   3. ~/.wudict/wudict.toml
   4. /etc/wudict/wudict.toml
   On the first "serve" run a fully commented ~/.wudict/wudict.toml is
@@ -240,7 +240,7 @@ CONFIG FILE SEARCH ORDER
 
 PORTABLE MODE
   Put a wudict.toml next to the executable and it wins, and is where
-  settings are saved — for a USB stick or a self-contained folder.
+  settings are saved - for a USB stick or a self-contained folder.
   wudict never creates that file on its own: an executable directory is
   usually somebody else's (~/go/bin, /opt/homebrew/bin), not ours.
 
@@ -250,14 +250,14 @@ PRIORITY (highest → lowest)
 FIRST RUN
   If the dictionary folder is missing or empty, the web UI shows a setup
   page: paste a folder path, it is validated live, and the choice is
-  saved to wudict.toml — no restart needed.
+  saved to wudict.toml - no restart needed.
 
 LIBRARY FOLDER
   Preparing a dictionary creates <DB_DIR>/<name>/ holding text.db,
-  media.db and info.txt — one folder per dictionary, the unit you copy
+  media.db and info.txt - one folder per dictionary, the unit you copy
   or hand over.
 
-  A res/ subfolder there replaces — or supplies — the files a dictionary
+  A res/ subfolder there replaces - or supplies - the files a dictionary
   ships. Articles load their stylesheets, scripts and media from inside
   the dictionary file; res/ is consulted FIRST, so a file there is used
   whether or not the dictionary has one of that name:
@@ -267,7 +267,7 @@ LIBRARY FOLDER
 
   Subfolders work, and articles routinely use them (js/…, css/…), so
   mirror the path the article asks for. That path is the one in the
-  /res/<id>/<name> URL seen in the browser's network panel — a 404 there
+  /res/<id>/<name> URL seen in the browser's network panel - a 404 there
   is the "missing resource" case. Overrides are served uncached, so a
   reload picks up an edit. Nothing inside the dictionary is modified;
   delete the file to go back. One exception: a .spx in res/ is served
@@ -277,8 +277,8 @@ LIBRARY FOLDER
   its own scripts usually load a library first, one bad file can
   silently disable every interactive part of its articles. wudict warns
   when it serves a .js/.css/.html/.json/.xml/.svg/.txt containing a NUL
-  byte — impossible in those formats, so proof the stored copy is
-  broken — and names the res/ path that would override it. The bytes
+  byte - impossible in those formats, so proof the stored copy is
+  broken - and names the res/ path that would override it. The bytes
   themselves are always served exactly as stored.
 
 EXAMPLE wudict.toml
@@ -296,7 +296,7 @@ EXAMPLES
   SERVER_PORT=9000 wudict
 
 ABOUT
-  %s — %s
+  %s - %s
   %s
 `, Version, ProductName, Tagline, RepoURL)
 }
@@ -370,7 +370,7 @@ func Main() {
 			break
 		}
 		if args := openFileArgs(cmd); args != nil {
-			// `wudict <dictfile>` — the entry point desktop file associations
+			// `wudict <dictfile>` - the entry point desktop file associations
 			// point at (D76). Tested last, so a typo is still an unknown
 			// command rather than a silently misread path.
 			err = cmdServe(args)
@@ -385,7 +385,7 @@ func Main() {
 // openFileArgs turns a lone dictionary path into serve flags, or returns nil
 // if the argument is not one. Double-clicking a .mdx serves the FOLDER that
 // holds it, not the single file: dictionaries travel with companions (an .mdd
-// beside its .mdx, a StarDict .idx beside its .ifo — dict.SourceFiles), the
+// beside its .mdx, a StarDict .idx beside its .ifo - dict.SourceFiles), the
 // discovery path already knows how to pair them, and one folder is the
 // smallest unit that cannot be half-opened.
 //
@@ -531,7 +531,7 @@ func cmdIngest(args []string) error {
 	full := fs.Bool("full", false, "also pack binary resources into a companion .media.db")
 	headwords := fs.Bool("headwords", false, "index headwords only: smaller db, no full-text search")
 	fuzzyOnly := fs.Bool("fuzzy-only", false, "deprecated spelling of -headwords")
-	contains := fs.Bool("contains", false, "also build the substring (contains) index — roughly doubles a headword-only index")
+	contains := fs.Bool("contains", false, "also build the substring (contains) index - roughly doubles a headword-only index")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: wudict ingest [-o out.db] [-full] [-headwords] [-contains] <dictfile|folder…>")
@@ -598,7 +598,7 @@ func ingestOne(srcPath, out string, full bool, plan store.Plan) error {
 		}
 		fresh := !store.SourceChanged(dbPath, srcPath)
 		if fresh && have == plan {
-			fmt.Printf("%salready prepared in %s — skipped\n", logx.Dict(name), filepath.Dir(dbPath))
+			fmt.Printf("%salready prepared in %s - skipped\n", logx.Dict(name), filepath.Dir(dbPath))
 			return maybePackMedia(srcPath, dbPath, name, full)
 		}
 		// a different plan or a changed source: IngestPlan overwrites the
@@ -632,7 +632,7 @@ func maybePackMedia(srcPath, dbPath, name string, full bool) error {
 	}
 	mediaPath := store.MediaSibling(dbPath)
 	if _, err := os.Stat(mediaPath); err == nil {
-		fmt.Printf("%smedia already packed — skipped\n", logx.Dict(name))
+		fmt.Printf("%smedia already packed - skipped\n", logx.Dict(name))
 		return nil
 	}
 	d, err := dict.Open(srcPath)
@@ -671,7 +671,7 @@ func cmdServe(args []string) (err error) {
 	fs.Var(&dictDirs, "dict-dir", "folder with dictionaries; repeat for several (env/toml: DICT_DIR)")
 	dbDir := fs.String("db-dir", "", "library dir for cached dictionaries (env/toml: DB_DIR)")
 	useCached := fs.Bool("use-cached", false, "also serve previously imported dictionaries from the library (env/toml: USE_CACHED)")
-	noCompress := fs.Bool("no-compress", false, "store article text uncompressed — larger databases (env/toml: NO_COMPRESS)")
+	noCompress := fs.Bool("no-compress", false, "store article text uncompressed - larger databases (env/toml: NO_COMPRESS)")
 	indexWorkers := fs.String("index-workers", "", "dictionaries to prepare at once; \"auto\" = every core (env/toml: INDEX_WORKERS)")
 	ip := fs.String("ip", "", "listen IP (env/toml: SERVER_IP)")
 	port := fs.String("port", "", "listen port (env/toml: SERVER_PORT)")
@@ -724,7 +724,7 @@ func cmdServe(args []string) (err error) {
 	}
 
 	// Machine C (D74). A terminal launch keeps today's behaviour byte for
-	// byte; only a GUI launch — a macOS .app, a double-clicked wudict.exe —
+	// byte; only a GUI launch - a macOS .app, a double-clicked wudict.exe -
 	// moves the message channel, because there stderr points at nothing a
 	// human will ever read. A console is never taken from a user who has one.
 	//
@@ -744,7 +744,7 @@ func cmdServe(args []string) (err error) {
 			logx.SetOutput(f)
 			guiDetached, headlessLog = true, f.Name()
 			// Whatever ends this run is written to the log while the file is
-			// still open — the restore below is what closes it, and Main's
+			// still open - the restore below is what closes it, and Main's
 			// stderr is dead by then. The dialog Main raises says where to
 			// find this line.
 			defer func() {
@@ -765,7 +765,7 @@ func cmdServe(args []string) (err error) {
 
 	// The library (DB_DIR) is wudict's own working area, never a folder of
 	// user dictionaries. Using it as DICT_DIR is a
-	// hard error; and wherever it lives, discovery skips it — which also covers
+	// hard error; and wherever it lives, discovery skips it - which also covers
 	// the subtler case of a DB_DIR nested inside the dictionary folder.
 	libDir := store.DefaultDBDir()
 	for _, d := range cfg.DictDirs {
@@ -780,8 +780,8 @@ func cmdServe(args []string) (err error) {
 	}
 	dict.ExcludeDir(libDir)
 
-	// Claim the port FIRST. Everything below — adopting library folders,
-	// scanning dictionaries, auto-preparing a DSL index — costs time and
+	// Claim the port FIRST. Everything below - adopting library folders,
+	// scanning dictionaries, auto-preparing a DSL index - costs time and
 	// writes to the library, and a launch that turns out to be a duplicate
 	// must do none of it.
 	url := "http://" + cfg.Addr() + "/"
@@ -791,7 +791,7 @@ func cmdServe(args []string) (err error) {
 		// replaces matched the string "address already in use", which is the
 		// POSIX phrasing; Windows says "Only one usage of each socket address
 		// ... is normally permitted", so a second launch there never reached
-		// this branch — it returned a raw bind error, and after DetachConsole
+		// this branch - it returned a raw bind error, and after DetachConsole
 		// that error had nowhere to appear at all (D76). One HTTP probe on a
 		// path that has already failed costs less than a per-OS errno table
 		// and answers the question that actually matters.
@@ -838,7 +838,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 
 	// Parallelism, before anything starts using it. Zero means this platform
 	// keeps the runtime's own default (every core), which is right on a desktop
-	// and wrong on a phone — see config.MaxProcs. Handing the number to the
+	// and wrong on a phone - see config.MaxProcs. Handing the number to the
 	// server as well is what lets the power states lower it while the app is
 	// away and restore it on return (D64).
 	if n := config.MaxProcs(); n > 0 {
@@ -868,7 +868,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	if cfg.MemoryLimit > 0 {
 		// A soft ceiling: Go collects harder instead of growing past it. Set it
 		// through the server rather than debug directly, because a ceiling on
-		// its own only buys more GC — the registry needs the same number to
+		// its own only buys more GC - the registry needs the same number to
 		// know when to shed caches instead, which is what turns pressure into
 		// freed memory rather than a collector spinning on a live set (D64).
 		server.SetMemoryLimit(cfg.MemoryLimit)
@@ -904,7 +904,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	}
 
 	// No WriteTimeout: /api/search (NDJSON) and /api/ingest (SSE) stream for
-	// a long time — a write deadline would sever them. ReadHeaderTimeout +
+	// a long time - a write deadline would sever them. ReadHeaderTimeout +
 	// IdleTimeout + MaxHeaderBytes harden against slowloris without touching
 	// the streaming paths.
 	httpSrv := &http.Server{
@@ -915,8 +915,8 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		MaxHeaderBytes:    1 << 20,
 	}
 	// Graceful shutdown on Ctrl-C / SIGTERM: finish in-flight requests, close
-	// database handles cleanly. One shutdown, reachable from two places — a
-	// signal and the tray's Quit item — so sync.Once, not a second code path.
+	// database handles cleanly. One shutdown, reachable from two places - a
+	// signal and the tray's Quit item - so sync.Once, not a second code path.
 	idle := make(chan struct{})
 	var stopOnce sync.Once
 	stop := func() {
@@ -947,7 +947,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	// The tray wraps the server rather than the other way round: serve() runs
 	// to completion whatever the tray does, and with the tray off (every
 	// terminal launch, every service unit, Android) Wrap is a pass-through.
-	// Name is left empty so the menu uses the package default, WuWeiDict —
+	// Name is left empty so the menu uses the package default, WuWeiDict -
 	// ProductName still reads "wuDict", which predates D27.
 	return tray.Wrap(tray.Config{
 		Enabled:  trayWanted,
@@ -963,8 +963,8 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 }
 
 // trayRescan drives the same rescan /api/rescan does. Menu clicks arrive on
-// the platform's own thread, so the work runs off it — a rescan of 105
-// dictionaries would otherwise freeze the menu — and a second click while one
+// the platform's own thread, so the work runs off it - a rescan of 105
+// dictionaries would otherwise freeze the menu - and a second click while one
 // is running is dropped rather than queued.
 func trayRescan(reg *server.Registry) func() {
 	var busy atomic.Bool
@@ -1087,7 +1087,7 @@ func resolveSpeexdec(override string) (path, source string) {
 		if p, err := exec.LookPath(override); err == nil {
 			return p, "SPEEXDEC override"
 		}
-		logx.Warn("SPEEXDEC=%q not found — falling back to auto-detection", override)
+		logx.Warn("SPEEXDEC=%q not found - falling back to auto-detection", override)
 	}
 	if exe, err := os.Executable(); err == nil {
 		if cand := filepath.Join(filepath.Dir(exe), name); isExecFile(cand) {
@@ -1132,7 +1132,7 @@ func speexSummary(useExternal bool, path, source string) string {
 	if path != "" {
 		return "external speexdec at " + path + " (" + why + ")"
 	}
-	return "" // none available — printStartup emits the install hint
+	return "" // none available - printStartup emits the install hint
 }
 
 // printStartup shows the *resolved* configuration that is in effect. All values
@@ -1152,8 +1152,8 @@ type startupInfo struct {
 }
 
 // statePath places state.json next to the wudict.toml that is in effect. When
-// no config file exists at all it falls back to the home location — the same
-// directory EnsureConfigFile would have used — and when even the home
+// no config file exists at all it falls back to the home location - the same
+// directory EnsureConfigFile would have used - and when even the home
 // directory is unknown it returns "", which makes the state in-memory rather
 // than scattering a file somewhere nobody asked for.
 func statePath(cfgFile string) string {
@@ -1173,7 +1173,7 @@ func printStartup(cfg config.Config, in startupInfo) {
 	fmt.Fprintf(out, "%s %s\n", ProductName, Version)
 
 	// one line per folder, aligned in a single column, each with its own
-	// status — an unmounted drive must be visible, not silently absent
+	// status - an unmounted drive must be visible, not silently absent
 	for i, root := range in.roots {
 		label := "  dictionaries  "
 		if i > 0 {
@@ -1206,19 +1206,19 @@ func printStartup(cfg config.Config, in startupInfo) {
 	}
 	fmt.Fprintf(out, "  library       %s  (%s)\n", in.libDir, libNote)
 
-	// The three paths a user has to know — dictionaries, library, config — are
+	// The three paths a user has to know - dictionaries, library, config - are
 	// printed on every start, not just the first: a config file in the wrong
 	// place is invisible otherwise, and that was the whole bug behind D32.
 	switch cfgSrc := cfg.Source; {
 	case cfgSrc == "":
-		fmt.Fprintf(out, "  config        (none — built-in defaults)\n")
+		fmt.Fprintf(out, "  config        (none - built-in defaults)\n")
 	case cfg.Portable:
-		fmt.Fprintf(out, "  config        %s  (portable — beside the executable)\n", cfgSrc)
+		fmt.Fprintf(out, "  config        %s  (portable - beside the executable)\n", cfgSrc)
 	default:
 		fmt.Fprintf(out, "  config        %s\n", cfgSrc)
 	}
 	for _, p := range cfg.Shadowed {
-		fmt.Fprintf(out, "                %s  (ignored — lower priority)\n", p)
+		fmt.Fprintf(out, "                %s  (ignored - lower priority)\n", p)
 	}
 	fmt.Fprintf(out, "  address       %s\n", in.url)
 	if in.speex != "" {
@@ -1235,17 +1235,17 @@ func printStartup(cfg config.Config, in startupInfo) {
 	switch {
 	case in.total == 0:
 		if in.prepared > 0 && !cfg.UseCached {
-			fmt.Fprintf(out, "\nopen %s — choose a dictionary folder, or use the %s already prepared\n",
+			fmt.Fprintf(out, "\nopen %s - choose a dictionary folder, or use the %s already prepared\n",
 				in.url, plural(in.prepared, "dictionary", "dictionaries"))
 		} else {
 			fmt.Fprintf(out, "\nopen %s to choose your dictionary folder\n", in.url)
 		}
 	case in.prepared > 0 && !cfg.UseCached:
-		fmt.Fprintf(out, "\n%s previously imported — enable with --use-cached (or on the setup page)\n",
+		fmt.Fprintf(out, "\n%s previously imported - enable with --use-cached (or on the setup page)\n",
 			plural(in.prepared, "dictionary", "dictionaries"))
 	}
 	if in.speex == "" {
-		fmt.Fprintf(out, "\nnote: no .spx decoder available — Speex audio will not play.\n"+
+		fmt.Fprintf(out, "\nnote: no .spx decoder available - Speex audio will not play.\n"+
 			"  Build with cgo for the built-in decoder, or install speex / set SPEEXDEC=/path/to/speexdec:\n"+
 			"    macOS:    brew install speex\n"+
 			"    Linux:    sudo apt install speex   (or your distro's speex package)\n"+
@@ -1269,14 +1269,14 @@ func (m *multiFlag) Set(v string) error {
 // budgetNote describes the preview-memory cap for the startup block.
 func budgetNote(b int64) string {
 	if b <= 0 {
-		return "unlimited — dictionaries stay open once used"
+		return "unlimited - dictionaries stay open once used"
 	}
 	return fmt.Sprintf("%.1f GB for dictionaries that are not yet prepared", float64(b)/(1<<30))
 }
 
 // searchBudgetNote appends the per-search materialisation cap when one is in
 // force. Said out loud because it is the one setting here that can change what
-// a search *returns* — a dictionary it declines is reported as not searched,
+// a search *returns* - a dictionary it declines is reported as not searched,
 // and a user seeing that deserves to know a number caused it.
 func searchBudgetNote(b int64) string {
 	if b <= 0 {
@@ -1303,9 +1303,9 @@ func plural(n int, one, many string) string {
 
 func indexingSummary(autoIndex string) string {
 	if autoIndex == config.AutoIndexOff {
-		return "off — dictionaries are searched through their own format (AUTO_INDEX=off)"
+		return "off - dictionaries are searched through their own format (AUTO_INDEX=off)"
 	}
-	return "on — a headword index is prepared on first search; contains, full-text and media on request"
+	return "on - a headword index is prepared on first search; contains, full-text and media on request"
 }
 
 func openBrowser(url string) {
@@ -1355,7 +1355,7 @@ func cmdSearchAll(args []string) error {
 	for _, p := range paths {
 		d, err := dict.Open(p)
 		if err != nil {
-			logx.Warn("%scannot be opened: %v — skipped", logx.Dict(filepath.Base(p)), err)
+			logx.Warn("%scannot be opened: %v - skipped", logx.Dict(filepath.Base(p)), err)
 			continue
 		}
 		defer d.Close()
@@ -1387,7 +1387,7 @@ func cmdClean(args []string) error {
 		return err
 	}
 	if len(orphans) == 0 {
-		fmt.Println("library is clean — nothing to remove")
+		fmt.Println("library is clean - nothing to remove")
 		return nil
 	}
 	var total int64
@@ -1401,7 +1401,7 @@ func cmdClean(args []string) error {
 	}
 	fmt.Printf("%d items, %.1f MB total\n", len(orphans), float64(total)/(1<<20))
 	if !*force {
-		fmt.Println("dry run — re-run with -f to delete")
+		fmt.Println("dry run - re-run with -f to delete")
 		return nil
 	}
 	var failed int
@@ -1487,7 +1487,7 @@ func cmdRes(args []string) error {
 // the accident; binary down a pipe or a redirect is the command working as
 // intended, and `wudict res d.mdx img.png > img.png` and `… | file -` must keep
 // meaning what they always meant. `-o -` is an explicit instruction and beats
-// the terminal check — naming stdout IS the consent.
+// the terminal check - naming stdout IS the consent.
 //
 // stat is injected so the directory case is testable without touching disk.
 func resDest(out, name string, stdout *os.File, stat func(string) (os.FileInfo, error)) (dest string, derived bool, err error) {
@@ -1522,7 +1522,7 @@ func resDest(out, name string, stdout *os.File, stat func(string) (os.FileInfo, 
 // The name comes from the DICTIONARY, not from the user: MDX stores paths as
 // `\audio\x.spx`, and a hostile or merely broken container can hold "..", an
 // absolute path, a Windows drive letter, or a NUL. So the whole path is
-// discarded and only the last element kept — the flat file the user asked for.
+// discarded and only the last element kept - the flat file the user asked for.
 // Recreating the container's directory tree from those strings is what turns
 // this into zip-slip, and is why -o exists for anyone who wants a specific
 // place. The server solved the same problem the same way (D59).
@@ -1586,7 +1586,7 @@ func writeFileAtomic(path string, src io.Reader) (int64, error) {
 	return n, nil
 }
 
-// isTerminal reports whether f is a character device — the same test logx uses
+// isTerminal reports whether f is a character device - the same test logx uses
 // for stderr, kept here rather than shared because logx is about progress
 // output and this is about not vomiting a PNG into someone's shell.
 func isTerminal(f *os.File) bool {
