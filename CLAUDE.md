@@ -32,7 +32,3 @@ The reference projects this was built from (`mdict-go-web`, `draego`, `pyglossar
 - Go, modules. `make build` uses cgo (`-tags sqlite_fts5` → mattn sqlite + built-in speex); a **tag-less** `go build`/`go install` gets the pure-Go driver and must keep working, because FTS5 is mandatory (D29). `-tags purego` must keep building and passing (D4, D18). Table-driven tests.
 - Each format package implements both `Lookuper` (direct runtime lookup) and `Reader` (sequential ingest scan) — parsing logic written once, shared by both. Ingesters are one-shot batch paths.
 - Update `docs/PHASES.md` (record section) at the end of every working session; update `docs/DECISIONS.md` when a decision is taken.
-
-## Non-Negotiables
-- organize the process in such a way that everything is correct and works without testing and verification and validation ON THE FIRST PASS, AVOID SLOPPY ASSUMPTIONS and DON'T RELY ON DEBUGGING IT LATER - you MUST do INTERNAL testing, verifications, validation and iterative SELF-CORRECTION **in your deep subconscious and conscious mind** before writing any code. leave all the manual testing and verification to the user, who will follow up as needed; NEVER COMMIT unless explicitly instructed, NEVER ACCESS THE EMULATOR FOR tests unless critically justified and approved by the user
-- never every commit unless explicitly requested
