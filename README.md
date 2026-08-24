@@ -27,7 +27,7 @@ once.
    empty, a setup page opens where you set custom folders with dictionaries.
 
 ## Adding dictionaries 
-Dictionary folders can be configured in the browser via the [browser setup page](http://localhost:6888/setup). 
+Dictionary folders can be configured in the browser via the [browser setup page http://localhost:6888/setup](http://localhost:6888/setup) when `wudict` is running. 
 
 ### Multiple dictionary folders
 
