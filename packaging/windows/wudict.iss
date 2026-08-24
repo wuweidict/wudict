@@ -52,7 +52,7 @@ AppUpdatesURL=https://github.com/legbehindneck/wudict/releases
 ; still asks for no administrator password and still puts everything in the
 ; user's own profile, exactly as this installer did before. Allowing the dialog
 ; also allows /ALLUSERS and /CURRENTUSER for scripted installs, and
-; UsePreviousPrivileges (yes by default) makes an upgrade reuse whichever mode
+; UsePreviousPrivileges (no by default) makes an upgrade reuse whichever mode
 ; the first install chose instead of asking again.
 ;
 ; Use Inno Setup's built-in privilege-selection dialog. The base value must be

@@ -10,8 +10,8 @@ import "github.com/wuweidict/wudict/internal/speex/clib"
 
 func init() {
 	Available = true
-	newDecoder = func(mode int) (frameDecoder, error) {
-		d, err := clib.New(mode)
+	newDecoder = func(mode, channels int) (frameDecoder, error) {
+		d, err := clib.New(mode, channels)
 		if err != nil {
 			return nil, err
 		}

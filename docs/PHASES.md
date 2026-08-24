@@ -540,3 +540,36 @@ android/arm64.
 `internal/server`'s test package — `memlimit_test.go:181` uses `syscall.Rusage.Maxrss`,
 which does not exist there. Pre-existing (confirmed against a clean tree) and
 invisible to `make check`, which vets for the host only.
+
+### P87 — custom format .spx audio, decoded — COMPLETE
+
+Reported as "the served `.spx` is the raw file, not a WAV". Correct diagnosis,
+confirmed from the running server rather than the screenshot: the response
+carried `Cache-Control: no-store`, which only the raw fallback sets. Root cause
+and the three-part fix are D77 — intensity-stereo support, `speexdec`'s padding
+arithmetic replacing a tail trim that was 509 samples out of phase, and `.spx` →
+`audio/ogg` on the raw path.
+
+Scope established before fixing, not after: all 119,941 CEPD resources are
+stereo 32 kHz mode 2 (all dead), and a sweep of the whole corpus found exactly one other Speex dictionary, 
+with mono 11025 mode 0 (working).
+
+**Verified against the reference implementation, built.** Upstream `speexdec.c`
++ `wav_io.c` compiled against own vendored `clib` sources and homebrew
+libogg, giving a byte-exact comparator instead of an argument. The reported file
+is now **byte-identical** to it, and a 60-file batch (30 stereo CEPD + 30 mono
+MW11) produced **zero mismatches**. End-to-end through an isolated server (own
+db dir, port 6899): `Content-Type: audio/wav`, `Cache-Control: public,
+max-age=86400`, `file` → `WAVE audio, Microsoft PCM, 16 bit, stereo 32000 Hz`.
+
+`internal/speex/trim_test.go` is new and carries no build tag, so the padding
+arithmetic is covered under `purego` too: a fake decoder that numbers every
+sample it returns, table-driven over mono / stereo / bogus channel count,
+asserting *which* samples survive, plus an impossible granule that must be
+ignored.
+
+Gates: `make check` green, gofmt clean, `go build ./...`, `go vet ./...`,
+`go build -tags purego ./...`, `go test -tags purego ./internal/speex/...`.
+
+**Not fixed, deliberate:** a missing or failing Speex decoder is silent without
+`-v` (D77's residual). That is the reason this arrived as a user report.

@@ -1113,3 +1113,61 @@ requirement. Verified on the box — the `KnownDLLs` registry value is present a
 so no new module is loaded and no image-load event is produced. `LazyProc.Find`
 is checked before `Call`, because `Call` *panics* on an unresolved export and a
 file-manager click must not be able to take down a running server.
+
+## D77 — Speex is decoded the way `speexdec` decodes it: intensity stereo, and the encoder's padding — **ACCEPTED**
+
+**Context.** `internal/speex.DecodeToWAV` rejected any stream whose header
+claimed `channels != 1`. Every one of the 119,936 `.spx` in the Cambridge
+English Pronouncing Dictionary is **stereo, 32 kHz, mode 2**, so the transcode
+errored, `handleResource` fell through to the raw-bytes path, and the browser
+was handed an Ogg-Speex file it cannot play — the reported "⚠ could not play
+audio". The mono `MW11sound.mdd` worked, which is what the decoder had been
+written against, and is why this survived.
+
+**Speex stereo is not two channels of audio.** It is *intensity* stereo: the
+codec always decodes one mono signal, and each packet carries an in-band request
+(`SPEEX_INBAND_STEREO`) holding that frame's balance. Decoding it therefore
+needs **no second decoder** — only `speex_std_stereo_request_handler` registered
+through `SPEEX_SET_HANDLER`, and `speex_decode_stereo_int` expanding each frame
+in place (it walks downwards writing `data[2*i]`, so the mono samples must sit at
+the bottom of a buffer twice their length). Without the handler libspeex's
+default merely *skips* those bits, which is why such a stream decodes to
+plausible-sounding mono and the bug looks like an absence rather than an error.
+`stereo.c` and `speex_callbacks.c` were already compiled — cgo builds every `.c`
+in the package directory — so this vendored nothing new.
+
+**A header claiming neither 1 nor 2 is decoded as mono**, where `speexdec` maps
+everything that is not exactly 1 to stereo. A header reading 0 is seen in the
+wild and describes a stream with no in-band stereo packets at all; doubling its
+size would say nothing.
+
+**The padding arithmetic is reproduced, not approximated.** The old tail trim
+(`pcm = pcm[:granule]`) produced the right *number* of samples and the wrong
+*samples*: a bit-comparison against a locally built `speexdec` showed our output
+identical at **lag 509** — the codec's leading delay kept, and an equal length
+chopped off the end instead. Audibly, a clipped final consonant. So the decode
+loop now carries `speexdec`'s per-page correction
+(`skip = frame_size*(page_nb_packets*granule_frame_size*nframes - (page_granule -
+last_granule))/granule_frame_size`, negated on the EOS page): positive on the
+first page it drops `skip + lookahead` from the first frame, negative on the last
+it keeps `nframes*frame_size + skip + lookahead`. That required the Ogg demuxer
+to expose per-page bookkeeping (granule, previous granule, packets completing on
+the page, EOS) rather than one running granule. Bounded by `maxSkip = 1<<20`
+against a hostile granule, which is the only thing standing between a crafted
+`.mdd` and a nonsense slice index. The mono path is more correct than it was
+before this change, not merely unbroken.
+
+**`.spx` in `webMIME` is `audio/ogg`, not `audio/wav`.** The transcode path sets
+`audio/wav` itself; the table is consulted for a `.spx` only where the original
+bytes are shipped — a failed transcode, no decoder, or a user override file — and
+there the payload really is Ogg. The old value described what the entry usually
+*became* rather than what it *is*, and made a failure look like a success.
+
+**Rejected: shelling out to `speexdec`.** It is already the fallback (`SPEEXDEC`)
+and exists precisely for the purego build; making the cgo build depend on an
+external binary for a codec it links is backwards.
+
+**Residual, unfixed and named.** When `canTranscodeSpx()` is false nothing is
+logged, and a transcode failure logs only at `logx.V` — so this whole class of
+failure is invisible without `-v`. That is why the symptom reached a user as a
+browser error message rather than a server log line.

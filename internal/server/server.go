@@ -953,9 +953,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 // registered font types (font/woff, font/ttf, … — RFC 8081), text/javascript
 // (RFC 9239, not the obsolete application/javascript), and
 // image/vnd.microsoft.icon — not the legacy application/x-font-* variants.
-// Exception: .spx is mapped to audio/wav because wudict transcodes Speex
-// to WAV on the way out (see handleResource), so that is what the client
-// actually receives.
+// .spx is the one entry that describes the CONTAINER rather than what a
+// browser usually gets: handleResource transcodes Speex to WAV and sets
+// audio/wav itself, so this table is consulted for a .spx only on the paths
+// that ship the original bytes — a failed transcode, no decoder, or a
+// user-supplied override file — where the payload really is Ogg.
 var webMIME = map[string]string{
 	// images
 	".bmp": "image/bmp", ".gif": "image/gif", ".ico": "image/vnd.microsoft.icon",
@@ -972,12 +974,10 @@ var webMIME = map[string]string{
 	".otf": "font/otf", ".eot": "application/vnd.ms-fontobject",
 	// documents
 	".pdf": "application/pdf",
-	// audio. .spx is served as WAV: the server transcodes Speex→WAV via
-	// speexdec before it ever reaches the client, so the byte stream at a
-	// .spx URL is audio/wav, NOT audio/ogg. .webm can be audio or video —
-	// dictionaries ship audio, so default to that.
+	// audio. .spx is Ogg-Speex here (see above). .webm can be audio or
+	// video — dictionaries ship audio, so default to that.
 	".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg",
-	".oga": "audio/ogg", ".spx": "audio/wav", ".wav": "audio/wav",
+	".oga": "audio/ogg", ".spx": "audio/ogg", ".wav": "audio/wav",
 	".m4a": "audio/mp4", ".m4b": "audio/mp4", ".aac": "audio/aac",
 	".webm": "audio/webm", ".weba": "audio/webm",
 	// video
