@@ -24,7 +24,7 @@ once.
 2. Run `wudict` or `./wudict` if the file is in the current folder. 
 3. By default `wudict` searches for dictionaries under `~/Dictionaries` (including subfolders); 
    if the dictionary folder is missing or
-   empty, a setup page lets you set custom folders with dictionaries.
+   empty, a setup page opens where you set custom folders with dictionaries.
 
 ## Adding dictionaries 
 Dictionary folders can be configured in the browser via the [browser setup page](http://localhost:6888/setup). 
