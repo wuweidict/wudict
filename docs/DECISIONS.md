@@ -1021,7 +1021,7 @@ Detaching is confined to the serve path and gated on the tray being wanted, so `
 
 **CI builds it in a job of its own** (`windows-installer`, downstream of `build`), which asks the script itself — `make-installer.ps1 -Locate`, a query that prints the compiler it would use and says nothing if there is none — and `choco install`s Inno Setup only when that comes back empty. Pinning a release to the runner image's promise to ship it would make an image change an outage; keeping a second copy of *where Inno Setup lives* in the workflow would make discovery drift.
 
-### Amended 2026-08-23 — four things that were wrong on a real Windows machine
+### Amended — four things that were wrong on a real Windows machine
 
 Verified on Windows 11 26200 with Windows PowerShell 5.1, GnuWin32 make and Inno Setup 6.7.1. Every item below was invisible to CI, which is the common thread: the runner is `pwsh` 7 on an image that already has Inno Setup at the one path the code guessed, so it exercised none of them.
 
@@ -1065,4 +1065,51 @@ The two PATH `Check`s were **wrapper functions** (`NeedsAddMachinePath`, `NeedsA
 
 Deliberately **not** taken from the examples: `WizardStyle=modern dynamic`, which every current example uses. `dynamic` follows the system light/dark setting and arrived in 6.6 (2025-11-11); the floor is 6.3 because correctness needs it, and moving it another three releases for the wizard's colours is not the same trade.
 
-Verified on the Windows box: the script compiles under Inno Setup 6.7.1 with **zero warnings** and produces `dist\wudict-setup-0.9.3.exe`. Running the installer in each mode is a user check — it writes to Program Files, the machine PATH and HKLM, which is not something to do to someone's machine unasked.
+Verified on the Windows box: the script compiles under Inno Setup 6.7.1 with **zero warnings** and produces `dist\wudict-windows-x64-setup-0.9.3.exe`. Running the installer in each mode is a user check — it writes to Program Files, the machine PATH and HKLM, which is not something to do to someone's machine unasked.
+
+### Amended — reveal gives away the foreground right on Windows
+
+Clicking *Show in File Explorer* on Windows opened the right folder and left it
+**behind** the browser: the taskbar button flashed and, to the user, nothing had
+happened. Not a bug in the call — `explorer /select,` is correct — but Windows'
+foreground lock. `SetForegroundWindow` succeeds only for a process that is
+already foreground, was launched by the foreground process, or received the last
+input event; everything else is demoted to a flashing button. wudict serving an
+HTTP request is none of the three, because the foreground belongs to the browser
+that made the request.
+
+`reveal()` now calls `AllowSetForegroundWindow(ASFW_ANY)` immediately before
+spawning Explorer. That is the sanctioned way to hand the right to another
+process — and it is governed by the same rule, so it only works when we hold the
+right to give away. This is therefore **half a fix, and knowingly so**:
+
+- from the **tray** menu (D74) the user's last input event went to our own icon,
+  we hold the right, and Explorer comes up focused;
+- from the **web panel** the browser is foreground and we have received no
+  input, so the call returns FALSE and the button flashes exactly as before.
+
+Both paths go through one `reveal()`, so the half that can be fixed is fixed
+without a second code path, and the half that cannot is left alone rather than
+papered over. `ASFW_ANY` rather than the child's process id, which looks more
+precise and would be wrong: `explorer.exe` normally forwards the request to the
+already-running shell process and exits, so the window is created by a process
+whose id we never see.
+
+**Rejected: `AttachThreadInput` + a forced `SetForegroundWindow`.** It works from
+both paths. It also has to poll for a window that does not exist yet, is racy
+when it finds the wrong one, is precisely the focus-stealing behaviour the
+restriction exists to prevent — and, unlike `AllowSetForegroundWindow`, it is a
+recognised signature in AV and EDR heuristics, which is a real cost for an
+unsigned binary that already has SmartScreen friction. A focused Explorer window
+is not worth being scored as an input thief.
+
+**Bound with `syscall.NewLazyDLL`, not `x/sys/windows.NewLazySystemDLL`.** The
+point of the latter is a System32-only search so a planted DLL beside the .exe
+cannot win the lookup. `user32.dll` is a **KnownDLL**: `LoadLibraryW` takes it
+from the `\KnownDlls` section object and never consults the search order, so the
+hardening buys nothing here and `x/sys` stays out of `go.mod` as a direct
+requirement. Verified on the box — the `KnownDLLs` registry value is present and
+`user32.dll` is already mapped into the running `wudict.exe` (the tray links it),
+so no new module is loaded and no image-load event is produced. `LazyProc.Find`
+is checked before `Call`, because `Call` *panics* on an unresolved export and a
+file-manager click must not be able to take down a running server.

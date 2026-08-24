@@ -309,6 +309,11 @@ func reveal(path string) error {
 		// -R reveals the item in its parent folder, selected
 		return exec.Command("open", "-R", path).Start()
 	case "windows":
+		// Hand over the foreground right first, so the window that appears is
+		// focused instead of merely flashing in the taskbar. Only effective
+		// when this process holds that right — the tray menu, not the web
+		// panel; see allowForeground in foreground_windows.go.
+		allowForeground()
 		// explorer exits with a non-zero status even on success, so Start()
 		// (which does not wait) is both correct and simpler here
 		return exec.Command("explorer", "/select,"+filepath.Clean(path)).Start()

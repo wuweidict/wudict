@@ -180,7 +180,7 @@ $isccArgs = @(
 & $Iscc @isccArgs
 if ($LASTEXITCODE -ne 0) { throw "make-installer: iscc exited $LASTEXITCODE" }
 
-$setup = Join-Path $OutDir "wudict-Windows-x64-setup-$num.exe"
+$setup = Join-Path $OutDir "wudict-windows-x64-setup-$num.exe"
 if (-not (Test-Path -LiteralPath $setup -PathType Leaf)) {
     throw "make-installer: iscc reported success but $setup is missing"
 }

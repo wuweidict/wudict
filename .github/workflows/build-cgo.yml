@@ -49,11 +49,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          # Tags, not just the tip commit. checkout's default fetch-depth of 1
-          # fetches NO tags, so the `git describe` below found nothing, VERSION
-          # fell back to "dev", and every downstream artifact that derives its
-          # version from the binary was stamped 0.0.0 — most visibly
-          # wudict-setup-0.0.0.exe. The release job already does this.
           fetch-depth: 0
 
       - name: Setup Go
@@ -192,7 +187,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: wudict-windows-installer
-          path: dist/wudict-Windows-x64-setup*.exe
+          path: dist/wudict-windows-x64-setup*.exe
           if-no-files-found: warn
 
   release:

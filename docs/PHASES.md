@@ -472,11 +472,11 @@ P86 shipped without a Windows machine ever running it, and said so. This is that
 - **The duplicate-launch check never ran on Windows.** `strings.Contains(err, "address already in use")` is POSIX phrasing; Windows says *"Only one usage of each socket address …"*. A second launch returned a raw bind error into a console that had already been released — the flash the user reported. Now any listen failure asks `probeRunning` who is there; the string match is deleted, not duplicated.
 - **A detached launch can now report a fatal error**: into the headless log while it is still open (named return + deferred log), through `logx.Output()` for the "already running" banner, and as a native dialog from a single `fail()` in `Main`. `tray.notify`'s message box became the exported `tray.Alert(title, body)`, wording moved to `tray.go`, one `stopHint` per platform — one dialog mechanism, not two. `Alert` refuses in session 0, where `MessageBoxW` would block forever on a desktop nobody can see.
 
-Verified **on the Windows box**, with a purego build stamped `v0.9.3`: `make win-installer` compiles `dist\wudict-setup-0.9.3.exe` end to end under GnuWin32 make + PowerShell 5.1; `-Locate` prints `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` from the registry; a second GUI-style launch (`start "" wudict.exe`, which gives the child a console of its own) exits quietly leaving exactly one process, with the full ALREADY RUNNING banner in `%LOCALAPPDATA%\wudict\wudict.log`; a launch onto a port held by a non-wudict listener exits (no hang) and logs `cannot listen … netstat -ano | findstr :8899`; and a plain console launch is unchanged — banner on the console, exit 0, console not taken. On this machine: `make check` green (all 16 packages), `gofmt` clean, `go vet -tags purego ./...` clean, `GOOS=windows/linux/freebsd/android` build clean.
+Verified **on the Windows box**, with a purego build stamped `v0.9.3`: `make win-installer` compiles `dist\wudict-windows-x64-setup-0.9.3.exe` end to end under GnuWin32 make + PowerShell 5.1; `-Locate` prints `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` from the registry; a second GUI-style launch (`start "" wudict.exe`, which gives the child a console of its own) exits quietly leaving exactly one process, with the full ALREADY RUNNING banner in `%LOCALAPPDATA%\wudict\wudict.log`; a launch onto a port held by a non-wudict listener exits (no hang) and logs `cannot listen … netstat -ano | findstr :8899`; and a plain console launch is unchanged — banner on the console, exit 0, console not taken. On this machine: `make check` green (all 16 packages), `gofmt` clean, `go vet -tags purego ./...` clean, `GOOS=windows/linux/freebsd/android` build clean.
 
 **Still not verified anywhere:** the dialog itself. Every Windows session available over SSH is session 0, where `Alert` deliberately returns without drawing. Seeing the message box needs an interactive desktop — a double-clicked `wudict.exe` pointed at an occupied port.
 
-### P86b — the installer offers both install modes — 2026-08-23 — COMPLETE
+### P86b — the installer offers both install modes - COMPLETE
 
 `PrivilegesRequired=admin` + `PrivilegesRequiredOverridesAllowed=dialog`: the wizard's first page asks who the install is for, **all users preselected**, with "for me only" — the previous, prompt-free behaviour — one click away. `/ALLUSERS` and `/CURRENTUSER` come with the dialog for unattended installs, and `UsePreviousPrivileges` makes upgrades reuse the first choice. Reasoning in the **D76 amendment (b) of 2026-08-23**.
 
@@ -489,7 +489,7 @@ Knock-on changes, all of them forced by the new mode rather than chosen:
 - `UsedUserAreasWarning=no`, because a compile-time warning cannot see the `Check` that makes the one HKCU entry correct.
 - `[Run]` unchanged: `postinstall` already implies `runasoriginaluser`, so the server still starts as the installing user.
 
-Verified on the Windows box (Inno Setup 6.7.1): compiles with **zero warnings** to `dist\wudict-setup-0.9.3.exe`. **Not verified, deliberately:** running it. An all-users install writes to `Program Files`, the machine PATH and HKLM on a real machine — that is the user's to run. Worth watching on the first run: the mode page appears with "Install for all users" selected, an all-users install prompts once for UAC and lands in `C:\Program Files\wuDict`, a per-user install prompts not at all, and `where wudict` resolves after a new shell in both.
+Verified on the Windows box (Inno Setup 6.7.1): compiles with **zero warnings** to `dist\wudict-windows-x64-setup-0.9.3.exe`. **Not verified, deliberately:** running it. An all-users install writes to `Program Files`, the machine PATH and HKLM on a real machine — that is the user's to run. Worth watching on the first run: the mode page appears with "Install for all users" selected, an all-users install prompts once for UAC and lands in `C:\Program Files\wuDict`, a per-user install prompts not at all, and `where wudict` resolves after a new shell in both.
 
 Then the script was read end to end against `jrsoftware/issrc` — `Examples/`, `Files/Default.isl` — which is what turned up the rest:
 
@@ -503,3 +503,40 @@ The install-mode page itself needs no `[CustomMessages]`: `Default.isl` already 
 Net: 263 → 260 lines (bytes up, 12657 → 13081 — comment density), two fewer `[Code]` routines and both `shell32.dll` declarations gone.
 
 Docs updated: `README.md`, `pages/docs/install.md`.
+
+### P86c — two Windows reports from the panel — COMPLETE
+
+**Doubled backslashes in the dictionary-folders row were not a regression.** The
+panel showed `C:\\Users\\xh\\Downloads\\mdict`. Diagnosed from the live server
+rather than from the screenshot: `/api/config` returned that path doubled while
+`libDir`, `configPath` and `pathAliases` — everything Go computes for itself —
+came back correct, which places the fault squarely in the one value that arrives
+through the TOML reader. `~/.wudict/wudict.toml` on disk is correct TOML
+(`DICT_DIR = "C:\\Users\\xh\\Downloads\\mdict"`, one backslash each after
+unescaping); the binary running on that box simply did not unescape it. It was
+built at 08:19 on the 23rd, three hours before `bb06f4f` added `decodeString`.
+The front end was never involved: `pathHTML` and `esc` are byte-identical
+between the two checkouts and neither touches a backslash.
+
+Proved rather than argued: current master cross-compiled (`CGO_ENABLED=0
+GOOS=windows`), run on that machine against a config holding the identical
+doubly-escaped line, answers `C:\Users\xh\Downloads\mdict`. Probe binary, its
+config and its scratch db dir removed afterwards. **No code change.**
+
+**Reveal now hands over the foreground right** — new `allowForeground()` in
+`internal/server/foreground_{windows,other}.go`, called from `reveal()`'s Windows
+branch. Fixes the tray path, cannot fix the web-panel path, and the amendment in
+`docs/DECISIONS.md` says why in full (foreground lock; `ASFW_ANY` not the child
+pid; `AttachThreadInput` rejected; `NewLazyDLL` defensible because `user32.dll`
+is a KnownDLL). Verified on the box that the export resolves and returns without
+panicking; **whether the window actually comes forward from the tray is a user
+check** — it needs a human at the keyboard and a real input event.
+
+Gates: `make check` green, tag-less `go build ./...`, `go vet -tags purego ./...`,
+and `go build` for windows/{amd64,arm64}, darwin/{amd64,arm64}, linux/{amd64,arm64},
+android/arm64.
+
+**Found in passing, not fixed:** `go vet` for `GOOS=windows` cannot compile
+`internal/server`'s test package — `memlimit_test.go:181` uses `syscall.Rusage.Maxrss`,
+which does not exist there. Pre-existing (confirmed against a clean tree) and
+invisible to `make check`, which vets for the host only.

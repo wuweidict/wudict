@@ -41,7 +41,7 @@ AppId={{7B267AE3-CE1C-49F4-A8B2-2DEB9F979DE3}
 AppName={#AppName}
 AppVersion={#AppVersion}
 VersionInfoVersion={#NumVersion}
-AppPublisher=glowinthedark
+AppPublisher=legbehindneck
 AppPublisherURL=https://github.com/legbehindneck/wudict
 AppSupportURL=https://github.com/legbehindneck/wudict/issues
 AppUpdatesURL=https://github.com/legbehindneck/wudict/releases
@@ -55,13 +55,17 @@ AppUpdatesURL=https://github.com/legbehindneck/wudict/releases
 ; UsePreviousPrivileges (yes by default) makes an upgrade reuse whichever mode
 ; the first install chose instead of asking again.
 ;
-; Almost nothing below names a mode: {autopf} is Program Files or
-; %LOCALAPPDATA%\Programs, {group} and {autodesktop} are the All Users ones or
-; the user's own, HKA is HKLM or HKCU. The single genuine exception is PATH,
-; which is not merely a different root but a different key in the two hives —
-; hence the two [Registry] lines with complementary Checks.
-PrivilegesRequired=lowest
+; Use Inno Setup's built-in privilege-selection dialog. The base value must be
+; "admin" for the dialog to offer both installation modes. Setting
+; PrivilegesRequired=lowest would force a per-user installation and suppress
+; the all-users choice.
+;
+; /ALLUSERS and /CURRENTUSER can also be used for scripted installations.
+; UsePreviousPrivileges=no makes Setup ask again instead of silently reusing
+; the mode selected by an earlier installation.
+PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
+UsePreviousPrivileges=no
 DefaultDirName={autopf}\{#AppName}
 
 ; Both directives, as Examples\64Bit.iss sets them for exactly this case: one
@@ -116,7 +120,7 @@ WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes
 OutputDir={#OutputDir}
-OutputBaseFilename=wudict-Windows-x64-setup-{#NumVersion}
+OutputBaseFilename=wudict-windows-x64-setup-{#NumVersion}
 LicenseFile=..\..\LICENSE
 
 [Languages]
@@ -186,7 +190,7 @@ Root: HKA; Subkey: "Software\Classes\.bgl\OpenWithProgids";  ValueType: string; 
 ; an elevated install: the server must come up as the person who installed it,
 ; not as the administrator whose credentials the UAC prompt took, or it would
 ; read that account's dictionaries and write that account's config.
-Filename: "{app}\wudict.exe"; Description: "Start {#AppName} now"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\wudict.exe"; Description: "Start {#AppName} now"; Flags: nowait postinstall runasoriginaluser skipifsilent
 
 [Code]
 const

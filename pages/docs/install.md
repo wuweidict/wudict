@@ -64,7 +64,7 @@ Every platform below starts from [the releases page](https://github.com/wuweidic
     choose **More info → Run anyway** once.
 
     **Or use the installer.** The release includes
-    `wudict-setup-<version>.exe`. The setup wizard offers to install
+    `wudict-windows-x64-setup-<version>.exe`. The setup wizard offers to install
     **for all users** (the default, needs administrator
     permissions), or **for current user only**, which keeps
     everything in the user profile. Install options include: a desktop shortcut, 
