@@ -44,6 +44,22 @@ make help      # every target, with a description
 
 Run `make check` before you propose a change.
 
+## The API document
+
+The HTTP contract is one OpenAPI file, `internal/server/web/openapi.yaml`,
+embedded into the binary and served at `/api/openapi.yaml`.
+
+``` sh title="check it, read it"
+make api-test   # assert it matches the server's routes (also part of make test)
+make api-lint   # validate it (needs Node, through npx)
+make api-open   # render it and open it - one offline HTML file in dist/
+```
+
+`make api-test` is the gate. It walks the document against the route table in
+both directions, so an endpoint cannot be added, renamed or dropped without the
+document following it. `api-lint` and `api-ui` need the network on first run;
+`make check` never does.
+
 ## Release builds
 
 ``` sh title="every release platform from one machine"

@@ -1,6 +1,6 @@
 ---
 title: HTTP API
-description: The endpoints WuWeiDict serves - the streaming search API, the dictionary list, and resource files.
+description: The endpoints wuDict serves - the streaming search API, the dictionary list, resource files, and the OpenAPI document that defines them.
 ---
 
 # HTTP API
@@ -13,43 +13,49 @@ authentication, because there is no network exposure: the server binds to the
 loopback address unless you change
 [`SERVER_IP`](configuration.md#server_ip-and-server_port).
 
-Three endpoints are public to browser extensions: `/api/dicts`, `/api/search`
+Three endpoints are open to browser extensions: `/api/dicts`, `/api/search`
 and `/res/`. They are read-only. Everything else is same-origin, so a web page
 or an extension cannot reach it.
 
-## Streaming responses
+## The contract
 
-`/api/dicts` and `/api/search` answer with **NDJSON**: one JSON object per
-line, sent as soon as it is ready.
+Every parameter, every field and every status code lives in one OpenAPI 3.1
+document. This page explains the parts a schema cannot state.
+
+| Where | What for                                                                                                                                  |
+| --- |-------------------------------------------------------------------------------------------------------------------------------------------|
+| `http://127.0.0.1:6888/api/openapi.yaml` | the running server describes itself; feed the downloaded .yml file to any OpenAPI compatible tool such as e.g. https://editor.swagger.io/ |
+| [`internal/server/web/openapi.yaml`](https://github.com/wuweidict/wudict/blob/master/internal/server/web/openapi.yaml) | the same file, in the repository                                                                                                          |
+| `make api-ui` | renders it into `dist/api-explorer.html`, one offline page                                                                                |
+
+A test walks that document against the server's route table in both
+directions, so an endpoint cannot be added, renamed or dropped without the
+document following it.
+
+## Streaming
+
+`/api/dicts`, `/api/search` and `/api/rescan` answer with **NDJSON**: one JSON
+object per line, sent as soon as it is ready.
 
 Read it line by line. Do not wait for the whole body. That is the entire point:
 the first dictionary's results arrive while the slowest one is still reading.
 
 Every stream starts with a `begin` line and ends with an `end` line.
 
-## GET /api/search
+`/api/ingest` streams Server-Sent Events instead, because it reports progress
+rather than results.
+
+## Reading a search stream
 
 ``` text title="request"
 GET /api/search?q=flight&mode=prefix&format=clean&n=5
 ```
 
-| Parameter | Values | Default |
-| --- | --- | --- |
-| `q` | the search text; required | - |
-| `mode` | `exact`, `prefix`, `contains`, `fts` | `prefix` |
-| `format` | `raw`, `clean`, `text` | `raw` |
-| `dict` | `all`, one id, or a comma-separated ordered list of ids | `all` |
-| `n` | maximum results per dictionary | `20` |
-
-`fuzzy` is accepted as an old alias for `mode`. It now means `prefix`.
-
-### The response
-
 ``` json title="one line per object, in arrival order"
-{"t":"begin","slots":[{"dict":"oxford","name":"oxford"},{"dict":"webster","name":"webster"}]}
+{"t":"begin","i":0,"slots":[{"dict":"oxford","name":"oxford"},{"dict":"webster","name":"webster"}]}
 {"t":"hit","i":1,"dict":"webster","name":"Webster's Revised Unabridged","results":[{"Headword":"flight","Body":"<div>…</div>"}]}
 {"t":"hit","i":0,"dict":"oxford","name":"Oxford Advanced Learner's","results":[]}
-{"t":"end"}
+{"t":"end","i":0}
 ```
 
 The `begin` line lists every dictionary that will answer, in your preferred
@@ -58,21 +64,22 @@ order. Draw the layout from it at once.
 Each `hit` line carries `i`, the position of that dictionary in the `slots`
 array. Fill that slot. Lines arrive in completion order, not in slot order.
 
-| Field on a `hit` line | Meaning |
-| --- | --- |
-| `i` | slot index from the `begin` line |
-| `dict`, `name` | the dictionary's id and its real display name |
-| `results` | array of `{"Headword", "Body"}`; `Body` is article HTML |
-| `skipped` | this dictionary does not support the requested mode |
-| `deferred` | this dictionary was not opened, because the search reached its memory cap; not an error |
-| `error` | this dictionary failed; the others still answered |
+A `hit` can report `skipped`, `deferred` or `error` instead of results:
 
-A `deferred` dictionary answers normally when you ask for it alone. See
-[`SEARCH_MEMORY`](configuration.md#search_memory).
+-   **`skipped`** - this dictionary does not support the requested mode. Ask
+    `/api/dicts` for `caps` before offering a mode.
+-   **`deferred`** - this dictionary was not opened, because the search reached
+    its memory cap. Not an error. Asking for that dictionary alone answers it.
+    See [`SEARCH_MEMORY`](configuration.md#search_memory).
+-   **`error`** - this dictionary failed. The others still answered.
 
 A search is cancelled after 30 seconds.
 
+`fuzzy` is accepted as an old value for `mode`. It now means `prefix`.
+
 ### Article formats
+
+`format` decides how much of the dictionary's own markup you get back.
 
 | `format` | What you get | Relative size |
 | --- | --- | --- |
@@ -87,57 +94,39 @@ would otherwise cause - 82 of them for one entry in a large dictionary.
 `clean` rewrites root-absolute links such as `/res/…` to full URLs, so the
 payload works in a page served from somewhere else.
 
-## GET /api/dicts
+## Reading the dictionary list
 
-``` text title="request"
-GET /api/dicts
-```
-
-``` json title="response"
+``` json title="GET /api/dicts"
 {"t":"begin","total":2}
 {"t":"dict","dict":{"id":"oxford","name":"Oxford Advanced Learner's","format":"mdx","path":"/Users/me/Dicts/oald.mdx","entries":184000,"caps":{"Exact":true,"Prefix":true,"Contains":false,"FTS":false}}}
 {"t":"end"}
 ```
 
-| Field | Meaning |
-| --- | --- |
-| `id` | the value to pass as `dict` to `/api/search` |
-| `name` | display name |
-| `format` | `mdx`, `stardict`, `slob`, `dsl`, `bgl` or `wudict` |
-| `path` | the source file, or the `text.db` for a prepared dictionary |
-| `entries` | headword count |
-| `caps` | which modes this dictionary supports now |
-| `error` | this dictionary could not be opened |
+> curl
+```sh
+curl -s 'http://127.0.0.1:6888/api/dicts' | jq 
+```
 
-`caps` is the authority on which modes to offer. `Contains` and `FTS` are false
-until that dictionary is prepared with those indexes.
+`total` arrives first, from dictionary ids alone. Show a count before anything
+is opened.
 
-??? info "Fields the ☰ panel uses"
+`id` is the value to pass as `dict` to `/api/search`. `caps` is the authority
+on which modes to offer: `Contains` and `FTS` stay false until that dictionary
+is prepared with those indexes.
 
-    These are present when they apply, and describe where a dictionary's data
-    lives on disk.
+Each row also carries where the dictionary's data lives - the source file, the
+prepared databases, their sizes. The ☰ panel is built from those fields; the
+[document](https://github.com/wuweidict/wudict/blob/master/internal/server/web/openapi.yaml)
+lists them.
 
-    | Field | Meaning |
-    | --- | --- |
-    | `source` | the original file, if still present |
-    | `mediaSrc` | companion media sources, such as `.mdd` files |
-    | `textDB`, `mediaDB` | the prepared databases |
-    | `folder` | the library folder holding them |
-    | `dbPath` | path of the prepared database |
-    | `dbSize`, `mediaSize` | their sizes in bytes |
-    | `hasMedia` | packable media exists, so "pack media" is offered |
-    | `containsStale` | the substring index was built with older text folding, so it may miss words; the panel offers a rebuild |
+## Resource files
 
-## GET /res/{dict}/{name}
-
-Returns one file from a dictionary: an image, a stylesheet, a script or audio.
-
-``` text title="request"
+``` text title="resource request"
 GET /res/oxford/audio/flight__gb.mp3
 ```
 
-`{name}` is the path the article asks for, including subfolders. A `404` means
-the dictionary does not hold that file.
+The path after the dictionary id is the path the article asks for, subfolders
+included. A `404` means the dictionary does not hold that file.
 
 Speex audio is converted to WAV and answered as `audio/wav`. A `.spx` file that
 cannot be converted, or one you supplied in a
@@ -149,17 +138,7 @@ takes effect on reload.
 
 ## Errors
 
-Every failing request answers with a JSON object and an HTTP status.
-
-``` json title="400, 404 and 500 all look like this"
-{"error":"missing q parameter"}
-```
-
-| Status | When |
-| --- | --- |
-| `400` | `q` is missing, or `mode` or `format` is unknown |
-| `404` | no such dictionary id, or no such resource |
-| `500` | the dictionary could not be opened |
+Every failing request answers with `{"error":"…"}` and an HTTP status.
 
 A failure inside one dictionary during a search is not an error status. It
 arrives as an `error` field on that dictionary's `hit` line, and the other
@@ -167,33 +146,31 @@ dictionaries still answer.
 
 ## Same-origin endpoints
 
-These serve the web page itself. They are not reachable from an extension or a
-web page, and they may change between releases.
+The rest of the surface serves the web page and the Android shell: rescan,
+ingest, the library, the settings, the preferences, the power state. They are
+not reachable from an extension or a web page, and they may change between
+releases.
 
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /api/rescan` | re-scan the dictionary folders |
-| `GET /api/ingest` | prepare a dictionary, or add an index |
-| `GET /api/library`, `DELETE /api/library` | list and remove library items |
-| `GET /api/config` | the effective settings and where each came from |
-| `GET /api/prefs`, `PUT /api/prefs` | dictionary order and on/off switches |
-| `GET /api/setup`, `GET /setup` | the first-run setup page and its checks |
-| `GET /api/reveal` | show a file in the system file manager |
-| `POST /api/power` | the Android shell reports memory and battery state |
+They are tagged `internal` in the document. Read them there rather than here,
+so there is one description only.
 
-## A worked example
+## A working example
 
-``` sh title="search every dictionary, print the headwords"
-curl -sN 'http://127.0.0.1:6888/api/search?q=flight&mode=exact&format=text&n=3' \
-  | while IFS= read -r line; do
-      printf '%s\n' "$line" | python3 -c '
-import json,sys
-m = json.loads(sys.stdin.read())
-if m.get("t") == "hit":
-    for r in m.get("results") or []:
-        print(m["name"], "|", r["Headword"])
+``` sh title="search every dictionary, print the headwords + definitions"
+python3 -c '
+import json, urllib.request
+
+url = "http://127.0.0.1:6888/api/search?q=flight&mode=exact&format=text&n=3"
+
+with urllib.request.urlopen(url) as f:
+    for line in f:
+        m = json.loads(line)
+        if m.get("t") == "hit":
+            for r in m.get("results") or []:
+                print(m["name"], "|", r["Headword"])
+                print("=" * 70)
+                print(r.get("Body", ""))
 '
-    done
 ```
 
 `curl -sN` disables buffering, so lines print as they arrive.

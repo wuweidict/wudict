@@ -1,0 +1,959 @@
+# wudict - the HTTP contract, hand-written (see internal/server/openapi.go for
+# why) and embedded into the binary, which serves it at /api/openapi.yaml.
+#
+# internal/server/openapi_test.go walks this file against the route table in
+# routes.go in both directions: no endpoint without a document, no document
+# without an endpoint.
+#
+# Render it:  make api-ui        Validate it:  make api-lint
+
+openapi: 3.1.0
+
+info:
+  title: wudict
+  version: "1"
+  summary: A local dictionary server for MDX/MDD, StarDict, Slob, DSL and BGL files.
+  description: |
+    WuWeiDict serves your own dictionary files over HTTP, on your own machine.
+
+    **Streaming.** `/api/dicts`, `/api/search` and `/api/rescan` answer with
+    NDJSON: one JSON object per line, flushed the moment it is ready. Read them
+    line by line; do not wait for the body to end. That is the whole point - the
+    first dictionary's results arrive while the slowest one is still opening.
+    Every stream opens with a `begin` line and closes with an `end` line.
+
+    `/api/ingest` streams Server-Sent Events instead, because it reports
+    progress rather than results.
+
+    **Two surfaces.** Three read-only endpoints answer a browser extension
+    cross-origin: `/api/dicts`, `/api/search` and `/res/`. Everything else is
+    same-origin, is marked `internal` below, and may change between releases.
+
+    **No authentication**, because there is normally no exposure: the server
+    binds to `127.0.0.1`. Setting `SERVER_IP` to `0.0.0.0` publishes an
+    unauthenticated API to your network. Do that only on a network you trust.
+  license:
+    name: GPL-3.0-or-later
+    identifier: GPL-3.0-or-later
+  contact:
+    url: https://github.com/wuweidict/wudict
+
+servers:
+  - url: http://127.0.0.1:6888
+    description: The default local server. SERVER_IP and SERVER_PORT move it.
+
+security: []
+
+tags:
+  - name: search
+    description: The client API. Read-only, and reachable from a browser extension.
+  - name: internal
+    description: >
+      Same-origin endpoints that serve the web page and the platform shell.
+      Documented for completeness; not a stable contract.
+
+paths:
+  /api/search:
+    get:
+      tags: [search]
+      operationId: search
+      summary: Search every dictionary, streaming
+      description: |
+        Queries the selected dictionaries concurrently and streams one line per
+        dictionary as it finishes. Lines arrive in completion order, never in
+        slot order: each `hit` carries `i`, its index in the `begin` line's
+        `slots` array.
+
+        A dictionary that fails, that cannot serve the requested mode, or that
+        was declined by the memory cap reports that on its own line. None of
+        those is a request failure, and the other dictionaries still answer.
+
+        A search is cancelled after 30 seconds.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: The search text. Blank is a 400.
+          schema: { type: string }
+          example: flight
+        - name: mode
+          in: query
+          description: |
+            `exact` · `prefix` · `contains` (trigram substring over folded
+            headwords) · `fts` (full text). `fuzzy` is accepted as a legacy
+            alias and now means `prefix`.
+
+            `contains` and `fts` need the dictionary to carry that index; ask
+            `/api/dicts` for `caps` first, and expect `skipped` if you do not.
+          schema:
+            type: string
+            enum: [exact, prefix, contains, fts, fuzzy]
+            default: prefix
+        - name: format
+          in: query
+          description: |
+            `raw` is the dictionary's own HTML. `clean` keeps structure,
+            emphasis and media and drops scripts, styles and presentation, at
+            roughly half the bytes; it also rewrites root-absolute links such
+            as `/res/…` into absolute URLs, so the payload works inside a page
+            served from somewhere else. `text` is markup-free, roughly 0.4.
+
+            Ask for `clean` unless you render the article with the dictionary's
+            own stylesheet.
+          schema:
+            type: string
+            enum: [raw, clean, text]
+            default: raw
+        - name: dict
+          in: query
+          description: >
+            `all`, one dictionary id, or a comma-separated list of ids in the
+            order you want them back. Ids come from /api/dicts. A list where no
+            id resolves is a 404; unknown ids inside a resolving list are
+            skipped. Naming exactly one dictionary bypasses the memory cap,
+            because a search of one is a direct demand.
+          schema: { type: string, default: all }
+          example: oxford,webster
+        - name: 'n'
+          in: query
+          description: Maximum results per dictionary.
+          schema: { type: integer, minimum: 1, default: 20 }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -sN 'http://127.0.0.1:6888/api/search?q=flight&mode=prefix&format=clean&n=5'
+
+            # -N is the whole point: without it curl buffers, and the lines that
+            # were sent one at a time arrive together at the end.
+      responses:
+        '200':
+          description: The NDJSON stream. One object per line.
+          content:
+            application/x-ndjson:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SearchBegin'
+                  - $ref: '#/components/schemas/SearchHit'
+                  - $ref: '#/components/schemas/StreamEnd'
+                discriminator: { propertyName: t }
+              example: |
+                {"t":"begin","i":0,"slots":[{"dict":"oxford","name":"oxford"},{"dict":"webster","name":"webster"}]}
+                {"t":"hit","i":1,"dict":"webster","name":"Webster's Revised Unabridged","results":[{"Headword":"flight","Body":"<div>…</div>"}]}
+                {"t":"hit","i":0,"dict":"oxford","name":"Oxford Advanced Learner's","results":[]}
+                {"t":"end","i":0}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    options:
+      tags: [search]
+      operationId: searchPreflight
+      summary: CORS preflight
+      description: >
+        Answers 204 with the extension grant. The extension's own requests are
+        CORS-simple and never preflight; this exists so a future one does not
+        meet a 405 that explains nothing.
+      responses:
+        '204': { description: Preflight accepted. }
+
+  /api/dicts:
+    get:
+      tags: [search]
+      operationId: listDicts
+      summary: List every dictionary, streaming
+      description: >
+        `begin` carries the total immediately, from registry ids alone, so a
+        client can show "0 of 105" before any dictionary is opened. Rows follow
+        in completion order.
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -sN 'http://127.0.0.1:6888/api/dicts'
+
+            # just the ids, which is what /api/search wants
+            curl -sN 'http://127.0.0.1:6888/api/dicts' | jq -r 'select(.t=="dict") | .dict.id'
+      responses:
+        '200':
+          description: The NDJSON stream. One object per line.
+          content:
+            application/x-ndjson:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/DictsBegin'
+                  - $ref: '#/components/schemas/DictsRow'
+                  - $ref: '#/components/schemas/StreamEnd'
+                discriminator: { propertyName: t }
+              example: |
+                {"t":"begin","total":2}
+                {"t":"dict","dict":{"id":"oxford","name":"Oxford Advanced Learner's","format":"mdx","path":"/Users/me/Dicts/oald.mdx","entries":184000,"caps":{"Exact":true,"Prefix":true,"Contains":false,"FTS":false}}}
+                {"t":"end"}
+        '500':
+          $ref: '#/components/responses/ServerError'
+    options:
+      tags: [search]
+      operationId: dictsPreflight
+      summary: CORS preflight
+      responses:
+        '204': { description: Preflight accepted. }
+
+  /res/{dict}/{path}:
+    get:
+      tags: [search]
+      operationId: getResource
+      summary: One file from inside a dictionary
+      description: |
+        Images, stylesheets, scripts and audio, as the article references them.
+
+        `path` is the whole remainder of the URL and may contain slashes, which
+        an OpenAPI path parameter cannot express: send it unencoded, exactly as
+        the article asks for it.
+
+        Speex audio is transcoded to WAV and answered as `audio/wav`. A `.spx`
+        that cannot be transcoded, or one supplied in a `res/` override folder,
+        is answered raw as `audio/ogg`. Files from a `res/` folder are served
+        uncached, so an edit takes effect on reload.
+      parameters:
+        - name: dict
+          in: path
+          required: true
+          description: Dictionary id, from /api/dicts.
+          schema: { type: string }
+        - name: path
+          in: path
+          required: true
+          description: The resource path inside the dictionary, subfolders included.
+          schema: { type: string }
+          example: audio/flight__gb.mp3
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            # the path after the id is the article's own path, slashes and all
+            curl -s 'http://127.0.0.1:6888/res/oxford/audio/flight__gb.mp3' -o flight.mp3
+      responses:
+        '200':
+          description: The file, with the type the dictionary declares.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: No such dictionary, or no such file inside it.
+        '500':
+          $ref: '#/components/responses/ServerError'
+    options:
+      tags: [search]
+      operationId: resourcePreflight
+      summary: CORS preflight
+      parameters:
+        - name: dict
+          in: path
+          required: true
+          schema: { type: string }
+        - name: path
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Preflight accepted. }
+
+  /api/openapi.yaml:
+    get:
+      tags: [search]
+      operationId: getSpec
+      summary: This document
+      description: The contract of the running build, served by it.
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s 'http://127.0.0.1:6888/api/openapi.yaml' -o openapi.yaml
+      responses:
+        '200':
+          description: The OpenAPI document.
+          content:
+            application/yaml:
+              schema: { type: string }
+
+  /api/rescan:
+    get:
+      tags: [internal]
+      operationId: rescan
+      x-internal: true
+      summary: Re-scan the dictionary folders, then list
+      description: >
+        Reads the dictionary folders again, warms the registry, and then answers
+        exactly as /api/dicts does. Use it after adding files on disk.
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            # picks up files added to the dictionary folders, then lists
+            curl -sN 'http://127.0.0.1:6888/api/rescan' | head -1
+      responses:
+        '200':
+          description: The /api/dicts stream, after the rescan.
+          content:
+            application/x-ndjson:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/DictsBegin'
+                  - $ref: '#/components/schemas/DictsRow'
+                  - $ref: '#/components/schemas/StreamEnd'
+                discriminator: { propertyName: t }
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/ingest:
+    get:
+      tags: [internal]
+      operationId: ingest
+      x-internal: true
+      summary: Prepare a dictionary, or add an index to it
+      description: |
+        Brings one dictionary to the feature state you ask for, streaming
+        Server-Sent Events:
+
+            event: progress   data: {"done":N,"total":M}
+            event: done       data: {…a /api/dicts row…}
+            event: error      data: {"error":"…"}
+
+        Each switch is a state, not a verb: a parameter you leave out keeps
+        whatever that feature is now, so toggling one thing cannot strip
+        another. Progress is emitted at most every 200 ms.
+      parameters:
+        - name: dict
+          in: query
+          required: true
+          description: Dictionary id.
+          schema: { type: string }
+        - name: contains
+          in: query
+          description: Trigram substring index over headwords. `0` or `false` turns it off.
+          schema: { type: string, enum: ['0', '1', 'true', 'false'] }
+        - name: fts
+          in: query
+          description: Full-text index over article text - the largest one.
+          schema: { type: string, enum: ['0', '1', 'true', 'false'] }
+        - name: media
+          in: query
+          description: Pack the dictionary's media into media.db.
+          schema: { type: string, enum: ['0', '1', 'true', 'false'] }
+        - name: full
+          in: query
+          description: Legacy. Any value means full text plus media.
+          deprecated: true
+          schema: { type: string }
+        - name: level
+          in: query
+          description: Legacy. `headwords` turns full text off.
+          deprecated: true
+          schema: { type: string, enum: [headwords] }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            # add the substring index to one dictionary and watch it build
+            curl -sN 'http://127.0.0.1:6888/api/ingest?dict=oxford&contains=1'
+
+            # leave a switch out and it keeps its current state; this only packs media
+            curl -sN 'http://127.0.0.1:6888/api/ingest?dict=oxford&media=1'
+      responses:
+        '200':
+          description: The event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/library:
+    get:
+      tags: [internal]
+      operationId: listLibrary
+      x-internal: true
+      summary: List the prepared dictionaries on disk
+      description: >
+        Everything in the library folder, whether or not it is currently
+        enrolled. Listing is not consent: reading this never adds anything to
+        the registry.
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s 'http://127.0.0.1:6888/api/library' | jq '.dir, .count'
+      responses:
+        '200':
+          description: The library.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dir: { type: string, description: The library folder. }
+                  count: { type: integer }
+                  useCached:
+                    type: boolean
+                    description: Whether prepared dictionaries whose source file is gone are listed.
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/LibEntry' }
+        '500':
+          $ref: '#/components/responses/ServerError'
+    delete:
+      tags: [internal]
+      operationId: removeLibrary
+      x-internal: true
+      summary: Delete one dictionary
+      description: |
+        Removes the prepared folder, the original files, or both. Both default
+        to on, which is "remove this dictionary".
+
+        Offered only where the app cannot hand you to a file manager instead -
+        in practice, Android. A desktop gets a 403 and the name of its own
+        reveal command, because deleting files is the file manager's job.
+      parameters:
+        - name: dict
+          in: query
+          required: true
+          description: Dictionary id.
+          schema: { type: string }
+        - name: prepared
+          in: query
+          description: Delete the prepared library folder. `0` keeps it.
+          schema: { type: string, default: '1' }
+        - name: source
+          in: query
+          description: Delete the original dictionary files. `0` keeps them.
+          schema: { type: string, default: '1' }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            # remove one dictionary: prepared folder and original files
+            curl -s -X DELETE 'http://127.0.0.1:6888/api/library?dict=oxford'
+
+            # free the indexes only, keeping the original file
+            curl -s -X DELETE 'http://127.0.0.1:6888/api/library?dict=oxford&source=0'
+
+            # Answers 403 on a desktop, by design: your file manager does this job.
+      responses:
+        '200':
+          description: What was removed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Removal' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: This machine has a file manager. Remove the folder there.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: >
+            Dropping the source while keeping the prepared folder would leave a
+            dictionary that exists but is listed nowhere. Enable cached
+            dictionaries first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/setup:
+    get:
+      tags: [internal]
+      operationId: setup
+      x-internal: true
+      summary: Validate a dictionary folder, and optionally save it
+      description: >
+        Drives the first-run page. Without `save` it only reports what the
+        folder holds, which is what live typing needs. With `save=1` it switches
+        the registry over and writes DICT_DIR. Repeat `path` for several
+        folders; `found` is then the deduplicated total across all of them,
+        because overlapping folders must not be counted twice.
+      parameters:
+        - name: path
+          in: query
+          description: A dictionary folder. Repeatable. `~` is expanded.
+          schema: { type: string }
+        - name: save
+          in: query
+          description: Any value persists the folders to the config file.
+          schema: { type: string }
+        - name: useCached
+          in: query
+          description: >
+            `1` enrolls the previously prepared dictionaries and persists
+            USE_CACHED; `0` turns that off; absent leaves it alone.
+          schema: { type: string, enum: ['0', '1'] }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            # what this folder holds, without changing anything
+            curl -s 'http://127.0.0.1:6888/api/setup?path=~/Dictionaries'
+
+            # adopt two folders and write them to the config file
+            curl -s 'http://127.0.0.1:6888/api/setup?path=~/Dictionaries&path=/Volumes/Ext/Dicts&save=1'
+      responses:
+        '200':
+          description: >
+            The result. A folder that does not exist, holds nothing, or cannot
+            be read reports that in `error` with a 200: this answers a keystroke,
+            and a half-typed path is not a failed request.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SetupResult' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/config:
+    get:
+      tags: [internal]
+      operationId: getConfig
+      x-internal: true
+      summary: The effective settings, and where each came from
+      description: >
+        What the panel's folders section shows, including which layer set
+        DICT_DIR - so the page can say that saving will not take effect, rather
+        than silently doing nothing.
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            # where the settings came from, and which folders are scanned
+            curl -s 'http://127.0.0.1:6888/api/config' | jq '.configPath, .dictDirOrigin, .roots'
+      responses:
+        '200':
+          description: The effective configuration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigInfo' }
+
+  /api/prefs:
+    get:
+      tags: [internal]
+      operationId: getPrefs
+      x-internal: true
+      summary: Dictionary order and on/off switches
+      description: >
+        Healed against the dictionaries that exist right now. `exists` is false
+        on a first run, which is the client's cue to adopt what an older build
+        left in localStorage, once, instead of starting the user over.
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s 'http://127.0.0.1:6888/api/prefs' | jq '.dicts'
+      responses:
+        '200':
+          description: The preferences.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Prefs' }
+    put:
+      tags: [internal]
+      operationId: savePrefs
+      x-internal: true
+      summary: Replace the order and the enabled set
+      description: >
+        Array order is the user's order. Entries record the path as well as the
+        id, because ids are derived from the path: moving a dictionary folder
+        changes every id at once, and the path is what re-attaches the state
+        instead of resetting it. Body is capped at 1 MiB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dicts:
+                  type: array
+                  items: { $ref: '#/components/schemas/DictPref' }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            # Replaces the whole list: array order IS the user's order, and any
+            # dictionary you leave out loses its place. Read /api/prefs first and
+            # send back an edited copy.
+            curl -s -X PUT 'http://127.0.0.1:6888/api/prefs' \
+              -H 'content-type: application/json' \
+              -d '{"dicts":[{"id":"oxford","path":"/Users/me/Dicts/oald.mdx"},
+                          {"id":"webster","path":"/Users/me/Dicts/webster.slob","off":true}]}'
+      responses:
+        '200':
+          description: The merged preferences, as stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Prefs' }
+        '400':
+          description: The body is not valid JSON.
+        '500':
+          description: The state file could not be written.
+
+  /api/reveal:
+    get:
+      tags: [internal]
+      operationId: reveal
+      x-internal: true
+      summary: Show a file or folder in the desktop's file manager
+      description: >
+        Loopback only, and limited to the paths this app already displays: a
+        remote browser must not open a window on someone else's desktop, and an
+        arbitrary path must never reach the shell.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: An absolute path the app is showing.
+          schema: { type: string }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            # opens a file manager window on the machine running the server
+            curl -s 'http://127.0.0.1:6888/api/reveal?path=/Users/me/.wudict/db'
+
+            # Loopback only: the request must come from this machine.
+      responses:
+        '200':
+          description: The file manager was asked to show it.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revealed: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: Not a loopback request, or not a path this app displays.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/power:
+    post:
+      tags: [internal]
+      operationId: setPower
+      x-internal: true
+      summary: Report the platform's power state
+      description: |
+        How the Android shell tells the server what the platform just told it -
+        onStop, onTrimMemory, thermal throttling, battery saver - which an
+        exec'd server has no other way of learning.
+
+        `active` is normal. `background` stops all indexing and closes every
+        handle that can be reopened, while prepared databases stay open so
+        returning is instant. `restricted` closes those too, leaving the process
+        holding nothing but its listener.
+
+        Loopback only, and POST because it changes state: a GET here would be
+        followed by every link prefetcher on the network.
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [active, background, restricted]
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            # what the Android shell sends when the app leaves the screen
+            curl -s -X POST 'http://127.0.0.1:6888/api/power?state=background'
+            curl -s -X POST 'http://127.0.0.1:6888/api/power?state=active'
+
+            # Loopback only, like /api/reveal.
+      responses:
+        '200':
+          description: The state now in effect.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state: { type: string, enum: [active, background, restricted] }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: Not a loopback request.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  responses:
+    BadRequest:
+      description: A parameter is missing or unknown.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: No such dictionary id, or no such resource.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ServerError:
+      description: The dictionary could not be opened, or the stream could not start.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      description: Every failing request answers with this shape.
+      properties:
+        error: { type: string }
+      required: [error]
+
+    Caps:
+      type: object
+      description: >
+        Which search modes this dictionary can serve now. The authority on what
+        to offer: Contains and FTS stay false until that index is built. Field
+        names are capitalised on the wire.
+      properties:
+        Exact: { type: boolean }
+        Prefix: { type: boolean }
+        Contains: { type: boolean }
+        FTS: { type: boolean }
+
+    Result:
+      type: object
+      description: One article. Field names are capitalised on the wire.
+      properties:
+        Headword: { type: string }
+        Body:
+          type: string
+          description: Article HTML, in the requested format.
+
+    StreamEnd:
+      type: object
+      description: The last line of any NDJSON stream.
+      properties:
+        t: { const: end }
+        i:
+          type: integer
+          description: Always 0 here. The search stream carries the field on every line.
+      required: [t]
+
+    SearchBegin:
+      type: object
+      description: >
+        The slot layout, sent before any dictionary is opened. Draw the empty
+        result areas from it at once; each real name arrives with its hit.
+      properties:
+        t: { const: begin }
+        i: { type: integer, description: Always 0 here. }
+        slots:
+          type: array
+          items:
+            type: object
+            properties:
+              dict: { type: string, description: Dictionary id. }
+              name: { type: string, description: The id again; the display name arrives with the hit. }
+      required: [t, slots]
+
+    SearchHit:
+      type: object
+      description: One dictionary's outcome. Fill slot `i`.
+      properties:
+        t: { const: hit }
+        i: { type: integer, description: Index into the begin line's slots array. }
+        dict: { type: string }
+        name: { type: string, description: The dictionary's real display name. }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/Result' }
+        skipped:
+          type: boolean
+          description: This dictionary does not support the requested mode.
+        deferred:
+          type: boolean
+          description: >
+            Not opened, because the search reached its memory cap. Not an error:
+            asking for this dictionary alone answers it. See SEARCH_MEMORY.
+        bytes:
+          type: integer
+          description: What the declined open was estimated to cost. For logs.
+        error:
+          type: string
+          description: This dictionary failed. The others still answered.
+      required: [t, i]
+
+    DictsBegin:
+      type: object
+      properties:
+        t: { const: begin }
+        total: { type: integer, description: How many rows follow. }
+      required: [t]
+
+    DictsRow:
+      type: object
+      properties:
+        t: { const: dict }
+        dict: { $ref: '#/components/schemas/DictInfo' }
+      required: [t, dict]
+
+    DictInfo:
+      type: object
+      description: One dictionary, as the list and the panel see it.
+      properties:
+        id: { type: string, description: The value to pass as `dict` to /api/search. }
+        name: { type: string }
+        format:
+          type: string
+          enum: [mdx, stardict, slob, dsl, bgl, wudict]
+        path:
+          type: string
+          description: The source file, or the text.db of a prepared dictionary.
+        entries: { type: integer, description: Headword count. }
+        caps: { $ref: '#/components/schemas/Caps' }
+        dbPath: { type: string, description: The prepared database. }
+        error: { type: string, description: This dictionary could not be opened. }
+        containsStale:
+          type: boolean
+          description: >
+            The substring index predates the current text folding, so it may
+            miss words. It keeps working; the panel offers a rebuild.
+        source: { type: string, description: 'The original file, if still on disk.' }
+        mediaSrc:
+          type: array
+          items: { type: string }
+          description: Companion media sources, such as .mdd files.
+        textDB: { type: string }
+        mediaDB: { type: string }
+        folder:
+          type: string
+          description: The library folder holding them - the transferable unit.
+        dbSize: { type: integer, description: Bytes of text.db. }
+        mediaSize: { type: integer, description: Bytes of media.db. }
+        hasMedia: { type: boolean, description: 'Packable media exists, so "pack media" is offered.' }
+      required: [id, name, format, path, entries, caps]
+
+    LibEntry:
+      type: object
+      description: One prepared dictionary in the library folder.
+      properties:
+        dir: { type: string }
+        textDB: { type: string }
+        mediaDB: { type: string }
+        name: { type: string }
+        format: { type: string }
+        source: { type: string }
+        sourceExists:
+          type: boolean
+          description: >
+            Whether the original file is still there. Removal is only reversible
+            while it is.
+        entries: { type: integer }
+        fullText: { type: boolean }
+        contains: { type: boolean }
+        media: { type: boolean }
+        size: { type: integer, description: Bytes. }
+        created: { type: string }
+
+    Removal:
+      type: object
+      properties:
+        name: { type: string }
+        folder: { type: string, description: The prepared folder that was removed. }
+        sources:
+          type: array
+          items: { type: string }
+          description: Original files that were removed.
+        freed: { type: integer, description: Bytes reclaimed. }
+        gone: { type: boolean, description: The dictionary is no longer listed at all. }
+        note: { type: string, description: A consequence the user should know about. }
+
+    Root:
+      type: object
+      description: One dictionary folder and what it contributed.
+      properties:
+        path: { type: string }
+        count: { type: integer, description: Dictionaries this folder was the first to offer. }
+        total: { type: integer, description: Everything it holds. Greater than count means overlap. }
+        exists: { type: boolean }
+
+    ConfigInfo:
+      type: object
+      properties:
+        roots:
+          type: array
+          items: { $ref: '#/components/schemas/Root' }
+        libDir: { type: string }
+        prepared: { type: integer }
+        useCached: { type: boolean }
+        configPath: { type: string, description: The config file in effect. }
+        total: { type: integer, description: Dictionaries served. }
+        dictDirOrigin:
+          type: string
+          enum: [flag, env, file, default]
+          description: Which layer set DICT_DIR.
+        dictDirEditable:
+          type: boolean
+          description: False when a flag or environment variable outranks the config file.
+        revealLabel:
+          type: string
+          description: The platform's own wording, such as "Reveal in Finder".
+        canReveal: { type: boolean }
+        canDelete:
+          type: boolean
+          description: >
+            The exact complement of canReveal: removal is offered where no file
+            manager can be handed the folder instead.
+        pathAliases:
+          type: array
+          description: >
+            Display shortenings as [prefix, label] pairs, longest prefix first.
+            Display only - the clipboard and /api/reveal keep absolute paths.
+          items:
+            type: array
+            items: { type: string }
+            minItems: 2
+            maxItems: 2
+
+    DictPref:
+      type: object
+      properties:
+        id: { type: string }
+        path: { type: string, description: Recorded so the state survives a moved folder. }
+        name: { type: string }
+        off: { type: boolean, description: Excluded from "All dictionaries". }
+
+    Prefs:
+      type: object
+      properties:
+        exists:
+          type: boolean
+          description: False when no state file has been written yet.
+        dicts:
+          type: array
+          description: Array order is the user's order.
+          items: { $ref: '#/components/schemas/DictPref' }
+
+    SetupResult:
+      type: object
+      properties:
+        path: { type: string, description: 'The folder, expanded and made absolute.' }
+        found: { type: integer, description: 'Dictionaries found, deduplicated across folders.' }
+        dirs:
+          type: array
+          items: { $ref: '#/components/schemas/Root' }
+        saved: { type: boolean }
+        useCached: { type: boolean }
+        error: { type: string, description: Why this folder cannot be used. }

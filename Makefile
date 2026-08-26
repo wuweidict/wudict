@@ -290,6 +290,46 @@ tidy: ## go mod tidy
 .PHONY: check
 check: tidy vet test ## Pre-commit gate: tidy + vet + test
 
+# ---- API contract -------------------------------------------------------
+# The OpenAPI document is hand-written and embedded, so a running server serves
+# its own contract at /api/openapi.yaml. It is hand-written because the
+# streaming endpoints emit a union of line types that no Go-struct reflector
+# can express - and `api-test` is what keeps it honest: internal/server walks
+# the document against the route table in both directions, so an endpoint
+# cannot be added, renamed or dropped without the document following it.
+#
+# Rendering needs Node only, through npx, and only when you ask for it: nothing
+# here is a build or module dependency, and `make check` never touches the
+# network.
+OPENAPI  := internal/server/web/openapi.yaml
+REDOCLY  ?= npx -y @redocly/cli
+API_HTML := $(BUILD_DIR)/api-explorer.html
+
+.PHONY: api-test
+api-test: ## Assert the OpenAPI document matches the routes (also runs in `make test`)
+	go test $(GOFLAGS) -run 'TestOpenAPI|TestCORSBoundary|TestRoutesAreUnique' ./internal/server/
+
+.PHONY: api-lint
+api-lint: ## Validate $(OPENAPI) with Redocly (needs Node; network on first run)
+	@command -v npx >/dev/null || { echo "npx not found: install Node, or lint at https://editor.swagger.io"; exit 1; }
+	$(REDOCLY) lint $(OPENAPI)
+
+.PHONY: api-ui
+api-ui: ## Render the API explorer into dist/ - one self-contained offline HTML file
+	@command -v npx >/dev/null || { echo "npx not found: install Node"; exit 1; }
+	@mkdir -p $(BUILD_DIR)
+	$(REDOCLY) build-docs $(OPENAPI) -o $(API_HTML) --disableGoogleFont
+	@python3 tools/inline-api-docs.py $(API_HTML)
+	@echo "wrote $(API_HTML)"
+
+.PHONY: api-open
+api-open: api-ui ## Render the API explorer, then open it in a browser
+	@python3 -m webbrowser "file://$(CURDIR)/$(API_HTML)" 2>/dev/null || open "$(API_HTML)"
+
+.PHONY: api-spec
+api-spec: ## Print every documented operation, one per line
+	@sed -n '/^paths:/,/^components:/p' $(OPENAPI) | grep -E '^  /|^    (get|put|post|delete|options):' | sed 's/:$$//'
+
 # ---- launchd agent (macOS) ----------------------------------------------
 # Modern launchctl syntax (bootstrap/bootout/kickstart), GUI domain.
 #

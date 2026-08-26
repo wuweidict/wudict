@@ -1,0 +1,14 @@
+# Lint configuration for internal/server/web/openapi.yaml (`make api-lint`).
+#
+# A green lint has to mean something, so the one rule that fires on correct
+# endpoints is turned off rather than tolerated as nine standing warnings.
+extends:
+  - recommended
+
+rules:
+  # Nine of our operations genuinely cannot fail with a 4xx: the CORS
+  # preflights always answer 204, and /api/config, /api/prefs and
+  # /api/openapi.yaml read state that is always there. Documenting an
+  # unreachable 4xx to satisfy a linter would be a false statement about the
+  # server.
+  operation-4xx-response: off

@@ -119,61 +119,15 @@ type Server struct {
 
 func New(reg *Registry) *Server {
 	s := &Server{reg: reg, mux: http.NewServeMux()}
-	s.mux.HandleFunc("GET /", s.handleIndex)
-	// The three read-only routes the browser extension uses, and the only ones
-	// that answer a cross-origin request - see cors.go (D69). Everything below
-	// stays same-origin: an extension can read dictionaries, and can neither
-	// read the user's preferences nor touch the library.
-	s.mux.HandleFunc("GET /api/dicts", s.withCORS(s.handleDicts))
-	s.mux.HandleFunc("GET /api/search", s.withCORS(s.handleSearch))
-	s.mux.HandleFunc("OPTIONS /api/dicts", s.handlePreflight)
-	s.mux.HandleFunc("OPTIONS /api/search", s.handlePreflight)
-	s.mux.HandleFunc("OPTIONS /res/", s.handlePreflight)
-	s.mux.HandleFunc("GET /api/rescan", s.handleRescan)
-	s.mux.HandleFunc("GET /api/ingest", s.handleIngest)
-	s.mux.HandleFunc("GET /api/setup", s.handleSetup)
-	s.mux.HandleFunc("GET /api/library", s.handleLibrary)
-	s.mux.HandleFunc("DELETE /api/library", s.handleRemoveLibrary)
-	s.mux.HandleFunc("GET /api/config", s.handleConfig)
-	s.mux.HandleFunc("GET /api/prefs", s.handlePrefs)
-	s.mux.HandleFunc("PUT /api/prefs", s.handleSavePrefs)
-	s.mux.HandleFunc("GET /api/reveal", s.handleReveal)
-	// what the platform is doing to us (D64) - the Android shell's channel for
-	// onStop / onTrimMemory / thermal / battery-saver, which the exec'd server
-	// has no other way of learning
-	s.mux.HandleFunc("POST /api/power", s.handlePower)
-	// the setup page stays reachable after first run: it is where folders are
-	// edited, not just where they are first chosen
-	s.mux.HandleFunc("GET /setup", s.handleSetupPage)
-	s.mux.HandleFunc("GET /res/", s.withCORS(s.handleResource))
-	// Content-addressed: index.html asks for these with ?v=<hash of the file>,
-	// so the URL changes whenever the file does and a week-long cache is safe.
-	// It was NOT safe before. Both scripts are embedded in the same binary as
-	// index.html and are versioned with it, but the browser cached them
-	// SEPARATELY - index.html fresh from "/", frame.js up to a week stale -
-	// so any change to the protocol between the two broke silently and only
-	// for dictionaries rendered in an iframe. D41 renamed frame.js's lookup
-	// message from "lookup" to "ref"/"pick"; a cached frame.js kept posting
-	// the old name to an index.html that no longer listened for it, and every
-	// entry:// link in a script-bearing dictionary stopped responding.
-	serveScript := func(body []byte) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-			w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
-			_, _ = w.Write(body)
+	// The surface is a table (routes.go), so it can be asserted about: the
+	// CORS boundary and the OpenAPI document are both checked against it.
+	for _, rt := range s.routes() {
+		h := rt.Handler
+		if rt.CORS {
+			h = s.withCORS(h)
 		}
+		s.mux.HandleFunc(rt.Method+" "+rt.Pattern, h)
 	}
-	s.mux.HandleFunc("GET /assets/mark.min.js", serveScript(markJS))
-	s.mux.HandleFunc("GET /assets/frame.js", serveScript(frameJS))
-	// SVG favicon, plus a /favicon.ico route so browsers that fetch the
-	// well-known path by default get the same mark instead of a 404.
-	serveFavicon := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Header().Set("Cache-Control", "public, max-age=604800")
-		_, _ = w.Write(faviconSVG)
-	}
-	s.mux.HandleFunc("GET /assets/favicon.svg", serveFavicon)
-	s.mux.HandleFunc("GET /favicon.ico", serveFavicon)
 	return s
 }
 
