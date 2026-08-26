@@ -6,9 +6,8 @@ name: docs
 
 on:
   push:
-    branches: [master]
-    # The site is rebuilt for its own sources, and for the API document it
-    # publishes - not for every Go change.
+    branches: [master_manual]
+
     paths:
       - 'pages/**'
       - 'internal/server/web/openapi.yaml'
@@ -32,7 +31,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     steps:
       - uses: actions/checkout@v6
 
@@ -43,9 +42,9 @@ jobs:
           cache-dependency-path: pages/requirements.txt
 
       # not stricly necessary, 24 is already ootb in the runner
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
+      # - uses: actions/setup-node@v7
+      #   with:
+      #     node-version: '22'
 
       - uses: actions/setup-go@v7
         with:
