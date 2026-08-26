@@ -7,7 +7,7 @@ status: new
 # Browser extension
 
 With the wuDict Hover extension you can quickly get a definition for any word in Chrome/Firefox 
-by hovering (with an optional key) or via the right-click context menu - no need to copy-paste words into another app.
+by hovering (with an optional key) or via the right-click context menu — no need to copy-paste words into another app.
 
 The extension needs the wuDict server to be running on the same computer or another computer in your local network.
 
