@@ -1,6 +1,6 @@
 ---
 title: Home
-description: WuWeiDict searches every dictionary you own from your browser. One file to download, no account, no cloud, nothing leaves your machine.
+description: wuDict searches every dictionary you own from your browser. One file to download, no account, no cloud, nothing leaves your machine.
 ---
 
 # All your dictionaries, in your browser

@@ -1,8 +1,8 @@
 # WuWeiDict
 
 Fast, self-contained, multi-format dictionary server that runs in your
-browser at [http://localhost:6888](http://localhost:6888). One binary, no
-dependencies; drop your dictionaries in a folder and search them all at
+browser at [http://localhost:6888](http://localhost:6888). One native binary, no
+dependencies; set the folders with your .mdx/.slob/.bgl/.ifo dictionaries, and search them all at
 once.
 
 **Supported formats**
@@ -21,26 +21,27 @@ once.
 1. Download the binary for your platform from
    [releases](https://github.com/wuweidict/wudict/releases), rename to `wudict`, 
    `chmod +x wudict` (macOS/Linux) and move to a folder in `$PATH`, e.g. `/usr/local/bin`.
-2. Run `wudict` or `./wudict` if the file is in the current folder. On windows use the installer [`wudict-windows-x64-setup-<x.y.z>.exe`](https://github.com/wuweidict/wudict/releases/latest) or download the standalone executable `wudict-windows-amd64-cgo.exe` and then double-click to run. 
+2. Run `wudict` or `./wudict` if the file is in the current folder. On windows use the installer [`wudict-windows-x64-setup-<x.y.z>.exe`](https://github.com/wuweidict/wudict/releases/latest) or download the standalone executable `wudict-windows-amd64-cgo.exe` and then double-click to run. For macOS an app bundle is provided too (it is not signed with a commercial Apple Developer Certificate, will be flagged by the system as unverified by Apple and requires additional steps to de-quarantine the app as described in the [manual](https://wuweidict.github.io/wudict/apps/macos/)).
 3. By default `wudict` searches for dictionaries under `~/Dictionaries` (including subfolders); 
    if the dictionary folder is missing or
-   empty, a setup page opens where you set custom folders with dictionaries.
+   empty, a setup page opens where you can set custom folders with dictionaries.
 
 ## Adding dictionaries 
-Dictionary folders can be configured in the browser via the [browser setup page http://localhost:6888/setup](http://localhost:6888/setup) when `wudict` is running. 
+Dictionary folders can be configured in the browser via the [browser setup page http://localhost:6888/setup](http://localhost:6888/setup) when `wudict` is running. The browser setup page is a convenience 
+for writing `DICT_DIR` in the configuration file at `~/.wudict/wudict.toml`.
 
 ### Multiple dictionary folders
 
 `DICT_DIR` accepts more than one folder:
 
 As an alternative to the [setup page](http://localhost:6888/setup) you can configure the dictionary folders from
-the console via cli args, env vars or using the config file at `~/.wudict/wudict.toml`:
+the console via cli args, env vars or by directly editing the config file at `~/.wudict/wudict.toml`:
 ```sh
 # as one or more CLI args:
 wudict --dict-dir ~/Dictionaries --dict-dir /Volumes/Data/Dicts   # repeat the flag
 
 # or via an env var:
-DICT_DIR="~/Dictionaries:/Volumes/Data/Dicts" wudict              # ":" — ";" on Windows
+DICT_DIR="~/Dictionaries:/Volumes/Data/Dicts" wudict              # separate with ":" for linux/mac and ";" on Windows
 ```
 
 in `wudict.toml`:
@@ -54,7 +55,7 @@ DICT_DIR = ["~/Dictionaries", "/Volumes/Data/Dicts"]
 |---|---|---|
 | **starts with** | exact matches, else headwords starting with the term (accent/case-insensitive) | no |
 | **exact** | exact headword (accent/case-fold fallback: `corazon` → `corazón`) | no |
-| **contains** | substring / typo-tolerant headword match, anywhere in the word (FTS5 trigram) | automatic |
+| **contains** | substring / typo-tolerant headword match, anywhere in the word (FTS5 trigram) | ad-hoc |
 | **full-text** | search inside article text, ranked by relevance | yes |
 
 Every dictionary works immediately for starts-with/exact lookups using
@@ -69,18 +70,20 @@ Each shows its actual size; *⚡ index all* adds full-text for all dictionaries
 at once, and `wudict ingest [-contains] <file-or-folder>` does the
 same from the command line.
 
-Results stream in as each dictionary responds — the top one opens
+Results stream lazily as each dictionary responds — the top one opens
 automatically. In the ☰ panel you can **reorder** dictionaries (drag the
 ⠿ handle or use the ▲▼⏫⏬ buttons) to set your preferred result order, and
 **enable/disable** each one (the switch) to include or exclude it from
 *All dictionaries* searches; both are remembered. Searching *All* shows a
-few hits per dictionary with a **more…** link to expand any one.
+few hits per dictionary with a **more…** link to expand any one. 
+A dictionary that was disabled for *All dictionaries* searches can still 
+be searched by selecting it in the dictionary dropdown.
 
 Tips: `/` focuses the search box; double-click any word in an article to
 look it up; click links inside articles to follow cross-references —
 these stay inside the dictionary you are reading, and widen to all of them
 only if that dictionary has no such entry;
-audio plays on click; ⊞ opens every dictionary's results at once (⊟ closes
+audio plays on click; ⊞ expands all results (⊟ closes
 them again — for the current page only, never remembered);
 ⇔ toggles a wide layout; ◐ cycles auto/light/dark
 theme. Search URLs are bookmarkable.
@@ -100,7 +103,7 @@ keeps it out of the Dock and it puts a **menu-bar icon** up instead — running
 state, open in browser, rescan, open the dictionary folder, quit. That icon is
 the only interface, so its log goes to `~/Library/Logs/wudict.log`. Overrides:
 `APP_ID=` (bundle identifier), `CODESIGN_ID=` (a Developer ID instead of the
-ad-hoc signature), `MACOS_MIN=`.
+ad-hoc signature), `MACOS_MIN=`. See more about [running on macOS](https://wuweidict.github.io/wudict/apps/macos/).
 
 ## Run as an app (Windows)
 
@@ -108,10 +111,10 @@ There is **one** `wudict.exe`. From `cmd` or PowerShell it is an ordinary
 command-line program — it prints, pipes and returns an exit code. Double-clicked,
 started from a shortcut, or used to open a dictionary file, it releases the
 console window Windows handed it and shows a **tray icon** instead, logging to
-`%LOCALAPPDATA%\wudict\wudict.log`.
+`%LOCALAPPDATA%\wudict\wudict.log`. See also [running on windows](https://wuweidict.github.io/wudict/apps/windows/).
 
 `make win-installer` compiles the installer (needs
-[Inno Setup 6.3+](https://jrsoftware.org/isinfo.php); CI builds it for every
+[Inno Setup 6.3+](https://jrsoftware.org/isinfo.php); github's CI builds it for every
 release). The wudict setup wizard has options to add a desktop shortcut,
 *start at sign-in*, add to `PATH`, and **Open with → wuDict** for `.mdx`,
 `.dsl`, `.slob` and `.bgl`.
@@ -125,6 +128,7 @@ the browser there.
 `wudict` can be installed as a `launchctl` LaunchAgent using Makefile targets:
 
 ```sh
+# from project root
 make mac-agent-install   # generate the plist from launchctl/*.plist.in, then:
 make mac-agent-start     # launchctl bootstrap gui/$UID <plist>
 make mac-agent-stop      # launchctl bootout   gui/$UID/com.legbehindneck.wudict
@@ -139,6 +143,7 @@ On linux `wudict` can be installed as a **systemd user unit** — only copying t
 `/usr/local/bin` needs sudo, the service itself runs with user permissions and start/stop does not require sudo.
 
 ```sh
+# from project root
 make linux-service-install   # sudo-installs /usr/local/bin/wudict, then writes the user unit
 make linux-service-start     # systemctl --user enable --now wudict.service
 make linux-service-stop
@@ -150,7 +155,7 @@ make linux-install     # just the binary  (PREFIX=/opt/foo to relocate)
 make linux-uninstall
 ```
 
-The ststemd unit expects the executable to be at `/usr/local/bin/wudict`.
+The systemd unit expects the executable to be at `/usr/local/bin/wudict`.
 
 To keep the service running when you are not logged in:
 
@@ -194,6 +199,8 @@ BROWSER_EXTENSIONS = ["chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
 (Firefox generates a fresh `moz-extension://` id for every installation, so
 there is no stable origin to pin there.)
 
+See also: [chrome/firefox browser extension](https://wuweidict.github.io/wudict/extension/)
+
 Config file search order: `--config` / `CONFIG_PATH`, then
 `<exe-dir>/wudict.toml`, `~/.wudict/wudict.toml`,
 `/etc/wudict/wudict.toml`.
@@ -221,7 +228,7 @@ wudict res ~/Dicts/Oxford.mdd audio/a.mp3   # …and pull one out
 
 ## Sharing dictionaries (one folder each)
 
-Indexing a dictionary creates a folder named after it under
+Indexing a dictionary creates a corresponding folder under
 `~/.wudict/db/` — the **library**:
 
 ```
@@ -234,50 +241,36 @@ Indexing a dictionary creates a folder named after it under
 ```
 
 A dictionary is one folder, so it moves as one thing: **copy, move or zip
-it and hand it over**. On the other machine, drop it into a dictionary
-folder and it works — no original source files needed (a `text.db`
-without its `media.db` still works; audio and images just fall back to
-the source file when one is present).
+it and share**. On the other machine, drop it into a dictionary
+folder and it works — no original source files needed. a `text.db`
+without its `media.db` still works (with no media). 
+To include the media into the bundle the corresponding <kbd>media</kbd> button must be clicked in the dictionary panel.
 
-Databases from earlier versions (the old flat `<name>-<hash>.text.db`
-files) are moved into folders automatically on startup — a rename, never
-a re-index, and nothing is deleted.
-
-Your own library is used only if you say so. On first run, when the
-dictionary folder is empty, the setup page lists previously cached
-sources under *Previously imported dictionaries* with a **Use these
+When present, on first run, when the dictionary folder is empty, 
+the setup page lists previously indexed
+dictionaries under *Previously imported dictionaries* with a **Use these
 dictionaries** button; that choice is remembered (`USE_CACHED = "1"`, or
 `--use-cached`). Your dictionary folder must not be the db folder —
 wudict refuses to start if they are the same.
 
 The ☰ panel shows each dictionary's provenance: the source file it came
-from, and — expanded — the library folder holding its prepared files.
+from, and — expanded — the library folder holding its SQLite database files.
 Click any path to copy.
 
 At the foot of the panel, **Folders & configuration** shows which folders
-are being scanned (with per-folder counts), where prepared dictionaries
-live, and which `wudict.toml` is in effect — with *Reveal in Finder* /
+are being scanned (with per-folder counts), where indexed dictionaries
+are located, and which `wudict.toml` is in effect — with *Reveal in Finder* /
 *Show in File Explorer* / *Open Containing Folder*, depending on your
-system. **Edit folders…** opens the folder editor (also at `/setup`) at
-any time. If a folder came from `--dict-dir` or `DICT_DIR`, the editor
-says so: saving to the config file cannot override them.
+system. **Edit folders…** opens the dictionary folders editor.
+If DICT_DIR was set via `--dict-dir` cli flag or `DICT_DIR` env var then the editor cannot override those paths and will show a warning.
 
-## Replacing or supplying a dictionary's files (`res/`)
+## Patching dictionary's files
 
 Dictionaries carry their own stylesheets, scripts, images and audio
-inside the dictionary file. Sometimes one of them is **damaged**, and
-sometimes it is simply **missing** — an article asks for a file the
-`.mdd`/`.slob` never contained, usually because the dictionary was
-converted or repacked from a website. Either way the result is the same:
-a stylesheet that never applies, a script that never runs, an audio
-button that does nothing. And because a dictionary's own JavaScript
-normally loads a library first, one absent or broken file can disable
-everything interactive in its articles at once.
-
-A `res/` folder inside the dictionary's library folder answers both. A
-file there is served **instead of** the dictionary's copy, or **in place
-of** one it doesn't have — wudict looks in `res/` first and only then
-inside the dictionary:
+inside the dictionary file. You can provide your own 'patched' versions 
+for example to fix broken or missing resources in the `res/` subfolder in 
+wuDict's DB folder at under `~/.wudict/db/<some-dict-name/res`. Any
+file in the `./res` folder is served **instead of** the original.
 
 ```
 ~/.wudict/db/Cambridge English Dictionary Online/
@@ -289,42 +282,19 @@ inside the dictionary:
 ```
 
 Subfolders work, and they matter: articles routinely reference
-`js/…` and `css/…`, so mirror whatever path the article asks for.
-
-The name is the one the article requests. If you don't know it, open
-*Developer Tools ▸ Network* and look for a `/res/<id>/<name>` request —
-`<name>`, including any folders, is where to put your file. A 404 there
-is exactly the "missing resource" case. Reload the page after adding or
-editing one; overrides are never cached.
+`js/…` and `css/…`, so mirror whatever path the article is referencing.
 
 This works for any file and any dictionary, and it is also how you'd
-patch a stylesheet you dislike or swap an icon. Nothing is modified
-inside the dictionary itself — remove the file and you're back to what
-it ships.
+patch a CSS stylesheet you want to modify or swap an icon. Nothing is modified
+inside the dictionary itself — remove the file and you're back to the original.
 
 One exception: a `.spx` audio file placed in `res/` is served as-is,
-**not** transcoded to WAV the way a `.spx` inside the dictionary is, so
-browsers cannot play it. Supply `.mp3` or `.wav` instead.
-
-**wudict tells you when a file is damaged.** Serving a `.js`, `.css`,
-`.html`, `.json`, `.xml`, `.svg` or `.txt` that contains a NUL byte — a
-byte that cannot legally occur in any of them — prints a warning naming
-the file and the folder to put a replacement in:
-
-```
-"…/Cambridge English Dictionary Online.slob": jquery.js is damaged: it
-contains NUL bytes and cannot parse. The dictionary is stored that way —
-wudict is serving it verbatim. Drop a good copy at <library folder>/res/jquery.js
-to override it.
-```
-
-The bytes are still served exactly as stored; wudict never edits what a
-dictionary contains.
+**not** transcoded to WAV the way a `.spx` inside the dictionary is. Supply `.mp3` or `.wav` instead.
 
 ## Disk use
 
 A prepared dictionary is usually **smaller than the file it came from**:
-article text is compressed, and only the indexes you ask for are built.
+article text is compressed, and full-text search and contains indexes are only built when you ask for it.
 
 | what | cost (40k-entry dictionary, 45.6 MB source) |
 |---|---|
@@ -344,15 +314,16 @@ roughly 3x larger databases, marginally faster reads.
 
 ## Speex audio (.spx)
 
-Browsers cannot play Speex. WuWeiDict internally transcodes
+Browsers cannot play Speex. wuDict internally transcodes
 `.spx` resources to WAV on the fly and caches the result. 
-If WuWeiDict was built without the internal speex decoder then 
-the external `speexdec` utility can be used (for mac: `brew install speex`, linux: `apt install speex`, etc).
+If wuDict was built without the internal speex decoder (the purego flavours) 
+then the external `speexdec` utility can be used (for mac: `brew install speex`, 
+linux: `apt install speex`, etc).
 
 ## Build from source
 
 Requires [Go](https://go.dev/doc/install) (and a C compiler for the
-default build):
+default cgo build):
 
 ```sh
 make build          # native build (cgo sqlite, fastest) → ./wudict
