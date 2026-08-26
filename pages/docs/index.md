@@ -40,13 +40,13 @@ on your disk.
 
     ---
 
-    `.slob`. Images, audio and styles are stored inside the one file.
+    `.slob`. Single binary with text, images, audio, scripts and styling.
 
 -   :fontawesome-solid-language:{ .lg .middle } **Lingvo DSL**
 
     ---
 
-    `.dsl` and `.dsl.dz`. Old, and still widely used in Eastern Europe.
+    `.dsl` and `.dsl.dz`. Legacy, still used in Eastern Europe.
 
 -   :fontawesome-solid-earth-americas:{ .lg .middle } **Babylon**
 
@@ -59,8 +59,8 @@ on your disk.
 
     ---
 
-    `text.db`. wuDict's own SQLite3-based format: one folder per dictionary, which you can
-    copy share.
+    `text.db`. wuDict's own SQLite-based format: one folder per dictionary, which you can
+    copy across machines.
 
 </div>
 
@@ -70,20 +70,19 @@ on your disk.
 
 ## How you search
 
-wuDict searches all your dictionaries at once. Results appear per dictionary as
-each one answers, so you read the first hit before the slowest dictionary has
-finished.
+wuDict searches all your dictionaries at once. Results are streamed as soon as they are available, so you get the first hit
+while the other dictionaries are still being searched.
 
-| Mode | It finds | Available |
+| Mode | Results | Available |
 | --- | --- | --- |
 | **Exact** | the headword itself, ignoring case and accents - `corazon` finds `corazón` | always |
 | **Prefix** | every headword that starts with your text | always |
-| **Contains** | your text anywhere inside a headword | switch per dictionary |
-| **Full-text** | words inside the article text, ranked by relevance | switch per dictionary |
+| **Contains** | your text anywhere inside a headword | on-demand per dictionary |
+| **Full-text** | words inside the article text, ranked by relevance | on-demand per dictionary |
 
-Exact and prefix work the moment a dictionary is found. Contains and full-text
-need an extra index. The ☰ panel offers each one as a switch and shows what it
-costs in megabytes first.
+Exact and prefix work instantly. Contains and full-text need an extra index which can be 
+enabled on a per dictionary basis. 
+The ☰ panel offers each one as a switch and shows what it costs in megabytes first.
 
 [How search works](start/search.md){ .md-button }
 
@@ -105,4 +104,3 @@ costs in megabytes first.
 - It does not send anything anywhere. The server listens on the loopback
   address only.
 - It has no account, no telemetry, no analytics and no crash reporting.
-- It does not change your dictionary files. It only reads them.
