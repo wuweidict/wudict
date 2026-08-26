@@ -1,5 +1,6 @@
 /wudict
-dist/
+dist/**
+!dist/api-explorer.html
 coverage.out
 /wudict.toml
 /state.json
