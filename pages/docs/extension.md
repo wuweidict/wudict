@@ -4,19 +4,37 @@ description: Hover any word in chrome/firefox to get definition from the wuDict 
 status: new
 ---
 
-# Browser extension
+# wuDict Hover Chrome/Firefox Extension
+
+
+## Install
+
+Click a badge below to install:
+
+<p align="center">
+  <a href="https://chromewebstore.google.com/detail/bknaaoffefipfnpefmkbipcdemljbhjh">
+    <img alt="Available in the Chrome Web Store" height="60" src="docs/assets/chrome-web-store-badge.png" />
+  </a>
+  &nbsp;&nbsp;&nbsp;
+  <a href="https://addons.mozilla.org/firefox/addon/wudict-hover/">
+    <img alt="Get the Add-on for Firefox" height="60" src="docs/assets/firefox-get-the-addon.svg" />
+  </a>
+</p>
+
+--
 
 With the wuDict Hover extension you can quickly get a definition for any word in Chrome/Firefox 
 by hovering (with an optional key) or via the right-click context menu — no need to copy-paste words into another app.
 
-The extension needs the wuDict server to be running on the same computer or another computer in your local network.
+The extension needs the [wuDict](index.md) server to be running on localhost or another computer in your local network.
 
+<!--
 !!! info "Not published yet"
 
     The Chrome Web Store and Firefox Add-ons listings are in preparation.
     Preview builds circulate directly. This page describes how the extension
     behaves and how to configure it.
-
+-->
 ## Preconditions
 
 - a running **wuDict** server, by default `127.0.0.1:6888`. You can also configure the wudict server to run 
