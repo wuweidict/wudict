@@ -6,7 +6,7 @@ name: docs
 
 on:
   push:
-    branches: [master]
+    branches: [master_off]
     # The site is rebuilt for its own sources, and for the API document it
     # publishes - not for every Go change.
     paths:
