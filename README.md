@@ -1,6 +1,6 @@
 # WuWeiDict
 
-Fast, self-contained, multi-format dictionary server that runs in your
+Fast, _native_, self-contained, multi-format dictionary server that runs in your
 browser at [http://localhost:6888](http://localhost:6888). One native binary, no
 dependencies; set the folders with your .mdx/.slob/.bgl/.ifo dictionaries, and search them all at
 once.
