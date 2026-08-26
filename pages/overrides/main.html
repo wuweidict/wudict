@@ -1,7 +1,17 @@
 {% extends "base.html" %}
 
 {% block announce %}
-  <a href="extension/">
+  {#
+    The announcement bar renders on every page, so a bare relative href
+    ("extension/") resolves against whatever page the reader is on, and a
+    root-absolute one ("/extension/") assumes the site owns the domain root.
+    Neither holds on GitHub Pages, which serves this site under /wudict/.
+
+    The `url` filter is the only correct form: it emits a path relative to the
+    current page, so the link works at the domain root, under /wudict/, and
+    from file:// alike.
+  #}
+  <a href="{{ 'extension/' | url }}">
     wuDict Hover &mdash; instant lookup in Chrome/Firefox.
   </a>
 {% endblock %}
