@@ -1,14 +1,7 @@
 # The documentation site: build pages/ and publish it to GitHub Pages.
 #
 # Deployment is the modern one - an artifact uploaded by this workflow and
-# handed to the Pages runtime over OIDC. There is no gh-pages branch, and
-# nothing here writes to the repository.
-#
-# One manual step is required once, and cannot be done from a workflow:
-# Settings > Pages > Build and deployment > Source must be "GitHub Actions".
-# The custom domain (wudict.legbehindneck.com) is set on the same page; with
-# Actions deployments it lives in repository settings, so no CNAME file is
-# needed.
+# handed to the Pages runtime over OIDC.
 name: docs
 
 on:
