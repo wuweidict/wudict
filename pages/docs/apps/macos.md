@@ -7,19 +7,17 @@ description: wuDict.app is native macOS app bundle which gives you a menu-bar ic
 
 **Goal:** run WuWeiDict from the Applications folder, without a terminal.
 
-`wuDict.app` holds the same server as the command-line build. It adds one
-thing: a **menu-bar icon**, so a program with no window still has a way to be
-opened and quit.
+`wuDict.app` is the same server as the command-line build, packed into a macOS app bundle. Unlike the CLI version, it adds a **menu-bar icon**, so you can see when it is running and quit via the icon.
 
 ## Install
 
 1.  Download **`wudict-macos-app.zip`** from
     [the releases page](https://github.com/wuweidict/wudict/releases).
     It is universal — one file for Apple Silicon and Intel.
-2.  Unzip it. Drag **wuDict** to *Applications*.
+2.  Unzip it. Drag **wuDict.app** to *Applications*.
 3.  Control-click the app and choose **Open**. Confirm **Open** in the dialog.
-4.  If you get a warning that Apple cannot verify this app — you should move it to trash, 
-    then remove the extended attribute quarantine bits:
+4.  If you get a warning that Apple cannot verify this app, and you should move it to trash, 
+    then retry step 3 after removing the extended attribute quarantine bits:
 
 ```sh  title="stripping macOS extended attributes"
 /usr/bin/xattr -cr /Applications/wudict.app
@@ -28,7 +26,7 @@ opened and quit.
 /usr/bin/xattr -cr ~/Applications/wudict.app
 ```
 
-Step 3 is needed once. The app is signed with an ad-hoc certificate, so macOS treats it as
+The app is signed with an ad-hoc certificate, so macOS treats it as
 software from an unidentified developer. A normal double-click is refused, and
 the Control-click menu is the workaround.
 
