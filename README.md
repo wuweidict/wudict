@@ -1,6 +1,6 @@
 # WuWeiDict
 
-Fast, self-contained, multi-format dictionary server that runs in your
+Fast, _native_, self-contained, multi-format dictionary server that runs in your
 browser at [http://localhost:6888](http://localhost:6888). One native binary, no
 dependencies; set the folders with your .mdx/.slob/.bgl/.ifo dictionaries, and search them all at
 once.
@@ -9,12 +9,12 @@ once.
 
 | Format | Files                               | Notes |
 |---|-------------------------------------|---|
-| MDict | `.mdx` + `.mdd`                     | companion `NAME.mdd`, `NAME.1.mdd`, … resource archives; `.spx` audio via `speexdec` |
+| MDict | `.mdx` + `.mdd`                     | companion `*.mdd`, `*.1.mdd`, … resource archives; built-in `.spx` audio decoding |
 | StarDict | `.ifo` + `.idx(.gz)` + `.dict(.dz)` | `.syn` synonyms, `res/` folder or `res.zip` resources |
 | Aard2 | `.slob`                             | zlib/bz2/lzma2; embedded images/audio/css |
-| Lingvo DSL | `.dsl`, `.dsl.dz`                   | UTF-8/16/32 auto-detected; `NAME.dsl.files.zip` resources; indexed automatically on first open |
+| Lingvo DSL | `.dsl`, `.dsl.dz`                   | UTF-8/16/32 auto-detected; `*.dsl.files.zip` resources; auto-indexed |
 | Babylon | `.bgl`                              | gzip block stream; source/target charset auto-detected (Latin / Cyrillic / CJK code pages); embedded images; indexed automatically on first open |
-| WuWeiDict | cache folder (`text.db`)            | this app's own portable format (see *Sharing*, below) |
+| WuWeiDict | cache folder (`text.db`)            | wuDict's own SQLite-based format (see *Sharing*, below) |
 
 ## Quick start
 

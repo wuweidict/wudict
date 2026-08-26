@@ -1,0 +1,60 @@
+# The correctness gate
+#
+# Both flavours are covered, because they are different products: the cgo
+# build links mattn/go-sqlite3 and the built-in Speex decoder, the purego build
+# links modernc's driver (D4, D18, D29). A change can pass one and fail the
+# other.
+name: test
+
+on:
+  push:
+    branches: [master]
+    # The documentation site cannot break the Go build. It has its own gate.
+    paths-ignore:
+      - 'pages/**'
+      - 'docs/**'
+      - '**.md'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A superseded run on the same branch has nothing left to say.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # tidy + vet + the whole test suite, cgo flavour. This is also what
+      # asserts the OpenAPI document against the server's route table, which is
+      # why docs.yml does not have to.
+      #
+      # Integration tests skip themselves when WUDICT_TEST_* points at nothing,
+      # so no dictionary fixtures are needed here.
+      - name: make check
+        run: make check
+
+      # `make check` RUNS `go mod tidy`; CI must not accept a repository that
+      # only becomes correct after being modified. If tidy changed anything,
+      # the commit was untidy.
+      - name: go.mod and go.sum are tidy
+        run: git diff --exit-code -- go.mod go.sum
+
+      # Release parity (D4): the pure-Go driver must keep passing, and the
+      # tag-less build must keep working, because `go install` produces it.
+      - name: purego flavour
+        run: |
+          make test-purego
+          go build -tags purego ./...
+          go build ./...

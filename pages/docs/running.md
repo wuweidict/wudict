@@ -8,10 +8,8 @@ description: Start WuWeiDict automatically when you log in - a macOS LaunchAgent
 **Goal:** WuWeiDict answers at [localhost:6888](http://localhost:6888) from the
 moment you log in, without you starting it.
 
-This page is optional. The plain `wudict` command is the product.
-
-Every route below keeps the server under your own user account. None of them
-needs a system service, and none runs before you log in.
+All this is optional and is just convenience to have `wudict` running as service even after you reboot,
+so that you don't need to start it manually every time you need it.
 
 === "macOS"
 
@@ -104,7 +102,7 @@ needs a system service, and none runs before you log in.
     ### What you get
 
     Started by Windows or from Explorer, `wudict.exe` shows a **tray icon** in
-    the notification area instead of a console window. Its log is written to
+    the notification area instead of a console window with log messages. It logs to
     `%LOCALAPPDATA%\wudict\wudict.log`.
 
     ### Verify
