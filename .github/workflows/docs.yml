@@ -1,14 +1,7 @@
 # The documentation site: build pages/ and publish it to GitHub Pages.
 #
 # Deployment is the modern one - an artifact uploaded by this workflow and
-# handed to the Pages runtime over OIDC. There is no gh-pages branch, and
-# nothing here writes to the repository.
-#
-# One manual step is required once, and cannot be done from a workflow:
-# Settings > Pages > Build and deployment > Source must be "GitHub Actions".
-# The custom domain (wudict.legbehindneck.com) is set on the same page; with
-# Actions deployments it lives in repository settings, so no CNAME file is
-# needed.
+# handed to the Pages runtime over OIDC.
 name: docs
 
 on:
@@ -41,19 +34,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
           cache: pip
           cache-dependency-path: pages/requirements.txt
 
-      - uses: actions/setup-node@v4
+      # not stricly necessary, 24 is already ootb in the runner
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -75,7 +69,7 @@ jobs:
       - name: Build the site
         run: make docs
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: pages/site
 
@@ -84,7 +78,6 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
