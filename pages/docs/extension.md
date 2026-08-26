@@ -1,143 +1,108 @@
 ---
-title: WuDict Hover
-description: Look up any word on any page of your browser — hover, read, move on. The WuWeiDict extension for Chrome and Firefox.
-tags:
-  - Browser
+title: WuDict Hover chrome/firefox extension
+description: Hover any word in chrome/firefox to get definition from the wuDict server.
 status: new
 ---
 
-# WuDict Hover - Chrome/Firefox extension
+# Browser extension
 
-With the WuWeiDict extension for **Chrome and Firefox** you get a quick definition for any word in your browser — no need to copy the word and switch to another app to look it up.
+With the wuDict extension you can quickly get a definition for any word in your browser 
+by hovering (with an optional key) or via the right-click context menu - no need to copy-paste words into another app.
 
-The WuWeiDict server [must be running](run.md) for the extension to work.
+The extension needs the wuDict server to be running on the same computer or another computer in your local network.
 
-## Install
+!!! info "Not published yet"
+
+    The Chrome Web Store and Firefox Add-ons listings are in preparation.
+    Preview builds circulate directly. This page describes how the extension
+    behaves and how to configure it.
+
+## Preconditions
+
+- **wuDict must be running** on the same machine as the browser. The extension talks to
+  `127.0.0.1:6888`. You can also configure it to use a wudict server on another computer in your local network, and then set the IP address in the extension settings.
+- **Chrome or Firefox**, current version, Manifest V3.
+
+
+The server must be running for the popup to answer.
+[Keep it running](running.md){ .md-button }
+
+## Install a build by hand
 
 === "Chrome"
 
-    **Chrome Web Store.**
+    1. Unzip the extension folder.
+    2. Open `chrome://extensions`.
+    3. Switch **Developer mode** on.
+    4. Click **Load unpacked** and select the folder.
 
-    [Install from the Chrome Web Store](https://FIXME.TODO.com/chrome-webstore/wudict){ .md-button .md-button--primary }
-
-    !!! warning "This link is a placeholder"
-
-        `https://FIXME.TODO.com/…` is a stand-in while the store listing
-        is being prepared. The day the extension ships, this button
-        becomes the real listing. Found your way here before then? Manual
-        install below works today.
-
-    **Install via developer mode**
-
-    ``` sh title="1. download the extension and unpack it"
-    # the built extension bundle (source is in the repository)
-    curl -L -o wudict-extension.zip https://FIXME.TODO.com/wudict-extension.zip
-    unzip wudict-extension.zip -d wudict-extension
-    ```
-
-    1. Open `chrome://extensions`
-    2. Enable the **Developer mode** switch
-    3. Click **Load unpacked** and select the `wudict-extension` folder
-
-    The extension is live, and stays live across browser restarts.
+    The extension stays installed across browser restarts.
 
 === "Firefox"
 
-    **Firefox Add-on**
+    1. Open `about:addons`.
+    2. Use the gear menu, then **Install Add-on From File**.
+    3. Choose the `.xpi` file.
 
-    [Get it on Firefox Add-ons](https://FIXME.TODO.com/amo/wudict){ .md-button .md-button--primary }
+    A temporary install also works: open
+    `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on**,
+    and pick `manifest.json` inside the unpacked folder. Temporary add-ons
+    disappear when Firefox restarts.
 
-    !!! warning "This link is a placeholder"
+## Use it
 
-        `https://FIXME.TODO.com/…` names a slot, not a listing yet. When
-        the add-on is published, this button points at the real page.
+Hover a word. The popup shows the entry, worded by your dictionaries.
 
-    **The developer way — install a preview build now.**
+- **Exact lookups only.** The popup asks for the word itself, never for every
+  word starting with it. Hovering *run* does not offer *runny*. You get one or
+  two results per dictionary.
+- **Audio plays** in the popup. Speex is converted by the server first.
+- **Open in WuWeiDict** shows the full entry in the dictionary's own styling, in
+  the main page. The popup is a glance; the app is for reading.
+- **Cross-references leave the popup.** Clicking a link inside the popup opens
+  the target in the main page, in the dictionary the link came from.
 
-    ``` sh title="1. download the extension bundle (.xpi)"
-    curl -L -o wudict-extension.xpi https://FIXME.TODO.com/wudict-extension.xpi
-    ```
+## Options
 
-    1. Open `about:addons`
-    2. Gear menu → **Install Add-on From File** → choose
-       `wudict-extension.xpi`
+The options page controls all of it.
 
-    Temporary loading works too: `about:debugging#/runtime/this-firefox`
-    → **Load Temporary Add-on** → pick the unpacked folder's
-    `manifest.json`. Temporary add-ons vanish on restart — permanent
-    installs do not.
-
-## Use
-
-Hover any word that looks unfamiliar. The popup shows the entry — the
-way your dictionaries phrase it, not a machine paraphrase:
-
-- **Exact lookups only.** The popup asks for the word itself, never for
-  "everything starting with" it — hovering _run_ should not offer _runny_.
-  One or two results per dictionary, enough to read, not a scroll marathon.
-- **Audio plays** — Speex transcoded for you on the server.
-- **"Open in WuWeiDict"** — the _full_ entry, in the dictionary's own
-  styling, in your own full-page reader. One consistent rule: the popup
-  is a glance; the app is the reading.
-- **Cross-references stay out of the popup.** Clicking a link inside the
-  popup opens the target in the real app, scoped to the dictionary the
-  link came from. The popup never becomes a browser.
-
-Everything above adapts in the **options page**: server host and port
-(default `127.0.0.1:6888`), which dictionaries answer, popup size and
-theme, and an optional **modifier key** (say, <kbd>Alt</kbd>) so hover
-stays silent until you ask for it.
-
-``` text title="Options — the defaults"
-Server          http://127.0.0.1:6888      (set once, remembered)
-Dictionaries    All enabled                 (or pick a short list)
-Trigger         Hover, or Alt + hover
-Payload         Clean HTML — structure only, no scripts (fast & safe)
-Cache           500 lookups, per-word, in the background worker
+``` text title="the defaults"
+Server          http://127.0.0.1:6888      set once, remembered
+Dictionaries    all enabled                 or pick a short list
+Trigger         hover, or a modifier key plus hover
+Payload         clean HTML: structure only, no scripts
+Cache           500 lookups, held by the background worker
 ```
 
-## How it stays fast — and safe
+Set a modifier key, for example <kbd>Alt</kbd>, and the popup stays silent
+until you ask for it.
 
-Three engineering truths shaped the popup, all inherited from the
-server's public contract:
+## Why it is fast, and why it is safe
 
-- **One request per lookup.** The server answers several dictionaries in
-  a single concurrent call, so the extension never fans out requests.
-- **Reduced payloads.** The popup asks for _clean_ articles — markup
-  reduced by half, every stylesheet and script request dropped. Reading a
-  glance costs one small request, and repeat lookups never reach the
-  network twice (worker cache).
-- **The worker talks, the page doesn't.** Browser security forbids an
-  ordinary page from calling your server — so the extension's background
-  worker does it, on its own extension identity, and relays results to
-  the popup. Definitions, images and pronunciation audio all arrive that
-  way; the page you are reading never addresses your machine, so your
-  browser never asks whether *that site* may reach your local network.
-  The server's loopback binding stays intact, and your dictionaries stay
-  unexposed to the internet.
+**One request per lookup.** The server searches several dictionaries in a
+single call, so the extension never sends one request per dictionary.
 
-    WuWeiDict answers extension identities — and only them — on the three
-    read-only endpoints the extension uses. Websites get nothing, and no
-    part of the private API (importing, deleting, settings) is reachable
-    that way. `BROWSER_EXTENSIONS` narrows it further to a named list.
+**Small payloads.** The popup asks for `clean` articles. That form is about
+half the size of the original markup and drops every stylesheet and script
+request. Repeated lookups are answered from the worker's cache and never reach
+the network twice.
 
-    If the extension reports **"is not answering extensions"**, the
-    WuWeiDict you are running predates this and needs an update.
+**The worker talks, the page does not.** A browser forbids an ordinary web page
+from calling a server on your machine. The extension's background worker calls
+it instead, under the extension's own identity, and passes the result to the
+popup. The page you are reading never addresses your machine, so your browser
+never asks whether *that site* may reach your local network.
 
-## Requirements
+WuWeiDict answers browser extensions on three read-only endpoints only:
+`/api/dicts`, `/api/search` and `/res/`. Web pages get nothing. Settings,
+preferences and the library are unreachable this way.
 
-- **wuWeiDict running** on the machine the browser runs on — the
-  extension reaches `127.0.0.1:6888`, nothing else.
-- Modern Chrome or Firefox (Manifest V3). No other extensions required,
-  and none of your browsing data requests is ever read.
-- **No permissions to grant.** The extension asks for no site and no host
-  at install; there is nothing to approve and no prompt to dismiss.
+To allow named extensions only, list their origins in
+[`BROWSER_EXTENSIONS`](reference/configuration.md#browser_extensions).
 
-!!! info inline end "Status"
+??? question "The popup says WuWeiDict is not answering extensions"
 
-    Preview builds circulate manually. The Chrome Web Store and Firefox
-    Add-ons listings are in preparation; every `FIXME.TODO.com` link on
-    this page becomes a live store page the day they are approved.
+    Your WuWeiDict is older than this feature. Download the current release and
+    replace the binary.
 
-WuWeiDict reads your dictionaries. The extension carries that reading to
-every page you visit — without ever leaving home.
+    [Install](start/install.md)

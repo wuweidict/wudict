@@ -1,19 +1,16 @@
 # ============================================================================
-# WuWeiDict — documentation site configuration (Zensical, TOML)
+# WuWeiDict - documentation site configuration (Zensical, TOML)
 #
 # Build:   zensical build        (from this directory)
 # Preview: zensical serve        (http://localhost:8000)
 #
-# The marketing copy, install guides and extension docs live in `docs/`
-# as plain Markdown. Keep this file readable: every setting below is
-# deliberate, and every value the site can do without is left out.
 # ============================================================================
 
 [project]
 
-site_name = "wuDict"
-site_description = "wuDict (wudict) — one small binary that turns every dictionary you own into a fast, private, offline-first search server in your browser. Supports MDX/MDD, StarDict, Slob, DSL, BGL and its own portable library format."
-site_author = "The wuDict contributors"
+site_name = "WuWeiDict"
+site_description = "WuWeiDict (wudict) is a native app for macOS, Linux, Windows and Android that reads MDX/MDD, StarDict, Slob, DSL and BGL dictionaries."
+site_author = "The WuWeiDict contributors"
 site_url = "https://wudict.legbehindneck.com"
 
 copyright = """
@@ -25,34 +22,56 @@ repo_name = "wuweidict/wudict"
 edit_uri = "edit/master/pages/docs/"
 
 # ----------------------------------------------------------------------------
-# Navigation. Explicit, so the reading order is the thinking order: meet the
-# idea, get it running, learn to use it, then go deeper only when curious.
+# Navigation.
+#
+# Sections are named for what a reader types into the search box, not for what
+# the software calls the thing. "Run at startup" beats "Background service".
+#
+# Install and first run are separate pages because they are read at different
+# moments and fail in different ways: install fails on the download, first run
+# fails on the dictionary folder.
 # ----------------------------------------------------------------------------
 nav = [
   { "Home" = "index.md" },
   { "About" = "about.md" },
-  { "Quick start" = [
-    "install.md",
-    "run.md",
-    "use.md",
+  { "Quick Start" = [
+    "start/install.md",
+    "start/first-run.md",
+    "start/search.md",
   ] },
-  { "Chrome/Firefox" = [
-    "extension.md",
+  { "Apps" = [
+    "apps/macos.md",
+    "apps/windows.md",
+    "apps/android.md",
   ] },
   { "Dictionaries" = [
-    "dictionaries.md",
-    "service.md",
+    "dictionaries/formats.md",
+    "dictionaries/library.md",
+    "dictionaries/override.md",
+  ] },
+  { "Browser extension" = [
+    "extension.md",
+  ] },
+  { "Run at startup" = [
+    "running.md",
+  ] },
+  { "Reference" = [
+    "reference/configuration.md",
+    "reference/cli.md",
+    "reference/api.md",
+    "reference/building.md",
   ] },
   { "Help" = [
-    "faq.md",
-    "license.md",
+    "help/troubleshooting.md",
+    "help/faq.md",
+    "help/license.md",
   ] },
 ]
 
 extra_css = ["stylesheets/extra.css"]
 
 # ----------------------------------------------------------------------------
-# Theme — the modern variant, tuned for reading
+# Theme - the modern variant, tuned for reading
 # ----------------------------------------------------------------------------
 [project.theme]
 variant = "modern"
@@ -62,7 +81,7 @@ favicon = "assets/favicon.svg"
 language = "en"
 
 features = [
-  # Announcement bar (content in overrides/main.html) — a dismissible line
+  # Announcement bar (content in overrides/main.html) - a dismissible line
   # instead of a wall of text.
   "announce.dismiss",
 
@@ -78,10 +97,13 @@ features = [
   # Footnotes read without leaving the sentence.
   "content.footnote.tooltips",
 
-  # Tabs with matching labels stay in step across the whole site.
+  # Tabs with matching labels stay in step across the whole site. This is why
+  # every OS tab set on every page uses the labels macOS / Linux / Windows /
+  # Android in that order: pick your system once on the install page and every
+  # later page is already showing it.
   "content.tabs.link",
 
-  # Richer link tooltips.
+  # Richer link tooltips, and abbreviations defined in includes/abbr.md.
   "content.tooltips",
 
   # The header steps aside when you read, returns when you scroll up.
@@ -94,6 +116,11 @@ features = [
   "navigation.instant",
   "navigation.instant.prefetch",
   "navigation.instant.progress",
+
+  # Hover an internal link, read the target section without leaving the page.
+  # This site cross-references heavily - a task page sends you to a reference
+  # table for one value - and this turns most of those trips into a glance.
+  "navigation.instant.preview",
 
   # Breadcrumbs above every title.
   "navigation.path",
@@ -136,25 +163,27 @@ toggle.name = "Switch to light mode"
 
 [project.theme.icon]
 repo = "fontawesome/brands/github"
-tag.default = "lucide/hash"
-tag.start = "lucide/rocket"
-tag.browser = "lucide/globe"
-tag.format = "lucide/book-open"
 
 # ----------------------------------------------------------------------------
-# Extra data used by templates, tags and the social footer
+# Extra data used by templates
+#
+# No tags. Zensical 0.0.50 ships the search and offline plugins only, so no
+# tags index page exists; partials/tags.html renders a tag as a link only when
+# a plugin gives it a URL, and otherwise as a plain span. Tags here were five
+# pages of unclickable decoration that looked like navigation.
+#
+# The status badge, by contrast, does work - it just needs its label here, or
+# the badge appears with no tooltip at all.
 # ----------------------------------------------------------------------------
-[project.extra.tags]
-Quickstart = "start"
-Browser = "browser"
-Formats = "format"
+[project.extra.status]
+new = "Recently added"
 
 [[project.extra.social]]
 icon = "fontawesome/brands/github"
 link = "https://github.com/wuweidict/wudict"
 
 # ----------------------------------------------------------------------------
-# Markdown extensions — the working set: callouts, cards, tabs, annotations,
+# Markdown extensions - the working set: callouts, cards, tabs, annotations,
 # formatting, keys, task lists, and Mermaid diagrams. Nothing exotic.
 # ----------------------------------------------------------------------------
 [project.markdown_extensions.abbr]
@@ -184,6 +213,13 @@ pygments_lang_class = true
 [project.markdown_extensions.pymdownx.quotes]
 callouts = true
 [project.markdown_extensions.pymdownx.smartsymbols]
+
+# The glossary is appended to every page, so a term is defined once and gets a
+# tooltip everywhere it appears. Non-native readers pay nothing for a term they
+# already know and lose nothing to one they do not.
+[project.markdown_extensions.pymdownx.snippets]
+auto_append = ["includes/abbr.md"]
+
 [project.markdown_extensions.pymdownx.superfences]
 custom_fences = [
   { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },

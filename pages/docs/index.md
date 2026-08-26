@@ -1,81 +1,108 @@
 ---
 title: Home
-description: WuWeiDict — use every dictionary you own from your browser.
+description: WuWeiDict searches every dictionary you own from your browser. One file to download, no account, no cloud, nothing leaves your machine.
 ---
 
-# WuWeiDict: all your dictionaries, in your web browser
+# All your dictionaries, in your browser
 
-**WuWeiDict** (`wudict` for short, pronounced _woo-way_) is a golang app
-that lets you search all your dictionaries directly from your browser. It runs on
-your computer on
+**WuWeiDict** (the program is called `wudict`) searches every dictionary file you
+own. It runs on your own computer and answers in your browser at
 [localhost:6888](http://localhost:6888).
 
-[Installation](install.md){ .md-button .md-button--primary }
-[Usage](run.md){ .md-button }
-[Chrome/Firefox extension](extension.md){ .md-button }
+One file. No runtime, no database server, no account. Your dictionaries stay
+on your disk.
 
-No account. No cloud. No telemetry, no analytics or tracking. **Your dictionaries never leave your
-machine.**
+[Install](start/install.md){ .md-button .md-button--primary }
+[First run](start/first-run.md){ .md-button }
+[Browser extension](extension.md){ .md-button }
 
 ---
 
-## Supported formats
+## Supported dictionary formats
 
 <div class="grid cards" markdown>
 
-:fontawesome-solid-file-zipper: **MDict** `.mdx` + `.mdd`
+-   :fontawesome-solid-file-zipper:{ .lg .middle } **MDict**
 
-A popuplar HTML-based format with optional media.
+    ---
 
-:fontawesome-solid-book-bookmark: **StarDict** `.ifo` / `.idx` / `.dict`
+    `.mdx` plus `.mdd`. The most common format. Articles are HTML, media
+    travels in companion files.
 
-The GNU/Linux classic. Synonyms, scanned images, dictzip compression,
-all read in place.
+-   :fontawesome-solid-book-bookmark:{ .lg .middle } **StarDict**
 
-:fontawesome-solid-layer-group: **Aard 2** `.slob`
+    ---
 
-A self-contained format with images, media and styles originally created for Wikipedia dumps.
+    `.ifo`, `.idx`, `.dict`. Synonym files, images and dictzip compression are
+    all read in place.
 
-:fontawesome-solid-language: **Lingvo DSL** `.dsl`, `.dsl.dz`
+-   :fontawesome-solid-layer-group:{ .lg .middle } **Aard 2**
 
-An old but still widely used format popular in Eastern Europe.
+    ---
 
-:fontawesome-solid-earth-americas: **Babylon BGL** `.bgl`
+    `.slob`. Images, audio and styles are stored inside the one file.
 
-Yet another previously popular dictionary format.
+-   :fontawesome-solid-language:{ .lg .middle } **Lingvo DSL**
 
-:fontawesome-solid-box-archive: **WuWeiDict libraries** `text.db`
+    ---
 
-WuDict's own internal SQLite3-based format. One folder per dictionary that can
-be moved and shared.
+    `.dsl` and `.dsl.dz`. Old, and still widely used in Eastern Europe.
+
+-   :fontawesome-solid-earth-americas:{ .lg .middle } **Babylon**
+
+    ---
+
+    `.bgl`. Character sets are detected automatically, resources are read from
+    inside the file.
+
+-   :fontawesome-solid-box-archive:{ .lg .middle } **WuWeiDict library**
+
+    ---
+
+    `text.db`. wuDict's own SQLite3-based format: one folder per dictionary, which you can
+    copy share.
 
 </div>
 
-By default wudict searches all your dictionaries, with results displayed as soon as they are retrieved.
-You can configure the search priority from the dictionary panel under the hamburger menu (☰).
+[All format details](dictionaries/formats.md){ .md-button }
 
 ---
 
-## Search type types
+## How you search
 
-Dictionary headwords are indexed on the fly and results are return even while indexing is still in progress.
-Full-text search is optional and can be generated only for specific dictionaries from the dictionary panel (☰),
-or for all dictionary using the CLI interface (NOTE: enabling will use additional disk space, up to 3x the dictionary size).
+WuWeiDict searches all your dictionaries at once. Results appear per dictionary as
+each one answers, so you read the first hit before the slowest dictionary has
+finished.
 
-| Search mode   | Availability   | It answers                                                             |
-| ------------- | -------------- | ---------------------------------------------------------------------- |
-| **Exact**     | out-of-the-box | the headword, accent- and case-insensitive — `corazon` finds `corazón` |
-| **Prefix**    | out-of-the-box | every headword that starts with what you typed                         |
-| **Contains**  | on demand      | the term anywhere in the word, typos forgiven                          |
-| **Full-text** | on demand      | words _inside_ the definitions, ranked by relevance                    |
+| Mode | It finds | Available |
+| --- | --- | --- |
+| **Exact** | the headword itself, ignoring case and accents - `corazon` finds `corazón` | always |
+| **Prefix** | every headword that starts with your text | always |
+| **Contains** | your text anywhere inside a headword | switch per dictionary |
+| **Full-text** | words inside the article text, ranked by relevance | switch per dictionary |
 
-Exact and prefix work immediately. Contains and
-full-text are per-dictionary switches in the ☰ panel, each labelled with its
-true size before you commit.
+Exact and prefix work the moment a dictionary is found. Contains and full-text
+need an extra index. The ☰ panel offers each one as a switch and shows what it
+costs in megabytes first.
+
+[How search works](start/search.md){ .md-button }
 
 ---
 
-#### More
+## Where it runs
 
-[About](about.md) · [Install](install.md) ·
-[Chrome/Firefox extension](extension.md)
+| | |
+| --- | --- |
+| **macOS** | a command, or [wuDict.app](apps/macos.md) with a menu-bar icon |
+| **Windows** | a command, or [an installer](apps/windows.md) with a tray icon |
+| **Linux** | a command, and a systemd user unit for [startup](running.md) |
+| **Android** | [an app](apps/android.md) that looks a word up from inside any other app |
+
+---
+
+## What it does not do
+
+- It does not send anything anywhere. The server listens on the loopback
+  address only.
+- It has no account, no telemetry, no analytics and no crash reporting.
+- It does not change your dictionary files. It only reads them.
