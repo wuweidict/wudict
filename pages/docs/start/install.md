@@ -6,7 +6,7 @@ description: Download and run WuWeiDict on macOS, Linux, Windows or Android. One
 # Install
 
 WuWeiDict is one executable per platform. It needs no runtime, no database
-server and no setup step. Download the file, make it runnable, start it.
+server and (almost) zero configuration. Download the file, make it executable, start it.
 
 Optionally, for macOS you can download the macOS bundle, for Windows an install wizard is available.
 

@@ -1,2 +1,6 @@
 # Build output of the Zensical documentation site
 site/
+
+# The rendered API explorer, copied in by `make docs-api` before the build.
+# Generated from internal/server/web/openapi.yaml; never edited here.
+docs/api/

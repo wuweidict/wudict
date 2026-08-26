@@ -55,7 +55,7 @@ on your disk.
     `.bgl`. Character sets are detected automatically, resources are read from
     inside the file.
 
--   :fontawesome-solid-box-archive:{ .lg .middle } **WuWeiDict library**
+-   :fontawesome-solid-box-archive:{ .lg .middle } **wuDict library**
 
     ---
 
@@ -70,7 +70,7 @@ on your disk.
 
 ## How you search
 
-WuWeiDict searches all your dictionaries at once. Results appear per dictionary as
+wuDict searches all your dictionaries at once. Results appear per dictionary as
 each one answers, so you read the first hit before the slowest dictionary has
 finished.
 

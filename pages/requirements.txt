@@ -1,0 +1,12 @@
+# The documentation site generator, pinned.
+#
+# Zensical is pre-1.0 and releases often - 0.0.57 was current when this pin was
+# written, and the site is validated against 0.0.50. An unpinned CI install
+# would therefore build the published site with software nobody here has run.
+#
+# To upgrade: raise the number, run `make docs` locally, look at the result,
+# then commit. That makes an upgrade a reviewable change instead of a surprise
+# at deploy time.
+#
+# Install:  pip install -r pages/requirements.txt
+zensical==0.0.57

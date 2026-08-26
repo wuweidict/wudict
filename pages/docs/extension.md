@@ -6,7 +6,7 @@ status: new
 
 # Browser extension
 
-With the wuDict extension you can quickly get a definition for any word in your browser 
+With the wuDict Hover extension you can quickly get a definition for any word in Chrome/Firefox 
 by hovering (with an optional key) or via the right-click context menu - no need to copy-paste words into another app.
 
 The extension needs the wuDict server to be running on the same computer or another computer in your local network.
@@ -19,15 +19,15 @@ The extension needs the wuDict server to be running on the same computer or anot
 
 ## Preconditions
 
-- **wuDict must be running** on the same machine as the browser. The extension talks to
-  `127.0.0.1:6888`. You can also configure it to use a wudict server on another computer in your local network, and then set the IP address in the extension settings.
+- a running **wuDict** server, by default `127.0.0.1:6888`. You can also configure the wudict server to run 
+on another computer in your local network, and then set the IP address in the extension settings.
 - **Chrome or Firefox**, current version, Manifest V3.
 
 
-The server must be running for the popup to answer.
+Without a running wudDict server the browser extension cannot work.
 [Keep it running](running.md){ .md-button }
 
-## Install a build by hand
+## Install the wuDict Hover extension in development mode 
 
 === "Chrome"
 
@@ -49,22 +49,23 @@ The server must be running for the popup to answer.
     and pick `manifest.json` inside the unpacked folder. Temporary add-ons
     disappear when Firefox restarts.
 
-## Use it
+## Using wuDict Hover
 
-Hover a word. The popup shows the entry, worded by your dictionaries.
+Hover a word while holding the <kbd>Alt</kbd> key, or without a key, depending on what you set in <kbd>Options</kbd>. 
+The definitions from wuDict will show in a popup below your mouse.
 
 - **Exact lookups only.** The popup asks for the word itself, never for every
-  word starting with it. Hovering *run* does not offer *runny*. You get one or
+  word starting with it. Hovering *run* will not return *running*. You get one or
   two results per dictionary.
-- **Audio plays** in the popup. Speex is converted by the server first.
-- **Open in WuWeiDict** shows the full entry in the dictionary's own styling, in
-  the main page. The popup is a glance; the app is for reading.
+- **Audio plays** in the popup when available.
+- **Look up selection in wuDict** is an alternative way to show definitions. Whether the results open in the 
+popup or in the main wuDict page is controlled by <kbd>Options</kbd> > <kbd>Options</kbd> > <kbd>Search opens</kbd>: popup/full wudict page. 
 - **Cross-references leave the popup.** Clicking a link inside the popup opens
-  the target in the main page, in the dictionary the link came from.
+  the target in the main wuDict page.
 
 ## Options
 
-The options page controls all of it.
+wuDict Hover options
 
 ``` text title="the defaults"
 Server          http://127.0.0.1:6888      set once, remembered

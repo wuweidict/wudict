@@ -1,0 +1,90 @@
+# The documentation site: build pages/ and publish it to GitHub Pages.
+#
+# Deployment is the modern one - an artifact uploaded by this workflow and
+# handed to the Pages runtime over OIDC. There is no gh-pages branch, and
+# nothing here writes to the repository.
+#
+# One manual step is required once, and cannot be done from a workflow:
+# Settings > Pages > Build and deployment > Source must be "GitHub Actions".
+# The custom domain (wudict.legbehindneck.com) is set on the same page; with
+# Actions deployments it lives in repository settings, so no CNAME file is
+# needed.
+name: docs
+
+on:
+  push:
+    branches: [master]
+    # The site is rebuilt for its own sources, and for the API document it
+    # publishes - not for every Go change.
+    paths:
+      - 'pages/**'
+      - 'internal/server/web/openapi.yaml'
+      - 'redocly.yaml'
+      - 'tools/inline-api-docs.py'
+      - 'Makefile'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+# Read the repo; mint the OIDC token deploy-pages exchanges for the write.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one in flight: a half-published
+# site is worse than a late one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: pages/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install the site generator
+        run: pip install -r pages/requirements.txt
+
+      # The document this site publishes must still describe the server it
+      # documents. The Go workflows run this too; the duplication is the point,
+      # because a wrong contract on the public site outlives a red build.
+      - name: Check the API document against the routes
+        run: make api-test
+
+      - name: Validate the API document
+        run: make api-lint
+
+      # Renders the explorer into pages/docs/api/, then builds with --strict:
+      # any broken link or anchor fails the job.
+      - name: Build the site
+        run: make docs
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -60,6 +60,30 @@ both directions, so an endpoint cannot be added, renamed or dropped without the
 document following it. `api-lint` and `api-ui` need the network on first run;
 `make check` never does.
 
+## The documentation site
+
+This site is built by [Zensical](https://zensical.org/) from `pages/`, and
+published to GitHub Pages by `.github/workflows/docs.yml` on every push to
+`master` that touches it.
+
+``` sh title="build it, preview it"
+pip install -r pages/requirements.txt
+make docs         # into pages/site, warnings are errors
+make docs-serve   # preview at localhost:8000
+make docs-clean   # remove the output, the cache and the copied explorer
+```
+
+The generator is pinned in `pages/requirements.txt`. Zensical is pre-1.0, so an
+unpinned install would build the published site with a version nobody tested.
+
+`make docs` renders the API explorer into `pages/docs/api/` before it builds,
+so the [explorer](../api/index.html) is part of the site and appears in the
+local preview too. That folder is generated, and git ignores it.
+
+The build runs with `--strict`, which turns a broken link or a missing anchor
+into a failed build. Without that flag Zensical reports the issue and still
+exits 0.
+
 ## Release builds
 
 ``` sh title="every release platform from one machine"

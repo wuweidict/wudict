@@ -302,7 +302,9 @@ check: tidy vet test ## Pre-commit gate: tidy + vet + test
 # here is a build or module dependency, and `make check` never touches the
 # network.
 OPENAPI  := internal/server/web/openapi.yaml
-REDOCLY  ?= npx -y @redocly/cli
+# Pinned: `npx @redocly/cli` floats across majors, and a docs deploy must not
+# change because someone else published a release.
+REDOCLY  ?= npx -y @redocly/cli@2.48.0
 API_HTML := $(BUILD_DIR)/api-explorer.html
 
 .PHONY: api-test
@@ -329,6 +331,48 @@ api-open: api-ui ## Render the API explorer, then open it in a browser
 .PHONY: api-spec
 api-spec: ## Print every documented operation, one per line
 	@sed -n '/^paths:/,/^components:/p' $(OPENAPI) | grep -E '^  /|^    (get|put|post|delete|options):' | sed 's/:$$//'
+
+# ---- documentation site -------------------------------------------------
+# pages/ is a Zensical site. Two rules make it reproducible:
+#
+#   * the generator is pinned in pages/requirements.txt - Zensical is pre-1.0,
+#     and an unpinned install builds the public site with an untested version;
+#   * `--strict` is not optional. Without it `zensical build` prints "1 issue
+#     found" for a broken link and still exits 0, which makes a CI check that
+#     trusts the exit code a decoration.
+#
+# The API explorer is copied into docs/api/ BEFORE the build, not into site/
+# after it: site/ is derived and must have exactly one producer, and a file
+# that only exists in CI cannot be previewed with `make docs-serve`. Zensical
+# copies an .html under docs/ through byte-for-byte, no templating.
+#
+# Note that Zensical validates .md links only - a link to docs/api/index.html
+# is NOT checked. `make docs` asserts the file landed instead.
+PAGES     := pages
+ZENSICAL  ?= zensical
+DOCS_API  := $(PAGES)/docs/api/index.html
+
+.PHONY: docs-api
+docs-api: api-ui ## Render the API explorer into the docs tree (pages/docs/api/)
+	@mkdir -p $(dir $(DOCS_API))
+	@cp $(API_HTML) $(DOCS_API)
+	@echo "wrote $(DOCS_API)"
+
+.PHONY: docs
+docs: docs-api ## Build the documentation site into pages/site (strict: warnings fail)
+	@command -v $(ZENSICAL) >/dev/null || { echo "zensical not found: pip install -r $(PAGES)/requirements.txt"; exit 1; }
+	cd $(PAGES) && $(ZENSICAL) build --strict
+	@test -s $(PAGES)/site/api/index.html || { echo "the API explorer did not reach the site"; exit 1; }
+	@echo "site in $(PAGES)/site - API explorer at /api/"
+
+.PHONY: docs-serve
+docs-serve: docs-api ## Preview the documentation site at localhost:8000
+	@command -v $(ZENSICAL) >/dev/null || { echo "zensical not found: pip install -r $(PAGES)/requirements.txt"; exit 1; }
+	cd $(PAGES) && $(ZENSICAL) serve
+
+.PHONY: docs-clean
+docs-clean: ## Remove the built site, the Zensical cache and the copied explorer
+	rm -rf $(PAGES)/site $(PAGES)/.cache $(dir $(DOCS_API))
 
 # ---- launchd agent (macOS) ----------------------------------------------
 # Modern launchctl syntax (bootstrap/bootout/kickstart), GUI domain.

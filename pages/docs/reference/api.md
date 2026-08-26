@@ -27,6 +27,7 @@ document. This page explains the parts a schema cannot state.
 | `http://127.0.0.1:6888/api/openapi.yaml` | the running server describes itself; feed the downloaded .yml file to any OpenAPI compatible tool such as e.g. https://editor.swagger.io/ |
 | [`internal/server/web/openapi.yaml`](https://github.com/wuweidict/wudict/blob/master/internal/server/web/openapi.yaml) | the same file, in the repository                                                                                                          |
 | `make api-ui` | renders it into `dist/api-explorer.html`, one offline page                                                                                |
+| [ API explorer](../api/index.html) | the same document, rendered and browsable, with a `curl` example on every endpoint                        |
 
 A test walks that document against the server's route table in both
 directions, so an endpoint cannot be added, renamed or dropped without the
