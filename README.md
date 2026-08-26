@@ -1,8 +1,8 @@
 # WuWeiDict
 
 Fast, self-contained, multi-format dictionary server that runs in your
-browser at [http://localhost:6888](http://localhost:6888). One binary, no
-dependencies; drop your dictionaries in a folder and search them all at
+browser at [http://localhost:6888](http://localhost:6888). One native binary, no
+dependencies; set the folders with your .mdx/.slob/.bgl/.ifo dictionaries, and search them all at
 once.
 
 **Supported formats**
@@ -24,17 +24,18 @@ once.
 2. Run `wudict` or `./wudict` if the file is in the current folder. On windows use the installer [`wudict-windows-x64-setup-<x.y.z>.exe`](https://github.com/wuweidict/wudict/releases/latest) or download the standalone executable `wudict-windows-amd64-cgo.exe` and then double-click to run. 
 3. By default `wudict` searches for dictionaries under `~/Dictionaries` (including subfolders); 
    if the dictionary folder is missing or
-   empty, a setup page opens where you set custom folders with dictionaries.
+   empty, a setup page opens where you can set custom folders with dictionaries.
 
 ## Adding dictionaries 
-Dictionary folders can be configured in the browser via the [browser setup page http://localhost:6888/setup](http://localhost:6888/setup) when `wudict` is running. 
+Dictionary folders can be configured in the browser via the [browser setup page http://localhost:6888/setup](http://localhost:6888/setup) when `wudict` is running. The browser setup page is convenience 
+for writing `DICT_DIR` in the configuration file at `~/.wudict/wudict.toml`.
 
 ### Multiple dictionary folders
 
 `DICT_DIR` accepts more than one folder:
 
 As an alternative to the [setup page](http://localhost:6888/setup) you can configure the dictionary folders from
-the console via cli args, env vars or using the config file at `~/.wudict/wudict.toml`:
+the console via cli args, env vars or by directly editing the config file at `~/.wudict/wudict.toml`:
 ```sh
 # as one or more CLI args:
 wudict --dict-dir ~/Dictionaries --dict-dir /Volumes/Data/Dicts   # repeat the flag
