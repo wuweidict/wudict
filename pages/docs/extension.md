@@ -13,11 +13,11 @@ Click a badge below to install:
 
 <p align="center">
   <a href="https://chromewebstore.google.com/detail/bknaaoffefipfnpefmkbipcdemljbhjh">
-    <img alt="Available in the Chrome Web Store" height="60" src="docs/assets/chrome-web-store-badge.png" />
+    <img alt="Available in the Chrome Web Store" height="60" src="assets/chrome-web-store-badge.png" />
   </a>
   &nbsp;&nbsp;&nbsp;
   <a href="https://addons.mozilla.org/firefox/addon/wudict-hover/">
-    <img alt="Get the Add-on for Firefox" height="60" src="docs/assets/firefox-get-the-addon.svg" />
+    <img alt="Get the Add-on for Firefox" height="60" src="assets/firefox-get-the-addon.svg" />
   </a>
 </p>
 
