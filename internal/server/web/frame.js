@@ -17,6 +17,163 @@
 	var wantFrag = document.currentScript.dataset.frag || "";
 	var audioEl = null; // reused across clicks so playback isn't GC'd mid-load
 
+	// ------------------------------------------------------------------ host
+	// The app window. Captured before `window.parent` is replaced below, and
+	// from here on the only channel this file uses to reach the application.
+	var HOST = window.parent;
+
+	// --- the article's faults become visible ------------------------------
+	// A dead article and a working one look identical from the outside: one
+	// unanswerable question about the host silently costs every feature the
+	// dictionary has. Register before anything else runs.
+	function report(msg, src, line, col) {
+		try {
+			HOST.postMessage({
+				t: "jserr", fid: fid, dict: dictID,
+				msg: String(msg == null ? "script error" : msg),
+				src: String(src || ""), line: +line || 0, col: +col || 0
+			}, "*");
+		} catch (e) { /* the app is gone; there is nobody to tell */ }
+	}
+	// Bubble phase deliberately: a failed resource load (a 404 image in the
+	// article's own markup) only reaches window in the capture phase, and is
+	// not a script fault.
+	addEventListener("error", function (e) {
+		report((e.error && e.error.message) || e.message, e.filename, e.lineno, e.colno);
+	});
+	addEventListener("unhandledrejection", function (e) {
+		var r = e.reason;
+		report((r && r.message) || r, "", 0, 0);
+	});
+
+	// --- the soft value ---------------------------------------------------
+	// "Nothing here", in every idiom JavaScript has for asking. A function, so
+	// `typeof` reports "function"; calling it or reading any property yields
+	// another one, so `parent.a.b.c()` chains instead of throwing; length 0 and
+	// no items, so `parent.$("#k_iframe").length` correctly answers falsy.
+	function softValue(path) {
+		var target = function () {};
+		return new Proxy(target, {
+			apply: function () { return softValue(path + "()"); },
+			construct: function () { return softValue("new " + path); },
+			get: function (t, k) {
+				if (k === "length") return 0;
+				if (k === "name") return "";
+				if (k === "then") return undefined;  // never a thenable: an await must not hang
+				if (k === "prototype") return t.prototype;
+				if (k === "toString" || k === "toJSON" || k === "toLocaleString")
+					return function () { return ""; };
+				if (k === "valueOf") return function () { return 0; };
+				if (k === Symbol.iterator)
+					return function () { return [][Symbol.iterator](); };
+				if (k === Symbol.toPrimitive)
+					return function (hint) { return hint === "number" ? 0 : ""; };
+				if (typeof k === "symbol") return undefined;
+				if (/^\d+$/.test(k)) return undefined;  // an empty collection has no items
+				return softValue(path + "." + k);
+			},
+			// `prototype` is the function target's one non-configurable own
+			// property; denying it would break the Proxy invariant.
+			has: function (t, k) { return k === "prototype"; },
+			set: function () { return true; },
+			deleteProperty: function () { return true; }
+		});
+	}
+
+	// --- window.parent is a declared contract, not the app's namespace -----
+	// `parent` is [Replaceable] in the HTML spec's Window IDL, so assigning it
+	// replaces the accessor with a data property. What an article finds there
+	// is now a fixed, honest surface rather than ~100 of this application's
+	// top-level names, which it was never designed to read and whose meanings
+	// are not the ones it assumes (ODE 2024 asks for `parent.$` expecting
+	// jQuery, gets our getElementById helper, and dies on the first line of
+	// its initialiser).
+	var IDENT = { self: 1, window: 1, parent: 1, top: 1 };
+	var LIVE = { innerWidth: 1, innerHeight: 1, outerWidth: 1, outerHeight: 1, devicePixelRatio: 1 };
+
+	function inertLocation(loc) {
+		var out = {};
+		["href", "origin", "protocol", "host", "hostname", "port", "pathname", "search", "hash"]
+			.forEach(function (k) {
+				var v = ""; try { v = String(loc[k]); } catch (e) { }
+				// accessor, not a frozen value: a strict-mode article assigning
+				// parent.location.href must be inert, not fatal.
+				Object.defineProperty(out, k, {
+					get: function () { return v; }, set: function () { }, enumerable: true
+				});
+			});
+		out.toString = function () { return out.href; };
+		out.assign = out.replace = out.reload = function () { };
+		return out;
+	}
+
+	var hostAPI = {
+		// the frame/app protocol stays open to the dictionary's own scripts
+		postMessage: function () { return HOST.postMessage.apply(HOST, arguments); },
+		// blank and detached: `parent.document.querySelector("#k_iframe")` is
+		// null by contract instead of by luck, and the app's DOM is gone.
+		document: document.implementation.createHTMLDocument(""),
+		location: inertLocation(HOST.location),
+		frames: [], length: 0, closed: false, name: ""
+	};
+	var own = Object.create(null);   // whatever the article writes lands here
+	var softs = Object.create(null);
+	var facade;
+
+	function facadeGet(t, k) {
+		if (k in t) return t[k];
+		if (IDENT[k] === 1) return facade;  // parent.parent must not hand back the real window
+		if (Object.prototype.hasOwnProperty.call(hostAPI, k)) return hostAPI[k];
+		if (LIVE[k] === 1) { try { return HOST[k]; } catch (e) { return 0; } }
+		if (typeof k === "symbol") return undefined;
+		if (!softs[k]) {
+			softs[k] = softValue("parent." + k);
+			// The one line that names the next unknown host API without anyone
+			// opening a debugger.
+			try { console.debug("wudict: article read parent." + k + " - answering empty"); } catch (e) { }
+		}
+		return softs[k];
+	}
+	function reserved(k) {
+		return IDENT[k] === 1 || LIVE[k] === 1 ||
+			Object.prototype.hasOwnProperty.call(hostAPI, k);
+	}
+	facade = new Proxy(own, {
+		get: facadeGet,
+		// Refusing the contract names keeps ownKeys duplicate-free, which is a
+		// Proxy invariant, not a preference.
+		set: function (t, k, v) { if (!reserved(k)) t[k] = v; return true; },
+		defineProperty: function (t, k, d) { if (!reserved(k)) Object.defineProperty(t, k, d); return true; },
+		deleteProperty: function (t, k) { if (!reserved(k)) delete t[k]; return true; },
+		// honest: `"mdict" in parent` is false, so in/typeof probes get the
+		// truth and only call-shaped probes get the soft value.
+		has: function (t, k) { return k in t || reserved(k); },
+		ownKeys: function (t) {
+			return Object.getOwnPropertyNames(t)
+				.concat(Object.keys(IDENT), Object.keys(hostAPI), Object.keys(LIVE));
+		},
+		getOwnPropertyDescriptor: function (t, k) {
+			var d = Object.getOwnPropertyDescriptor(t, k);
+			if (d) return d;
+			if (reserved(k))
+				return { value: facadeGet(t, k), writable: false, enumerable: true, configurable: true };
+			return undefined;
+		}
+	});
+
+	if (HOST && HOST !== window) {
+		try { window.parent = facade; } catch (e) { }
+		// no [LegacyUnforgeable], and [Global] makes it a configurable own
+		// property. null is what a top-level or cross-origin frame reports, so
+		// it is the answer least likely to surprise - and it closes the last
+		// handle on the app's DOM.
+		try {
+			Object.defineProperty(window, "frameElement", {
+				get: function () { return null; }, configurable: true
+			});
+		} catch (e) { }
+	}
+
 	// Reports the content's natural height so the parent can size this frame.
 	//
 	// The rule this function exists to obey (D60): every term must be a function of
@@ -92,7 +249,7 @@
 				e.scrollHeight > viewport ? e.scrollHeight : 0
 			);
 		}
-		parent.postMessage({ t: "h", fid: fid, h: Math.ceil(h) }, "*");
+		HOST.postMessage({ t: "h", fid: fid, h: Math.ceil(h) }, "*");
 	}
 	addEventListener("message", function (e) {
 		if (e.data && e.data.t === "theme") {
@@ -146,7 +303,7 @@
 			}
 		}
 		if (!el) return;
-		parent.postMessage({
+		HOST.postMessage({
 			t: "anchor", fid: fid,
 			y: el.getBoundingClientRect().top + (window.pageYOffset || 0)
 		}, "*");
@@ -186,7 +343,7 @@
 				// "ref", not "pick": an author's link is an exact headword and
 				// carries where it was written, so the app searches that
 				// dictionary and leaves the term untouched.
-				parent.postMessage({ t: "ref", w: ref.word, dict: dictID, frag: ref.frag }, "*");
+				HOST.postMessage({ t: "ref", w: ref.word, dict: dictID, frag: ref.frag }, "*");
 				return;
 			}
 			jumpToFragment(ref.frag); // "anchor": a place in this same article
@@ -244,7 +401,7 @@
 			// parent is not sandboxed, so it can open an ordinary tab — and
 			// widening this sandbox to fix a link would be the wrong trade.
 			e.preventDefault();
-			parent.postMessage({ t: "open", url: href }, "*");
+			HOST.postMessage({ t: "open", url: href }, "*");
 		} else if (href && !/^([a-z][\w+.-]*:|\/|#|res\/|assets\/)/i.test(href)) {
 			// A bare relative href with no scheme is a cross-reference: OALD10
 			// writes <a class="Ref" href="defendant">, and Aard/slob articles
@@ -263,7 +420,7 @@
 			e.preventDefault();
 			e.stopPropagation();
 			if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-			parent.postMessage({ t: "ref", w: decodeRef(href), dict: dictID, frag: "" }, "*");
+			HOST.postMessage({ t: "ref", w: decodeRef(href), dict: dictID, frag: "" }, "*");
 		}
 	}, true);
 	// Sub-entry inlining. The iframe is same-origin (sandbox allows it), so it
@@ -313,6 +470,6 @@
 	// (trailing punctuation, footnote digits) and searches everywhere.
 	document.addEventListener("dblclick", function () {
 		var sel = String(document.getSelection() || "").trim();
-		if (sel) parent.postMessage({ t: "pick", w: sel }, "*");
+		if (sel) HOST.postMessage({ t: "pick", w: sel }, "*");
 	});
 })();

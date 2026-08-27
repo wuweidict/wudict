@@ -415,7 +415,7 @@ func init() {
 // Background indexing must respect INDEX_WORKERS. Before this bound existed, a
 // single "all dictionaries" search started one ingest per dictionary - measured
 // at 500 MB and 424 % CPU for four real dictionaries, extrapolating to 18 GB
-// for a 100-dictionary library (docs/PERF.md M1).
+// for a 100-dictionary library (docs.local/PERF.md M1).
 func TestIndexingConcurrencyIsBounded(t *testing.T) {
 	isolatedDBDir(t)
 	dir := t.TempDir()

@@ -226,7 +226,7 @@ func restoreMemoryLimit() {
 // limitRelaxed reports whether the ceiling in force is above the configured
 // one. It is the janitor's reason to keep waking after everything reclaimable
 // is gone: restoring the configured ceiling only ever happens inside a pass,
-// and measured on a real phone (docs/PERF.md §8.5) the passes stop exactly
+// and measured on a real phone (docs.local/PERF.md §8.5) the passes stop exactly
 // when they are needed - the fan-out that forced the relax ends, the heap
 // drains, nothing is left to reclaim, and without this the process would run
 // under a 6 GB ceiling it was granted for one search, for the rest of its life.

@@ -52,7 +52,7 @@ func MaxProcs() int {
 //
 // 1 GB is a reasonable desktop answer and an absurd one on a phone, where it
 // exceeds what the whole app may resident before the platform intervenes. 64 MB
-// holds roughly 180k headwords of direct backends (docs/PERF.md §3.1: ~350 B
+// holds roughly 180k headwords of direct backends (docs.local/PERF.md §3.1: ~350 B
 // each) - several open dictionaries - and everything past that is evicted and
 // reopened on demand, which costs a fraction of a second and no battery to
 // speak of.
@@ -67,7 +67,7 @@ func previewMemoryDefault() int64 {
 //
 // Unset on a desktop. The failure it prevents is real there too - a `dict=all`
 // query over an unprepared library held 6.3 GB against a 64 MB preview budget
-// (docs/PERF.md §8.2) - but the cost of preventing it is dictionaries reported
+// (docs.local/PERF.md §8.2) - but the cost of preventing it is dictionaries reported
 // as not searched, and on a machine with the RAM to spare that is a worse deal
 // than the memory. The key exists; the default declines to take it.
 //

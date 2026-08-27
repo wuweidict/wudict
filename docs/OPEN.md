@@ -2,7 +2,7 @@
 
 Things that have been thought through far enough to cost, and then deliberately parked.
 Nothing here is committed to. An item leaves this file by becoming a D-number in
-`docs/DECISIONS.md`, or by being deleted with a reason.
+`docs.local/DECISIONS.md`, or by being deleted with a reason.
 
 Status vocabulary: **ON HOLD** (wanted, unscheduled) · **MAYBE** (unconvinced) · **DO ANYWAY**
 (stands on its own merits, unrelated to the item it was found under).
@@ -105,7 +105,7 @@ if isASCII(s) { return strings.ToLower(s) }
 ```
 
 The hardened version is plausibly *faster* than the current one. Benchmark before and after
-(`docs/PERF.md` discipline).
+(`docs.local/PERF.md` discipline).
 
 **Cost:** 1–2 days for the folding changes (~50 lines plus a punctuation table and a
 script-aware `Mn` exception list), on top of O1.
@@ -242,7 +242,7 @@ maintenance surface, not a project with an end. **This is the main reason the it
    golem's data is ODbL; OpenCC is Apache-2.0. GPL-3.0-or-later makes *shipping* fine, but
    *embedding* third-party language data changes the attribution obligations.
 8. **Binary size** versus the single self-contained binary (D28), and **RAM** versus
-   `PREVIEW_MEMORY` and the `docs/PERF.md` budgets. Concrete figure for the forward-expansion
+   `PREVIEW_MEMORY` and the `docs.local/PERF.md` budgets. Concrete figure for the forward-expansion
    approach (expanding `.dic` into a form→stem map): en_US ~50k stems → ~250k forms, fine;
    **ru_RU ~150k stems → 3–5M forms ≈ 100–200 MB resident**, not fine.
 
@@ -264,3 +264,129 @@ maintenance surface, not a project with an end. **This is the main reason the it
   mostly look up citation forms, the whole item is worthless.
 - Prepared mode is primary (D15), so index-backed validation is available for most dictionaries.
 - `-tags purego` must keep building (D4/D18), which disqualifies every cgo binding outright.
+
+---
+
+## O4 — Speak the selection with the browser's own voice — **ON HOLD**
+
+*Raised 2026-08-27, immediately after D78/P88 made ODE 2024's scripts run. Parked
+by the user the same day with the design already settled. This entry exists so it
+can be unparked without redoing any of the investigation below.*
+
+### The decision already taken
+
+**Do not sniff dictionary markup. Do not patch dictionaries.** The feature is
+*speak the user's current selection*, triggered in the app, using
+`speechSynthesis.speak(new SpeechSynthesisUtterance(text))`. It knows nothing
+about any dictionary, so no dictionary can break it and it can break none.
+
+### Why it came up
+
+ODE 2024 renders a speaker icon on thousands of examples that have **no audio in
+the MDD**. Those icons are not shipped markup — `ODE_2024.js:398 initTTS()`
+creates them at runtime (`$('<a>',{class:'audio_play_button tts'})`) and binds
+its own click handler. They only became visible because D78 let `main()` run.
+
+They are **not** browser TTS. `createEdgeTTS()` (`ODE_2024.js:432`) opens a
+WebSocket to an undocumented Microsoft Edge read-aloud endpoint, signing the
+request with a SHA-256 token derived from a 5-minute-rounded Windows FILETIME
+(`generateSecMsGecToken`, needs CryptoJS, which *is* present in the MDD, so
+`/res/<id>/crypto-js.min.js` resolves; the server sends no CSP, and
+`enableOnlineTTS` is `true` at line 32).
+
+**Observed:** the socket upgrades and closes cleanly, no error, no audio.
+Diagnosis, from reading the file — **not fixed, and deliberately not fixed**:
+
+- Playback is `globalAudio` (`:296`, a plain `new Audio()`), the *same object*
+  the dictionary's ordinary MDD audio icons use (`:310-312`). If those icons
+  play, then `Audio.play()`, user activation and the sandbox are all proven, and
+  the fault is that `playText` (`:545`) never received a URL.
+- `sendSSMLRequest`'s promise is resolved from exactly one place, `:516`:
+  `dataView.getUint8(0)===0x00 && ===0x67 && ===0x58` — a hardcoded guess that
+  the terminating binary frame's 2-byte big-endian header length is exactly
+  0x0067 (103). If Microsoft's header is any other length, the branch never
+  matches, the promise **never settles**, `await` hangs forever and `catch`
+  never runs. That is precisely the observed symptom.
+- Second candidate: `:502` `if (!(event.data instanceof Blob)) return;` discards
+  every **text** frame, including `turn.end` and any error payload, so the code
+  cannot learn that a turn ended or was refused.
+- **Decisive check if anyone ever cares:** devtools → Network → the `edge/v1`
+  entry → *Messages*. Multi-KB binary frames ⇒ the 0x0067 marker; only text
+  frames ⇒ the service refused the request.
+
+The general lesson, which is the actual reason for this item: a dictionary's
+bespoke cloud-TTS integration built on a private protocol **will** rot — this one
+already has, and its pinned `Sec-MS-GEC-Version=1-130.0.2849.68` is years stale.
+A wudict-level fallback that owns nothing dictionary-specific is the durable
+answer. Per-dictionary `res/` patching was considered and **rejected by the user
+as unsustainable**.
+
+### What already exists (do not rebuild it)
+
+Getting selected text out of an article is the only awkward part, and it is
+solved on **both** renderers:
+
+- **Shadow-DOM articles** — `index.html:1662` uses `attachShadow({mode:"open"})`,
+  and `index.html:2384` already reads
+  `(root&&root.getSelection?root.getSelection():document.getSelection()).toString()`.
+- **Sandboxed iframes** — the parent's `getSelection()` cannot see inside one,
+  but `frame.js` already reads `document.getSelection()` in-frame on dblclick and
+  posts it out as `{t:"pick"}` (the `HOST.postMessage` path, D78).
+
+So the work is *a trigger plus a call*, reusing the paths that feed
+`lookupSelection()` (`index.html:2227`) today. No new architecture.
+
+### Open decisions, all small
+
+1. **Trigger.** A keyboard shortcut collides with nothing and is cheapest. A
+   floating button on selection is nicer and adds a UI surface. Double-click is
+   already taken — it means *look this word up*.
+2. **Voice.** `getVoices()` is empty until `voiceschanged` fires in Chrome, so
+   one async settle is required. Otherwise it is a single preference; the honest
+   default is the browser's default voice.
+3. **Language.** **There is no per-dictionary language field anywhere in the
+   model** — verified against `internal/dict` and a real `info.txt`. Either speak
+   with the default voice and let the user choose one in prefs, or add the field
+   (ingest + schema + prefs + UI) later. On an English-dominant library the
+   default is fine; it is visibly wrong on Espasa-Calpe.
+4. **Android (D52).** WebView has no TTS unless the device has an engine
+   installed. `getVoices()` returning empty is the capability test — hide the
+   affordance rather than offering a dead button.
+5. **Cancel.** One platform voice, many frames. Cancel on navigate, on a new
+   search and on section collapse, or a voice keeps talking about a word the user
+   has left. Touches the D73 latch behaviour; nothing else.
+6. **Chrome's ~15 s utterance cutoff.** Real and still unfixed upstream; the only
+   workaround is a `resume()` timer hack. Irrelevant for a selected example
+   sentence, bites only on paragraph-length text.
+
+Every one of those is a preference or a capability check. **None is dictionary
+knowledge**, which is the whole point.
+
+### Rejected while designing this
+
+- **A `.tts` (or any) CSS-class allowlist.** It is the per-dictionary quirks
+  table D78 abolished, re-entered through a different door: the name is not
+  standardised (`.audio_play_button`, `.speaker`, `.sound`, `.pron`, `sound://`,
+  unclassed `<img>` all occur), it is unversioned, and it rots per repack.
+- **Binding a handler to sniffed icons.** ODE binds click on the very element and
+  calls `stopPropagation()`. Capture phase ⇒ both fire, doubled, in two voices.
+  Bubble phase ⇒ ours never fires. No phase is right for both a dictionary that
+  handles its own icon and one that does not, and the DOM cannot distinguish
+  them.
+- **Deriving "what text to speak" from the DOM.** ODE's `$example.text()` works
+  only because the anchor is a child of the example. Generically the text is in
+  an ancestor, a sibling, or a sibling minus the IPA span — different per
+  dictionary, untestable across 105 of them, and wrong *audibly* (reading
+  `/ˈɔːdə/`, list numbers, grammar labels). The user's selection has none of this
+  ambiguity, which is why the feature is selection-based.
+- **Patching `ODE_2024.js` via `res/`.** Correct mechanism, wrong strategy:
+  rejected by the user as not sustainable long term.
+
+### If a per-dictionary version is ever wanted anyway
+
+Make the selector **data, not code**: an optional `tts` block in the dictionary's
+library folder beside `res/` (selector + text source + language), edited by the
+user and surfaced in the ☰ panel. Same philosophy as the `res/` override — the
+quirk lives with the dictionary that needs it, never in the binary, and an
+unknown dictionary simply has none. Not proposed; recorded so it is not
+re-derived.

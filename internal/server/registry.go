@@ -39,7 +39,7 @@ type upgraded struct {
 
 	// The source handle is opened only when a resource misses media.db - but
 	// it is a full direct backend, so it holds the same ~350 bytes per headword
-	// as any preview (docs/PERF.md §3.1). It is therefore evictable on the same
+	// as any preview (docs.local/PERF.md §3.1). It is therefore evictable on the same
 	// terms: no sync.Once, a recorded weight and last-use, and a release path.
 	srcMu  sync.Mutex
 	src    dict.Dictionary
@@ -138,7 +138,7 @@ func (u *upgraded) Close() error {
 }
 
 // Preparing a dictionary costs a saturated core and a few hundred bytes of RAM
-// per headword (docs/PERF.md §3). Nothing bounded that: `maybeAutoIndex` fired
+// per headword (docs.local/PERF.md §3). Nothing bounded that: `maybeAutoIndex` fired
 // one goroutine per dictionary, so a single "all dictionaries" search over a
 // 100-dictionary library started 100 concurrent ingests - measured at 500 MB
 // and 424 % CPU for FOUR dictionaries, extrapolating to the reported 18 GB and
@@ -361,7 +361,7 @@ func (e *entry) open() (dict.Dictionary, error) {
 // by the janitor, between bursts, and it deliberately refuses to evict anything
 // used in the last minEvictIdle - which is every dictionary a `dict=all` search
 // just touched. Measured, that means a 64 MB budget coexisting with 6.3 GB held
-// (docs/PERF.md §8.2) on a desktop, and 1.71 GB on a 3.8 GB tablet (§8.6): the
+// (docs.local/PERF.md §8.2) on a desktop, and 1.71 GB on a 3.8 GB tablet (§8.6): the
 // budget bounds the *steady state* and nothing bounds the burst. This does.
 //
 // The unit is estimated bytes, not dictionaries, for the same reason the budget
@@ -482,7 +482,7 @@ func (e *entry) openWithin(f *fanout) (dict.Dictionary, error) {
 // dictionary answers from SQLite and costs a few MB whatever its size, so it
 // weighs nothing here. A direct ("preview", D15) backend builds an in-memory
 // headword index on first use - measured at 300–500 bytes per headword across
-// MDX and SLOB (docs/PERF.md §3.1) - and that is what eviction reclaims.
+// MDX and SLOB (docs.local/PERF.md §3.1) - and that is what eviction reclaims.
 func previewWeight(d dict.Dictionary, m dict.Meta) int64 {
 	if _, ok := d.(storeBacked); ok {
 		return 0 // answers from SQLite: the index lives on disk, not in RAM
@@ -501,7 +501,7 @@ func previewWeight(d dict.Dictionary, m dict.Meta) int64 {
 type storeBacked interface{ SourcePath() string }
 
 // previewBytesPerEntry is the per-headword cost of a direct backend's in-memory
-// index (docs/PERF.md §3.1: 290–570 B across formats; 350 is the middle of that
+// index (docs.local/PERF.md §3.1: 290–570 B across formats; 350 is the middle of that
 // range). It is an estimate applied to a headword count, never a measurement of
 // this dictionary: re-measured against MDX in 2026-08 (PERF §8.3) the real cost
 // was 83 B/entry at open and 201 B/entry once a search had built the folded
@@ -871,7 +871,7 @@ func pathID(path string) string {
 // costing a few MB - and deliberately leaves unprepared ones alone: opening
 // those builds an in-memory headword index (measured 300–500 B per headword),
 // and doing it for a whole library was several GB of resident memory for
-// dictionaries nobody had searched yet (docs/PERF.md M2). An unprepared
+// dictionaries nobody had searched yet (docs.local/PERF.md M2). An unprepared
 // dictionary is opened when something actually needs it: a search, or the
 // background indexer that is about to replace it with a prepared one.
 //
@@ -917,7 +917,7 @@ func (r *Registry) Warm() {
 
 // Preview backends are bounded by memory, not by count: dictionaries differ by
 // two orders of magnitude in headwords, so "keep 8 open" would mean 50 MB or
-// 3 GB depending on which 8 (docs/PERF.md §1).
+// 3 GB depending on which 8 (docs.local/PERF.md §1).
 //
 // Eviction runs on a janitor, never on the request path, and never touches a
 // backend used in the last minEvictIdle. That is deliberate: a search that
@@ -1227,7 +1227,7 @@ func (e *entry) rebuild(name, textDB string, plan store.Plan, progress store.Pro
 // reopen swaps in a view of the freshly written data and lets go of the old
 // one. The superseded handle is usually a DIRECT backend holding a headword map
 // worth hundreds of bytes per entry; leaving it for the garbage collector kept
-// that memory resident for the life of the process (docs/PERF.md M2). It is
+// that memory resident for the life of the process (docs.local/PERF.md M2). It is
 // closed after a grace period so requests already reading from it finish first.
 func (e *entry) reopen() error {
 	fresh, err := openUpgradedOrDirect(e.Path)
@@ -1335,7 +1335,7 @@ func (e *entry) ensureBaseIndex(progress store.Progress) error {
 	}
 	// Deliberately NOT e.open(): the ingest reader parses the file itself, and
 	// holding the direct backend at the same time doubles the working set of
-	// the largest thing in the process (docs/PERF.md M3). The name comes from
+	// the largest thing in the process (docs.local/PERF.md M3). The name comes from
 	// a header-only probe, or from the reader once it is open.
 	if err := e.rebuild(e.probeName(), store.TextDBPath(dir), store.Plan{}, progress); err != nil {
 		return err

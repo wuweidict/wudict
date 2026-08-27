@@ -6,12 +6,14 @@ Go web dictionary app supporting MDX/MDD, StarDict, Aard2 Slob, Lingvo DSL, Baby
 
 ## Read this first (token discipline)
 - `docs/SPEC.md` — architecture, schema, query engine. Read before writing any code.
-- `docs/DECISIONS.md` — ADR log. Check status before re-opening any settled question.
 - `docs/FORMATS.md` — per-format facts + exact reference-code pointers. Read the section for the format you touch, nothing more.
-- `docs/PHASES.md` — phase plan + running record. Update when a phase advances.
-- `docs/PERF.md` — measured RAM/CPU audit against the real 105-dictionary corpus (unit costs per headword, the first-run indexing storm, ranked fixes). Read before touching concurrency, caching or the open/ingest paths.
-- `code-review.md` — standing optimization backlog (C1–C10), prioritized by D15.
 - `docs/OPEN.md` — researched but **unscheduled** items (O-numbers). Check before proposing morphology, stemming or Unicode-folding work; do not start anything in it without being asked.
+
+**D-, P- and C-numbers** cited throughout the code (`D15`, `docs.local/PERF.md §3.1`,
+`P88`) refer to the maintainer's decision log, phase record, performance audit and
+review backlog. Those are working records kept outside the repository and are not
+distributed with it; the citations are provenance, so treat a reference you cannot
+open as a note on *why* the code is the way it is, not as a missing file.
 
 ## Layout
 
@@ -31,4 +33,3 @@ The reference projects this was built from (`mdict-go-web`, `draego`, `pyglossar
 ## Conventions
 - Go, modules. `make build` uses cgo (`-tags sqlite_fts5` → mattn sqlite + built-in speex); a **tag-less** `go build`/`go install` gets the pure-Go driver and must keep working, because FTS5 is mandatory (D29). `-tags purego` must keep building and passing (D4, D18). Table-driven tests.
 - Each format package implements both `Lookuper` (direct runtime lookup) and `Reader` (sequential ingest scan) — parsing logic written once, shared by both. Ingesters are one-shot batch paths.
-- Update `docs/PHASES.md` (record section) at the end of every working session; update `docs/DECISIONS.md` when a decision is taken.

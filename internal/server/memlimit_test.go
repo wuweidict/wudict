@@ -226,7 +226,7 @@ func runOneLimit(t *testing.T, corpus string) {
 	}
 
 	// Never the user's real library: a prepared dictionary costs almost no
-	// memory (docs/PERF.md §3), so borrowing an already-prepared library would
+	// memory (docs.local/PERF.md §3), so borrowing an already-prepared library would
 	// measure the easy case. An empty db dir keeps every dictionary in preview
 	// mode, which is both the worst case and the state a fresh install is in.
 	isolatedDBDir(t)

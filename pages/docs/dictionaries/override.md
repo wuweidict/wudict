@@ -55,6 +55,23 @@ effect on the next reload.
 To go back to the original, delete your file. Nothing inside the dictionary was
 ever changed.
 
+## What a dictionary's scripts can see
+
+A dictionary that ships scripts runs them in a sandboxed frame of its own. The
+article gets its own document, its own styles and its own scripts, and it cannot
+reach wuDict's page - `parent` is a small fixed surface, not wuDict's own code.
+
+Many MDict dictionaries ask their host what it is, usually to detect MDict's
+preview pane. wuDict answers honestly: it is none of them. Any host feature the
+dictionary then asks for reads as empty rather than failing, so the rest of the
+article still works.
+
+If a dictionary's own script throws, wuDict marks that dictionary's row with a
+`⚠` - hover it for the message - and writes one line to the browser console. The
+article still renders; the parts that script would have driven do not run. That
+is usually a broken or missing `.js` file, which is what a `res/` override
+fixes.
+
 ## The one exception
 
 A `.spx` file placed in `res/` is served as it is, not converted to WAV.

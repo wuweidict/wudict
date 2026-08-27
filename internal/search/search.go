@@ -153,7 +153,7 @@ func StreamOpen(ctx context.Context, openers []Opener, mode Mode, term string, p
 			//
 			// What it costs to miss this is not a wasted CPU slice. open() on a
 			// direct backend materialises that dictionary's whole in-memory
-			// index - measured on a phone (docs/PERF.md §8.7), three abandoned
+			// index - measured on a phone (docs.local/PERF.md §8.7), three abandoned
 			// fan-outs over 24 preview dictionaries took 90s each and drove RSS
 			// to 1.0 GB, all of it for output nobody would read. Stopping here
 			// bounds the damage of a cancelled search to the opens already in

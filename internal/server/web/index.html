@@ -238,6 +238,8 @@ details.dict[open]>summary{border-bottom:1px solid var(--line-soft)}
    The size hint keeps the scrollbar from jumping as they are rendered. */
 details.dict[open]>dl{content-visibility:auto;contain-intrinsic-size:0 400px}
 summary .count{margin-left:auto;font-weight:400;color:var(--fg-faint);font-size:12px}
+/* a dictionary's own script threw; the article is intact but inert */
+summary .jserr{margin-left:6px;font-weight:400;color:var(--accent);font-size:12px;cursor:help}
 /* A deferred dictionary's hint (renderSlot, h.deferred). Link-coloured because
    it is an offer rather than a status, not underlined because the target is the
    whole summary and not these two words, and never wrapped: it sits opposite a
@@ -1707,6 +1709,7 @@ function frameDoc(content,fid,dark,dictID,frag){
     '</body></html>';
 }
 /* bridge messages from article iframes */
+const jsErrSeen=new Set();   // one console line per (dictionary, message) per session
 addEventListener("message",e=>{
   const d=e.data||{};
   if(d.t==="h"&&d.fid){
@@ -1733,6 +1736,25 @@ addEventListener("message",e=>{
        grants allow-popups), so nothing here widens what a dictionary can do —
        but this message must never become the one way it gains more. */
     if(/^https?:\/\//i.test(d.url))window.open(d.url,"_blank","noopener,noreferrer");
+  }else if(d.t==="jserr"&&d.fid){
+    /* A dictionary's own script threw. That is not fatal to us and must not
+       interrupt reading - but a dead article and a working one look identical,
+       and "clicking does nothing" is otherwise the entire diagnostic surface.
+       Say it once, where the dictionary is named, and mark its row. */
+    const key=(d.dict||"")+"\n"+(d.msg||"");
+    if(!jsErrSeen.has(key)){
+      jsErrSeen.add(key);
+      console.warn(`wudict: ${dictName(d.dict)} script error: ${d.msg}`+
+        (d.src?` (${d.src}:${d.line}:${d.col})`:""));
+    }
+    const f=document.querySelector('iframe[data-fid="'+CSS.escape(d.fid)+'"]');
+    const sum=f&&f.closest("details.dict")?.querySelector(":scope>summary");
+    if(sum&&!sum.querySelector(".jserr")){
+      const s=document.createElement("span");
+      s.className="jserr";s.textContent="\u26a0";
+      s.title="This dictionary's own script failed: "+(d.msg||"script error");
+      sum.appendChild(s);
+    }
   }else if(d.t==="anchor"&&d.fid){
     // an in-article jump inside a sandboxed iframe. The iframe is sized to its
     // content and never scrolls itself, so the position it reports is relative

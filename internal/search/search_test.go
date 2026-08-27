@@ -162,7 +162,7 @@ func TestAllCancelledContext(t *testing.T) {
 // runtime picks one at random, so roughly half of an unbounded queue would sail
 // past a context that was already dead and materialise a dictionary apiece. On
 // a phone that is the difference between an abandoned keystroke costing nothing
-// and costing a gigabyte (docs/PERF.md §8.7). With 200 openers the random path
+// and costing a gigabyte (docs.local/PERF.md §8.7). With 200 openers the random path
 // is indistinguishable from broken, which is the point of the count.
 func TestStreamOpenCancelledBeforeStartOpensNothing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

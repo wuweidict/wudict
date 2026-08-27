@@ -2,7 +2,7 @@
 
 Status: **superseded by D62 — frozen, kept for the options it rejects.** Written
 2026-08-13 against the shipped shell (D52/D53/D54) as the pre-decision analysis;
-Option A was accepted and built the same day. `docs/DECISIONS.md` **D62** is the
+Option A was accepted and built the same day. `docs.local/DECISIONS.md` **D62** is the
 authority on what was decided and what shipped — where the two differ, D62 wins,
 and this file is not updated to follow the code. Two points here were amended by
 the user after it was written: **both** flavours use `getExternalFilesDir()` (not
