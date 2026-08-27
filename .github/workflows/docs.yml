@@ -6,7 +6,7 @@ name: docs
 
 on:
   push:
-    branches: [master_manual]
+    branches: [master]
     # The site is rebuilt for its own sources, and for the API document it
     # publishes - not for every Go change.
     paths:
@@ -14,7 +14,6 @@ on:
       - 'internal/server/web/openapi.yaml'
       - 'redocly.yaml'
       - 'tools/inline-api-docs.py'
-      - 'Makefile'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
