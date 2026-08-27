@@ -65,6 +65,10 @@ jobs:
       - name: Build the site
         run: make docs
 
+      - name: Add Google Site Verification file
+        run: |
+          echo "google-site-verification: googlec4893d05b6cdeee8.html" > pages/site/googlec4893d05b6cdeee8.html
+
       - uses: actions/upload-pages-artifact@v5
         with:
           path: pages/site
