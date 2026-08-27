@@ -281,7 +281,11 @@ fmt: ## gofmt all sources in place
 
 .PHONY: lint
 lint: vet ## golangci-lint if installed, else vet only
-	@command -v golangci-lint >/dev/null && golangci-lint run --build-tags $(GO_TAGS) ./... || echo "golangci-lint not installed; ran vet only"
+	@if command -v golangci-lint >/dev/null; then \
+		golangci-lint run --build-tags $(GO_TAGS) ./...; \
+	else \
+		echo "golangci-lint not installed; ran vet only"; \
+	fi
 
 .PHONY: tidy
 tidy: ## go mod tidy
@@ -327,10 +331,6 @@ api-ui: ## Render the API explorer into dist/ - one self-contained offline HTML 
 .PHONY: api-open
 api-open: api-ui ## Render the API explorer, then open it in a browser
 	@python3 -m webbrowser "file://$(CURDIR)/$(API_HTML)" 2>/dev/null || open "$(API_HTML)"
-
-.PHONY: api-spec
-api-spec: ## Print every documented operation, one per line
-	@sed -n '/^paths:/,/^components:/p' $(OPENAPI) | grep -E '^  /|^    (get|put|post|delete|options):' | sed 's/:$$//'
 
 # ---- documentation site -------------------------------------------------
 # pages/ is a Zensical site. Two rules make it reproducible:
