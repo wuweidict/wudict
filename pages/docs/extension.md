@@ -98,6 +98,10 @@ Cache           500 lookups, held by the background worker
 Set a modifier key, for example <kbd>Alt</kbd>, and the popup stays silent
 until you ask for it.
 
+## wuDict Hover Source Code Repository
+
+- https://github.com/wuweidict/wudict-browser-extension
+
 ## Why it is fast, and why it is safe
 
 **One request per lookup.** The server searches several dictionaries in a

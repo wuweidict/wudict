@@ -164,6 +164,8 @@ toggle.name = "Switch to light mode"
 [project.theme.icon]
 repo = "fontawesome/brands/github"
 
+[project.extra]
+generator = false
 # ----------------------------------------------------------------------------
 # Extra data used by templates
 #
@@ -181,7 +183,12 @@ new = "Recently added"
 [[project.extra.social]]
 icon = "fontawesome/brands/github"
 link = "https://github.com/wuweidict/wudict"
+name = "wuDict Server"
 
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/wuweidict/wudict-browser-extension"
+name = "wuDict Browser Extension"
 # ----------------------------------------------------------------------------
 # Markdown extensions - the working set: callouts, cards, tabs, annotations,
 # formatting, keys, task lists, and Mermaid diagrams. Nothing exotic.
