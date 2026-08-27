@@ -3,7 +3,10 @@ title: WuDict Hover chrome/firefox extension
 description: Hover any word in chrome/firefox to get definition from the wuDict server.
 status: new
 ---
-
+<style>
+.md-typeset .badges{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:center}
+.md-typeset .badges img{height:80px;width:auto;max-width:none}
+</style>
 # wuDict Hover Chrome/Firefox Extension
 
 
@@ -11,17 +14,16 @@ status: new
 
 Click a badge below to install:
 
-<p align="center">
+<div class="badges">
   <a href="https://chromewebstore.google.com/detail/bknaaoffefipfnpefmkbipcdemljbhjh">
-    <img alt="Available in the Chrome Web Store" height="60" src="assets/chrome-web-store-badge.png" />
+    <img alt="Available in the Chrome Web Store" height="80" src="assets/chrome-web-store-badge.png" />
   </a>
-  &nbsp;&nbsp;&nbsp;
   <a href="https://addons.mozilla.org/firefox/addon/wudict-hover/">
-    <img alt="Get the Add-on for Firefox" height="60" src="assets/firefox-get-the-addon.svg" />
+    <img alt="Get the Add-on for Firefox" height="80" src="assets/firefox-get-the-addon.svg" />
   </a>
-</p>
+</div>
 
---
+---
 
 With the wuDict Hover extension you can quickly get a definition for any word in Chrome/Firefox 
 by hovering (with an optional key) or via the right-click context menu — no need to copy-paste words into another app.
