@@ -110,7 +110,7 @@ ad-hoc signature), `MACOS_MIN=`. See more about [running on macOS](https://wuwei
 There is **one** `wudict.exe`. From `cmd` or PowerShell it is an ordinary
 command-line program — it prints, pipes and returns an exit code. Double-clicked,
 started from a shortcut, or used to open a dictionary file, it releases the
-console window Windows handed it and shows a **tray icon** instead, logging to
+console window, and shows a **tray icon** instead, logging to
 `%LOCALAPPDATA%\wudict\wudict.log`. See also [running on windows](https://wuweidict.github.io/wudict/apps/windows/).
 
 `make win-installer` compiles the installer (needs
