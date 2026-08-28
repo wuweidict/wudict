@@ -161,11 +161,11 @@ Exit status is 1 when no dictionary matched, as with `lookup`.
 
 !!! note "It searches the files, not the library"
 
-    `searchall` uses direct access to each dictionary in the original format (.mdx, .blg, .slob)
+    `searchall` reads each dictionary in its original format (`.mdx`, `.slob`, `.bgl`, etc)
     and does not use the SQLite indexes, so `-mode contains` and
     `-mode fts` are skipped by dictionaries that only support them once
-    prepared. The [web UI](../start/search.md) and the HTTP API use the
-    prepared library and do not have this limit.
+    indexes are generated. The [web UI](../start/search.md) and the HTTP API use the
+    indexed library and do not have this limit.
 
 ## keys
 
