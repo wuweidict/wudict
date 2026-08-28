@@ -118,7 +118,21 @@ as `wudict://lookup?q=serendipity` — see [the Android app](../apps/android.md)
 
 ## Searching from the console
 
-``` sh title="the same four modes, in the terminal"
+
+``` sh title="search in ALL dictionaries"
+wudict searchall flight
+
+# search in a custom folder
+wudict searchall -dict-dir=/another/dir/Babylon flight
+
+# return full raw HTML
+wudict searchall -format=raw flight
+
+# return cleaned-up HTML
+wudict searchall -format=clean flight
+```
+
+``` sh title="search in a single dictionary in the terminal"
 wudict lookup   ~/Dicts/Oxford.mdx flight
 wudict prefix   ~/Dicts/Oxford.mdx fli
 wudict contains ~/Dicts/Oxford.mdx light
