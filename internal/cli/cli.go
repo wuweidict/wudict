@@ -78,9 +78,14 @@ COMMANDS
   list   <dir> [dir…]                     Discover dictionaries under one or more folders
   info   <dictfile>                       Show dictionary metadata and capabilities
   lookup [-n max] <dictfile> <word>       Exact lookup (accent-fold fallback); HTML to stdout
+                                          By default uses -format=raw, pass -format=text for plain text
   prefix [-n max] <dictfile> <word>       Exact-else-prefix lookup (accent-insensitive); HTML to stdout
   contains [-n max] <dictfile> <word>     Substring headword search (FTS5 trigram; ingested dicts only)
   fts    [-n max] <dictfile> <query>      FTS5 full-text search (ingested dicts only)
+                                          All four take -format raw|clean|text, the same
+                                          three the HTTP API offers: raw is the dictionary's
+                                          own HTML (the default), clean drops scripts, styles
+                                          and presentation, text drops all markup.
   keys   [-offset N] [-n count] <dictfile>  List headwords (all by default).
                                           On an .mdd, lists the files it holds -
                                           the same key/value format, so the same
@@ -103,9 +108,14 @@ COMMANDS
                                           (much smaller), -contains adds the substring index
                                           (roughly doubles a headwords-only db), and -full
                                           also packs media.db into the same folder.
-  searchall [-mode m] [-n perDict] <dir> <term>
-                                          Concurrent search across all dictionaries in a folder
-                                          (<dir> may be a "a:b" list, as in DICT_DIR)
+  searchall [-mode m] [-n perDict] [-format f] [<dir>] <term>
+                                          Concurrent search across every dictionary, printed as
+                                          each one answers. Without <dir> it searches the
+                                          configured DICT_DIR (--dict-dir, env, or wudict.toml);
+                                          <dir> may be a "a:b" list, as in DICT_DIR.
+                                          -format text (default) prints the definitions;
+                                          clean|raw print them as markup, as in lookup;
+                                          list prints headwords only.
   clean  [-f]                             List removable items in the library: incomplete or
                                           unreadable folders, interrupted ingests, leftovers
                                           from the old flat layout. A cached dictionary is
@@ -456,9 +466,20 @@ func cmdInfo(args []string) error {
 func cmdQuery(mode string, args []string) error {
 	fs := flag.NewFlagSet(mode, flag.ExitOnError)
 	n := fs.Int("n", 20, "max results")
+	format := fs.String("format", "raw", "article format: raw|clean|text")
+	// The base a /res/… reference is resolved against. Empty by default: the
+	// CLI is not a server, and inventing an address here would emit links to
+	// something that may not be listening. Point it at a running server and the
+	// output is a self-contained page.
+	base := fs.String("base", "", "prefix for /res/… references (e.g. http://127.0.0.1:6888)")
 	fs.Parse(args)
 	if fs.NArg() != 2 {
-		return fmt.Errorf("usage: wudict %s [-n max] <dictfile> <word>", mode)
+		return fmt.Errorf("usage: wudict %s [-n max] [-format raw|clean|text] <dictfile> <word>", mode)
+	}
+	// Before the open, so a misspelled format costs nothing.
+	f, err := server.ParseArticleFormat(*format)
+	if err != nil {
+		return err
 	}
 	d, err := dict.Open(fs.Arg(0))
 	if err != nil {
@@ -490,7 +511,12 @@ func cmdQuery(mode string, args []string) error {
 	if len(results) == 0 {
 		return dict.ErrNotFound
 	}
+	// The same reduction /api/search performs (D61), from the same code.
+	server.FormatArticles(d, f, strings.TrimSuffix(*base, "/"), results)
 	for _, r := range results {
+		// One delimiter for all three formats. `text` gains an HTML comment it
+		// does not need, which is cheaper than a second line format for
+		// anything already parsing this output.
 		fmt.Printf("<!-- %s -->\n%s\n", r.Headword, r.Body)
 	}
 	return nil
@@ -1327,13 +1353,32 @@ func browserCmd(url string) {
 }
 
 func cmdSearchAll(args []string) error {
+	applyLibrarySettings()
 	fs := flag.NewFlagSet("searchall", flag.ExitOnError)
-	modeStr := fs.String("mode", "prefix", "exact|prefix|contains|fts")
+	// exact by default: the term a person types on this command line is the
+	// word they want, and prefix over a whole library answers a query nobody
+	// asked - 97 dictionaries offering `Casablanca` for `casa`.
+	modeStr := fs.String("mode", "exact", "exact|prefix|contains|fts")
 	n := fs.Int("n", 10, "max results per dictionary")
+	format := fs.String("format", "text", "text|clean|raw|list - list prints headwords only")
+	base := fs.String("base", "", "prefix for /res/… references (e.g. http://127.0.0.1:6888)")
+	var dictDirs multiFlag
+	fs.Var(&dictDirs, "dict-dir", "folder to search; repeat for several (env/toml: DICT_DIR)")
+	configPath := fs.String("config", "", "path to wudict.toml (env: CONFIG_PATH)")
 	fs.Parse(args)
-	if fs.NArg() != 2 {
-		return fmt.Errorf("usage: wudict searchall [-mode m] [-n perDict] <dir> <term>")
+
+	// The folder is optional now, so the term is the last argument either way.
+	// Two arguments still mean the original `searchall <dir> <term>`.
+	var dirArg, term string
+	switch fs.NArg() {
+	case 1:
+		term = fs.Arg(0)
+	case 2:
+		dirArg, term = fs.Arg(0), fs.Arg(1)
+	default:
+		return fmt.Errorf("usage: wudict searchall [-mode m] [-n perDict] [-format f] [-dict-dir path] [<dir>] <term>")
 	}
+
 	var mode search.Mode
 	switch *modeStr {
 	case "exact":
@@ -1347,32 +1392,112 @@ func cmdSearchAll(args []string) error {
 	default:
 		return fmt.Errorf("unknown mode %q", *modeStr)
 	}
-	paths, _, err := dict.DiscoverAll(folderArgs([]string{fs.Arg(0)}))
+	// A search that prints only headwords answers "does this word exist", which
+	// is not what anyone runs a dictionary for. `text` is the default because
+	// it is the readable one, and because it is the smallest: raw markup is
+	// 2.6x its size (D61) and a terminal cannot render it anyway. `list` keeps
+	// the old headword listing for the times the question really is "which
+	// dictionaries have this".
+	bodies := *format != "list"
+	var articleFormat string
+	if bodies {
+		f, err := server.ParseArticleFormat(*format)
+		if err != nil {
+			return fmt.Errorf("%w (or \"list\" for headwords only)", err)
+		}
+		articleFormat = f
+	}
+
+	// Where to search, resolved the way every other setting is: an explicit
+	// argument, else --dict-dir, else DICT_DIR from the environment, else
+	// wudict.toml, else the default folder (config.Load applies that chain).
+	// Before this, `searchall` was the one command that could not find the
+	// library the rest of the program is configured with.
+	if *configPath == "" {
+		*configPath = os.Getenv("CONFIG_PATH")
+	}
+	cfg, err := config.Load(*configPath, map[string]string{"DICT_DIR": dictDirs.String()})
 	if err != nil {
 		return err
 	}
-	var dicts []dict.Dictionary
-	for _, p := range paths {
-		d, err := dict.Open(p)
-		if err != nil {
-			logx.Warn("%scannot be opened: %v - skipped", logx.Dict(filepath.Base(p)), err)
-			continue
-		}
-		defer d.Close()
-		dicts = append(dicts, d)
+	dirs := cfg.DictDirs
+	origin := cfg.Origin("DICT_DIR")
+	if dirArg != "" {
+		dirs, origin = folderArgs([]string{dirArg}), "argument"
 	}
-	for _, h := range search.All(context.Background(), dicts, mode, fs.Arg(1), *n) {
+	paths, _, err := dict.DiscoverAll(dirs)
+	if err != nil {
+		return err
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("no dictionaries found in %s (%s)", strings.Join(dirs, ", "), origin)
+	}
+	// stderr, so stdout stays exactly the results: the folder searched is not
+	// obvious once it comes from a config file rather than the command line.
+	fmt.Fprintf(os.Stderr, "searching %s in %s (%s)\n",
+		plural(len(paths), "dictionary", "dictionaries"), strings.Join(dirs, ", "), origin)
+
+	// Opened inside the worker, closed as soon as that dictionary has answered.
+	// The previous version opened all of them up front and held every one until
+	// the command exited - for a large library that is the whole corpus
+	// materialised at once (docs.local/PERF.md §8.7). Peak is now the worker
+	// count, and the first dictionary's results print while the rest are still
+	// opening.
+	//
+	// opened[i] is written by worker i and read only by its own emit call,
+	// which StreamOpen runs on that same goroutine - one writer, one reader,
+	// no sharing.
+	opened := make([]dict.Dictionary, len(paths))
+	openers := make([]search.Opener, len(paths))
+	for i, p := range paths {
+		i, p := i, p
+		openers[i] = func() (dict.Dictionary, error) {
+			d, err := dict.Open(p)
+			opened[i] = d
+			return d, err
+		}
+	}
+
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+	var found int
+	search.StreamOpen(context.Background(), openers, mode, term, *n, func(i int, h search.Hit) {
+		d := opened[i]
+		if d != nil {
+			defer func() { d.Close(); opened[i] = nil }()
+		}
+		name := h.Meta.Name
+		if name == "" {
+			name = filepath.Base(paths[i]) // an open that failed carries no Meta
+		}
 		switch {
 		case h.Skipped:
-			continue
+			return
 		case h.Err != nil:
-			logx.Warn("%ssearch failed: %v", logx.Dict(h.Meta.Name), h.Err)
-		case len(h.Results) > 0:
-			fmt.Printf("== %s (%d)\n", h.Meta.Name, len(h.Results))
-			for _, r := range h.Results {
-				fmt.Printf("  %s\n", r.Headword)
+			logx.Warn("%ssearch failed: %v", logx.Dict(name), h.Err)
+			return
+		case len(h.Results) == 0:
+			return
+		}
+		found++
+		if bodies {
+			// The same reduction /api/search performs, from the same code.
+			server.FormatArticles(d, articleFormat, strings.TrimSuffix(*base, "/"), h.Results)
+		}
+		fmt.Fprintf(w, "== %s (%d)\n", name, len(h.Results))
+		for _, r := range h.Results {
+			if bodies {
+				fmt.Fprintf(w, "<!-- %s -->\n%s\n", r.Headword, r.Body)
+			} else {
+				fmt.Fprintf(w, "  %s\n", r.Headword)
 			}
 		}
+		// One flush per dictionary: this is the streaming the API does, and it
+		// is what makes `| head` and a piped reader work on a slow library.
+		w.Flush()
+	})
+	if found == 0 {
+		return dict.ErrNotFound
 	}
 	return nil
 }

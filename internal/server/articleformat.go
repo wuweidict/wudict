@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/net/html"
 
+	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/htmlref"
 )
 
@@ -250,6 +251,42 @@ func applyFormat(body, format, base string, st htmlref.Styles) string {
 		return htmlref.Text(body, st)
 	}
 	return body
+}
+
+// ParseArticleFormat validates a `format` name for a caller that is not an
+// HTTP request - the CLI. Same three names, same error text, so `wudict lookup
+// -format cleen` and `?format=cleen` are wrong in the same words.
+func ParseArticleFormat(s string) (string, error) { return parseFormat(s) }
+
+// FormatArticles applies the /api/search reduction (D61) to results looked up
+// outside the server, in place. `wudict lookup -format clean` and
+// `GET /api/search?format=clean` then produce the same bytes because they are
+// the same code - a second implementation of "clean" would diverge on the first
+// dictionary that stresses either one.
+//
+// The pipeline is the handler's, in the handler's order: rewrite the
+// dictionary's internal references first so they are named, derive the
+// dictionary's own display table from the stylesheets the first article links,
+// then reduce. base is prepended to wudict's root-absolute refs (/res/…); ""
+// leaves them as they are, which is the honest answer when no server is running
+// to serve them.
+//
+// `raw` returns immediately without rewriting
+func FormatArticles(d dict.Dictionary, format, base string, rs []dict.Result) {
+	if format == formatRaw || len(rs) == 0 {
+		return
+	}
+	id := pathID(d.Meta().Path)
+	for i := range rs {
+		rs[i].Body = RewriteEntryHTML(rs[i].Body, id)
+	}
+	var st htmlref.Styles
+	if names := stylesheetNames(rs[0].Body, id); len(names) > 0 {
+		st = stylesFrom(d, names)
+	}
+	for i := range rs {
+		rs[i].Body = applyFormat(rs[i].Body, format, base, st)
+	}
 }
 
 // originOf is the base a client reached us on, so absolutised references point

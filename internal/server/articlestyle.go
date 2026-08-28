@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/net/html"
 
+	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/htmlref"
 )
 
@@ -92,6 +93,13 @@ func (e *entry) readStyles(body string) htmlref.Styles {
 		// janitor has to be told, exactly as handleResource tells it.
 		e.reg.nudge()
 	}
+	return stylesFrom(d, names)
+}
+
+// stylesFrom reads the named stylesheets out of an already-open backend. Split
+// from the entry method so a caller with no registry - the CLI, which opens one
+// dictionary by path - derives the same table from the same code.
+func stylesFrom(d dict.Dictionary, names []string) htmlref.Styles {
 	budget := maxStyleBytes
 	var st htmlref.Styles
 	for _, n := range names {
