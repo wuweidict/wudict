@@ -245,6 +245,9 @@ wudict keys ~/Dicts/Oxford.mdd
 wudict res ~/Dicts/Oxford.mdd audio/a.mp3
 ```
 
+For more on command line usage see the manual:
+- [wuDict Command Line](https://wudict.legbehindneck.com/reference/cli/)
+
 ## Sharing dictionaries (one folder each)
 
 Indexing a dictionary creates a corresponding folder under
