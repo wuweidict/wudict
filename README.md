@@ -215,15 +215,34 @@ Run `wudict --help` for the full reference. Highlights:
 
 ```sh
 wudict                                   # start the server (default command)
-wudict --dict-dir ~/Dicts --port 9090    # server with options
+
+# start server with custom options
+wudict --dict-dir ~/Dicts --port 9090    
 wudict --dict-dir ~/Dicts --dict-dir /Volumes/Ext/Dicts   # several folders
-wudict lookup ~/Dicts/Oxford.mdx word    # exact lookup, HTML to stdout
-wudict ingest ~/Dicts                    # index every dictionary in a folder
-wudict ingest -full ~/Dicts/Oxford.mdx   # index + pack media into the same folder
-wudict clean                             # list removable library items (-f deletes)
-wudict keys ~/Dicts/Oxford.mdx           # list headwords
-wudict keys ~/Dicts/Oxford.mdd           # list the files inside a resource archive
-wudict res ~/Dicts/Oxford.mdd audio/a.mp3   # …and pull one out
+
+# search for a word in a specific dictionary; plain text to stdout
+wudict lookup ~/Dicts/Oxford.mdx water
+
+# search ALL dictionaries in folder; plain text to stdout
+wudict searchall -dict-dir /path/to/dicts flight
+
+# index every dictionary in a given folder
+wudict ingest ~/Dicts                    
+
+# index + pack media
+wudict ingest -full ~/Dicts/Oxford.mdx   
+
+# clean leftover files
+wudict clean
+
+# list removable library items (-f deletes)
+
+# list headwords (or keys) in a specific dictionary
+wudict keys ~/Dicts/Oxford.mdx
+wudict keys ~/Dicts/Oxford.mdd
+
+# extract a resource (pass the key shown by `wudict keys ...`)
+wudict res ~/Dicts/Oxford.mdd audio/a.mp3
 ```
 
 ## Sharing dictionaries (one folder each)
