@@ -5,6 +5,8 @@ description: The endpoints wuDict serves - the streaming search API, the diction
 
 # HTTP API
 
+[OpenAPI compatible API Reference](https://wudict.legbehindneck.com/api/){ .md-button }
+
 The web page is one client of this API. The browser extension is another. Your
 own script can be a third.
 
