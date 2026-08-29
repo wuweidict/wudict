@@ -66,6 +66,9 @@ nav = [
     "help/faq.md",
     "help/license.md",
   ] },
+  { "Privacy" = [
+    "privacy_policy.md",
+  ] },
 ]
 
 extra_css = ["stylesheets/extra.css"]
