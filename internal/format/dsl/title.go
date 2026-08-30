@@ -9,7 +9,7 @@ import "strings"
 // titleResult carries the two headword variants of one DSL title line
 // plus its display form. Port of pyglossary's TitleTransformer:
 //
-//	(...)  optional part: kept in Full, absent from Alt
+//	(...)  optional part: kept in Full, absent from Alt, bracketed in Display
 //	{...}  unsorted part: rendered only into Display (markup allowed)
 //	{{..}} comment: dropped from all three
 //	\x     escaped char
@@ -71,13 +71,19 @@ func transformTitle(line string) titleResult {
 				add(c)
 				break
 			}
+			// The brackets themselves are index syntax, so they never reach a
+			// key - but they are content in the display form, which is what
+			// Lingvo and GoldenDict show: "abandonar(se)", not "abandonarse".
+			// Without them the reader cannot tell which part is optional.
 			inParen = true
+			display.WriteByte(c)
 		case ')':
 			if !inParen {
 				add(c)
 				break
 			}
 			inParen = false
+			display.WriteByte(c)
 		case '{':
 			// `{{...}}` is a comment even in a headword: consume, emit nothing.
 			if pos < len(line) && line[pos] == '{' {

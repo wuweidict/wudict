@@ -83,6 +83,11 @@ func TestTransformTitle(t *testing.T) {
 	if tr.Full != "abandonar(se)"[:9]+"se" || tr.Alt != "abandonar" {
 		t.Errorf("parens: %+v", tr)
 	}
+	// The keys drop the brackets, the display form keeps them - that is how
+	// Lingvo and GoldenDict render an optional part.
+	if tr.Display != "abandonar(se)" {
+		t.Errorf("parens display: %q", tr.Display)
+	}
 	tr = transformTitle(`word {[i]extra[/i]}`)
 	if tr.Full != "word" || !strings.Contains(tr.Display, "<i>extra</i>") {
 		t.Errorf("curly: %+v", tr)
@@ -108,6 +113,10 @@ func TestTransformTitle(t *testing.T) {
 	}
 	if strings.Contains(tr.Display, "{") || strings.Count(tr.Display, `<u class="accent">`) != 4 {
 		t.Errorf("accent in parens, Display: %q", tr.Display)
+	}
+	if !strings.HasSuffix(tr.Display, `стать<u class="accent">и</u>)`) ||
+		!strings.Contains(tr.Display, `вке (слов`) {
+		t.Errorf("accent in parens, brackets lost: %q", tr.Display)
 	}
 	// Removing an unsorted part must not leave a double space in the key:
 	// the entry would be unreachable by its own headword.
