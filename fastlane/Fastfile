@@ -1,0 +1,169 @@
+# wudict — Google Play uploads.  See fastlane.md for the step-by-step.
+#
+# These lanes UPLOAD; they never build. Building belongs to Makefile_fastlane,
+# because the bundle needs the Go server cross-compiled into jniLibs first
+# (`make android-go`) and because there is no gradlew at the repo root — the
+# Gradle project is android/. Every lane below assumes `make -f Makefile_fastlane
+# aab` has already produced AAB.
+#
+# The artifact is the `play` FLAVOUR (D62): no storage permission at all. The
+# `foss` flavour is the GitHub/F-Droid build and must never reach Play.
+#
+# No `mapping:` anywhere: android/app/build.gradle sets minifyEnabled = false,
+# so there is no mapping.txt to upload.
+#
+# json_key_file and package_name come from fastlane/Appfile.
+# Metadata comes from ./fastlane/metadata/android — supply's default, which is
+# correct because fastlane runs from the repo root.
+
+default_platform(:android)
+
+# fastlane chdirs INTO ./fastlane before it runs a lane, so a path written
+# relative to the repo root resolves one level too deep and File.exist? answers
+# false for a bundle that is plainly there. Every path in this file is therefore
+# anchored to the repo root explicitly, and the anchor is asserted rather than
+# assumed.
+ROOT = File.expand_path('..', Dir.pwd)
+unless File.exist?(File.join(ROOT, 'go.mod'))
+  UI.user_error!("cannot locate the repo root from #{Dir.pwd} (looked at #{ROOT})")
+end
+
+AAB      = File.join(ROOT, 'android/app/build/outputs/bundle/playRelease/wudict-play-release.aab')
+JSON_KEY = File.join(ROOT, 'play-store-config.json')
+METADATA = File.join(ROOT, 'fastlane/metadata/android')
+
+def require_bundle!
+  UI.user_error!("no bundle at #{AAB} — run: make -f Makefile_fastlane aab") \
+    unless File.exist?(AAB)
+  # A stale bundle at that path is uploadable and looks exactly like a fresh
+  # one, so say how old it is rather than let it pass in silence.
+  age = ((Time.now - File.mtime(AAB)) / 60).round
+  UI.important("bundle is #{age} min old (#{File.mtime(AAB)}) — rebuild with " \
+               "'make -f Makefile_fastlane aab' if that is not this build") if age > 30
+end
+
+platform :android do
+  # Everything :internal does, except that Play is asked to validate and discard
+  # instead of commit. This is the gate: credentials, package name, versionCode
+  # collisions, the signing certificate and every metadata length limit are all
+  # checked here, and nothing is published.
+  desc "Dry run: validate the bundle and the full listing against Play. Uploads nothing"
+  lane :validate do
+    require_bundle!
+    upload_to_play_store(
+      json_key: JSON_KEY,
+      metadata_path: METADATA,
+      track: 'internal',
+      aab: AAB,
+      validate_only: true,
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false
+    )
+  end
+
+  # draft, not completed: the release is created but stays under your control in
+  # Console. For an app that has never been published, Play requires draft here
+  # anyway — the first release is completed by hand in the Console.
+  desc "Upload the bundle and the full listing to the internal track, as a draft"
+  lane :internal do
+    require_bundle!
+    upload_to_play_store(
+      json_key: JSON_KEY,
+      metadata_path: METADATA,
+      track: 'internal',
+      aab: AAB,
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false,
+      release_status: 'draft'
+    )
+  end
+
+  # Moves the artifact that is already on `internal` to production. It uploads
+  # no binary and no metadata: the listing that went up with the bundle is
+  # already the live listing, since a store listing is per-app, not per-track.
+  # An app that has never been published is a DRAFT app, and Play refuses any
+  # release on it that is not itself a draft ("Only releases with status draft
+  # may be created on draft app"). So the first promotion must pass status:draft
+  # and be released by hand in Console; every one after that takes the default.
+  #
+  # The two status options are NOT interchangeable and supply gives no hint that
+  # you picked the wrong one:
+  #
+  #   release_status              filters which release on the SOURCE track to
+  #                               promote (uploader.rb promote_track). Setting it
+  #                               to 'draft' here looks for a draft release on
+  #                               internal, finds the completed one it uploaded
+  #                               earlier, matches nothing, and dies with the
+  #                               misleading "Track 'internal' doesn't have any
+  #                               releases".
+  #   track_promote_release_status  the status the release gets on the
+  #                               DESTINATION track. This is the draft knob.
+  #
+  # version_code, when given, replaces the status filter outright and names the
+  # release to move - the only unambiguous way to pick when internal holds more
+  # than one.
+  desc "Promote whatever is on the internal track to production (status:draft for a never-published app)"
+  lane :promote do |options|
+    upload_to_play_store(
+      json_key: JSON_KEY,
+      metadata_path: METADATA,
+      track: 'internal',
+      track_promote_to: 'production',
+      version_code: options[:version_code],
+      # which release on internal to take
+      release_status: options[:from_status] || 'completed',
+      # what it becomes on production
+      track_promote_release_status: options[:status] || 'completed',
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      # skip_upload_metadata does NOT cover changelogs - supply treats them as a
+      # separate upload and then fails with "Cannot find changelog because no
+      # version code given". There is nothing to send anyway: the release notes
+      # travelled with the release when it went up on internal, and promoting
+      # moves that release, notes included.
+      skip_upload_changelogs: true
+    )
+  end
+
+  # Release notes belong to a release, so supply refuses to upload changelogs
+  # without a version_code telling it which release to attach them to. This lane
+  # ships no binary and creates no release, so changelogs are skipped here; they
+  # go up with the bundle in :internal and :deploy. Pass version_code=<code> to
+  # rewrite the notes of a release that is already live on the given track.
+  desc "Upload the listing text and graphics only, with no new binary"
+  lane :metadata do |options|
+    code = options[:version_code]
+    upload_to_play_store(
+      json_key: JSON_KEY,
+      metadata_path: METADATA,
+      track: options[:track] || 'production',
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false,
+      skip_upload_changelogs: code.nil?,
+      **(code.nil? ? {} : { version_code: code.to_i })
+    )
+  end
+
+  desc "Upload the bundle and the full listing straight to production"
+  lane :deploy do
+    require_bundle!
+    upload_to_play_store(
+      json_key: JSON_KEY,
+      metadata_path: METADATA,
+      track: 'production',
+      aab: AAB,
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false,
+      release_status: 'completed'
+    )
+  end
+end

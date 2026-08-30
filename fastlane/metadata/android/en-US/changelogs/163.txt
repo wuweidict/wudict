@@ -1,0 +1,7 @@
+First release.
+
+- Search MDX/MDD, StarDict, Aard 2 Slob, Lingvo DSL and Babylon BGL
+  dictionaries entirely on-device
+- Exact, prefix, contains and full-text search across your whole collection
+- Pictures, audio pronunciation and the dictionary's own styling
+- No account, no network, no tracking

@@ -65,8 +65,6 @@ nav = [
     "help/troubleshooting.md",
     "help/faq.md",
     "help/license.md",
-  ] },
-  { "Privacy" = [
     "privacy_policy.md",
   ] },
 ]

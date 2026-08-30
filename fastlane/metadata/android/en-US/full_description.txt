@@ -1,0 +1,55 @@
+wuDict searches all dictionary files on your own phone, with no
+account and no network.
+
+The app runs the wudict server locally and shows its pages in a WebView. Your
+dictionaries stay on your device. Nothing is uploaded, nothing is tracked,
+there is no sign-in — the app works fully offline.
+
+SUPPORTED FORMATS
+
+- MDict (.mdx/.mdd)
+- StarDict (.ifo/.idx/.dict)
+- Aard 2 (.slob)
+- Lingvo DSL (.dsl)
+- Babylon (.bgl)
+
+Pictures, audio pronunciation and the dictionary's own styling all render the
+way the dictionary authors intended.
+
+SEARCH
+
+Four ways to look a word up:
+
+- Exact — the headword itself
+- Prefix — everything starting with what you typed
+- Contains — the word anywhere in a headword
+- Full text — the word anywhere in an article
+
+Results from all of your dictionaries arrive together, streamed as each one
+answers, so a large collection stays responsive.
+
+BUILT FOR LARGE COLLECTIONS
+
+Dictionaries are searched directly as soon as you add them. In the background
+each one is prepared into a compact local index, after which lookups are
+effectively instant even across a hundred dictionaries. Preparation is
+automatic and needs no configuration; contains-search, full-text search and
+media packing are per-dictionary switches you can turn on only for the dictionaries
+that you select.
+
+PRIVACY
+
+- No account, no cloud, no telemetry
+- No advertising
+- The only network permission is used to reach the server running inside the
+  app itself, on 127.0.0.1
+- This build declares no storage permission at all: dictionaries are imported
+  through the system file picker into the app's own storage
+
+OPEN SOURCE
+
+wuDict is free software, licensed under GPL-3.0. The same program runs on
+Linux, macOS and Windows, in your default web browser.
+
+Source code: https://github.com/wuweidict/wudict
+User guide: https://wudict.legbehindneck.com/apps/android/

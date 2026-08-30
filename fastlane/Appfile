@@ -1,0 +1,2 @@
+json_key_file("../play-store-config.json") # repo root; fastlane runs with CWD=./fastlane
+package_name("com.legbehindneck.wudict") # e.g. com.krausefx.app

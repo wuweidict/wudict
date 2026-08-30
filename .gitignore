@@ -16,3 +16,17 @@ android/app/build/
 android/app/src/main/jniLibs/
 android/local.properties
 /CLAUDE.local.md
+
+# Play release (fastlane). The lanes and the listing ARE tracked -
+# fastlane/metadata/android/ is also the layout F-Droid reads. What must never
+# be committed is the local tooling and every piece of signing material.
+/Makefile_fastlane
+/fastlane.md
+/play-store-config.json
+*.jks
+*.keystore
+/upload_certificate.pem
+/playconsole/
+/fastlane/report.xml
+/fastlane/README.md
+/vendor/bundle/
