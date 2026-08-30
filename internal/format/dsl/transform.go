@@ -30,8 +30,20 @@ type transformer struct {
 	resFiles   []string
 }
 
-// transformBody renders DSL body markup to HTML. currentKey replaces `~`.
+// transformBody renders a whole DSL entry body to HTML. currentKey replaces
+// `~`. The surrounding whitespace is the file's own indentation, not content,
+// so it is dropped - but only here, at the outer edge of a complete article.
 func transformBody(text, currentKey string) (html string, resFiles []string, err error) {
+	html, resFiles, err = transformFragment(text, currentKey)
+	if err != nil {
+		return "", nil, err
+	}
+	return strings.TrimSpace(html), resFiles, nil
+}
+
+// transformFragment is transformBody without the trim, for markup that is
+// concatenated with text on either side of it.
+func transformFragment(text, currentKey string) (html string, resFiles []string, err error) {
 	tr := &transformer{
 		input:      reCommentBlock.ReplaceAllString(text, ""),
 		currentKey: currentKey,
@@ -42,7 +54,7 @@ func transformBody(text, currentKey string) (html string, resFiles []string, err
 	if tr.labelOpen {
 		tr.closeLabel()
 	}
-	return strings.TrimSpace(tr.out.String()), tr.resFiles, nil
+	return tr.out.String(), tr.resFiles, nil
 }
 
 func (tr *transformer) end() bool  { return tr.pos >= len(tr.input) }

@@ -86,6 +86,17 @@ func TestTransformTitle(t *testing.T) {
 	if tr.Full != "a(b" {
 		t.Errorf("escaped paren: %+v", tr)
 	}
+	// DSL lets the space that separates the unsorted part from the headword
+	// sit either inside or outside the braces.
+	for _, line := range []string{`{to }go away from`, `{to} go away from`} {
+		tr = transformTitle(line)
+		if tr.Full != "go away from" || tr.Alt != "go away from" {
+			t.Errorf("unsorted key %q: %+v", line, tr)
+		}
+		if tr.Display != "to go away from" {
+			t.Errorf("unsorted display %q: got %q", line, tr.Display)
+		}
+	}
 }
 
 const sampleDSL = "#NAME \"Mini Diccionario\"\n" +

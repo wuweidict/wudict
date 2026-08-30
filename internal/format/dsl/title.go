@@ -89,7 +89,9 @@ func transformTitle(line string) titleResult {
 				}
 			}
 			inner := line[start : pos-1]
-			if html, _, err := transformBody(inner, ""); err == nil {
+			// Fragment, not body: the space in `{headword } suffix` is the word
+			// separator and must be preserved.
+			if html, _, err := transformFragment(inner, ""); err == nil {
 				display.WriteString(html)
 			}
 		default:
