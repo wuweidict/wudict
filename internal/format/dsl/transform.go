@@ -14,7 +14,10 @@ import (
 	"strings"
 )
 
-var reCommentBlock = regexp.MustCompile(`\{\{[^}]*\}\}`)
+// A `{{...}}` comment may itself contain a single `}`, so the body is
+// non-greedy rather than "no closing brace at all". Escaped braces (`\{\{`)
+// are not matched: the backslash sits between them, so no `{{` exists.
+var reCommentBlock = regexp.MustCompile(`(?s)\{\{.*?\}\}`)
 
 const exampleColor = "steelblue"
 
@@ -100,14 +103,18 @@ func (tr *transformer) addTextByte(c byte) {
 	}
 }
 
-func escape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-	return r.Replace(s)
-}
+var (
+	textEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+	attrEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
+)
 
-func quoteAttr(s string) string {
-	return `"` + strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;").Replace(s) + `"`
-}
+func escape(s string) string { return textEscaper.Replace(s) }
+
+// quoteAttr renders a value as a complete double-quoted attribute. Every
+// attribute built from dictionary content must go through this and not
+// escape(): a `"` inside a colour name or a media file name would otherwise
+// close the attribute and start a new one.
+func quoteAttr(s string) string { return `"` + attrEscaper.Replace(s) + `"` }
 
 func (tr *transformer) closeLabel() {
 	tr.out.WriteString(`<i class="p"><font color="green">` + tr.label.String() + "</font></i>")
@@ -274,6 +281,19 @@ func (tr *transformer) lexAttrValue() string {
 	}
 }
 
+// isMarginTag reports whether tag is [m] or [m] followed only by digits.
+func isMarginTag(tag string) bool {
+	if tag == "" || tag[0] != 'm' {
+		return false
+	}
+	for i := 1; i < len(tag); i++ {
+		if tag[i] < '0' || tag[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func (tr *transformer) processTag(tag string, attrs map[string]string) error {
 	if tag[0] == '/' {
 		tr.closeTag(tag[1:])
@@ -296,13 +316,16 @@ func (tr *transformer) processTag(tag string, attrs map[string]string) error {
 				break
 			}
 		}
-		tr.addHTML(`<font color="` + escape(color) + `">`)
-	case tag[0] == 'm':
+		tr.addHTML(`<font color=` + quoteAttr(color) + `>`)
+	case isMarginTag(tag):
+		// [m0]..[m9] set the left margin to N spaces; [m0] means 0, and a
+		// bare [m] means the default indent. Only digits reach the CSS -
+		// anything else would emit a length like "padding-left:arkem".
 		padding := "0.3"
-		if len(tag) > 1 && tag[1:] != "0" {
+		if len(tag) > 1 {
 			padding = tag[1:]
 		}
-		tr.addHTML(`<p style="padding-left:` + escape(padding) + `em;margin:0">`)
+		tr.addHTML(`<p style="padding-left:` + padding + `em;margin:0">`)
 	case tag == "p":
 		tr.labelOpen = true
 	case tag == "*":
@@ -420,10 +443,10 @@ func (tr *transformer) lexTagS() {
 	ext := strings.TrimPrefix(strings.ToLower(path.Ext(fname)), ".")
 	switch ext {
 	case "wav", "mp3", "ogg", "spx":
-		tr.addHTML(`<object type="audio/x-wav" data="` + escape(fname) +
-			`" width="40" height="40"><param name="autoplay" value="false" /></object>`)
+		tr.addHTML(`<object type="audio/x-wav" data=` + quoteAttr(fname) +
+			` width="40" height="40"><param name="autoplay" value="false" /></object>`)
 	case "bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp":
-		tr.addHTML(`<img align="top" src="` + escape(fname) + `" alt="` + escape(fname) + `" />`)
+		tr.addHTML(`<img align="top" src=` + quoteAttr(fname) + ` alt=` + quoteAttr(fname) + ` />`)
 	}
 	tr.resFiles = append(tr.resFiles, fname)
 }

@@ -11,6 +11,7 @@ import "strings"
 //
 //	(...)  optional part: kept in Full, absent from Alt
 //	{...}  unsorted part: rendered only into Display (markup allowed)
+//	{{..}} comment: dropped from all three
 //	\x     escaped char
 type titleResult struct {
 	Full    string // headword with optional parts unwrapped
@@ -18,11 +19,16 @@ type titleResult struct {
 	Display string // HTML display title (unsorted parts rendered)
 }
 
+// transformTitle parses one headword line. The three constructs are
+// independent and may be nested in either order, so this is one flat loop
+// with a paren flag rather than a paren scanner with its own alphabet:
+// `(слов{[']}а{[/']}рной)` puts an unsorted stress mark inside an optional
+// part, and a paren loop that did not know about `{` would copy the braces
+// verbatim into the lookup key and make the entry unfindable.
 func transformTitle(line string) titleResult {
 	var full, alt, display strings.Builder
 	pos := 0
-	end := func() bool { return pos >= len(line) }
-	next := func() byte { c := line[pos]; pos++; return c }
+	inParen := false
 
 	// Headword variants stay raw (they are lookup keys); only the
 	// display form is HTML-escaped. Bytes are appended raw so multi-byte
@@ -39,68 +45,94 @@ func transformTitle(line string) titleResult {
 			b.WriteByte(c)
 		}
 	}
-	addBoth := func(c byte) { // outside parens: all three
+	// add appends one indexable byte: always to Full and Display, and to
+	// Alt only outside an optional part.
+	add := func(c byte) {
 		full.WriteByte(c)
-		alt.WriteByte(c)
-		escByte(&display, c)
-	}
-	addFull := func(c byte) { // inside parens: full + display only
-		full.WriteByte(c)
+		if !inParen {
+			alt.WriteByte(c)
+		}
 		escByte(&display, c)
 	}
 
-	for !end() {
-		c := next()
+	for pos < len(line) {
+		c := line[pos]
+		pos++
 		switch c {
 		case '\\':
-			if end() {
-				addBoth(c)
+			if pos >= len(line) {
+				add(c)
 				break
 			}
-			addBoth(next())
+			add(line[pos])
+			pos++
 		case '(':
-			for !end() {
-				c = next()
-				if c == '\\' {
-					if end() {
-						break
-					}
-					addFull(next())
-					continue
-				}
-				if c == ')' {
-					break
-				}
-				addFull(c)
+			if inParen { // stray '(': literal, DSL does not nest optional parts
+				add(c)
+				break
 			}
+			inParen = true
+		case ')':
+			if !inParen {
+				add(c)
+				break
+			}
+			inParen = false
 		case '{':
+			// `{{...}}` is a comment even in a headword: consume, emit nothing.
+			if pos < len(line) && line[pos] == '{' {
+				if i := strings.Index(line[pos+1:], "}}"); i >= 0 {
+					pos += 1 + i + 2
+				} else {
+					pos = len(line)
+				}
+				break
+			}
 			start := pos
 			depth := 1
-			for !end() && depth > 0 {
-				c = next()
-				if c == '\\' && !end() {
-					next()
-					continue
-				}
-				if c == '{' {
+			for pos < len(line) && depth > 0 {
+				b := line[pos]
+				pos++
+				switch b {
+				case '\\':
+					if pos < len(line) {
+						pos++
+					}
+				case '{':
 					depth++
-				} else if c == '}' {
+				case '}':
 					depth--
 				}
 			}
-			inner := line[start : pos-1]
+			inner := line[start:] // unterminated `{`: take the rest verbatim
+			if depth == 0 {
+				inner = line[start : pos-1]
+			}
 			// Fragment, not body: the space in `{headword } suffix` is the word
 			// separator and must be preserved.
 			if html, _, err := transformFragment(inner, ""); err == nil {
 				display.WriteString(html)
 			}
 		default:
-			addBoth(c)
+			add(c)
 		}
 	}
+	// The two keys get their interior whitespace collapsed, the display form
+	// does not. Deleting an unsorted or optional part leaves the spaces that
+	// surrounded it behind - `sample {unsorted part} card` keys as
+	// "sample  card", which nobody can type - and a key exists only to be
+	// matched. Display is the opposite case: its spacing is the author's.
 	return titleResult{
-		Full:    strings.TrimSpace(full.String()),
-		Alt:     strings.TrimSpace(alt.String()),
+		Full:    collapseSpace(full.String()),
+		Alt:     collapseSpace(alt.String()),
 		Display: strings.TrimSpace(display.String()),
 	}
+}
+
+// collapseSpace trims and squeezes runs of whitespace to a single space.
+func collapseSpace(s string) string {
+	if !strings.ContainsAny(s, " \t\n\v\f\r\u0085\u00a0") {
+		return s
+	}
+	return strings.Join(strings.Fields(s), " ")
 }

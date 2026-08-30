@@ -35,6 +35,15 @@ func TestTransformBody(t *testing.T) {
 		{`5 &lt; 6? a<b`, `5 &amp;lt; 6? a&lt;b`},
 		{`literal ([ ]) brackets`, `literal ([ ]) brackets`}, // corchete case
 		{`[unknowntag]inner[/unknowntag]`, `inner`},
+		// [m0] means margin 0, not the default indent.
+		{`[m0]flush[/m]`, `<p style="padding-left:0em;margin:0">flush</p>`},
+		{`[m]bare[/m]`, `<p style="padding-left:0.3em;margin:0">bare</p>`},
+		// Not a margin tag: no digits after the 'm'.
+		{`[mx]plain[/mx]`, `plain`},
+		// A comment may contain a single closing brace.
+		{`x {{note with } inside}} y`, `x  y`},
+		// Hostile attribute content cannot break out of the quotes.
+		{`[c re"d]x[/c]`, `<font color="re&quot;d">x</font>`},
 	}
 	for _, c := range cases {
 		got, _, err := transformBody(c.in, "KEY")
@@ -85,6 +94,44 @@ func TestTransformTitle(t *testing.T) {
 	tr = transformTitle(`a\(b`)
 	if tr.Full != "a(b" {
 		t.Errorf("escaped paren: %+v", tr)
+	}
+	// Unsorted `{...}` parts nest inside optional `(...)` parts. Stress marks
+	// are written this way (the tag goes in braces so it is not indexed, the
+	// stressed vowel stays outside so it is), and a paren scanner blind to `{`
+	// used to copy the braces straight into the lookup key.
+	tr = transformTitle(`удар{[']}е{[/']}ние в загол{[']}о{[/']}вке (слов{[']}а{[/']}рной стать{[']}и{[/']})`)
+	if tr.Full != "ударение в заголовке словарной статьи" {
+		t.Errorf("accent in parens, Full: %q", tr.Full)
+	}
+	if tr.Alt != "ударение в заголовке" {
+		t.Errorf("accent in parens, Alt: %q", tr.Alt)
+	}
+	if strings.Contains(tr.Display, "{") || strings.Count(tr.Display, `<u class="accent">`) != 4 {
+		t.Errorf("accent in parens, Display: %q", tr.Display)
+	}
+	// Removing an unsorted part must not leave a double space in the key:
+	// the entry would be unreachable by its own headword.
+	tr = transformTitle(`sample {unsorted part} card`)
+	if tr.Full != "sample card" || tr.Alt != "sample card" {
+		t.Errorf("unsorted gap: %+v", tr)
+	}
+	if tr.Display != "sample unsorted part card" {
+		t.Errorf("unsorted gap display: %q", tr.Display)
+	}
+	// A comment is a comment in a headword line too.
+	tr = transformTitle(`word {{a note}} two`)
+	if tr.Full != "word two" || tr.Display != "word  two" {
+		t.Errorf("title comment: %+v", tr)
+	}
+	// Unterminated `{` must not eat the last character of the headword.
+	tr = transformTitle(`abc {[b]def`)
+	if tr.Full != "abc" || tr.Display != "abc <b>def" {
+		t.Errorf("unterminated curly: %+v", tr)
+	}
+	// Escapes still win over every construct.
+	tr = transformTitle(`a\{b\}c`)
+	if tr.Full != "a{b}c" {
+		t.Errorf("escaped braces: %+v", tr)
 	}
 	// DSL lets the space that separates the unsorted part from the headword
 	// sit either inside or outside the braces.
@@ -294,5 +341,55 @@ func TestIntegrationRealDSL(t *testing.T) {
 	}
 	if n == 0 {
 		t.Fatal("no entries parsed")
+	}
+}
+
+// TestReaderHeaderTabsAndSubEntries covers the two reader-level rules that
+// Lingvo's own sample.dsl exercises and a space-separated fixture does not:
+// header lines may use a tab as the key/value separator, and a sub-entry
+// headword obeys the same (...)/{...} rules as a top-level one.
+func TestReaderHeaderTabsAndSubEntries(t *testing.T) {
+	src := "#NAME\t\"Tabbed\"\n" +
+		"#INDEX_LANGUAGE\t\"Russian\"\n" +
+		"#CONTENTS_LANGUAGE\t\"Russian\"\n" +
+		"\n" +
+		"удар{[']}е{[/']}ние (слов{[']}а{[/']}рное)\n" +
+		"\tтело статьи\n" +
+		"\t@ подстать{[']}я(ми)\n" +
+		"\tтело подстатьи\n" +
+		"\t@\n"
+	p := writeDSL(t, "tabbed.dsl", []byte(src))
+	r, err := NewReader(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	if m := r.Meta(); m.Name != "Tabbed" || m.Description != "Russian → Russian" {
+		t.Errorf("tab-separated header: %+v", m)
+	}
+
+	main, err := r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMain := []string{"ударение словарное", "ударение"}
+	if len(main.Headwords) != 2 || main.Headwords[0] != wantMain[0] || main.Headwords[1] != wantMain[1] {
+		t.Errorf("main headwords: %q want %q", main.Headwords, wantMain)
+	}
+	if strings.Contains(main.Body, "{") || !strings.Contains(main.Body, `<u class="accent">`) {
+		t.Errorf("main body: %q", main.Body)
+	}
+	if !strings.Contains(main.Body, `href="bword://подстатьями"`) {
+		t.Errorf("sub-entry back-reference missing: %q", main.Body)
+	}
+
+	sub, err := r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSub := []string{"подстатьями", "подстатья"}
+	if len(sub.Headwords) != 2 || sub.Headwords[0] != wantSub[0] || sub.Headwords[1] != wantSub[1] {
+		t.Errorf("sub headwords: %q want %q", sub.Headwords, wantSub)
 	}
 }

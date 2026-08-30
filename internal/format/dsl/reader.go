@@ -75,9 +75,14 @@ func (r *Reader) init(path string) error {
 			continue
 		}
 		if strings.HasPrefix(line, "#") {
-			if k, v, ok := strings.Cut(line[1:], " "); ok {
-				r.header[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
+			// The key/value separator is "whitespace", not "a space":
+			// Lingvo's own sample writes #INDEX_LANGUAGE with a tab, and
+			// splitting on " " alone dropped the line entirely.
+			rest, k, v := line[1:], line[1:], ""
+			if i := strings.IndexAny(rest, " \t"); i >= 0 {
+				k, v = rest[:i], rest[i+1:]
 			}
+			r.header[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
 			continue
 		}
 		r.buffered = append(r.buffered, line)
@@ -89,11 +94,15 @@ func (r *Reader) init(path string) error {
 		base := filepath.Base(path)
 		name = strings.TrimSuffix(strings.TrimSuffix(base, ".dz"), ".dsl")
 	}
+	desc := ""
+	if from, to := r.header["INDEX_LANGUAGE"], r.header["CONTENTS_LANGUAGE"]; from != "" || to != "" {
+		desc = from + " → " + to
+	}
 	r.meta = dict.Meta{
 		Name:        name,
 		Format:      "dsl",
 		Path:        path,
-		Description: r.header["INDEX_LANGUAGE"] + " → " + r.header["CONTENTS_LANGUAGE"],
+		Description: desc,
 	}
 	return nil
 }
@@ -210,6 +219,7 @@ func (r *Reader) parseBlock(termLines, textLines []string) (dict.Entry, []dict.E
 
 	var mainText strings.Builder
 	var subs []dict.Entry
+	var subTitle titleResult
 	subKey, subText := "", strings.Builder{}
 	flushSub := func() {
 		if subKey == "" {
@@ -217,10 +227,18 @@ func (r *Reader) parseBlock(termLines, textLines []string) (dict.Entry, []dict.E
 		}
 		body, _, err := transformBody(strings.TrimRight(subText.String(), "\n"), subKey)
 		if err == nil {
-			subs = append(subs, dict.Entry{Headwords: []string{subKey}, Body: body, Kind: dict.BodyHTML})
+			heads := []string{subKey}
+			if subTitle.Alt != "" && subTitle.Alt != subKey {
+				heads = append(heads, subTitle.Alt)
+			}
+			subs = append(subs, dict.Entry{Headwords: heads, Body: body, Kind: dict.BodyHTML})
 		}
-		mainText.WriteString("\t[m2][ref]" + subKey + "[/ref][/m]\n")
+		// The back-reference is re-parsed as DSL, so the key has to survive a
+		// second pass: an unescaped "[" or "~" in a sub-headword would be read
+		// as markup and swallow the link.
+		mainText.WriteString("\t[m2][ref]" + dslEscape(subKey) + "[/ref][/m]\n")
 		subKey = ""
+		subTitle = titleResult{}
 		subText.Reset()
 	}
 	for _, line := range textLines {
@@ -231,7 +249,8 @@ func (r *Reader) parseBlock(termLines, textLines []string) (dict.Entry, []dict.E
 		}
 		if after, ok := strings.CutPrefix(s, "@ "); ok {
 			flushSub()
-			subKey = strings.TrimSpace(after)
+			subTitle = transformTitle(strings.TrimSpace(after))
+			subKey = subTitle.Full
 			continue
 		}
 		if subKey != "" {
@@ -251,3 +270,11 @@ func (r *Reader) parseBlock(termLines, textLines []string) (dict.Entry, []dict.E
 	}
 	return dict.Entry{Headwords: terms, Body: body, Kind: dict.BodyHTML}, subs, nil
 }
+
+// dslEscape backslash-escapes the characters the DSL lexer treats as markup,
+// so a string can be embedded in generated DSL and come back out unchanged.
+func dslEscape(s string) string { return dslEscaper.Replace(s) }
+
+var dslEscaper = strings.NewReplacer(
+	`\\`, `\\\\`, "[", `\\[`, "]", `\\]`, "~", `\\~`, "<", `\\<`, ">", `\\>`, "@", `\\@`,
+)
