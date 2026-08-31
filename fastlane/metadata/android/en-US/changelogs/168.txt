@@ -1,0 +1,5 @@
+v3.4
+
+- fix DSL formatting issues in titles and bodies
+- fix DSL audio format links
+- add WEB_ORIGINS for CORS whitelisting, by default empty, use '*' to allow all

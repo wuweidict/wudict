@@ -78,8 +78,8 @@ type Policy struct {
 	Bare func(tag string) bool
 
 	// Replace returns markup to emit in place of an element Tag dropped, so a
-	// policy can keep content that only an unsafe element was carrying - a DSL
-	// dictionary's pronunciation, which arrives as
+	// policy can keep content that only an unsafe element was carrying -
+	// GoldenDict-era pronunciation, which arrives as
 	// <object type="audio/x-wav" data="…">, becoming a plain <audio>. The
 	// element's subtree is still discarded; the returned markup is emitted
 	// VERBATIM, so a policy that builds it must escape it.

@@ -198,3 +198,178 @@ func TestCORSPinnedServer(t *testing.T) {
 		}
 	}
 }
+
+// The second predicate, and the one that can be widened by a config file: what
+// WEB_ORIGINS is allowed to mean.
+func TestWebOrigin(t *testing.T) {
+	tests := []struct {
+		origin   string
+		scheme   string
+		hostport string
+		ok       bool
+	}{
+		{"http://localhost:3000", "http", "localhost:3000", true},
+		{"https://notes.example.com", "https", "notes.example.com", true},
+		{"http://127.0.0.1:6888", "http", "127.0.0.1:6888", true},
+		{"http://[::1]:3000", "http", "[::1]:3000", true},
+		{"https://x.example:8443", "https", "x.example:8443", true},
+
+		// The browser never sends the default port, so a config that does
+		// must still describe the same origin.
+		{"https://x.example:443", "https", "x.example", true},
+		{"http://x.example:80", "http", "x.example", true},
+		// …and only the default one for that scheme.
+		{"https://x.example:80", "https", "x.example:80", true},
+
+		{"", "", "", false},
+		{"null", "", "", false}, // sandboxed iframe / file: page
+		{"file:///etc/passwd", "", "", false},
+		{"*", "", "", false}, // handled by the caller, never parsed
+		{"http://", "", "", false},
+		{"ftp://x.example", "", "", false},
+		{"chrome-extension://abc", "", "", false}, // the other predicate's job
+		// An origin has no path, and a comparison that tolerated one would
+		// match the attacker's host, not the trusted one after the '#'.
+		{"https://evil.example/#https://x.example", "", "", false},
+		{"https://x.example/", "", "", false},
+		{"https://x.example?a=1", "", "", false},
+		{"https://u@x.example", "", "", false},
+		{"https://x.example\\@evil.example", "", "", false},
+		{"https://x.example ", "", "", false},
+		{" https://x.example", "", "", false},
+	}
+	for _, tc := range tests {
+		scheme, hostport, ok := webOrigin(tc.origin)
+		if ok != tc.ok || (ok && (scheme != tc.scheme || hostport != tc.hostport)) {
+			t.Errorf("webOrigin(%q) = %q, %q, %v; want %q, %q, %v",
+				tc.origin, scheme, hostport, ok, tc.scheme, tc.hostport, tc.ok)
+		}
+	}
+}
+
+// The default is closed, and closed is the only state that needs no argument:
+// nothing a page can send opens it.
+func TestWebOriginsClosedByDefault(t *testing.T) {
+	s := &Server{}
+	for _, origin := range []string{
+		"https://notes.example.com", "http://localhost:3000", "null", "file://", "*",
+	} {
+		if s.allowOrigin(origin) {
+			t.Errorf("with WEB_ORIGINS unset, %q was allowed", origin)
+		}
+	}
+	// Widening it for web pages must not narrow it for extensions, which are
+	// governed by their own key.
+	if !(&Server{WebOrigins: []string{"https://notes.example.com"}}).allowOrigin(chromeOrigin) {
+		t.Errorf("setting WEB_ORIGINS refused an extension")
+	}
+}
+
+func TestAllowWebOrigin(t *testing.T) {
+	s := &Server{WebOrigins: []string{"http://localhost:3000", "https://Notes.Example.com:443"}}
+	allowed := []string{
+		"http://localhost:3000",
+		"https://notes.example.com", // the default port the browser drops
+		"https://NOTES.example.com", // hosts are case-insensitive
+	}
+	for _, origin := range allowed {
+		if !s.allowOrigin(origin) {
+			t.Errorf("listed origin %q was refused", origin)
+		}
+	}
+	denied := []string{
+		"http://localhost:3001",  // a different port is a different origin
+		"https://localhost:3000", // …and so is a different scheme
+		"http://localhost",       // …and so is no port at all
+		"https://notes.example.com.evil.test",
+		"https://evil.test/#https://notes.example.com",
+		"null",
+		"file://",
+		"",
+	}
+	for _, origin := range denied {
+		if s.allowOrigin(origin) {
+			t.Errorf("unlisted origin %q was allowed", origin)
+		}
+	}
+}
+
+// "*" is an explicit choice and behaves like one - but it is a choice about
+// web pages, not about everything that can set an Origin header.
+func TestWebOriginsWildcard(t *testing.T) {
+	s := &Server{WebOrigins: []string{"*"}}
+	for _, origin := range []string{"https://evil.example", "http://localhost:3000"} {
+		if !s.allowOrigin(origin) {
+			t.Errorf("wildcard refused %q", origin)
+		}
+	}
+	// `null` is what every sandboxed iframe and file: page sends. It names
+	// nobody, so it is never an allowed origin, wildcard or not.
+	for _, origin := range []string{"null", "file://", "chrome-extension://a/b"} {
+		if s.allowOrigin(origin) {
+			t.Errorf("wildcard allowed %q", origin)
+		}
+	}
+}
+
+// On the wire: the grant reaches exactly the three read-only routes, and the
+// echoed value is the origin, never a literal "*".
+func TestWebOriginsRoutes(t *testing.T) {
+	s := newTestServer(t)
+	s.WebOrigins = []string{"*"}
+	const origin = "https://notes.example.com"
+	for _, path := range []string{"/api/dicts", "/api/search?q=casa&mode=exact", "/res/nope/x.png"} {
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("Origin", origin)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if got := rec.Header().Get("Access-Control-Allow-Origin"); got != origin {
+			t.Errorf("GET %s: Allow-Origin = %q, want %q", path, got, origin)
+		}
+	}
+	for _, path := range []string{"/api/prefs", "/api/config", "/api/library", "/api/rescan", "/"} {
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("Origin", origin)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+			t.Errorf("GET %s: Allow-Origin = %q, want none - WEB_ORIGINS must not widen the route set", path, got)
+		}
+	}
+}
+
+// Chrome preflights every request to a private address from a page that is not
+// itself local, and drops the request unless the answer opts in. Without this
+// the setting would work in Firefox and silently do nothing in Chrome.
+func TestPreflightPrivateNetwork(t *testing.T) {
+	s := newTestServer(t)
+	s.WebOrigins = []string{"https://notes.example.com"}
+	req := httptest.NewRequest("OPTIONS", "/api/search", nil)
+	req.Header.Set("Origin", "https://notes.example.com")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	req.Header.Set("Access-Control-Request-Private-Network", "true")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Private-Network"); got != "true" {
+		t.Errorf("Allow-Private-Network = %q, want %q", got, "true")
+	}
+
+	// Not offered to an origin that was refused…
+	req = httptest.NewRequest("OPTIONS", "/api/search", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Access-Control-Request-Private-Network", "true")
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Private-Network"); got != "" {
+		t.Errorf("a denied origin got Allow-Private-Network = %q", got)
+	}
+
+	// …nor volunteered to one that did not ask.
+	req = httptest.NewRequest("OPTIONS", "/api/search", nil)
+	req.Header.Set("Origin", "https://notes.example.com")
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Private-Network"); got != "" {
+		t.Errorf("Allow-Private-Network = %q without the request header", got)
+	}
+}

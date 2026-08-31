@@ -47,6 +47,13 @@ type Config struct {
 	// any chrome-extension:// or moz-extension:// origin. See D69.
 	BrowserExtensions []string
 
+	// WebOrigins (WEB_ORIGINS) lists the http(s) page origins allowed to read
+	// those same three endpoints cross-origin. Empty - the default - means no
+	// web page may, which is not the same default as BrowserExtensions and is
+	// deliberately not: an extension is something the user installed, a web
+	// page is whatever they happened to open. "*" allows any origin. See D69.
+	WebOrigins []string
+
 	// Portable reports that Source sits next to the executable: the user put
 	// it there, so that is where saves go too (D32).
 	Portable bool
@@ -205,6 +212,9 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	if v := get("BROWSER_EXTENSIONS"); v != "" {
 		cfg.BrowserExtensions = ParseOrigins(v)
 	}
+	if v := get("WEB_ORIGINS"); v != "" {
+		cfg.WebOrigins = ParseOrigins(v)
+	}
 	return cfg, nil
 }
 
@@ -355,6 +365,16 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 #                                     # (it can read dictionaries and nothing else - never your
 #                                     # settings or library). List origins to allow only those:
 #                                     # ["chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
+# WEB_ORIGINS = []                    # which WEB PAGES may read this server with JavaScript.
+#                                     # Blank = none, and that is the safe default: a page you
+#                                     # visit cannot read your dictionaries. List the exact
+#                                     # origins of your own pages to let them (scheme, host and
+#                                     # port, no path):
+#                                     # ["http://localhost:3000", "https://notes.example.com"]
+#                                     # They reach the same three read-only endpoints an
+#                                     # extension does - never your settings or library.
+#                                     # "*" allows every site you visit; convenient while
+#                                     # developing, a standing invitation otherwise.
 `
 
 // EnsureConfigFile makes sure a config file exists, generating the fully
@@ -660,11 +680,12 @@ func ParseList(v string) []string {
 	return expandAll(strings.Split(v, string(os.PathListSeparator)))
 }
 
-// ParseOrigins reads BROWSER_EXTENSIONS: a list of browser-extension origins,
+// ParseOrigins reads the two origin lists - BROWSER_EXTENSIONS and WEB_ORIGINS -
 // written as a TOML array or separated by commas, semicolons or whitespace.
 //
 //	BROWSER_EXTENSIONS = ["chrome-extension://abc…", "moz-extension://1f2e…"]
 //	BROWSER_EXTENSIONS=chrome-extension://abc…,moz-extension://1f2e…
+//	WEB_ORIGINS = ["http://localhost:3000", "https://notes.example.com"]
 //
 // It deliberately does NOT split on os.PathListSeparator the way ParseList does:
 // that is ':' on Unix, and every value here contains one. A trailing '/' is

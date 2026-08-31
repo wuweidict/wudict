@@ -115,6 +115,12 @@ type Server struct {
 	// forces anyway: its moz-extension UUID is regenerated per install, so
 	// there is no stable id to list. See cors.go (D69).
 	BrowserExtensions []string
+
+	// WebOrigins lists http(s) page origins allowed to read the same three
+	// endpoints cross-origin (config WEB_ORIGINS). Empty - the default - means
+	// none: a web page gets nothing here. A single "*" allows any origin. See
+	// cors.go (D69).
+	WebOrigins []string
 }
 
 func New(reg *Registry) *Server {

@@ -214,6 +214,20 @@ SERVE FLAGS
                           env: BROWSER_EXTENSIONS  toml: BROWSER_EXTENSIONS
                           default: any extension
 
+  WEB_ORIGINS             Which web pages may look words up in this server with
+                          JavaScript. Blank = none, and a page in a browser
+                          cannot reach wudict at all. List the exact origins of
+                          your own pages - scheme, host and port, no path - to
+                          let them read the same three endpoints an extension
+                          reaches, and nothing else:
+                            WEB_ORIGINS = ["http://localhost:3000"]
+                          "*" allows every site you visit: useful while
+                          developing, a standing invitation otherwise.
+                          (Scripts outside a browser - curl, Node, your own
+                          program - are not affected by any of this.)
+                          env: WEB_ORIGINS    toml: WEB_ORIGINS
+                          default: no web page
+
   --ip           <addr>   Listen IP address
                           env: SERVER_IP      toml: SERVER_IP
                           default: 127.0.0.1
@@ -916,6 +930,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	srv.Speexdec = sxPath
 	srv.AutoIndex = cfg.AutoIndexEnabled()
 	srv.BrowserExtensions = cfg.BrowserExtensions
+	srv.WebOrigins = cfg.WebOrigins
 
 	lib, _ := store.Library()
 	inFolder, fromLib := reg.Counts()
@@ -1247,6 +1262,12 @@ func printStartup(cfg config.Config, in startupInfo) {
 		fmt.Fprintf(out, "                %s  (ignored - lower priority)\n", p)
 	}
 	fmt.Fprintf(out, "  address       %s\n", in.url)
+	// Printed only when set, and always when set: opening the dictionary API
+	// to a web page is the one setting here whose effect is invisible from
+	// inside the app, so the banner is where it becomes visible again.
+	if len(cfg.WebOrigins) > 0 {
+		fmt.Fprintf(out, "  web origins   %s\n", webOriginsNote(cfg.WebOrigins))
+	}
 	if in.speex != "" {
 		fmt.Fprintf(out, "  .spx audio    %s\n", in.speex)
 	}
@@ -1290,6 +1311,18 @@ func (m *multiFlag) String() string { return strings.Join(*m, string(os.PathList
 func (m *multiFlag) Set(v string) error {
 	*m = append(*m, v)
 	return nil
+}
+
+// webOriginsNote renders WEB_ORIGINS for the startup block. A wildcard is
+// spelled out rather than printed as "*": the difference between one allowed
+// site and all of them is the difference worth reading at a glance.
+func webOriginsNote(origins []string) string {
+	for _, o := range origins {
+		if o == "*" {
+			return "any website may read your dictionaries (WEB_ORIGINS = \"*\")"
+		}
+	}
+	return strings.Join(origins, ", ") + "  (may read your dictionaries)"
 }
 
 // budgetNote describes the preview-memory cap for the startup block.

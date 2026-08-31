@@ -5,12 +5,8 @@
 package dsl
 
 import (
-	"archive/zip"
 	"fmt"
 	"io"
-	"mime"
-	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,6 +16,7 @@ import (
 
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/logx"
+	"github.com/wuweidict/wudict/internal/resource"
 	"github.com/wuweidict/wudict/internal/store"
 )
 
@@ -39,14 +36,14 @@ func init() {
 // transparently prepares a library folder (<db dir>/<source name>/text.db) on
 // first use (SPEC §1); a changed source is detected from the recorded
 // size/mtime/hash and re-indexed in place. Resources stay lazy in
-// `<name>.files.zip` (or loose beside the .dsl).
+// `<name>.files.zip`, the matching `.files` folder, or loose beside the .dsl.
 type Dict struct {
 	*store.Store
 	srcPath string
 
-	zipOnce  sync.Once
-	zipFiles map[string]*zip.File
-	zipMu    sync.Mutex
+	resOnce sync.Once
+	res     []resource.Source
+	resMu   sync.Mutex // guards res against a concurrent Close
 }
 
 func Open(path string) (*Dict, error) {
@@ -97,58 +94,80 @@ func (d *Dict) Meta() dict.Meta {
 	return m
 }
 
-func (d *Dict) Close() error { return d.Store.Close() }
+func (d *Dict) Close() error {
+	// Do, not a flag: a Resource call racing Close must find the sources
+	// already built and closed, never build a fresh set nothing will close.
+	d.resOnce.Do(func() {})
+	d.resMu.Lock()
+	for _, s := range d.res {
+		s.Close()
+	}
+	d.res = nil
+	d.resMu.Unlock()
+	return d.Store.Close()
+}
 
-// Resource serves from `<dsl-path>.files.zip` (also `<base>.files.zip`
-// for .dsl.dz), else a loose file beside the source.
+// Resource serves from the dictionary's resource containers, in the order
+// LingvoDSL itself documents: the `.files.zip` archive first, then the
+// `.files` folder, then loose beside the source.
 func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
-	norm := strings.TrimLeft(path.Clean(name), "/")
-	if norm == "" || norm == "." || strings.HasPrefix(norm, "..") {
-		return nil, "", dict.ErrNotFound
-	}
-	d.zipOnce.Do(d.loadZip)
-	if d.zipFiles != nil {
-		if zf, ok := d.zipFiles[strings.ToLower(norm)]; ok {
-			d.zipMu.Lock()
-			rc, err := zf.Open()
-			d.zipMu.Unlock()
-			if err != nil {
-				return nil, "", err
-			}
-			return rc, mime.TypeByExtension(path.Ext(norm)), nil
+	for _, src := range d.sources() {
+		if rc, err := src.Open(name); err == nil {
+			return rc, resource.MIME(name), nil
 		}
-	}
-	if f, err := os.Open(filepath.Join(filepath.Dir(d.srcPath), filepath.FromSlash(norm))); err == nil {
-		return f, mime.TypeByExtension(path.Ext(norm)), nil
 	}
 	return nil, "", dict.ErrNotFound
 }
 
-// Resources lists the .files.zip entries.
+// Resources lists what the containers hold, for media packing. The folder the
+// dictionary merely sits in contributes nothing: it holds other dictionaries
+// and their assets, and packing them would copy a neighbour's media into this
+// dictionary's library folder.
 func (d *Dict) Resources() []string {
-	d.zipOnce.Do(d.loadZip)
-	out := make([]string, 0, len(d.zipFiles))
-	for name := range d.zipFiles {
-		out = append(out, name)
+	var out []string
+	seen := map[string]bool{}
+	for _, src := range d.sources() {
+		for _, n := range src.List() {
+			if k := resource.Key(n); k != "" && !seen[k] {
+				seen[k] = true
+				out = append(out, n)
+			}
+		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-func (d *Dict) loadZip() {
-	candidates := []string{d.srcPath + ".files.zip"}
-	if strings.HasSuffix(strings.ToLower(d.srcPath), ".dz") {
-		candidates = append(candidates, strings.TrimSuffix(d.srcPath, filepath.Ext(d.srcPath))+".files.zip")
+func (d *Dict) sources() []resource.Source {
+	d.resOnce.Do(d.loadSources)
+	d.resMu.Lock()
+	defer d.resMu.Unlock()
+	return d.res
+}
+
+func (d *Dict) loadSources() {
+	// A ".dsl.dz" names its resources after either the compressed file or the
+	// ".dsl" inside it; both spellings are in the wild.
+	bases := []string{d.srcPath}
+	if strings.EqualFold(filepath.Ext(d.srcPath), ".dz") {
+		bases = append(bases, strings.TrimSuffix(d.srcPath, filepath.Ext(d.srcPath)))
 	}
-	for _, p := range candidates {
-		zr, err := zip.OpenReader(p)
-		if err != nil {
-			continue
+	var res []resource.Source
+	for _, b := range bases {
+		if z, err := resource.OpenZip(b + ".files.zip"); err == nil {
+			res = append(res, z)
 		}
-		d.zipFiles = make(map[string]*zip.File, len(zr.File))
-		for _, f := range zr.File {
-			d.zipFiles[strings.ToLower(f.Name)] = f
-		}
-		return
 	}
+	for _, b := range bases {
+		if dir := b + ".files"; resource.IsDir(dir) {
+			res = append(res, resource.NewDir(dir))
+		}
+	}
+	// Last: a file lying loose beside the .dsl. Exact paths only - this
+	// folder is not the dictionary's own, so it is never walked or listed.
+	res = append(res, resource.NewDirExact(filepath.Dir(d.srcPath)))
+
+	d.resMu.Lock()
+	d.res = res
+	d.resMu.Unlock()
 }

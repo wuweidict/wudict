@@ -10,15 +10,12 @@
 package stardict
 
 import (
-	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
 	"fmt"
 	"io"
-	"mime"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -26,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/resource"
 )
 
 func init() {
@@ -69,9 +67,8 @@ type Dict struct {
 
 	basePath string // path without .ifo
 	resOnce  sync.Once
-	resZip   *zip.Reader
-	resZipMu sync.Mutex
-	resFiles map[string]*zip.File
+	res      []resource.Source
+	resMu    sync.Mutex // guards res against a concurrent Close
 }
 
 // Open opens NAME.ifo and its companion files.
@@ -262,6 +259,15 @@ func (d *Dict) Meta() dict.Meta { return d.meta }
 func (d *Dict) Caps() dict.Caps { return dict.Caps{Exact: true, Prefix: true} }
 
 func (d *Dict) Close() error {
+	// Do, not a flag: a Resource call racing Close must find the sources
+	// already built and closed, never build a fresh set nothing will close.
+	d.resOnce.Do(func() {})
+	d.resMu.Lock()
+	for _, src := range d.res {
+		src.Close()
+	}
+	d.res = nil
+	d.resMu.Unlock()
 	if d.dictFile != nil {
 		return d.dictFile.Close()
 	}
@@ -391,29 +397,13 @@ func (d *Dict) Keywords(offset, n int) []string {
 	return out
 }
 
-// Resource serves files from res/ (dir) or res.zip beside the .ifo.
+// Resource serves files from res/ (dir) or res.zip beside the .ifo. Names are
+// matched through internal/resource, so a res.zip whose entry names were
+// written in a legacy code page still resolves against the UTF-8 name.
 func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
-	norm := strings.TrimLeft(path.Clean(name), "/")
-	if norm == "" || norm == "." || strings.HasPrefix(norm, "..") {
-		return nil, "", dict.ErrNotFound
-	}
-	dir := filepath.Join(filepath.Dir(d.basePath), "res")
-	if st, err := os.Stat(dir); err == nil && st.IsDir() {
-		f, err := os.Open(filepath.Join(dir, filepath.FromSlash(norm)))
-		if err == nil {
-			return f, mime.TypeByExtension(path.Ext(norm)), nil
-		}
-	}
-	d.resOnce.Do(d.loadResZip)
-	if d.resFiles != nil {
-		if zf, ok := d.resFiles[strings.ToLower(norm)]; ok {
-			d.resZipMu.Lock()
-			rc, err := zf.Open()
-			d.resZipMu.Unlock()
-			if err != nil {
-				return nil, "", err
-			}
-			return rc, mime.TypeByExtension(path.Ext(norm)), nil
+	for _, src := range d.sources() {
+		if rc, err := src.Open(name); err == nil {
+			return rc, resource.MIME(name), nil
 		}
 	}
 	return nil, "", dict.ErrNotFound
@@ -422,52 +412,46 @@ func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
 // Resources lists res/ dir files (relative, forward-slash) and res.zip
 // entries.
 func (d *Dict) Resources() []string {
-	seen := map[string]bool{}
 	var out []string
-	dir := filepath.Join(filepath.Dir(d.basePath), "res")
-	filepath.WalkDir(dir, func(p string, de os.DirEntry, err error) error {
-		if err != nil || de.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(dir, p)
-		if err != nil {
-			return nil
-		}
-		name := filepath.ToSlash(rel)
-		if !seen[name] {
-			seen[name] = true
-			out = append(out, name)
-		}
-		return nil
-	})
-	d.resOnce.Do(d.loadResZip)
-	for name := range d.resFiles {
-		if !seen[name] {
-			seen[name] = true
-			out = append(out, name)
+	seen := map[string]bool{}
+	for _, src := range d.sources() {
+		for _, n := range src.List() {
+			if k := resource.Key(n); k != "" && !seen[k] {
+				seen[k] = true
+				out = append(out, n)
+			}
 		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-func (d *Dict) loadResZip() {
-	zr, err := zip.OpenReader(filepath.Join(filepath.Dir(d.basePath), "res.zip"))
-	if err != nil {
-		return
+func (d *Dict) sources() []resource.Source {
+	d.resOnce.Do(d.loadSources)
+	d.resMu.Lock()
+	defer d.resMu.Unlock()
+	return d.res
+}
+
+func (d *Dict) loadSources() {
+	dir := filepath.Dir(d.basePath)
+	var res []resource.Source
+	if r := filepath.Join(dir, "res"); resource.IsDir(r) {
+		res = append(res, resource.NewDir(r))
 	}
-	d.resFiles = make(map[string]*zip.File, len(zr.File))
-	for _, f := range zr.File {
-		d.resFiles[strings.ToLower(f.Name)] = f
+	if z, err := resource.OpenZip(filepath.Join(dir, "res.zip")); err == nil {
+		res = append(res, z)
 	}
-	d.resZip = &zr.Reader
+	d.resMu.Lock()
+	d.res = res
+	d.resMu.Unlock()
 }
 
 func fold(s string) string { return dict.Fold(s) }
 
 // ---- record rendering ----------------------------------------------------
 
-// recordToHTML converts one .dict record to HTML. With sametypesequence
+// recordToHTML converts one .dict record to HTML. With same type sequence
 // the type of each part is fixed; otherwise each part is prefixed by its
 // type char. Lowercase types are text (NUL-terminated unless last),
 // uppercase types carry a u32 BE size prefix.

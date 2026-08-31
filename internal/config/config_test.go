@@ -211,6 +211,46 @@ func TestParseOrigins(t *testing.T) {
 	}
 }
 
+// WEB_ORIGINS is the same list shape, read by the same parser, with the
+// opposite default: unset means no web page may read the API (D69).
+func TestWebOriginsConfig(t *testing.T) {
+	const local = "http://localhost:3000"
+	const notes = "https://notes.example.com"
+
+	p := filepath.Join(t.TempDir(), Name)
+	if err := os.WriteFile(p, []byte("WEB_ORIGINS = [\""+local+"\", \""+notes+"\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.WebOrigins) != 2 || cfg.WebOrigins[0] != local || cfg.WebOrigins[1] != notes {
+		t.Errorf("WEB_ORIGINS from file = %q, want [%q %q]", cfg.WebOrigins, local, notes)
+	}
+	// The environment outranks the file, and separates with commas rather than
+	// os.PathListSeparator - which is the ':' inside every one of these values.
+	t.Setenv("WEB_ORIGINS", local+","+notes)
+	if cfg, err = Load(p, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.WebOrigins) != 2 || cfg.WebOrigins[0] != local {
+		t.Errorf("WEB_ORIGINS from env = %q, want two origins starting %q", cfg.WebOrigins, local)
+	}
+	if cfg.Origin("WEB_ORIGINS") != OriginEnv {
+		t.Errorf("WEB_ORIGINS origin = %q, want %q", cfg.Origin("WEB_ORIGINS"), OriginEnv)
+	}
+
+	blank := filepath.Join(t.TempDir(), Name)
+	if err := os.WriteFile(blank, []byte("SERVER_PORT = \"1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WEB_ORIGINS", "")
+	if cfg2, _ := Load(blank, nil); len(cfg2.WebOrigins) != 0 {
+		t.Errorf("unset WEB_ORIGINS = %q, want empty (no web page)", cfg2.WebOrigins)
+	}
+}
+
 // AUTO_INDEX is on|off since the "fuzzy" search mode it was named after was
 // retired - but an existing wudict.toml saying "fuzzy" must keep working.
 func TestAutoIndexValues(t *testing.T) {

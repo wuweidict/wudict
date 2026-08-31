@@ -1096,10 +1096,9 @@ func TestSearchFormats(t *testing.T) {
 	if !strings.Contains(clean, "órgano muscular") {
 		t.Errorf("clean lost the definition text: %q", clean)
 	}
-	// DSL spells pronunciation as <object type="audio/x-wav">, which `clean`
-	// drops as an embedding vector - so it must arrive as a plain <audio>
-	// instead, or every DSL dictionary silently loses its audio.
-	if !strings.Contains(clean, `<audio src="http://example.com/res/`) {
+	// DSL pronunciation is an ordinary link (D81), so `clean` has nothing to
+	// rescue: it keeps the anchor and absolutises it like any other resource.
+	if !strings.Contains(clean, `<a href="http://example.com/res/`) {
 		t.Errorf("clean dropped the pronunciation instead of rewriting it: %q", clean)
 	}
 	if strings.Contains(clean, "<object") {

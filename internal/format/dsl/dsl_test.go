@@ -12,10 +12,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/wuweidict/wudict/internal/dict"
+	"golang.org/x/text/encoding/charmap"
 )
 
 func TestTransformBody(t *testing.T) {
@@ -44,6 +47,16 @@ func TestTransformBody(t *testing.T) {
 		{`x {{note with } inside}} y`, `x  y`},
 		// Hostile attribute content cannot break out of the quotes.
 		{`[c re"d]x[/c]`, `<font color="re&quot;d">x</font>`},
+		// A comment alone on its line takes the line with it: keeping the
+		// line would put a blank line in front of the next one whenever
+		// that line does not open with [m].
+		{"[m1]a\n\t{{note}}\n\tb", `<p style="padding-left:1em;margin:0">a<br/>b`},
+		{"[m1]a\n\t{{note}}\n\t[m2]b", `<p style="padding-left:1em;margin:0">a<p style="padding-left:2em;margin:0">b`},
+		// ... including on the last line, where the newline it takes is the
+		// one that ended the line before it.
+		{"[m1]a\n\t{{note}}", `<p style="padding-left:1em;margin:0">a`},
+		// A line that keeps content keeps its line break too.
+		{"[m1]a {{note}}\n\tb", `<p style="padding-left:1em;margin:0">a <br/>b`},
 	}
 	for _, c := range cases {
 		got, _, err := transformBody(c.in, "KEY")
@@ -70,7 +83,7 @@ func TestTransformBodyUTF8(t *testing.T) {
 
 func TestTransformMedia(t *testing.T) {
 	got, res, _ := transformBody(`[s]audio/x.mp3[/s][s]img.png[/s]`, "")
-	if !strings.Contains(got, `data="audio/x.mp3"`) || !strings.Contains(got, `<img align="top" src="img.png"`) {
+	if !strings.Contains(got, `<a class="wudict-audio" href="audio/x.mp3">`) || !strings.Contains(got, `<img align="top" src="img.png"`) {
 		t.Errorf("media html: %q", got)
 	}
 	if len(res) != 2 || res[0] != "audio/x.mp3" || res[1] != "img.png" {
@@ -314,6 +327,87 @@ func TestResourceZip(t *testing.T) {
 	}
 	if res, err := d.Exact("corazon", 5); err != nil || len(res) != 1 {
 		t.Errorf("folded exact via store: %v %v", res, err)
+	}
+}
+
+// A DSL keeps its media in "<name>.dsl.files.zip" or in the matching
+// "<name>.dsl.files" folder, and Lingvo's own archivers wrote the zip entry
+// names in the machine's code page without recording which one. Both places
+// must serve the name the article actually spells.
+func TestResourceContainers(t *testing.T) {
+	dir := t.TempDir()
+	dslPath := filepath.Join(dir, "mini.dsl")
+	os.WriteFile(dslPath, []byte(sampleDSL), 0o644)
+
+	cp1251 := func(s string) string {
+		b, err := charmap.Windows1251.NewEncoder().String(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+
+	zf, err := os.Create(dslPath + ".files.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(zf)
+	for _, n := range []string{cp1251("кубок.jpg"), "rummer.jpg"} {
+		w, _ := zw.Create(n)
+		w.Write([]byte{1, 2, 3})
+	}
+	zw.Close()
+	zf.Close()
+
+	files := dslPath + ".files"
+	if err := os.Mkdir(files, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"Кубок Provenzale.jpg", "goblet.jpg"} {
+		if err := os.WriteFile(filepath.Join(files, n), []byte{4, 5}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Setenv("WUDICT_DB_DIR", t.TempDir())
+	d, err := Open(dslPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	for _, c := range []struct {
+		name string
+		size int
+	}{
+		{"кубок.jpg", 3},            // cp1251 zip entry, asked for in UTF-8
+		{"rummer.jpg", 3},           // plain zip entry
+		{"Кубок Provenzale.jpg", 2}, // the .files folder, which used to be ignored
+		{"goblet.jpg", 2},           // ditto, Latin name: also broken before
+		{"GOBLET.JPG", 2},           // case is not the article's problem
+	} {
+		rc, mimeType, err := d.Resource(c.name)
+		if err != nil {
+			t.Errorf("Resource(%q): %v", c.name, err)
+			continue
+		}
+		b, _ := io.ReadAll(rc)
+		rc.Close()
+		if len(b) != c.size || mimeType != "image/jpeg" {
+			t.Errorf("Resource(%q) = %d bytes %q, want %d bytes image/jpeg", c.name, len(b), mimeType, c.size)
+		}
+	}
+	if _, _, err := d.Resource("missing.jpg"); err == nil {
+		t.Error("missing resource must not resolve")
+	}
+
+	// Packing sees decoded names from both containers, and nothing from the
+	// folder the .dsl merely sits in.
+	want := []string{"goblet.jpg", "rummer.jpg", "Кубок Provenzale.jpg", "кубок.jpg"}
+	got := d.Resources()
+	sort.Strings(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("Resources() = %q, want %q", got, want)
 	}
 }
 

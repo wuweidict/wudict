@@ -209,13 +209,7 @@ func cleanPolicy(base string, st htmlref.Styles) htmlref.Policy {
 	return p
 }
 
-// audioObject rescues the one thing dropping <object> would otherwise throw
-// away. A DSL dictionary's pronunciation is emitted as
-// `<object type="audio/x-wav" data="beat.mp3">`, so dropping the element for
-// being an embedding vector - which it is - would silently remove audio from
-// every DSL dictionary in the library. Rewritten to a plain <audio>, the
-// content survives in a form that needs no plugin, no script and no client
-// knowledge of how DSL happens to spell it.
+
 func audioObject(base string) func(string, []html.Attribute) string {
 	return func(tag string, attrs []html.Attribute) string {
 		if tag != "object" {

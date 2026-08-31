@@ -119,11 +119,16 @@ popup. The page you are reading never addresses your machine, so your browser
 never asks whether *that site* may reach your local network.
 
 WuWeiDict answers browser extensions on three read-only endpoints only:
-`/api/dicts`, `/api/search` and `/res/`. Web pages get nothing. Settings,
-preferences and the library are unreachable this way.
+`/api/dicts`, `/api/search` and `/res/`. Settings, preferences and the library
+are unreachable this way.
 
 To allow named extensions only, list their origins in
 [`BROWSER_EXTENSIONS`](reference/configuration.md#browser_extensions).
+
+Web pages get nothing here. A page of your own can be allowed the same three
+endpoints by naming its origin in
+[`WEB_ORIGINS`](reference/configuration.md#web_origins), which is unset by
+default.
 
 ??? question "The popup says WuWeiDict is not answering extensions"
 

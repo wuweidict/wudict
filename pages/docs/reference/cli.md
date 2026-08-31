@@ -69,6 +69,12 @@ Every flag has a corresponding environment variable and a `wudict.toml` key.
 | `--config <path>` | [`CONFIG_PATH`](configuration.md#config_path) |
 | `--verbose` | [`VERBOSE`](configuration.md#verbose) |
 
+Three settings have no flag, because they are not things you change per run:
+[`BROWSER_EXTENSIONS`](configuration.md#browser_extensions) and
+[`WEB_ORIGINS`](configuration.md#web_origins), which decide who may call the
+[HTTP API](api.md) from a browser, and
+[`AUTO_INDEX`](configuration.md#auto_index).
+
 [All settings, with defaults](configuration.md){ .md-button }
 
 ## list

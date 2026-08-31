@@ -31,9 +31,15 @@ It has no account system, no telemetry, no analytics and no crash reporting. It
 never uploads a dictionary, a query or a result.
 
 One deliberate exception exists, and you control it: a browser extension may
-read your dictionaries through three read-only endpoints. Web pages cannot.
+read your dictionaries through three read-only endpoints.
 [`BROWSER_EXTENSIONS`](reference/configuration.md#browser_extensions) narrows
 that to a named list.
+
+Web pages get nothing unless you say otherwise. Naming a page's origin in
+[`WEB_ORIGINS`](reference/configuration.md#web_origins) lets it read those same
+three endpoints; unset - the default - no page in a browser can reach WuWeiDict
+at all. Neither key opens anything else: not your settings, not your
+preferences, not your library.
 
 ## You can repair a dictionary
 

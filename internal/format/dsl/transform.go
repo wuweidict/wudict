@@ -10,14 +10,73 @@ package dsl
 
 import (
 	"path"
-	"regexp"
 	"strings"
 )
 
-// A `{{...}}` comment may itself contain a single `}`, so the body is
-// non-greedy rather than "no closing brace at all". Escaped braces (`\{\{`)
-// are not matched: the backslash sits between them, so no `{{` exists.
-var reCommentBlock = regexp.MustCompile(`(?s)\{\{.*?\}\}`)
+// stripComments removes `{{...}}` comments. A comment may itself contain a
+// single `}`, so the terminator is the first `}}` rather than "no closing
+// brace at all". Escaped braces (`\{\{`) are not a comment: the backslash
+// sits between them, so no `{{` exists, and an unterminated `{{` is literal
+// text - a real one in an article body is a typo, not a request to delete
+// the rest of the entry.
+//
+// A comment that stood alone on its line takes the line with it. Deleting
+// only the braces leaves the line's indentation and its newline behind, and
+// run() turns that leftover empty line into a <br/>.
+
+func stripComments(text string) string {
+	if !strings.Contains(text, "{{") {
+		return text
+	}
+	out := make([]byte, 0, len(text))
+	lineStart := 0 // index in out where the current line begins
+	commented := false
+	dropLine := func() bool {
+		if !commented {
+			return false
+		}
+		for _, c := range out[lineStart:] {
+			switch c {
+			case ' ', '\t', '\r', '\v', '\f':
+			default:
+				return false
+			}
+		}
+		return true
+	}
+	for i := 0; i < len(text); {
+		if text[i] == '{' && i+1 < len(text) && text[i+1] == '{' {
+			if j := strings.Index(text[i+2:], "}}"); j >= 0 {
+				i += 2 + j + len("}}")
+				commented = true
+				continue
+			}
+		}
+		if text[i] == '\n' {
+			if dropLine() {
+				out = out[:lineStart] // the line and its newline both go
+			} else {
+				out = append(out, '\n')
+				lineStart = len(out)
+			}
+			commented = false
+			i++
+			continue
+		}
+		out = append(out, text[i])
+		i++
+	}
+	// A comment on the last line has no newline of its own to drop, so it
+	// takes the one that ended the line before it; left in place that would
+	// render as a trailing <br/>.
+	if dropLine() {
+		out = out[:lineStart]
+		if lineStart > 0 && out[lineStart-1] == '\n' {
+			out = out[:lineStart-1]
+		}
+	}
+	return string(out)
+}
 
 const exampleColor = "steelblue"
 
@@ -48,7 +107,7 @@ func transformBody(text, currentKey string) (html string, resFiles []string, err
 // concatenated with text on either side of it.
 func transformFragment(text, currentKey string) (html string, resFiles []string, err error) {
 	tr := &transformer{
-		input:      reCommentBlock.ReplaceAllString(text, ""),
+		input:      stripComments(text),
 		currentKey: currentKey,
 	}
 	if err := tr.run(); err != nil {
@@ -442,9 +501,20 @@ func (tr *transformer) lexTagS() {
 	fname := b.String()
 	ext := strings.TrimPrefix(strings.ToLower(path.Ext(fname)), ".")
 	switch ext {
-	case "wav", "mp3", "ogg", "spx":
-		tr.addHTML(`<object type="audio/x-wav" data=` + quoteAttr(fname) +
-			` width="40" height="40"><param name="autoplay" value="false" /></object>`)
+	case "wav", "mp3", "ogg", "spx", "m4a":
+		// A link, not GoldenDict's `<object type="audio/x-wav">`. That spelling
+		// is a plugin-era embedding vector: `clean` has to drop it as unsafe
+		// and rescue the URL back out (server/articleformat.go audioObject),
+		// the shadow-DOM renderer needs a handler that exists for this one
+		// element, and the iframe renderer has no such handler at all - so DSL
+		// pronunciation was simply dead there. An anchor needs none of it: the
+		// server's rewriter already recognises a media href on <a> and points
+		// it at /res/, both renderers already play such a link, `clean` keeps
+		// it as an ordinary link, and no inline handler is emitted (the
+		// sanitiser strips every on* attribute, by design).
+		//
+		// [s] carries no link text of its own, so the glyph is the affordance.
+		tr.addHTML(`<a class="wudict-audio" href=` + quoteAttr(fname) + `>&#128266;</a>`)
 	case "bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp":
 		tr.addHTML(`<img align="top" src=` + quoteAttr(fname) + ` alt=` + quoteAttr(fname) + ` />`)
 	}

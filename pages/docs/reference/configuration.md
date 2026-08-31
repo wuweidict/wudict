@@ -307,6 +307,83 @@ pages reach none of them.
 Firefox generates a new `moz-extension://` origin per installation, so there is
 no stable origin to list there.
 
+### WEB_ORIGINS
+
+Which **web pages** may look words up in this server with JavaScript.
+
+| | |
+| --- | --- |
+| Flag | none, environment and file only |
+| Default | blank: no web page may |
+
+``` toml title="two pages of your own"
+WEB_ORIGINS = ["http://localhost:3000", "https://notes.example.com"]
+```
+
+The defaults of the two keys are opposite, on purpose. An extension is
+something you chose to install, so `BROWSER_EXTENSIONS` starts open and you
+narrow it. A web page is whatever you happened to open, so `WEB_ORIGINS` starts
+closed and you widen it, one origin at a time.
+
+An allowed page reaches the same three read-only endpoints an extension does -
+`/api/dicts`, `/api/search` and `/res/` - and nothing else. It cannot read your
+settings, your preferences or your library, and it cannot prepare, remove or
+rescan a dictionary.
+
+#### Writing an origin
+
+An origin is a scheme, a host and a port. Nothing else.
+
+``` toml
+WEB_ORIGINS = ["http://localhost:3000"]     # correct
+WEB_ORIGINS = ["http://localhost:3000/app"] # wrong: a path is not part of an origin
+WEB_ORIGINS = ["localhost:3000"]            # wrong: no scheme
+```
+
+`http://` and `https://` are the only schemes accepted. A different port is a
+different origin, and so is a different scheme: `http://localhost:3000` does not
+allow `https://localhost:3000`. The default port may be written or left out -
+`https://x.example` and `https://x.example:443` mean the same thing, because
+that is what the browser means by them.
+
+`null` is never allowed. It is what a `file://` page and a sandboxed iframe
+send, and every one of them sends the same string, so it names nobody.
+
+#### The wildcard
+
+``` toml
+WEB_ORIGINS = "*"
+```
+
+Every site you visit may then read every dictionary you have, for as long as
+WuWeiDict is running. That is useful while you are developing a page and know
+what is open in the browser. It is a standing invitation otherwise.
+
+The server prints the setting on every start, so an allowlist you left behind
+is visible rather than forgotten:
+
+``` text
+  address       http://127.0.0.1:6888
+  web origins   any website may read your dictionaries (WEB_ORIGINS = "*")
+```
+
+#### Chrome and private addresses
+
+`127.0.0.1` is a private address. Chrome sends a preflight before any request to
+one from a page that is not itself local, and drops the request unless the
+answer opts in. WuWeiDict answers that preflight for origins you allowed, so
+this needs nothing from you - but it is why an allowed page may still be blocked
+by a Chrome policy or an extension that suppresses local network access.
+
+#### What this does not cover
+
+Anything that is not a browser page ignores all of it. `curl`, a Node or Python
+script, an Electron main process, a native app: none of them send an `Origin`
+header, none of them enforce CORS, and all of them can already reach every
+endpoint. CORS is a rule browsers apply to pages, not a lock on the server. The
+lock is [`SERVER_IP`](#server_ip-and-server_port), which keeps the server on the
+loopback address.
+
 ## CONFIG_PATH
 
 The config file to read, instead of searching the four locations.
@@ -328,4 +405,5 @@ SERVER_IP   = "127.0.0.1"
 SERVER_PORT = "9000"
 NO_BROWSER  = "1"
 AUTO_INDEX  = "on"
+WEB_ORIGINS = ["http://localhost:3000"]
 ```

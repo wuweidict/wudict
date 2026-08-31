@@ -269,9 +269,6 @@ maintenance surface, not a project with an end. **This is the main reason the it
 
 ## O4 — Speak the selection with the browser's own voice — **ON HOLD**
 
-*Raised 2026-08-27, immediately after D78/P88 made ODE 2024's scripts run. Parked
-by the user the same day with the design already settled. This entry exists so it
-can be unparked without redoing any of the investigation below.*
 
 ### The decision already taken
 
@@ -362,31 +359,3 @@ So the work is *a trigger plus a call*, reusing the paths that feed
 Every one of those is a preference or a capability check. **None is dictionary
 knowledge**, which is the whole point.
 
-### Rejected while designing this
-
-- **A `.tts` (or any) CSS-class allowlist.** It is the per-dictionary quirks
-  table D78 abolished, re-entered through a different door: the name is not
-  standardised (`.audio_play_button`, `.speaker`, `.sound`, `.pron`, `sound://`,
-  unclassed `<img>` all occur), it is unversioned, and it rots per repack.
-- **Binding a handler to sniffed icons.** ODE binds click on the very element and
-  calls `stopPropagation()`. Capture phase ⇒ both fire, doubled, in two voices.
-  Bubble phase ⇒ ours never fires. No phase is right for both a dictionary that
-  handles its own icon and one that does not, and the DOM cannot distinguish
-  them.
-- **Deriving "what text to speak" from the DOM.** ODE's `$example.text()` works
-  only because the anchor is a child of the example. Generically the text is in
-  an ancestor, a sibling, or a sibling minus the IPA span — different per
-  dictionary, untestable across 105 of them, and wrong *audibly* (reading
-  `/ˈɔːdə/`, list numbers, grammar labels). The user's selection has none of this
-  ambiguity, which is why the feature is selection-based.
-- **Patching `ODE_2024.js` via `res/`.** Correct mechanism, wrong strategy:
-  rejected by the user as not sustainable long term.
-
-### If a per-dictionary version is ever wanted anyway
-
-Make the selector **data, not code**: an optional `tts` block in the dictionary's
-library folder beside `res/` (selector + text source + language), edited by the
-user and surfaced in the ☰ panel. Same philosophy as the `res/` override — the
-quirk lives with the dictionary that needs it, never in the binary, and an
-unknown dictionary simply has none. Not proposed; recorded so it is not
-re-derived.

@@ -309,6 +309,17 @@
 		}, "*");
 	}
 
+	// One referenced element, reused: a fresh `new Audio(url)` per click can be
+	// collected during the (possibly slow, speexdec-transcoded) load. Decoding
+	// follows the Content-Type, not the .spx extension in the URL.
+	function playURL(url) {
+		if (!url) return;
+		if (!audioEl) audioEl = new Audio();
+		audioEl.src = url;
+		var p = audioEl.play();
+		if (p && p.catch) p.catch(function (err) { console.warn("audio play failed:", url, err); });
+	}
+
 	// CAPTURE phase, deliberately. Dictionary scripts attach their own click
 	// handlers inside the article — LDOCE6's entry.js calls stopPropagation()
 	// on the speaker <img> so a play click does not also toggle the accordion
@@ -317,7 +328,18 @@
 	// media player. Capture runs on the way down, before any of that.
 	document.addEventListener("click", function (e) {
 		var a = e.target && e.target.closest ? e.target.closest("a") : null;
-		if (!a) return;
+		if (!a) {
+			// GoldenDict-era pronunciation: <object type="audio/…" data="…">.
+			// DSL emits a link now (D81), but every library folder prepared
+			// before that still stores the object, and this renderer had no
+			// handler for it at all — the audio was simply dead here.
+			var o = e.target && e.target.closest ? e.target.closest("object") : null;
+			if (o && /^audio\//i.test(o.getAttribute("type") || "")) {
+				e.preventDefault();
+				playURL(o.getAttribute("data") || "");
+			}
+			return;
+		}
 		var href = a.getAttribute("href") || "";
 		var ref = parseRef(href);
 		if (ref) {
@@ -349,13 +371,7 @@
 			jumpToFragment(ref.frag); // "anchor": a place in this same article
 		} else if (/\.(mp3|ogg|wav|spx|m4a)([?#]|$)/i.test(href)) {
 			e.preventDefault();
-			// reuse one referenced element so it can't be GC'd during the
-			// (possibly slow, speexdec-transcoded) load; decode is by
-			// Content-Type, not the .spx URL extension.
-			if (!audioEl) audioEl = new Audio();
-			audioEl.src = href;
-			var p = audioEl.play();
-			if (p && p.catch) p.catch(function (err) { console.warn("audio play failed:", href, err); });
+			playURL(href);
 		} else if (href.charAt(0) === "#") {
 			// A fragment link inside an about:srcdoc document. This container
 			// splits the two URLs that decide what "#x" means: the DOCUMENT URL

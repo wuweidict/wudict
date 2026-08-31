@@ -2385,7 +2385,9 @@ document.addEventListener("dblclick",e=>{
   if(sel)lookupSelection(sel);
 });
 
-/* audio inside <object type="audio/…"> (DSL) → click to play */
+/* audio inside <object type="audio/…"> → click to play. DSL emits a link now
+   (D81); this is what dictionaries prepared before that change still store,
+   and how GoldenDict-era sources spell pronunciation. */
 document.addEventListener("click",e=>{
   const o=e.composedPath().find(el=>el.tagName==="OBJECT"&&/^audio\//.test(el.getAttribute("type")||""));
   if(o){e.preventDefault();playAudio(o.getAttribute("data"))}

@@ -15,9 +15,62 @@ authentication, because there is no network exposure: the server binds to the
 loopback address unless you change
 [`SERVER_IP`](configuration.md#server_ip-and-server_port).
 
-Three endpoints are open to browser extensions: `/api/dicts`, `/api/search`
-and `/res/`. They are read-only. Everything else is same-origin, so a web page
-or an extension cannot reach it.
+Three endpoints are read-only and open to other origins: `/api/dicts`,
+`/api/search` and `/res/`. Everything else is same-origin, so neither an
+extension nor a web page can reach it.
+
+## Who can call it
+
+| Client | Reaches |
+| --- | --- |
+| A program - `curl`, Node, Python, an Electron main process, a native app | everything, with no configuration |
+| The WuWeiDict page itself | everything; it is same-origin |
+| A browser extension | the three read-only endpoints, unless [`BROWSER_EXTENSIONS`](configuration.md#browser_extensions) narrows it |
+| A web page in a browser | the three read-only endpoints, but **only** if [`WEB_ORIGINS`](configuration.md#web_origins) names its origin |
+
+CORS is a rule a browser applies to pages. It is not a lock on the server:
+anything that is not a browser page never sends an `Origin` header, and so is
+neither checked nor limited. What keeps the server private is
+[`SERVER_IP`](configuration.md#server_ip-and-server_port) binding it to
+loopback.
+
+### Calling it from your own page
+
+Add the page's origin to the config file and restart:
+
+``` toml title="~/.wudict/wudict.toml"
+WEB_ORIGINS = ["http://localhost:3000"]
+```
+
+``` js title="then, from a page served at http://localhost:3000"
+const url = 'http://127.0.0.1:6888/api/search?q=flight&mode=exact&format=clean&n=3';
+const res = await fetch(url);            // no credentials, no custom headers
+for (const line of (await res.text()).split('\n')) {
+  if (!line) continue;
+  const msg = JSON.parse(line);
+  if (msg.t === 'hit') console.log(msg.name, msg.results);
+}
+```
+
+Read the stream with a `ReadableStream` reader instead of `await res.text()` if
+you want each dictionary to appear as it answers - that is the point of the
+format, and it is described [below](#streaming).
+
+Three things to know before you debug a failure:
+
+-   **The origin must match exactly.** Scheme, host and port. A page on
+    `https://localhost:3000` is not the page on `http://localhost:3000`.
+-   **Do not send credentials or custom headers.** The server never answers
+    `Access-Control-Allow-Credentials`, so `credentials: 'include'` fails the
+    check. A plain `GET` needs no preflight.
+-   **Chrome treats `127.0.0.1` as a private address** and preflights every
+    request to it from a page that is not itself local. WuWeiDict answers that
+    preflight for allowed origins, so this normally just works - but a Chrome
+    policy or another extension can still block local network access.
+
+A `null` origin is never allowed: that is what a `file://` page sends, and
+every one of them sends the same value. Serve your page over `http://` while
+developing, even locally.
 
 ## The contract
 
@@ -151,8 +204,9 @@ dictionaries still answer.
 
 The rest of the surface serves the web page and the Android shell: rescan,
 ingest, the library, the settings, the preferences, the power state. They are
-not reachable from an extension or a web page, and they may change between
-releases.
+not reachable from an extension or a web page - `WEB_ORIGINS` does not widen
+that set, only who may call the three read-only endpoints - and they may change
+between releases.
 
 They are tagged `internal` in the document. Read them there rather than here,
 so there is one description only.
