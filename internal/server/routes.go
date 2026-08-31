@@ -103,7 +103,6 @@ func (s *Server) routes() []route {
 		// the setup page stays reachable after first run: it is where folders
 		// are edited, not just where they are first chosen
 		{"GET", "/setup", s.handleSetupPage, "", false},
-		{"GET", "/assets/mark.min.js", serveScript(markJS), "", false},
 		{"GET", "/assets/frame.js", serveScript(frameJS), "", false},
 		{"GET", "/assets/favicon.svg", serveFavicon, "", false},
 		{"GET", "/favicon.ico", serveFavicon, "", false},

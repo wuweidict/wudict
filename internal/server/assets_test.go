@@ -21,13 +21,8 @@ func TestScriptsAreContentAddressed(t *testing.T) {
 	s.Version = "1.2.3"
 	page := string(s.page())
 
-	for name, want := range map[string]string{
-		"frame.js":    "/assets/frame.js?v=" + assetTag(frameJS),
-		"mark.min.js": "/assets/mark.min.js?v=" + assetTag(markJS),
-	} {
-		if !strings.Contains(page, want) {
-			t.Errorf("index.html does not request %s by content hash (%s)", name, want)
-		}
+	if want := "/assets/frame.js?v=" + assetTag(frameJS); !strings.Contains(page, want) {
+		t.Errorf("index.html does not request frame.js by content hash (%s)", want)
 	}
 	if i := strings.Index(page, "{{"); i >= 0 {
 		t.Errorf("unsubstituted placeholder in the served page: %q", page[i:min(i+24, len(page))])
@@ -51,7 +46,7 @@ func TestAssetCacheHeaders(t *testing.T) {
 	if got := get("/").Header().Get("Cache-Control"); got != "no-cache" {
 		t.Errorf(`GET / Cache-Control = %q, want "no-cache" - a stale page would ask for stale scripts`, got)
 	}
-	for _, p := range []string{"/assets/frame.js?v=abc123", "/assets/mark.min.js?v=abc123"} {
+	for _, p := range []string{"/assets/frame.js?v=abc123"} {
 		rec := get(p)
 		if rec.Code != 200 || rec.Body.Len() == 0 {
 			t.Errorf("GET %s: status %d, %d bytes", p, rec.Code, rec.Body.Len())

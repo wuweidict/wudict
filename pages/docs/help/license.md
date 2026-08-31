@@ -24,5 +24,4 @@ The full text is in the repository at `LICENSE`, and at the
 | MDX and MDD parser | [go-mdict](https://github.com/terasum/go-mdict), forked and patched as `internal/gomdict`                                                                                  | GPL-3.0 |
 | BGL parser | [pyglossary](https://github.com/ilius/pyglossary)'s `babylon_bgl` plugin, ported to Go; streaming modelled on [GoldenDict NG](https://github.com/xiaoyifang/goldendict-ng) | GPL-3.0 |
 | Format knowledge | the original reverse engineering by **Raul Fernandes** and **Karl Grill**, which both parsers trace back to                                                                | - |
-| mark.js | [markjs.io](https://markjs.io/)                                                                                                                                            | MIT |
 | libspeex | [Speex](https://speex.org/), decoder only, vendored at `internal/speex/clib`                                                                                               | BSD-3-Clause |

@@ -36,9 +36,6 @@ import (
 //go:embed web/index.html
 var indexHTML []byte
 
-//go:embed web/mark.min.js
-var markJS []byte // vendored mark.js v8.11.1 (draego pulled it from a CDN)
-
 //go:embed web/setup.html
 var setupHTML string
 
@@ -231,7 +228,6 @@ func (s *Server) buildPage() {
 		}
 		page := strings.ReplaceAll(string(indexHTML), "{{VERSION}}", v)
 		page = strings.ReplaceAll(page, "{{FRAMEJS}}", assetTag(frameJS))
-		page = strings.ReplaceAll(page, "{{MARKJS}}", assetTag(markJS))
 		s.indexPage = []byte(page)
 		// Hashed AFTER substitution: the version stamp and the asset hashes are
 		// part of what the browser is holding, so a rebuild that changes only

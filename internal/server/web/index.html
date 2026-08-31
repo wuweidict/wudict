@@ -11,7 +11,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>wudict</title>
 <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
-<script src="/assets/mark.min.js?v={{MARKJS}}"></script>
 <style>
 /* ── design tokens ─────────────────────────────────────────────────── */
 :root{
@@ -1567,7 +1566,6 @@ const shadowBase=`<style>
 img,video,svg{max-width:100%;height:auto}
 a{color:#5b7a99;cursor:pointer}
 table{max-width:100%;border-collapse:collapse}
-mark{background:#fff0b3;color:#5c4a00;border-radius:2px;padding:0 .1em}
 :host([data-dark]) :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){
   filter:invert(1) hue-rotate(180deg)}
 </style>`;
@@ -1680,7 +1678,7 @@ function renderFrame(dd,body,dictID,frag){
   ifr.style.height="90px";
   ifr.srcdoc=frameDoc(body,fid,themeIsDark(),dictID,frag);
   dd.appendChild(ifr);
-  return null; // no shadow root: mark.js highlighting not applicable
+  return null; // no shadow root: nothing for the caller to anchor into
 }
 function frameDoc(content,fid,dark,dictID,frag){
   return '<!DOCTYPE html><html class="'+(dark?'dark':'')+'"><head><meta charset="utf-8">'+
@@ -1862,11 +1860,6 @@ $("out").addEventListener("click",e=>{
   navRecord="push"; // widening is a state worth having a Back button for
   doSearch();       // no scopeOnce set: the search runs at the selector's scope
 });
-function highlight(roots,mode,q){
-  if(!((mode==="contains"||mode==="fts")&&window.Mark))return;
-  const rx=new RegExp(q.trim().split(/\s+/).map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|"),"gi");
-  for(const root of roots){if(root)try{new Mark(root).markRegExp(rx)}catch(e){}}
-}
 /* The name to put on a section, preferring what the dictionary list already
    knows. A hit whose open never happened — deferred, or a failed open — carries
    no metadata, so the server falls back to the file name and the section reads
@@ -2022,7 +2015,6 @@ function renderSlot(box,h,mode,q,perDict){
   }
   det.open=expandAll;
   det.appendChild(dl);box.appendChild(det);
-  highlight(roots,mode,q);
   // A `bword://Word#frag` link: now that the article is in the document, put
   // the fragment on screen. Shadow-DOM articles can be measured immediately
   // (next frame, once laid out); iframe ones jump themselves — frameDoc has

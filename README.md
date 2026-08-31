@@ -382,5 +382,4 @@ GPL-3.0-or-later — see [LICENSE](LICENSE). Includes code derived from
 knowledge from [pyglossary](https://github.com/ilius/pyglossary) (the BGL
 parser is ported from its `babylon_bgl` plugin, with streaming modeled on
 [GoldenDict](https://github.com/xiaoyifang/goldendict-ng); both trace to
-the reverse engineering by Raul Fernandes and Karl Grill);
-[mark.js](https://markjs.io/) (MIT) is bundled for highlighting.
+the reverse engineering by Raul Fernandes and Karl Grill).

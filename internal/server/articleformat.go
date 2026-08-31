@@ -209,7 +209,6 @@ func cleanPolicy(base string, st htmlref.Styles) htmlref.Policy {
 	return p
 }
 
-
 func audioObject(base string) func(string, []html.Attribute) string {
 	return func(tag string, attrs []html.Attribute) string {
 		if tag != "object" {
