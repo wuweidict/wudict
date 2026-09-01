@@ -112,7 +112,18 @@ script-aware `Mn` exception list), on top of O1.
 
 ---
 
-## O3 — Morphology (inflected-form lookup) — **ON HOLD**
+## O3 — Morphology (inflected-form lookup) — **M1 DONE (D82); the rest ON HOLD**
+
+**What was built.** Headword lemmatization for de/en/es/fr/it/ru via `aaaton/golem/v4`, fired only
+when the whole search found nothing, restricted to dictionaries whose language was detected from
+declared metadata, a file-name prefix, or an exact ancestor folder name (English is the fallback
+for an undetected dictionary; every other language must be stated). See `docs/SPEC.md` §4
+"Lemmatization — the second wave" and D82. Two of the defects below were **dissolved rather than
+solved** by the zero-results rule, and are marked so.
+
+Still open here: M2 (`.aff` reverse-application / curated suffix tables), M4 (Japanese
+deconjugation), M5 (簡繁), morphological full-text, and every non-European script.
+
 
 ### Three unrelated problems wearing one name
 
@@ -219,20 +230,25 @@ maintenance surface, not a project with an end. **This is the main reason the it
 
 ### Defect surface, most dangerous first
 
-1. **Language attribution is the actual hard problem, not morphology.** Of the five formats only
-   DSL declares languages (`#INDEX_LANGUAGE`); MDX declares essentially nothing. Script detection
-   is trivial, language-within-script is not (Cyrillic → ru/uk/bg/sr; Latin → dozens). The
-   headword oracle mitigates but does not eliminate cross-language collisions (`come`, `pie`,
-   `son`, `chat`). **This forces a per-dictionary language override UI, which is more work than
-   the feature itself** — and new persistent per-dictionary state.
+1. ~~**Language attribution is the actual hard problem, not morphology.**~~ **Dissolved (D82).**
+   The premise held that attribution must be *right*, which forced a per-dictionary override UI.
+   Under the zero-results rule it only has to be *cheap*: a wrong language yields a candidate that
+   is almost certainly not a headword either, on a query that already found nothing. So attribution
+   is declared-metadata → file-name prefix → exact ancestor folder → English, with no UI, no new
+   persistent state (the declared value rides in the existing `meta` k/v table), and no heuristics
+   to tune. A dictionary that is silently unlemmatized is fixed by renaming it. Cross-language
+   collisions are handled structurally instead: a candidate is only ever offered to dictionaries of
+   the language it was derived from.
 2. **Preview vs prepared asymmetry (D15).** Prepared dictionaries validate candidates with a
    B-tree hit; preview backends scan in memory, so 10 candidates = 10 linear scans. Morphology
    would silently become a prepared-only feature — another axis of divergence between the two
    backends.
-3. **Latency at real scale.** 105 dictionaries × ~10 candidates ≈ 1,050 extra index probes per
-   query. Fine as B-tree hits, not fine unbounded. Needs a hard cap and a per-query candidate cache.
-4. **Ranking regression.** Derived hits must never outrank exact ones — requires a rank field
-   threaded through the whole NDJSON search path and the client's merge.
+3. **Latency at real scale.** Bounded in D82 by construction — a lemmatizer returns **one**
+   candidate per language, so the second wave is at most one extra search per detected language
+   (six, ceiling), over a subset of the dictionaries, on a query that already returned nothing.
+   The concern returns in full with M2/M3, where a rule table generates many candidates.
+4. ~~**Ranking regression.**~~ **Dissolved (D82).** Morphology runs only when the result set is
+   empty, so there is nothing for a derived hit to outrank and no rank field is needed anywhere.
 5. **Full-text is a separate, much larger decision.** Morphological FTS means index-time stemming
    → schema change → re-ingest → expanded FTS5 `OR` queries that can blow up. It must not ride
    along with headword morphology.

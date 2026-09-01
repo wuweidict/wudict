@@ -21,6 +21,7 @@ import (
 	"golang.org/x/text/transform"
 
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/lang"
 )
 
 // Reader is the sequential ingest scan over a .dsl / .dsl.dz file.
@@ -94,8 +95,9 @@ func (r *Reader) init(path string) error {
 		base := filepath.Base(path)
 		name = strings.TrimSuffix(strings.TrimSuffix(base, ".dz"), ".dsl")
 	}
+	from, to := r.header["INDEX_LANGUAGE"], r.header["CONTENTS_LANGUAGE"]
 	desc := ""
-	if from, to := r.header["INDEX_LANGUAGE"], r.header["CONTENTS_LANGUAGE"]; from != "" || to != "" {
+	if from != "" || to != "" {
 		desc = from + " → " + to
 	}
 	r.meta = dict.Meta{
@@ -103,6 +105,12 @@ func (r *Reader) init(path string) error {
 		Format:      "dsl",
 		Path:        path,
 		Description: desc,
+		// #INDEX_LANGUAGE names the language of the HEADWORDS, which is
+		// exactly what a lemmatizer needs and is the one thing a path
+		// convention can get backwards. Taken from the header field, never
+		// re-parsed out of desc. Lingvo writes collation names here
+		// ("SpanishModernSort"), which internal/lang absorbs.
+		IndexLang: lang.FromDeclared(from),
 	}
 	return nil
 }

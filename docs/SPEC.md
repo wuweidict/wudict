@@ -70,6 +70,7 @@ CREATE TABLE resource(name TEXT PRIMARY KEY, mime TEXT, data BLOB);
 - Pairing: identical `dict_uuid` in both `meta` tables; loader warns on mismatch, refuses cross-dict pairs.
 - Resolution order at runtime: `media.db` → source file resolver → 404. A text.db shipped alone still works fully for text (graceful degrade); receiver can point it at their own copy of the source for media.
 - Naming: D9's `<slug>.text.db`/`.media.db` pair is superseded by D20's folder — `text.db` and `media.db` inside a folder named after the source file. Loose `<name>.text.db` files still open (a database copied out of its folder).
+- A prepared **folder** is a valid path argument anywhere a file is (`dict.MainFile`, D90): it is the unit the library lists and the user copies, while dispatch is by base name and extension, which a folder has neither of usefully. `wudict info <db dir>/es_es_DLE_v23.8_1_RealAcademia2026` reported `unsupported dictionary format: .8_1_RealAcademia2026` — `filepath.Ext` reading a version number as an extension. `Open`, `Probe` and `OpenReader` resolve a directory to a registered bundle main file (`text.db`) only after extension dispatch has failed, so an ordinary open costs no `stat`, and a folder holding no main file is still not a dictionary.
 
 ### Storage of article bodies (D24)
 `entry.m` is DEFLATE-compressed per row, marked by a leading NUL byte (article text never begins with one), so compressed and literal rows coexist and pre-D24 databases open unchanged. Bodies under 120 bytes, and any body compression fails to shrink, are stored literally. `NO_COMPRESS` turns it off for new ingests; reading always understands both. Measured: 3.8x smaller on a 40k-entry dictionary, where article text was 95% of the file.
@@ -80,6 +81,100 @@ CREATE TABLE resource(name TEXT PRIMARY KEY, mime TEXT, data BLOB);
 ## 4. Query engine (ported from draego, fixed)
 
 Modes (D16): **exact**, **prefix** (default; starts-with, accent-insensitive — `store.Fuzzy` is now just its internal fold engine), **contains** (substring/typo, `entry_trigram` MATCH on folded `w` for ≥3 chars, raw escaped `LIKE` below that), **full-text** (FTS on `w`+`txt`, BM25), each × single-dict / all-dicts. `fuzzy` survives only as a legacy `parseMode` alias → prefix. All-dicts fans out concurrently (bounded goroutines) across *both* backend types — direct dicts contribute exact/prefix results, ingested ones the full set; grouped per dictionary in the accordion. `store.Prefix` falls back to a diacritic-folded FTS prefix when the raw `LIKE` finds nothing (accent-insensitive prefix parity with the direct backends). **Streaming (P8, D12)**: `search.Stream` emits each dictionary's `Hit` as it completes (serialized), so the server can flush results progressively in the caller's preference order instead of waiting for the whole fan-out.
+
+### Lemmatization — the second wave (D82, O3-M1)
+
+**Every dictionary that returns nothing** is retried once with the query's dictionary form:
+`knew`→`know`, `fuiste`→`ser`, `идет`→`идти`. Nothing else triggers it — a dictionary that hit,
+or that was deferred, errored or lacks the index this mode needs, is left out, so a dictionary
+sends either a first-wave hit or a lemma hit and never both. That is the whole simplification:
+within a dictionary there is no result set to rank against, so no derived hit can displace an
+exact one and no rank field has to be threaded through the NDJSON path; and a misdetected
+language costs one failed index probe on a dictionary that had already failed, because every
+candidate is validated by the real headword index.
+
+The gate is per dictionary rather than per search (D89). It was per search, and that made
+lemmatization depend on which unrelated dictionaries happened to be installed: a Babylon glossary
+carrying `estuviera` as a hand-written alias of `estar` answered the first wave, and every proper
+Spanish dictionary beside it — each indexing lemmas only, each of which would have answered
+`estar` — was never asked. The cost is that a pack can now load on a search that already partly
+succeeded; it stays bounded by `MORPH_CACHE`, and the retry still reaches only the dictionaries
+that returned nothing.
+
+**Language attribution** (`internal/lang`) is the only input, resolved per dictionary in one order:
+what the dictionary itself declares (`Meta.IndexLang` — DSL's `#INDEX_LANGUAGE`, BGL's source
+language; persisted at ingest as `meta[index_lang]`), else a **prefix** of the file stem
+(`en-es-apresyan.mdx`, `eng_eng_x.mdx`, `russian-apresyan.mdx`), else an **exact, case-insensitive**
+ancestor folder name up to the configured dictionary root (`Spanish/`, `ru/`), else the
+dictionary's own **title**, else **English**.
+
+The title is free text, so it is read by different rules than a file name (`lang.FromTitle`): the
+**first** English language name written as a whole word (`Dahl's Russian Dictionary` → ru,
+`Larousse Compact English-Spanish` → en, `JM Latin-English Dictionary` → la), or the first language
+code the title marks *as* a code — one half of a pair or alone in brackets (`(Ru-Ru)`, `(rus-rus)`,
+`(En-Ru)` → the first half; `[ru]`). A loose two- or three-letter token is never read as a code,
+because `is it no be am he la id ta pa ne ms ka ha my` are all ISO codes and ordinary English words
+(`A la carte` is not Latin). Failing all of that, a title with more Cyrillic letters than Latin
+ones is Russian (`Брокгауз и Ефрон`) — script is consulted last and for one language only, so
+`Apresyan (En-Ru)` is still English.
+
+English is the one language assumed without evidence — the smallest pack by a wide margin, and
+wrong costs one probe; every other language must be stated, so a rename is the fix. Path-derived
+answers are never persisted, so a rename takes effect at the next open with no re-ingest.
+
+Candidates come from `internal/morph` (`aaaton/golem/v4`, pure Go), and are
+offered **only to the dictionaries of that language**, which is what stops Spanish `sale`→`salar`
+being asked of an English dictionary. Packs are loaded on first use and held in a count-based LRU
+sized by `MORPH_CACHE` (desktop 2, Android 1, `0` disables the feature); a pack costs 7 MB (en) to
+65 MB (ru), so nothing is loaded at startup. Russian additionally retries one `е`→`ё`
+substitution, because golem's ru pack is keyed on the `ё` spellings.
+
+**Only English is compiled in** (D87, `internal/morph/file.go`). Every other language is a
+file in `LEMMA_DIR` (default `~/.wudict/lemmas`) named after its language — `pl.txt`, `pol.tsv`,
+`polish.txt.gz`, resolved through `lang.Normalize` — loaded through the same LRU; an `en` file
+replaces the built-in English rather than merging with it. golem takes a `LanguagePack` interface,
+so the backing is a file instead of a generated Go const and nothing else changes. English is the
+exception because it is the language assumed when a dictionary declares none, so it must answer
+with an empty folder; dropping the other five took the binary from 29.3 MB to 20.4 MB. The
+on-disk format is golem's own (lemma first, tab-separated forms, lower case), which is also the
+shape of the raw lists at michmech/lemmatization-lists, so those load as downloaded. Two
+things are done to the bytes on the way in,
+because golem is stricter than a hand-edited file can be trusted to be: they are lower-cased (only
+`LemmaLower` is ever called) and lines with fewer than two fields are dropped (**one** such line
+otherwise fails the entire load, costing a language). Decompressed size is capped at 64 MB — five
+times the largest language golem publishes — since golem's map costs 6-10x its input in heap and a
+compression bomb
+in that folder would otherwise be an OOM with no diagnostic.
+
+`wudict lemmas list | download | remove` is how a user obtains those files (D88,
+`internal/lemmas`, `internal/cli/lemmas.go`). `make lemma-files` is not: it needs a Go toolchain
+and a populated module cache, and someone who downloaded a release binary has neither. The client
+knows exactly one URL — `LEMMA_URL`, a `manifest.json` listing each language's file name, byte
+size, sha256 and *measured* heap cost — and every asset sits beside it, named by a bare file name.
+sha256 is the entire trust model, so the transport is interchangeable: a mirror, a proxy or a
+folder on a USB stick all work, and nothing pins a host. Every manifest field is treated as
+hostile — the code must survive `lang.Normalize`, the file name must be a plain base name with a
+known extension, the declared size must be within `morph.MaxPackBytes`, the manifest body is read
+through a 1 MB limit, and the **local** name is constructed as `<code><ext>` rather than taken
+from the catalogue, so a broken or malicious manifest cannot choose where wudict writes. A
+download streams to a dot-prefixed temporary in the destination folder — a name `scanDir` cannot
+match — and is renamed only after its length and digest both agree, so an interrupted install is
+invisible rather than half-applied. Enumerating a repository through a code-hosting API was
+rejected: the unauthenticated GitHub API is 60 requests per hour *per IP*, which fails for
+everyone behind one NAT, and a static file has no such limit.
+
+`tools/lemmafiles` builds that catalogue, from michmech/lemmatization-lists rather than golem's Go
+modules: 24 languages instead of 8, no module cache, no coupling to generated Go source. It
+groups the pair-per-line lists the way golem's own `cmd/simplify` does, loads each result through
+golem as an acceptance test, measures its heap with `runtime.ReadMemStats`, and writes
+`<code>.tsv.gz`, `manifest.json` and the ODbL `ATTRIBUTION.txt`. `internal/morph.Cache.Rescan()`
+re-indexes the folder so a language installed under a running process becomes searchable without
+a restart; packs already loaded are left alone. The CLI does not call it — it is a different
+process from a running server, and says so.
+
+The stream carries `{"t":"morph","from":…,"to":…,"lang":…}` before that language's hits, and the
+hits are **buffered** until at least one is non-empty — "showing results for X" over an empty list
+would be worse than silence. Multi-word queries are never lemmatized.
 
 ### FTS-audit — bugs found in draego/drae.go; fix when porting
 1. FTS indexes raw HTML ⇒ markup tokens pollute matches/rank. Index stripped text.

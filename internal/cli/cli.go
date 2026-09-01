@@ -30,6 +30,8 @@ import (
 	"github.com/wuweidict/wudict/internal/config"
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/logx"
+	"github.com/wuweidict/wudict/internal/morph"
+	"github.com/wuweidict/wudict/internal/resource"
 	"github.com/wuweidict/wudict/internal/search"
 	"github.com/wuweidict/wudict/internal/server"
 	"github.com/wuweidict/wudict/internal/speex"
@@ -76,7 +78,8 @@ USAGE
 COMMANDS
   serve                                   Start the HTTP server (the default command)
   list   <dir> [dir…]                     Discover dictionaries under one or more folders
-  info   <dictfile>                       Show dictionary metadata and capabilities
+  info   <dictfile>                       Show dictionary metadata, capabilities, and every file
+                                          on disk that belongs to it, with sizes
   lookup [-n max] <dictfile> <word>       Exact lookup (accent-fold fallback); HTML to stdout
                                           By default uses -format=raw, pass -format=text for plain text
   prefix [-n max] <dictfile> <word>       Exact-else-prefix lookup (accent-insensitive); HTML to stdout
@@ -99,6 +102,12 @@ COMMANDS
                                           overwrite). -o names the output: a path
                                           (parents created), a directory, or "-"
                                           for stdout.
+  dump   -o <outdir> <dictfile>           Write the whole dictionary out as CSV in
+                                          pyglossary's import/export layout, so any
+                                          format its converter writes is reachable
+                                          from here. Resources are unpacked beside
+                                          it into <name>.csv_res. -output is the
+                                          long form of -o.
   ingest [-full] [-headwords] [-contains] <dictfile|folder…>
                                           Prepare a dictionary into the library:
                                           <db-dir>/<dictionary name>/text.db (+ info.txt).
@@ -116,6 +125,13 @@ COMMANDS
                                           -format text (default) prints the definitions;
                                           clean|raw print them as markup, as in lookup;
                                           list prints headwords only.
+  lemmas list | download <lang…> | remove <lang…>
+                                          Manage the lemma data that lets a search for an
+                                          inflected word find its dictionary form ("knew" ->
+                                          "know"). English is built in; every other language
+                                          is a file in LEMMA_DIR. "list" marks the installed
+                                          ones; "download pl ru" or "download polish russian"
+                                          installs them from LEMMA_URL; "remove pl" deletes.
   clean  [-f]                             List removable items in the library: incomplete or
                                           unreadable folders, interrupted ingests, leftovers
                                           from the old flat layout. A cached dictionary is
@@ -172,7 +188,8 @@ SERVE FLAGS
                           recently used are closed above this; prepared ones
                           answer from disk and are never evicted. "0" = no limit.
                           env: PREVIEW_MEMORY toml: PREVIEW_MEMORY
-                          default: 1GB (Android: 64MB)
+                          default: 1GB (Android: a third of MEMORY_LIMIT,
+                          64-128MB by device RAM)
 
   SEARCH_MEMORY = "512MB" How much RAM ONE search may bring into memory by opening
                           dictionaries that are not yet prepared. Past it, the
@@ -182,6 +199,43 @@ SERVE FLAGS
                           dictionaries, which cost nothing to search. "0" = no cap.
                           env: SEARCH_MEMORY  toml: SEARCH_MEMORY
                           default: none (Android: the memory limit)
+
+  MORPH_CACHE = "2"       How many lemma packs stay in memory. When a search finds
+                          nothing in any dictionary, wudict looks the word's
+                          dictionary form up instead - "knew" finds "know" - in
+                          dictionaries whose language it can tell. English is
+                          built in; every other language is a file you install
+                          (see LEMMA_DIR). Each loaded language costs 7-65 MB;
+                          the least recently used is dropped above this.
+                          "0" = never lemmatize and load nothing.
+                          env: MORPH_CACHE    toml: MORPH_CACHE
+                          default: 2 (Android: 1)
+
+  LEMMA_DIR = "~/.wudict/lemmas"
+                          Folder of installed lemma files. Every language except
+                          English comes from here - Spanish, Russian, Polish and
+                          the rest are downloaded, not built in. One file per
+                          language, named after it: "pl.txt", "pol.tsv",
+                          "polish.txt.gz". Each line is
+                          a lemma followed by its forms, tab-separated and lower
+                          case - the format of the lists at
+                          github.com/michmech/lemmatization-lists, which work as
+                          downloaded. An "en" file replaces the built-in English.
+                          Read once at startup.
+                          env: LEMMA_DIR      toml: LEMMA_DIR
+                          default: ~/.wudict/lemmas
+
+  LEMMA_URL = "https://…/manifest.json"
+                          Where "wudict lemmas" looks for installable languages.
+                          A static catalogue naming each language, its size and
+                          its sha256 - not a code-hosting API, whose 60-requests-
+                          per-hour-per-IP limit would break "lemmas list" for
+                          anyone behind a shared address. May be a path to a
+                          manifest.json on disk instead, to install with no
+                          network at all; every check still applies, because the
+                          hashes are what is trusted, not the transport.
+                          env: LEMMA_URL      toml: LEMMA_URL
+                          default: the published catalogue
 
   MEMORY_LIMIT = "4GB"    Soft heap ceiling: Go collects harder - and drops its
                           caches - rather than growing past it. "0" = none.
@@ -378,6 +432,10 @@ func Main() {
 		err = cmdKeys(args)
 	case "res":
 		err = cmdRes(args)
+	case "dump":
+		err = cmdDump(args)
+	case "lemmas", "lemma":
+		err = cmdLemmas(args)
 	case "clean":
 		err = cmdClean(args)
 	case "rm", "remove":
@@ -463,18 +521,107 @@ func cmdInfo(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("usage: wudict info <dictfile>")
 	}
+	// Before the open, so the file list is printed even for a dictionary whose
+	// header will not parse - which is exactly when knowing what is on disk
+	// beside it is most useful.
+	applyLibrarySettings()
+	files := dictFiles(args[0])
+
 	d, err := dict.Open(args[0])
 	if err != nil {
+		printDictFiles(files)
 		return err
 	}
 	defer d.Close()
 	m, c := d.Meta(), d.Caps()
 	fmt.Printf("name:        %s\nformat:      %s\npath:        %s\nentries:     %d\ncapabilities: exact=%v prefix=%v contains=%v fts=%v\n",
 		m.Name, m.Format, m.Path, m.EntryCount, c.Exact, c.Prefix, c.Contains, c.FTS)
+	if m.IndexLang != "" {
+		// Only when the dictionary DECLARED it. A language derived from the
+		// file name is the search path's fallback, not a fact about the file,
+		// and printing it here would make a guess look like metadata.
+		fmt.Printf("language:    %s (declared)\n", m.IndexLang)
+	}
 	if m.Description != "" {
 		fmt.Printf("description: %s\n", m.Description)
 	}
+	printDictFiles(files)
 	return nil
+}
+
+// dictFile is one thing on disk that belongs to this dictionary: the file
+// itself, the .mdd/.files.zip/.idx companions it cannot be read without, and
+// the prepared folder if it has one.
+type dictFile struct {
+	kind string // "original" or "prepared", the words `wudict rm` uses
+	path string
+	size int64
+}
+
+// dictFiles answers the question `wudict rm` answers as a side effect of its
+// dry run - what is on disk for this dictionary, and how big - without the
+// user having to type a delete command to find out (D63 makes rm dry by
+// default precisely so it can be used for looking; this is the looking).
+//
+// The argument is a path, as everywhere else in the CLI. Two shapes:
+// a prepared text.db names its own folder, anything else is an original whose
+// companions and prepared folder are looked up. A prepared FOLDER resolves to
+// its text.db first (dict.MainFile), the same way the open does - it is the
+// name every listing shows for that dictionary, so it is the name a user
+// types, and without this it fell through to the "original" branch and was
+// reported as one opaque file.
+func dictFiles(arg string) []dictFile {
+	abs, err := filepath.Abs(arg)
+	if err != nil {
+		abs = arg
+	}
+	abs = dict.MainFile(abs)
+	var out []dictFile
+	add := func(kind, p string) {
+		if n := store.TreeSize(p); n > 0 || fileExists(p) {
+			out = append(out, dictFile{kind, p, n})
+		}
+	}
+	if store.IsTextDB(abs) {
+		// The bundle form is a folder and is reported as one, so its info.txt
+		// and any media.db are counted whether or not they are named here.
+		if strings.EqualFold(filepath.Base(abs), store.TextDBName) {
+			add("prepared", filepath.Dir(abs))
+			return out
+		}
+		add("prepared", abs) // loose <name>.text.db, copied out of its folder
+		add("prepared", store.MediaSibling(abs))
+		return out
+	}
+	for _, p := range dict.SourceFiles(abs) {
+		add("original", p)
+	}
+	if dir, ok := store.LookupDir(abs); ok {
+		add("prepared", dir)
+	}
+	return out
+}
+
+// printDictFiles prints the inventory in `wudict rm`'s vocabulary and order -
+// originals first, prepared last, one line each, then the total - so the two
+// commands describe the same dictionary in the same words.
+func printDictFiles(files []dictFile) {
+	if len(files) == 0 {
+		return
+	}
+	w := 0
+	for _, f := range files {
+		if len(f.path) > w {
+			w = len(f.path)
+		}
+	}
+	var total int64
+	fmt.Println("files:")
+	for _, f := range files {
+		total += f.size
+		fmt.Printf("  %-8s  %-*s  %10s\n", f.kind, w, f.path, humanSize(f.size))
+	}
+	fmt.Printf("  %-8s  %-*s  %10s\n", "total", w, "", humanSize(total))
 }
 
 func cmdQuery(mode string, args []string) error {
@@ -684,7 +831,7 @@ func maybePackMedia(srcPath, dbPath, name string, full bool) error {
 	if !ok {
 		return fmt.Errorf("format cannot enumerate resources")
 	}
-	names := lister.Resources()
+	names := resource.Filter(lister.Resources())
 	if len(names) == 0 {
 		fmt.Printf("%sno media to pack\n", logx.Dict(name))
 		return nil
@@ -929,6 +1076,19 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	}
 	srv.Speexdec = sxPath
 	srv.AutoIndex = cfg.AutoIndexEnabled()
+	// Lemma packs are loaded on first use and never at startup: a launch must
+	// not pay 25-157 ms and tens of megabytes for a language this session may
+	// never search in. MORPH_CACHE=0 loads none at all.
+	// The folder is indexed here rather than per search: re-reading it on
+	// every query that found nothing would put a directory listing on the
+	// search path. It is re-read only when something changes it - an install
+	// or a removal through /api/lemmas calls Rescan (D91).
+	srv.Morph = morph.New(cfg.MorphCache, cfg.LemmaDir)
+	// What /api/lemmas installs into, and the catalogue it installs FROM. The
+	// URL lives on the Server because the client must never supply one: a
+	// caller-chosen address would make the endpoint fetch whatever the host
+	// running wudict can reach.
+	srv.LemmaDir, srv.LemmaURL = cfg.LemmaDir, cfg.LemmaURL
 	srv.BrowserExtensions = cfg.BrowserExtensions
 	srv.WebOrigins = cfg.WebOrigins
 
@@ -1555,9 +1715,9 @@ func cmdClean(args []string) error {
 		if o.IsDir {
 			kind = "folder"
 		}
-		fmt.Printf("%s  (%s, %.1f MB)\n  %s\n", o.Path, kind, float64(o.Size)/(1<<20), o.Reason)
+		fmt.Printf("%s  (%s, %s)\n  %s\n", o.Path, kind, humanSize(o.Size), o.Reason)
 	}
-	fmt.Printf("%d items, %.1f MB total\n", len(orphans), float64(total)/(1<<20))
+	fmt.Printf("%d items, %s total\n", len(orphans), humanSize(total))
 	if !*force {
 		fmt.Println("dry run - re-run with -f to delete")
 		return nil

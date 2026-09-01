@@ -64,7 +64,7 @@ func (d *Dir) open(rel string) (io.ReadCloser, bool) {
 }
 
 func (d *Dir) Open(name string) (io.ReadCloser, error) {
-	rel := clean(name)
+	rel := Clean(name)
 	if rel == "" {
 		return nil, dict.ErrNotFound
 	}

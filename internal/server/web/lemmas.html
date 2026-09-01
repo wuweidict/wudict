@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<!--
+ Copyright (C) 2026 glowinthedark
+
+ SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wudict Lemmatization</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+<link rel="stylesheet" href="/assets/setup.css?v={{CSS}}">
+<style>
+/* Page-specific only; palette, card, buttons and typography are shared. */
+.card{max-width:640px}
+#list{margin:.618em 0 0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.lrow{display:flex;flex-wrap:wrap;align-items:center;gap:.5em;
+  padding:.5em .618em;border-bottom:1px solid var(--line);font-size:13.5px}
+.lrow:last-child{border-bottom:none}
+.lrow input[type=checkbox]{width:auto;margin:0;flex:none}
+.lrow .nm{flex:1 1 8em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lrow .cost{flex:none;color:var(--soft);font-size:12px;font-variant-numeric:tabular-nums}
+/* The indicator is the row's second line on a phone and its right edge on a
+   desktop: order:1 with a full basis wraps it below everything else, and the
+   media query is what decides whether that basis applies. */
+.lrow .st{flex:none;min-width:9em;text-align:right;font-size:12px;color:var(--soft)}
+.lrow .st.ok{color:var(--ok)}
+.lrow .st.err{color:var(--err)}
+.lrow .st.busy{color:var(--accent)}
+.lrow.off{opacity:.55}
+@media (max-width:520px){
+  .lrow .st{order:1;flex:1 1 auto;min-width:0;text-align:left}
+  .lrow .cost{order:1}
+}
+.note{font-size:12.5px;color:var(--faint);margin:.2em 0 0}
+.banner{font-size:13px;border:1px solid var(--line);border-radius:8px;
+  padding:.5em .7em;margin:.618em 0 0;color:var(--soft)}
+.banner.warn{border-color:var(--err);color:var(--err)}
+.head{display:flex;justify-content:space-between;align-items:baseline;gap:.5em;flex-wrap:wrap}
+.formats a{color:var(--accent);text-decoration:none}
+.formats a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="card">
+<h1><b>wu</b>Dict Lemmatization</h1>
+<p>When a word is not in a dictionary, wuDict can look up its dictionary form and
+   try again — so <i>understood</i> finds <i>understand</i>, and <i>geese</i> finds <i>goose</i>.
+   Each language needs its word list installed here.</p>
+
+<div id="banner" class="banner hidden"></div>
+
+<div class="head"><h2>Languages</h2><span class="note" id="summary"></span></div>
+<div id="list"></div>
+<p class="note" id="dir"></p>
+<div id="shadow" class="banner warn hidden"></div>
+
+<hr class="sep">
+<a class="btn ghost" href="/">Back to dictionaries</a>
+<a class="btn ghost" href="/setup">Folders…</a>
+
+<p class="formats" id="credit"></p>
+<p class="about"><b>WuWei</b>Dict — search every dictionary you own, from one browser tab.
+  <a href="https://wuweidict.github.io/wudict" target="_blank" rel="noopener">Website</a>
+  · <a href="https://github.com/wuweidict/wudict" target="_blank" rel="noopener">Source</a></p>
+</div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const mb=n=>n>=1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB";
+
+/* State lives on the SERVER, not here: a download is a job the server runs, so
+   this page can be reloaded, rotated or closed and reopened without losing it.
+   Everything drawn below comes from one GET, which is also what is polled. */
+let polling=false;
+
+async function load(){
+  let j;
+  try{ j=await (await fetch("/api/lemmas")).json() }
+  catch(e){ $("banner").className="banner warn";$("banner").textContent="Cannot reach wuDict.";return null }
+  render(j);
+  return j;
+}
+
+function render(j){
+  const list=$("list");
+  list.textContent="";
+  let installed=0;
+  for(const l of j.languages){
+    if(l.installed)installed++;
+    list.appendChild(rowFor(l,j));
+  }
+  $("summary").textContent=installed+" installed"+
+    (j.languages.length?" of "+j.languages.length:"");
+  $("dir").textContent="Installed in "+j.dir;
+
+  const b=$("banner");
+  if(!j.enabled){
+    b.className="banner warn";
+    b.innerHTML="Lemmatization is switched off (<code>MORPH_CACHE = 0</code>). "+
+      "Anything installed here will sit on disk unused until it is switched back on.";
+  }else if(j.error){
+    b.className="banner warn";
+    b.textContent="Could not read the catalogue: "+j.error+
+      " — languages already installed still work.";
+  }else{
+    b.className="banner hidden";
+  }
+
+  $("shadow").className=j.shadowed&&j.shadowed.length?"banner warn":"banner warn hidden";
+  if(j.shadowed&&j.shadowed.length)$("shadow").textContent=j.shadowed.join("; ");
+
+  /* ODbL: this data may be redistributed only with attribution, and the page
+     that installs it is where a user will look for that. */
+  const lic=j.languages.find(l=>l.license);
+  $("credit").innerHTML=lic
+    ? "Word lists: "+esc(lic.source||"")+" · "+esc(lic.license)+
+      (j.attribution?' · <a href="'+esc(j.attribution)+'" target="_blank" rel="noopener">attribution</a>':"")
+    : "";
+}
+
+function rowFor(l,j){
+  const row=document.createElement("div");
+  row.className="lrow"+(l.installed?"":" off");
+  const cb=document.createElement("input");
+  cb.type="checkbox";cb.checked=l.installed;cb.id="cb-"+l.code;
+  cb.setAttribute("aria-label",l.name);
+  const busy=l.state==="downloading";
+  // Built-in English cannot be "not installed", so its box has nothing to say.
+  cb.disabled=busy||(l.builtin&&!l.localSize)||(!l.installed&&!l.catalogued);
+  cb.addEventListener("change",()=>toggle(l,cb));
+
+  const nm=document.createElement("label");
+  nm.className="nm";nm.htmlFor=cb.id;
+  nm.textContent=l.name+" ("+l.code+")";
+
+  const cost=document.createElement("span");
+  cost.className="cost";
+  const bits=[];
+  if(l.size)bits.push(mb(l.size));
+  else if(l.localSize)bits.push(mb(l.localSize));
+  if(l.heapMB)bits.push("~"+l.heapMB+" MB RAM");
+  cost.textContent=bits.join(" · ");
+
+  const st=document.createElement("span");
+  st.className="st";
+  if(busy){
+    st.className="st busy";
+    // Guarded rather than trusting the numbers: a catalogue with no declared
+    // size, or a row read from an older build, must read "Downloading…" and
+    // never "Downloading… NaN%".
+    var pct=l.total>0?Math.floor(100*(l.done||0)/l.total):-1;
+    st.textContent=pct>=0?"Downloading… "+Math.min(pct,100)+"%":"Downloading…";
+  }else if(l.state==="error"){
+    st.className="st err";st.textContent="✕ "+l.error;
+  }else if(l.builtin&&!l.localSize){
+    st.className="st ok";st.textContent="built in";
+  }else if(l.installed&&l.mismatch){
+    st.className="st";st.textContent="installed (differs)";
+  }else if(l.installed&&!l.catalogued){
+    st.className="st ok";st.textContent="installed (local file)";
+  }else if(l.installed){
+    st.className="st ok";st.textContent="installed";
+  }
+  row.append(cb,nm,cost,st);
+  return row;
+}
+
+/* Checking installs, unchecking removes. The box is disabled the moment it is
+   clicked and re-enabled by the next poll that reports a terminal state, so a
+   second click cannot start a second download - the server refuses one anyway,
+   but the UI should not invite it. */
+async function toggle(l,cb){
+  cb.disabled=true;
+  if(cb.checked){
+    setStatus(cb,"busy","Downloading…");
+    try{
+      const r=await fetch("/api/lemmas?code="+encodeURIComponent(l.code),{method:"POST"});
+      if(!r.ok){ const j=await r.json().catch(()=>({}));fail(cb,j.error||("HTTP "+r.status));return }
+    }catch(e){ fail(cb,"cannot reach wuDict");return }
+    poll();
+    return;
+  }
+  const size=l.localSize?" ("+mb(l.localSize)+")":"";
+  if(!confirm("Remove "+l.name+" lemma data"+size+"?")){
+    cb.checked=true;cb.disabled=false;return;
+  }
+  setStatus(cb,"busy","Removing…");
+  try{
+    const r=await fetch("/api/lemmas?code="+encodeURIComponent(l.code),{method:"DELETE"});
+    if(!r.ok){ const j=await r.json().catch(()=>({}));fail(cb,j.error||("HTTP "+r.status));return }
+  }catch(e){ fail(cb,"cannot reach wuDict");return }
+  load();
+}
+
+function setStatus(cb,cls,text){
+  const st=cb.parentElement.querySelector(".st");
+  st.className="st "+cls;st.textContent=text;
+}
+function fail(cb,msg){
+  cb.checked=!cb.checked;cb.disabled=false;setStatus(cb,"err","✕ "+msg);
+}
+
+/* Polling, not a stream. A browser allows about six connections per origin and
+   a download here can be one of several; a stream each would leave the app
+   unable to search while they ran. It also means progress is server state:
+   nothing is lost when the page goes away, which on Android it does on every
+   rotation. */
+async function poll(){
+  if(polling)return;
+  polling=true;
+  for(;;){
+    const j=await load();
+    if(!j||!j.languages.some(l=>l.state==="downloading"))break;
+    await new Promise(r=>setTimeout(r,800));
+  }
+  polling=false;
+}
+
+load().then(j=>{ if(j&&j.languages.some(l=>l.state==="downloading"))poll() });
+</script>
+</body>
+</html>

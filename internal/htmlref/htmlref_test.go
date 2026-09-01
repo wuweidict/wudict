@@ -155,18 +155,18 @@ func TestDropTag(t *testing.T) {
 // from every component of a URI, so a trailing one cannot be part of the name.
 func TestClean(t *testing.T) {
 	cases := map[string]string{
-		`plaintiff__gb_1.ogg"`:  "plaintiff__gb_1.ogg",
-		`plaintiff__gb_1.ogg'`:  "plaintiff__gb_1.ogg",
-		"a.png`":                "a.png",
-		`  a.png  `:             "a.png",
-		"\n\ta.png\r\n":         "a.png",
-		`a.png`:                 "a.png",
-		`"a.png`:                `"a.png`, // leading: a different malformation, left alone
-		`say"what.png`:          `say"what.png`,
-		``:                      ``,
-		`"`:                     ``,
-		`sound://x.mp3`:         `sound://x.mp3`,
-		`a.png?v=1#frag`:        `a.png?v=1#frag`,
+		`plaintiff__gb_1.ogg"`: "plaintiff__gb_1.ogg",
+		`plaintiff__gb_1.ogg'`: "plaintiff__gb_1.ogg",
+		"a.png`":               "a.png",
+		`  a.png  `:            "a.png",
+		"\n\ta.png\r\n":        "a.png",
+		`a.png`:                "a.png",
+		`"a.png`:               `"a.png`, // leading: a different malformation, left alone
+		`say"what.png`:         `say"what.png`,
+		``:                     ``,
+		`"`:                    ``,
+		`sound://x.mp3`:        `sound://x.mp3`,
+		`a.png?v=1#frag`:       `a.png?v=1#frag`,
 	}
 	for in, want := range cases {
 		if got := Clean(in); got != want {

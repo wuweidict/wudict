@@ -444,6 +444,11 @@ func WriteInfo(dir string) error {
 	fmt.Fprintf(&b, "entries = %s\n", meta["entry_count"])
 	fmt.Fprintf(&b, "index = %s\n", level)
 	fmt.Fprintf(&b, "media = %s\n", media)
+	if l := meta["index_lang"]; l != "" {
+		// Only ever what the source declared, so this line is a fact about the
+		// dictionary and not a guess this folder would then keep forever.
+		fmt.Fprintf(&b, "language = %s\n", l)
+	}
 	fmt.Fprintf(&b, "source = %s\n", source)
 	fmt.Fprintf(&b, "source_size = %s\n", meta["source_size"])
 	fmt.Fprintf(&b, "source_mtime = %s\n", meta["source_mtime"])

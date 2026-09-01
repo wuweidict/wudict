@@ -80,14 +80,14 @@ func cmdRemove(args []string) error {
 	if prepared != "" {
 		n := store.TreeSize(prepared)
 		total += n
-		fmt.Printf("prepared  %s  (%.1f MB)\n", prepared, mb(n))
+		fmt.Printf("prepared  %s  (%s)\n", prepared, humanSize(n))
 	}
 	for _, p := range sources {
 		n := store.TreeSize(p)
 		total += n
-		fmt.Printf("original  %s  (%.1f MB)\n", p, mb(n))
+		fmt.Printf("original  %s  (%s)\n", p, humanSize(n))
 	}
-	fmt.Printf("%s - %.1f MB total\n", name, mb(total))
+	fmt.Printf("%s - %s total\n", name, humanSize(total))
 
 	if !*force {
 		fmt.Println("dry run - re-run with -f to delete")
@@ -110,7 +110,7 @@ func cmdRemove(args []string) error {
 	if failed > 0 {
 		return fmt.Errorf("%d deletions failed", failed)
 	}
-	fmt.Printf("deleted - %.1f MB freed\n", mb(total))
+	fmt.Printf("deleted - %s freed\n", humanSize(total))
 	if dropPrepared && !dropSource && len(allSources) > 0 {
 		fmt.Println("note: the original files are still in place, so this dictionary will be indexed again the next time it is searched")
 	}
@@ -177,4 +177,18 @@ func fileExists(p string) bool {
 	return err == nil && !fi.IsDir()
 }
 
-func mb(n int64) float64 { return float64(n) / (1 << 20) }
+// humanSize is how every byte count the CLI shows a user is written. In MB
+// alone a 40 KB .files.zip and an empty file both read "0.0 MB", which is the
+// one thing an inventory must not do - it is printed so the user can tell what
+// is actually there.
+func humanSize(n int64) string {
+	switch {
+	case n < 1<<10:
+		return fmt.Sprintf("%d B", n)
+	case n < 1<<20:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	case n < 1<<30:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	}
+	return fmt.Sprintf("%.2f GB", float64(n)/(1<<30))
+}

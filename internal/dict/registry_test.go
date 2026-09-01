@@ -7,6 +7,7 @@ package dict
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -120,6 +121,67 @@ func TestBundleFileNameAndSidecars(t *testing.T) {
 	}
 	if len(got) != 1 || filepath.Base(got[0]) != "text.db" {
 		t.Fatalf("a dropped-in dictionary folder should yield exactly its text.db, got %v", got)
+	}
+}
+
+// TestOpenPreparedFolder: the folder IS the dictionary (D20 - "copy, move or
+// zip it as a unit"), so it is the name every listing shows and the name a
+// user types. Dispatch is by file name and extension, which a folder has
+// neither of usefully: a real library folder called
+// "es_es_DLE_v23.8_1_RealAcademia2026" was rejected with "unsupported
+// dictionary format: .8_1_RealAcademia2026", filepath.Ext having read the
+// version number as an extension.
+func TestOpenPreparedFolder(t *testing.T) {
+	RegisterFileName("text.db", func(path string) (Dictionary, error) { return fakeDict{}, nil })
+
+	root := t.TempDir()
+	bundle := filepath.Join(root, "es_es_DLE_v23.8_1_RealAcademia2026")
+	if err := os.MkdirAll(bundle, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"text.db", "media.db", "info.txt"} {
+		if err := os.WriteFile(filepath.Join(bundle, f), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Trailing separator too: shell completion produces it, and it changes
+	// what filepath.Base reports.
+	for _, p := range []string{bundle, bundle + string(filepath.Separator)} {
+		if _, err := Open(p); err != nil {
+			t.Errorf("Open(%q): %v", p, err)
+		}
+		if got := MainFile(p); filepath.Base(got) != "text.db" {
+			t.Errorf("MainFile(%q) = %q, want its text.db", p, got)
+		}
+	}
+
+	// A folder with no main file is not a dictionary, and says so in words
+	// that name the folder rather than the dots in its name.
+	plain := filepath.Join(root, "Loose MDX v2.1")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plain, "a.mdx"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := MainFile(plain); got != plain {
+		t.Errorf("MainFile(%q) = %q, want it unchanged", plain, got)
+	}
+	_, err := Open(plain)
+	if err == nil {
+		t.Fatal("a folder of loose files must not open as a dictionary")
+	}
+	if !strings.Contains(err.Error(), "Loose MDX v2.1") || !strings.Contains(err.Error(), "folder") {
+		t.Errorf("error should name the folder and say it is one: %v", err)
+	}
+	if strings.HasSuffix(err.Error(), "format: .1") {
+		t.Errorf("error read the version number as an extension: %v", err)
+	}
+
+	// A path that does not exist is the opener's to report, named as typed.
+	missing := filepath.Join(root, "gone")
+	if got := MainFile(missing); got != missing {
+		t.Errorf("MainFile(%q) = %q, want it unchanged", missing, got)
 	}
 }
 

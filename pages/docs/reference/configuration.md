@@ -38,6 +38,7 @@ That file is written by the app, not by you.
 | What | macOS and Linux | Windows | Android |
 | --- | --- | --- | --- |
 | Config | `~/.wudict/wudict.toml` | `%USERPROFILE%\.wudict\wudict.toml` | `Android/data/com.legbehindneck.wudict/files/wudict.toml` |
+| Installed lemma data | `~/.wudict/lemmas` | `%USERPROFILE%\.wudict\lemmas` | `Android/data/com.legbehindneck.wudict/files/lemmas` |
 | Prepared library | `~/.wudict/db` | `%USERPROFILE%\.wudict\db` | `Android/data/com.legbehindneck.wudict/files/db` |
 | State (order, switches) | `~/.wudict/state.json` | `%USERPROFILE%\.wudict\state.json` | as above |
 | Log, when there is no console | `~/Library/Logs/wudict.log` on macOS, `~/.wudict/wudict.log` on Linux | `%LOCALAPPDATA%\wudict\wudict.log` | Android's own log |
@@ -227,7 +228,7 @@ How much RAM dictionaries that are not yet prepared may hold open.
     | --- | --- |
     | Flag | none, environment and file only |
     | Values | a size such as `1GB`, or `0` for no limit |
-    | Default | `1GB`, and `64MB` on Android |
+    | Default | `1GB`; on Android a third of [`MEMORY_LIMIT`](#memory_limit), which is `64MB` on a small device and `128MB` on a large one |
 
     Each dictionary in preview holds about 350 bytes per headword open. Above
     this limit, the least recently used are closed.
@@ -284,6 +285,133 @@ Store article text plain instead of compressed.
 
     Prepared databases become roughly three times larger. Reads get marginally
     faster. Worth it only with disk to spare.
+
+## Lemmatization
+
+When a dictionary comes back with nothing, WuWeiDict looks the word's
+dictionary form up and asks that dictionary again: `knew` finds *know*,
+`fuiste` finds *ser*, `идет` finds *идти*. It fires only on an empty answer,
+and only for a single word, so nothing it produces can push a real hit down the
+page.
+
+It is decided one dictionary at a time. A glossary that happens to list
+`understood` itself answers straight away; the dictionaries beside it that index
+only *understand* are still asked for *understand*, instead of being silenced by their
+neighbour's hit.
+
+### MORPH_CACHE
+
+How many languages of lemma data stay in memory.
+
+??? info "Values, default, and what a language costs"
+
+    | | |
+    | --- | --- |
+    | Flag | none, environment and file only |
+    | Values | a count, or `0` to switch lemmatization off entirely |
+    | Default | `2`; `1` on Android |
+
+    English is built in. Every other language is a file you install — see
+    [`LEMMA_DIR`](#lemma_dir). Nothing is loaded at startup: a language is read
+    on the first search that needs it, and the least recently used is dropped
+    above this count.
+
+    A loaded language costs from 7 MB (English) to 65 MB (Russian). `0` never
+    loads any and never lemmatizes, which is also what you want if you would
+    rather a failed search simply stay failed.
+
+    A dictionary is only offered its own language's lemma — Spanish `sale` →
+    *salar* is never asked of an English dictionary. WuWeiDict works the
+    language out from what the dictionary declares, then its file name, its
+    folders and its title; one it cannot place is searched as English.
+
+### LEMMA_DIR
+
+The folder every language but English is loaded from.
+
+??? info "Values, default, and the file format"
+
+    | | |
+    | --- | --- |
+    | Flag | none, environment and file only |
+    | Values | a folder path |
+    | Default | `~/.wudict/lemmas` |
+
+    Spanish, Russian, German, French, Italian and anything else is installed
+    here rather than shipped inside WuWeiDict — the six languages that used to
+    be built in were 9 MB of a 20 MB program, carried by everyone who never
+    searched in them.
+
+    You do not have to fill this folder by hand. Open **🔤 Lemmatization** on
+    the settings page (or in the ⚙ panel beside the search box) and tick a
+    language: it downloads, installs, and takes effect immediately — no
+    restart. That page is the only route on Android, which has no shell. From
+    a terminal, `wudict lemmas download ru` does the same; see
+    [the `lemmas` command](cli.md#lemmas). Everything below is what those
+    write, and what to write yourself for a language neither offers.
+
+    One file per language, named after the language: `pl.txt`, `pol.tsv`,
+    `polish.txt.gz`. The extension must be `.txt` or `.tsv`, optionally
+    `.gz`-compressed; anything else in the folder is ignored. The folder does
+    not have to exist.
+
+    Each line is a lemma followed by its forms, separated by tabs and written
+    in lower case:
+
+    ```
+    kot	kota	kotu	kotem	koty	kotów
+    pies	psa	psu	psem	psy	psów
+    ```
+
+    The lists at
+    [michmech/lemmatization-lists](https://github.com/michmech/lemmatization-lists)
+    are already in this shape — one `lemma`/form pair per line — and work as
+    downloaded. Blank or malformed lines are skipped rather than failing the
+    file.
+
+    An `en.txt` replaces the English WuWeiDict ships, if you have a better
+    list than the one built in.
+
+    The folder is indexed at startup and again whenever the lemmatization page
+    installs or removes something, so a language obtained there is searchable
+    at once; a file you drop in by hand is picked up at the next start. A
+    language is loaded under the same [`MORPH_CACHE`](#morph_cache) budget as a
+    built-in one — so `MORPH_CACHE = "0"` ignores the folder entirely, and the
+    lemmatization page says so rather than letting you download data nothing
+    will read.
+
+### LEMMA_URL
+
+The catalogue `wudict lemmas` installs languages from.
+
+??? info "Values, default, and using your own"
+
+    | | |
+    | --- | --- |
+    | Flag | `-url` on the `lemmas` commands |
+    | Used by | `wudict lemmas`, and the 🔤 Lemmatization page |
+    | Values | a URL, or the path of a `manifest.json` on disk |
+    | Default | the published WuWeiDict lemma catalogue |
+
+    You will not normally set this. It exists for two cases: an installation
+    with no route to the internet, and a mirror of your own.
+
+    For the first, copy the published folder — the `.tsv.gz` files and the
+    `manifest.json` beside them — onto the machine and point at it:
+
+    ``` sh
+    wudict lemmas download -url /media/usb/lemmas/manifest.json ru pl
+    ```
+
+    Everything else is unchanged: each file is still checked against the
+    SHA-256 digest the manifest publishes, which is what makes the source
+    interchangeable. WuWeiDict pins no host and never takes a file name from
+    the catalogue — a language installs as `<code>.tsv.gz` and nowhere else.
+
+    The lemma data itself is published under the
+    [ODbL](https://opendatacommons.org/licenses/odbl/1-0/) and derived from
+    [michmech/lemmatization-lists](https://github.com/michmech/lemmatization-lists);
+    an `ATTRIBUTION.txt` sits beside the files.
 
 ## Access
 

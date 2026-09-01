@@ -40,6 +40,9 @@ type Config struct {
 	MemoryLimit   int64  // MEMORY_LIMIT: soft heap ceiling in bytes (0 = none)
 	PreviewMemory int64  // PREVIEW_MEMORY: cap on RAM held by unprepared dictionaries (0 = unlimited)
 	SearchMemory  int64  // SEARCH_MEMORY: cap on RAM ONE search may materialise (0 = uncapped)
+	MorphCache    int    // MORPH_CACHE: how many lemma packs stay resident (0 = no lemmatization)
+	LemmaDir      string // LEMMA_DIR: folder of installed lemma files (adds/overrides languages)
+	LemmaURL      string // LEMMA_URL: manifest `wudict lemmas` installs languages from
 	Source        string // path of the wudict.toml that was loaded ("" if none)
 
 	// BrowserExtensions (BROWSER_EXTENSIONS) pins which browser-extension
@@ -97,6 +100,9 @@ func defaults() Config {
 		PreviewMemory: previewMemoryDefault(),
 		MemoryLimit:   memoryLimitDefault(),
 		SearchMemory:  searchMemoryDefault(),
+		MorphCache:    morphCacheDefault(),
+		LemmaDir:      filepath.Join(home, ".wudict", "lemmas"),
+		LemmaURL:      DefaultLemmaURL,
 	}
 }
 
@@ -208,6 +214,15 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	}
 	if v := get("SEARCH_MEMORY"); v != "" {
 		cfg.SearchMemory = ParseSize(v)
+	}
+	if v := get("MORPH_CACHE"); v != "" {
+		cfg.MorphCache = ParseCount(v)
+	}
+	if v := get("LEMMA_DIR"); v != "" {
+		cfg.LemmaDir = ExpandHome(v)
+	}
+	if v := get("LEMMA_URL"); v != "" {
+		cfg.LemmaURL = v
 	}
 	if v := get("BROWSER_EXTENSIONS"); v != "" {
 		cfg.BrowserExtensions = ParseOrigins(v)
@@ -347,12 +362,33 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 # PREVIEW_MEMORY = "1GB"              # how much RAM dictionaries that are NOT yet prepared may hold
 #                                     # open. Each costs ~350 bytes per headword; the least recently
 #                                     # used are closed above this. Prepared ones answer from disk and
-#                                     # are never evicted. "0" = no limit. Android defaults to 64MB.
+#                                     # are never evicted. "0" = no limit. On Android the default is a third of
+#                                     # MEMORY_LIMIT (64-128MB, by device RAM).
 # SEARCH_MEMORY = "0"                 # how much RAM ONE search may bring in by opening dictionaries
 #                                     # that are not yet prepared. Past it the rest are reported as
 #                                     # not searched rather than opened. Prepared dictionaries are
 #                                     # never capped. "0" = no cap. Android defaults to the memory
 #                                     # limit, where one query could otherwise get the app killed.
+# MORPH_CACHE = "2"                   # how many LEMMA packs stay in memory. When a search finds
+#                                     # nothing at all, wudict tries the word's dictionary form and
+#                                     # searches again. English is built in; other languages come
+#                                     # from LEMMA_DIR. Each loaded language costs 7-65 MB and is
+#                                     # dropped when another needs the slot.
+#                                     # "0" = never lemmatize, load nothing.
+#                                     # Android defaults to 1.
+# LEMMA_DIR   = "~/.wudict/lemmas"    # folder of installed lemma files. Every language but English
+#                                     # comes from here - one file per language, named after it
+#                                     # ("pl.txt", "polish.tsv.gz"; .txt/.tsv, optionally .gz).
+#                                     # Each line is a lemma and its forms, tab-separated, lower
+#                                     # case - the format of the lists at
+#                                     # github.com/michmech/lemmatization-lists, which load as
+#                                     # downloaded. An "en" file replaces the built-in English.
+#                                     # Read once at startup.
+#                                     # "wudict lemmas list" shows what is installed and what is
+#                                     # available; "wudict lemmas download pl" puts a file here.
+# LEMMA_URL = ""                      # where "wudict lemmas" looks for installable languages: the
+#                                     # URL of a manifest.json, or a path to one on disk for an
+#                                     # install with no network. Empty = the published catalogue.
 # MEMORY_LIMIT  = "0"                 # soft ceiling, e.g. "4GB": Go collects harder - and sheds its
 #                                     # caches - rather than growing past it. "0" = no ceiling.
 #                                     # Android defaults to a fraction of the device's RAM.
@@ -774,6 +810,17 @@ func ParseWorkers(v string) int {
 	return n
 }
 
+// ParseCount reads a small non-negative count. Anything unreadable is 0, which
+// for MORPH_CACHE means "off" - a typo in a config file disables a feature
+// rather than silently choosing a size nobody asked for.
+func ParseCount(v string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
 // ParseSize reads a byte size: plain bytes, or with a K/M/G suffix
 // ("2GB", "1500MB", "512M"). Returns 0 for "off"/"none"/unparseable.
 func ParseSize(v string) int64 {
@@ -815,3 +862,18 @@ func (c Config) EditableInFile(key string) bool {
 
 // Addr returns the listen address.
 func (c Config) Addr() string { return c.IP + ":" + c.Port }
+
+// DefaultLemmaURL is the catalogue `wudict lemmas` installs languages from
+// (LEMMA_URL). It is a static file, deliberately: enumerating a repository
+// through a code-hosting API would put a 60-request-per-hour, per-IP rate
+// limit in front of `wudict lemmas list`, and a user sharing an address with
+// their office or their carrier would see it fail for no reason they could
+// see. Point it at a local manifest.json to install with no network at all.
+//
+// The host is a repository holding nothing but the catalogue - not the golem
+// fork, whose name would credit a lemmatizer library for data it did not
+// produce, and not a mirror of michmech/lemmatization-lists either. What is
+// published here is DERIVED from those lists (grouped, deduplicated, gzipped)
+// and carries digests and measured memory costs the raw lists do not have;
+// `tools/lemmafiles` is the only thing that ever reads michmech.
+const DefaultLemmaURL = "https://raw.githubusercontent.com/wuweidict/lemmas/main/manifest.json"

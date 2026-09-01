@@ -75,6 +75,59 @@ func openerFor(path string) (opener, bool) {
 	return matchKey(inspectOpeners, path)
 }
 
+// MainFile resolves a path a USER typed to the file a format opener wants. A
+// prepared dictionary is a folder ("copy, move or zip it as a unit"), so the
+// folder is the name a user has for it and the name every listing shows -
+// while dispatch is by file name and extension, which a folder has neither of
+// in any useful sense. `wudict info ~/.wudict/db/es_es_DLE_v23.8_1_RAE2026`
+// answered "unsupported dictionary format: .8_1_RAE2026", having read
+// filepath.Ext of a folder name that happens to contain dots.
+//
+// Only a bundle MAIN FILE counts (the fileOpeners registrations - "text.db"),
+// so a folder is a dictionary exactly when it holds one, and a folder of loose
+// .mdx files is still a folder. Anything else is returned unchanged, including
+// a path that does not exist: reporting that is the opener's job, and it names
+// what the user typed.
+//
+// Checked last and only on a path with no extension match, so an ordinary open
+// costs no stat.
+func MainFile(path string) string {
+	if path == "" {
+		return path
+	}
+	fi, err := os.Stat(path)
+	if err != nil || !fi.IsDir() {
+		return path
+	}
+	// Sorted, so a folder holding two main files resolves the same way twice.
+	names := make([]string, 0, len(fileOpeners))
+	for name := range fileOpeners {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		p := filepath.Join(path, name)
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+			return p
+		}
+	}
+	return path
+}
+
+// formatOf names the thing that was not recognised, for an error message. The
+// extension is the useful half of the answer for a file, and actively
+// misleading for a folder ("MyDict v2.1" has an "extension" of ".1"), so a
+// path with no registered suffix is named by what it is instead.
+func formatOf(path string) string {
+	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+		return filepath.Base(path) + " (a folder holding no dictionary)"
+	}
+	if ext := filepath.Ext(path); ext != "" {
+		return ext
+	}
+	return filepath.Base(path)
+}
+
 // discoverableFor is openerFor without the inspect-only containers: what a
 // folder scan is allowed to consider a dictionary.
 func discoverableFor(path string) (opener, bool) {
@@ -132,6 +185,9 @@ func Probe(path string) (m Meta, err error) {
 	if fn, ok := matchKey(probers, path); ok {
 		return fn(path)
 	}
+	if p := MainFile(path); p != path {
+		return Probe(p)
+	}
 	d, err := Open(path)
 	if err != nil {
 		return Meta{}, err
@@ -154,7 +210,10 @@ func RegisterReader(ext string, fn readerOpener) {
 func OpenReader(path string) (r Reader, err error) {
 	fn, ok := matchKey(readerOpeners, path)
 	if !ok {
-		return nil, fmt.Errorf("no ingest reader for format: %s", filepath.Ext(path))
+		if p := MainFile(path); p != path {
+			return OpenReader(p)
+		}
+		return nil, fmt.Errorf("no ingest reader for format: %s", formatOf(path))
 	}
 	defer recoverOpen(path, &err)
 	return fn(path)
@@ -167,7 +226,10 @@ func OpenReader(path string) (r Reader, err error) {
 func Open(path string) (d Dictionary, err error) {
 	fn, ok := openerFor(path)
 	if !ok {
-		return nil, fmt.Errorf("unsupported dictionary format: %s", filepath.Ext(path))
+		if p := MainFile(path); p != path {
+			return Open(p)
+		}
+		return nil, fmt.Errorf("unsupported dictionary format: %s", formatOf(path))
 	}
 	defer recoverOpen(path, &err)
 	d, err = fn(path)

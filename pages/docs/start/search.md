@@ -57,6 +57,41 @@ the cogwheel ⚙️ in the dictionary panel and then in the expanded box clickin
     Folded means lower case with accents removed. The index stores the folded
     form, so searching for words with accented characters works as expected.
 
+## Inflected words
+
+A search that finds nothing anywhere is not over. wuDict looks the word up in
+its list of word forms and searches again for what it finds — *knew* becomes
+**know**, *estuviera* becomes **estar** — and a banner says which word it
+switched to.
+
+The retry is per dictionary and per language. A dictionary that already
+answered is never second-guessed, and a dictionary is only offered its own
+language's word forms: Spanish *sale* → **salir** is never asked of an English
+dictionary.
+
+**Only English is built in.** Every other language is a small data file you
+install, and there are two ways to do it:
+
+-   Click **🔤 Lemmatization** — in the ⚙ box of the ☰ dictionary panel, or on
+    the settings page — tick a language, and it downloads. It works in the next
+    search; nothing needs restarting. This is the only route on Android.
+-   From a terminal, [`wudict lemmas download ru`](../reference/cli.md#lemmas).
+
+??? info "What a language costs, and how to switch this off"
+
+    The page lists each language's download size (a few hundred KB to 2 MB) and
+    the memory it uses while loaded (7 MB for English, 90 MB for Slovak) —
+    measured, not estimated. Nothing is loaded until a search needs it, and
+    only [`MORPH_CACHE`](../reference/configuration.md#morph_cache) languages
+    stay in memory at once — 2 on a desktop, 1 on Android.
+
+    `MORPH_CACHE = "0"` switches the whole thing off, which is what you want if
+    you would rather a failed search simply stay failed. The lemmatization page
+    tells you when it is off rather than letting you download data nothing will
+    read.
+
+    Untick a language to delete its file.
+
 ## Dictionary search order
 
 The results appear in the order you have defined in the dictionary panel

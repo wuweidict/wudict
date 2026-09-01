@@ -177,7 +177,7 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 			links = append(links, pendingLink{w: hw, target: e.LinkTo})
 			continue
 		}
-		body, err2 := normalizeBody(e)
+		body, err2 := NormalizeBody(e)
 		if err2 != nil {
 			return rep, err2
 		}
@@ -248,11 +248,19 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 		"entry_count":      fmt.Sprint(id - int64(subEntries)),
 		"sub_entries":      fmt.Sprint(subEntries), // @-prefixed, hidden from browsing
 		"ingest_level":     string(level),
-		"has_trigram":      boolMeta(plan.Contains), // cheap-list flag; Open feature-detects the table
+		"has_trigram":      boolMeta(plan.Contains),      // cheap-list flag; Open feature-detects the table
 		"fold_version":     fmt.Sprint(dict.FoldVersion), // which text folding built the trigram index
 		"body_encoding":    bodyEncoding(),
 		"created":          time.Now().UTC().Format(time.RFC3339),
 		"source_sha256_1M": sourceHash(srcMeta.Path),
+	}
+	// Only what the SOURCE DICTIONARY declared. A language worked out from the
+	// file name or a parent folder is deliberately not recorded: those are
+	// recomputed at every open, so renaming a folder to add a hint takes effect
+	// immediately instead of being frozen here by an ingest that may have run
+	// before the source file was moved - or before it stopped existing at all.
+	if srcMeta.IndexLang != "" {
+		metaKV["index_lang"] = srcMeta.IndexLang
 	}
 	if st, err2 := os.Stat(srcMeta.Path); err2 == nil {
 		metaKV["source_size"] = fmt.Sprint(st.Size())
@@ -344,8 +352,11 @@ func tempDBName(dbPath string) string {
 	return dbPath + ".ingest." + hex.EncodeToString(b)
 }
 
-// normalizeBody converts an ingest Entry body to HTML.
-func normalizeBody(e dict.Entry) (string, error) {
+// NormalizeBody converts an ingest Entry body to HTML. Exported because
+// `wudict dump` reads the same format Readers and must render their bodies
+// exactly as an ingest would - a second copy of this switch would be a second
+// answer to "what is this dictionary's HTML".
+func NormalizeBody(e dict.Entry) (string, error) {
 	switch e.Kind {
 	case dict.BodyHTML:
 		return e.Body, nil

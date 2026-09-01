@@ -54,9 +54,9 @@ func (s *Server) routes() []route {
 	// message from "lookup" to "ref"/"pick"; a cached frame.js kept posting
 	// the old name to an index.html that no longer listened for it, and every
 	// entry:// link in a script-bearing dictionary stopped responding.
-	serveScript := func(body []byte) http.HandlerFunc {
+	serveAsset := func(mime string, body []byte) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+			w.Header().Set("Content-Type", mime)
 			w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
 			_, _ = w.Write(body)
 		}
@@ -97,13 +97,23 @@ func (s *Server) routes() []route {
 		{"POST", "/api/power", s.handlePower, "/api/power", false},
 		// The contract, served by the thing it describes.
 		{"GET", "/api/openapi.yaml", s.handleOpenAPI, "/api/openapi.yaml", false},
+		// lemma data: list what is installed and installable, install one,
+		// remove one (D91). Never CORS - the list names a folder on the
+		// user's disk, and the other two write to it.
+		{"GET", "/api/lemmas", s.handleLemmas, "/api/lemmas", false},
+		{"POST", "/api/lemmas", s.handleLemmaInstall, "/api/lemmas", false},
+		{"DELETE", "/api/lemmas", s.handleLemmaRemove, "/api/lemmas", false},
 
 		// ---- the app itself: pages and assets, not part of the API document.
 		{"GET", "/", s.handleIndex, "", false},
 		// the setup page stays reachable after first run: it is where folders
 		// are edited, not just where they are first chosen
 		{"GET", "/setup", s.handleSetupPage, "", false},
-		{"GET", "/assets/frame.js", serveScript(frameJS), "", false},
+		// the lemma installer, reached from setup and from the app's
+		// configuration disclosure
+		{"GET", "/lemmas", s.handleLemmasPage, "", false},
+		{"GET", "/assets/frame.js", serveAsset("application/javascript; charset=utf-8", frameJS), "", false},
+		{"GET", "/assets/setup.css", serveAsset("text/css; charset=utf-8", setupCSS), "", false},
 		{"GET", "/assets/favicon.svg", serveFavicon, "", false},
 		{"GET", "/favicon.ico", serveFavicon, "", false},
 	}

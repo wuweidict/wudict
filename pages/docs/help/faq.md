@@ -84,12 +84,12 @@ Questions, not symptoms. For a symptom, see
 
 ??? question "Can I use it on my phone?"
 
-    Yes, on Android. The app carries the same server and works offline; your
+    Yes, on Android. The app uses the same wudict server codebase and works offline; your
     dictionaries go in *Internal storage ▸ Dictionaries*. It also adds a
     **wuDict** entry to the text-selection toolbar, so you can look a word up
     without leaving the app you are reading.
 
-    There is no iOS app, and not planned, unless sufficient interest is proven.
+    There is no iOS app, and not planned, unless sufficient interest arises.
 
     [The Android app](../apps/android.md)
 
@@ -109,6 +109,31 @@ Questions, not symptoms. For a symptom, see
     To fix a broken file inside a dictionary, put a replacement in that
     dictionary's [`res/` folder](../dictionaries/override.md). Delete your file
     and the dictionary is exactly as it shipped.
+
+??? question "Why does searching *estuviera* find nothing?"
+
+    Because word-form data for Spanish is not installed. WuWeiDict retries a
+    failed search with the word's dictionary form — *knew* → **know** — but
+    only English is built into the program; every other language is a small
+    file you install.
+
+    Click **🔤 Lemmatization** in the ⚙ box of the ☰ panel (or on the settings
+    page), tick Spanish, and search again — it works immediately, with no
+    restart. On a desktop,
+    [`wudict lemmas download es`](../reference/cli.md#lemmas) does the same.
+
+    [Inflected words](../start/search.md#inflected-words)
+
+    **IMPORTANT**: Dictionary formats like `.mdx`, `.slob` and others contain
+    NO DATA about the actual language of the headwords in the dictionary.
+    Lemmatization will only work for these dictionaries if their filename starts 
+    e.g. with `es-es`,  `fr-en` (will be detected as French). 
+    Or, as an alterntive, you can place all the dictionaries for a specic language 
+    under a sobfolder that must match exactly the language code, e.g. `de` or `it`.
+
+    For English language dictionaries the `en-en` prefix is optional, since wudict
+    will by default use English as the fallback lemmatization language if it cannot be detected
+    from the dictionary metadata or from the filename or subfolder name.
 
 ??? question "Which download should I take, -cgo or -purego?"
 

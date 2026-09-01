@@ -466,6 +466,154 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/lemmas:
+    get:
+      tags: [internal]
+      operationId: listLemmas
+      x-internal: true
+      summary: List installable and installed lemma data
+      description: >
+        One row per language, merging the published catalogue (LEMMA_URL) with
+        what is present in LEMMA_DIR, plus the state of any download running
+        right now. Always answers 200: what is installed is the half of the
+        answer that needs no network, and an unreachable catalogue is reported
+        in `error` rather than by failing.
+      parameters:
+        - name: refresh
+          in: query
+          description: >
+            Re-read the catalogue instead of using the cached copy. The
+            catalogue is otherwise cached for ten minutes, so a page polling
+            during a download does not ask its host once a second.
+          schema: { type: string }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s 'http://127.0.0.1:6888/api/lemmas' |
+              jq -r '.languages[] | select(.installed) | .code'
+      responses:
+        '200':
+          description: The catalogue merged with the folder.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dir: { type: string, description: LEMMA_DIR. }
+                  url: { type: string, description: The catalogue this lists. }
+                  enabled:
+                    type: boolean
+                    description: >
+                      False when MORPH_CACHE is 0, in which case nothing
+                      installed here will ever be consulted by a search.
+                  cacheSize:
+                    type: integer
+                    description: How many language packs may be resident at once.
+                  attribution:
+                    type: string
+                    description: ATTRIBUTION.txt published beside the catalogue (ODbL).
+                  error:
+                    type: string
+                    description: Why the catalogue could not be read, if it could not.
+                  shadowed:
+                    type: array
+                    description: Files the lemmatizer ignores because another supplies the same language.
+                    items: { type: string }
+                  languages:
+                    type: array
+                    items: { $ref: '#/components/schemas/LemmaLanguage' }
+    post:
+      tags: [internal]
+      operationId: installLemmas
+      x-internal: true
+      summary: Install one language's lemma data
+      description: |
+        Starts a download and returns at once; follow it with `GET /api/lemmas`.
+        The download runs in the server, not in this request, so it survives the
+        page being reloaded, closed, or rotated away on Android.
+
+        The catalogue is never taken from the caller: only the configured
+        LEMMA_URL is fetched. A second call for a language already downloading
+        joins the running download instead of starting another.
+
+        On success the language is searchable immediately - no restart, because
+        the lemma folder is re-indexed in place.
+      parameters:
+        - name: code
+          in: query
+          required: true
+          description: Language code or English name ("pl", "polish").
+          schema: { type: string }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s -X POST 'http://127.0.0.1:6888/api/lemmas?code=pl'
+      responses:
+        '202':
+          description: The download is running.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string }
+                  state: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          description: The catalogue could not be read, so nothing can be installed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [internal]
+      operationId: removeLemmas
+      x-internal: true
+      summary: Delete one language's lemma data
+      description: >
+        Removes every file in LEMMA_DIR supplying this language, not only the
+        one in use, and re-indexes the folder. Deleting English falls back to
+        the pack compiled into the binary rather than losing the language.
+        Unlike dictionary removal this is offered on every platform: these are
+        files wudict downloaded, not files the user brought.
+      parameters:
+        - name: code
+          in: query
+          required: true
+          description: Language code or English name.
+          schema: { type: string }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s -X DELETE 'http://127.0.0.1:6888/api/lemmas?code=pl'
+      responses:
+        '200':
+          description: What was removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string }
+                  builtin: { type: boolean }
+                  removed:
+                    type: array
+                    items: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: That language is being downloaded right now.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/ServerError'
+
   /api/setup:
     get:
       tags: [internal]
@@ -719,6 +867,45 @@ components:
       properties:
         error: { type: string }
       required: [error]
+
+    LemmaLanguage:
+      type: object
+      description: >
+        One language, merging the catalogue entry with what is on disk and with
+        any download running right now. A language missing from the catalogue
+        but present in the folder still appears - it works, so it is listed as
+        working.
+      properties:
+        code: { type: string }
+        name: { type: string }
+        size:
+          type: integer
+          description: Compressed download size from the catalogue, in bytes.
+        localSize:
+          type: integer
+          description: Size of the installed file, in bytes. Zero when not installed.
+        lemmas: { type: integer, description: Entry count from the catalogue. }
+        heapMB:
+          type: integer
+          description: Measured resident cost once this pack is loaded.
+        source: { type: string }
+        license: { type: string }
+        installed: { type: boolean }
+        catalogued:
+          type: boolean
+          description: False for a file present in the folder but absent from the catalogue.
+        builtin:
+          type: boolean
+          description: True for English, which is compiled in and cannot be removed to nothing.
+        mismatch:
+          type: boolean
+          description: Installed, but its digest is not the catalogue's.
+        state:
+          type: string
+          description: '"downloading" or "error" while a job exists; empty otherwise.'
+        done: { type: integer }
+        total: { type: integer }
+        error: { type: string }
 
     Caps:
       type: object

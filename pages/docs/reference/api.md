@@ -203,7 +203,8 @@ dictionaries still answer.
 ## Same-origin endpoints
 
 The rest of the surface serves the web page and the Android shell: rescan,
-ingest, the library, the settings, the preferences, the power state. They are
+ingest, the library, the settings, the preferences, the lemma data, the power
+state. They are
 not reachable from an extension or a web page - `WEB_ORIGINS` does not widen
 that set, only who may call the three read-only endpoints - and they may change
 between releases.
@@ -213,21 +214,100 @@ so there is one description only.
 
 ## A working example
 
-``` sh title="search every dictionary, print the headwords + definitions"
-python3 -c '
-import json, urllib.request
+The same search three ways: read the stream line by line, print every headword
+and its article.
 
-url = "http://127.0.0.1:6888/api/search?q=flight&mode=exact&format=text&n=3"
+=== "Shell"
 
-with urllib.request.urlopen(url) as f:
-    for line in f:
-        m = json.loads(line)
-        if m.get("t") == "hit":
-            for r in m.get("results") or []:
-                print(m["name"], "|", r["Headword"])
-                print("=" * 70)
-                print(r.get("Body", ""))
-'
+    ``` sh title="curl and jq are enough - jq reads NDJSON natively"
+    curl -sN 'http://127.0.0.1:6888/api/search?q=flight&mode=exact&format=text&n=3' |
+      jq -r --unbuffered 'select(.t == "hit") | .name as $d | (.results // [])[]
+             | "\($d) | \(.Headword)", ("=" * 70), (.Body // "")'
+    ```
+
+    `-N` stops curl buffering and `--unbuffered` stops jq doing the same, so
+    each dictionary prints as it answers. `(.results // [])` is what skips the
+    dictionaries that missed - a `hit` line with no results is normal.
+
+=== "Python"
+
+    ``` py title="search every dictionary, print the headwords + definitions"
+    import json, urllib.request
+
+    url = "http://127.0.0.1:6888/api/search?q=flight&mode=exact&format=text&n=3"
+
+    with urllib.request.urlopen(url) as f:
+        for line in f:
+            m = json.loads(line)
+            if m.get("t") == "hit":
+                for r in m.get("results") or []:
+                    print(m["name"], "|", r["Headword"])
+                    print("=" * 70)
+                    print(r.get("Body", ""))
+    ```
+
+    A program sends no `Origin` header, so nothing has to be configured.
+
+=== "JavaScript"
+
+    ``` js title="the same, from a page in a browser - needs WEB_ORIGINS, see below"
+    const url = "http://127.0.0.1:6888/api/search?q=flight&mode=exact&format=text&n=3";
+    const res = await fetch(url);           // no credentials, no custom headers
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line) continue;
+        const m = JSON.parse(line);
+        if (m.t !== "hit") continue;
+        for (const r of m.results || []) {
+          console.log(m.name, "|", r.Headword);
+          console.log("=".repeat(70));
+          console.log(r.Body || "");
+        }
+      }
+    }
+    ```
+
+NOTE: 
+
+All three read the stream as it arrives rather than waiting for the body, which
+is the whole point of the format: the first dictionary prints while the slowest
+one is still reading.
+
+### The JavaScript version needs WEB_ORIGINS
+
+A page in a browser reaches the API only if
+[`WEB_ORIGINS`](configuration.md#web_origins) names the origin it was served
+from. Unset - the default - every page is refused, and the failure appears in
+the console as a CORS error, not as an HTTP status you can read.
+
+``` toml title="~/.wudict/wudict.toml - pick ONE of these"
+# One dev server on your own machine.
+WEB_ORIGINS = ["http://localhost:3000"]
+
+# Several origins. Scheme, host and port, exactly as the browser sends them;
+# :80 and :443 are the defaults and may be left off.
+WEB_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:8080", "https://notes.example.com"]
+
+# Every site you visit. Convenient while experimenting, and it means any page
+# you happen to open can read your dictionaries.
+WEB_ORIGINS = ["*"]
 ```
 
-`curl -sN` disables buffering, so lines print as they arrive.
+Restart WuWeiDict after editing the file.
+
+The grant is still only the three read-only endpoints - search, the dictionary
+list, and resource files. `*` does not widen that set; it widens who may call
+it. And it never reaches a `file://` page: those send `Origin: null`, which
+every one of them sends, so it can never be allowlisted. Serve your page over
+`http://` while developing, even locally.
+
+A program - `curl`, Node, Deno, Bun, Python - sends no `Origin` and needs none
+of this. The shell and Python tabs above work against a stock installation.

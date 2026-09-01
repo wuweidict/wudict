@@ -273,6 +273,9 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 .scopenote .widen{color:var(--link);cursor:pointer;text-decoration:underline;
   text-underline-offset:2px}
 .scopenote .widen:hover{color:var(--link-hover)}
+/* Same voice as .scopenote, but above the results: it says what was actually
+   searched for, and that has to be read BEFORE the articles it explains. */
+.morphnote{margin-top:0;margin-bottom:var(--sp-1)}
 .empty{padding-top:var(--sp-5);text-align:center;color:var(--fg-faint)}
 .empty svg path{fill:var(--line)}
 /* the search bar is inert until at least one dictionary is usable */
@@ -633,6 +636,10 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
   <div class="facts">
     <a class="act" id="editFolders" href="/setup">✏️ Edit folders…</a>
     <span class="act" id="rescanBtn" title="Re-scan every folder and re-open the dictionaries found (takes a moment)">♻️ Rescan folders</span>
+    <!-- Word-form data is installed long after first run - "why does estuviera
+         find nothing?" is a question asked while searching, not while choosing
+         folders - so the link lives here as well as on the setup page. -->
+    <a class="act" id="lemmaLink" href="/lemmas" title="Install the word-form data that lets an inflected word find its dictionary entry">🔤 Lemmatization…</a>
     <!-- Quiet, and shaped like its two peers: verb, object, scope, ellipsis.
          The shouted version ("ENABLE … GLOBALLY!") gave the panel's least-used
          and most expensive action its loudest voice, which is the hierarchy
@@ -2083,6 +2090,7 @@ async function doSearch(ev){
      inline @font-face it declares (hoistShadowFonts). The box a slot renders
      into is attached for its whole life here, exactly as before. */
   let boxes=[],anyShown=false,anyResults=false,stale=null;
+  let morphNote=null,morphAll=null;const morphSeen=new Set();
   const swap=()=>{if(stale){for(const n of stale)n.remove();stale=null}};
   try{
     await fetchStream("/api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+encodeURIComponent(dictParam)+"&n="+perDict,msg=>{
@@ -2122,6 +2130,31 @@ async function doSearch(ev){
           const det=box.querySelector("details.dict");
           if(det){det.open=true;openedIdx=msg.i;promote(boxes,msg.i)}
         }
+      }else if(msg.t==="morph"){
+        /* The server lemmatizes the dictionaries that came back empty, and
+           sends this only when the retry actually found something — so the
+           notice can never stand over an empty list. Each detected language
+           answers with its own lemma, so several may arrive; they are
+           collected into one line rather than stacked. Placed above the
+           results because it says what was searched for, and that has to be
+           read first.
+
+           Two wordings, because the wave is per dictionary: the word may have
+           been found in some dictionaries and lemmatized only for the rest.
+           `anyResults` is latched at the FIRST morph message — every later one
+           arrives after this wave's own hits have already set it. */
+        if(!boxes.length||!msg.to||morphSeen.has(msg.to))return;
+        if(morphAll===null)morphAll=!anyResults;
+        morphSeen.add(msg.to);
+        if(!morphNote){
+          morphNote=document.createElement("div");
+          morphNote.className="scopenote morphnote";
+          out.insertBefore(morphNote,boxes[0]);
+        }
+        const forms=[...morphSeen].map(w=>`<b>${esc(w)}</b>`).join(", ");
+        morphNote.innerHTML=morphAll
+          ?`Nothing found for “${esc(msg.from||q)}” — showing results for ${forms}`
+          :`Some dictionaries do not list “${esc(msg.from||q)}” — also showing results for ${forms}`;
       }else if(msg.t==="end"){
         // A cross-reference that its own dictionary cannot answer is not a
         // dead end — widen once, and say that is what happened. The re-run

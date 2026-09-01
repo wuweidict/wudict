@@ -38,6 +38,14 @@ type Meta struct {
 	Path        string // source path (or .text.db path for ingested)
 	Description string
 	EntryCount  int
+
+	// IndexLang is the ISO 639-1 code of the language the HEADWORDS are in,
+	// as the dictionary itself declares it (Lingvo's #INDEX_LANGUAGE, Babylon's
+	// source language), normalised by internal/lang. "" when the format
+	// declares nothing, which is most of them - the search path then falls back
+	// to the file and folder naming conventions, and never records what it
+	// worked out that way. See internal/lang.
+	IndexLang string
 }
 
 // DisplayText decodes the character references a dictionary's human-readable

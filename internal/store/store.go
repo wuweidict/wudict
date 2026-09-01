@@ -123,6 +123,7 @@ func Open(path string) (*Store, error) {
 		Format:      "wudict:" + m["format"],
 		Path:        path,
 		Description: dict.DisplayText(m["description"]),
+		IndexLang:   m["index_lang"], // declared at ingest; "" for most formats
 	}
 	s.ftsOK = m["ingest_level"] != string(LevelHeadwords)
 	s.srcPath = m["source_path"]

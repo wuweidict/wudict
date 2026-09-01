@@ -112,8 +112,16 @@ The app is built to be quiet when you are not reading.
 -   A hot device, battery-saver mode or memory pressure closes those too. The
     process then holds nothing but its listener.
 -   Off screen, the server uses one core instead of all of them.
--   [`MEMORY_LIMIT`](../reference/configuration.md#memory_limit) defaults to
-    **64 MB** on Android, against 1 GB on a desktop.
+-   [`MEMORY_LIMIT`](../reference/configuration.md#memory_limit) is set on
+    Android - a sixteenth of the device's RAM, between 192 MB and 384 MB - and
+    unset on a desktop, where the machine manages its own memory.
+-   [`PREVIEW_MEMORY`](../reference/configuration.md#preview_memory), what
+    dictionaries that are not yet prepared may hold open between searches, is a
+    third of that (**64-128 MB**) against 1 GB on a desktop.
+-   [`MORPH_CACHE`](../reference/configuration.md#morph_cache) is **1** on
+    Android against 2 on a desktop: one language of
+    [word-form data](../start/search.md#inflected-words) is held at a time, and
+    a second language displaces it rather than joining it.
 -   The keyboard hides as soon as you scroll an article, which gives the
     definition the full screen.
 
@@ -128,6 +136,7 @@ and on charge the first time you add one.
 | Speex `.spx` audio | works | works in the released build |
 | Browser extension | yes | no; the selection toolbar replaces it |
 | Command line | yes | no |
+| Word forms for other languages | the 🔤 Lemmatization page, or `wudict lemmas` | the page only |
 
 ## Next
 

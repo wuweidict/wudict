@@ -10,6 +10,8 @@ require (
 )
 
 require (
+	github.com/aaaton/golem/v4 v4.0.2
+	github.com/aaaton/golem/v4/dicts/en v1.0.1
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gogpu/systray v0.2.8
 	github.com/mattn/go-sqlite3 v1.14.48

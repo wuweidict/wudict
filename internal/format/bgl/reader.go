@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/lang"
 )
 
 // entryTypes are the block types carrying word/definition entries.
@@ -209,12 +210,21 @@ func NewReader(path string) (*Reader, error) {
 	if r.sourceLang != nil && r.targetLang != nil {
 		desc = r.sourceLang.name + " → " + r.targetLang.name
 	}
+	srcLang := ""
+	if r.sourceLang != nil {
+		srcLang = r.sourceLang.name
+	}
 	r.meta = dict.Meta{
 		Name:        name,
 		Format:      "bgl",
 		Path:        path,
 		Description: desc,
 		EntryCount:  r.numEntries,
+		// Babylon's source language, taken from the positional table rather
+		// than re-parsed out of desc. languageByCode also holds encoding
+		// GROUPS ("Other Russian languages"); those name no language and
+		// internal/lang resolves them to "", which is the honest answer.
+		IndexLang: lang.FromDeclared(srcLang),
 	}
 	return r, nil
 }

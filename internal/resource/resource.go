@@ -52,9 +52,12 @@ type Source interface {
 // MIME is the content type implied by a resource name's extension.
 func MIME(name string) string { return mime.TypeByExtension(path.Ext(name)) }
 
-// clean puts a name in the form used for both lookup and storage: forward
+// Clean puts a name in the form used for both lookup and storage: forward
 // slashes, no leading "/" or "./", and no path climbing out of the container.
-func clean(name string) string {
+// Exported for callers that WRITE a resource to disk (`wudict dump`), where
+// "cannot climb out of the container" is the difference between unpacking an
+// archive and obeying it.
+func Clean(name string) string {
 	s := strings.ReplaceAll(name, `\`, "/")
 	s = path.Clean("/" + s)[1:] // rooted Clean: "../x" and "/../x" both fold to "x"
 	if s == "." {
@@ -67,7 +70,7 @@ func clean(name string) string {
 // normalization are folded here and nowhere else, so every container agrees
 // on what "the same name" means.
 func Key(name string) string {
-	s := clean(name)
+	s := Clean(name)
 	if s == "" {
 		return ""
 	}

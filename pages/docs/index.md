@@ -84,6 +84,10 @@ Exact and prefix work instantly. Contains and full-text need an extra index whic
 enabled on a per dictionary basis. 
 The ☰ panel offers each one as a switch and shows what it costs in megabytes first.
 
+A search that finds nothing is retried with the word's dictionary form — *knew*
+finds **know**, *estuviera* finds **estar**. English is built in; other
+languages are a small file you install with one click.
+
 [How search works](start/search.md){ .md-button }
 
 ---

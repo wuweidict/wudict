@@ -24,6 +24,7 @@ import (
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/htmlref"
 	"github.com/wuweidict/wudict/internal/logx"
+	"github.com/wuweidict/wudict/internal/resource"
 	"github.com/wuweidict/wudict/internal/store"
 )
 
@@ -1277,7 +1278,7 @@ func (e *entry) packMedia(cur dict.Dictionary, textDB, mediaDB string, progress 
 	lister, _ := src.(dict.ResourceLister)
 	var names []string
 	if lister != nil {
-		names = lister.Resources()
+		names = resource.Filter(lister.Resources())
 	}
 	// Also pack the loose files beside the source that articles actually
 	// reference (a repack's stylesheet and scripts live there, not in the

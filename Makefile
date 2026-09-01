@@ -294,6 +294,30 @@ tidy: ## go mod tidy
 .PHONY: check
 check: tidy vet test ## Pre-commit gate: tidy + vet + test
 
+# ---- lemma data ---------------------------------------------------------
+# Only English is built into the binary (D87); every other language is a file
+# a user installs with `wudict lemmas download` (D88). This builds what that
+# command downloads: <code>.tsv.gz per language, plus the manifest.json that
+# LEMMA_URL points at and the ODbL ATTRIBUTION.txt redistribution requires.
+#
+# The source is github.com/michmech/lemmatization-lists, not golem's Go
+# modules - 24 languages instead of 8, and no dependency on a populated module
+# cache. LEMMA_SRC=<dir> uses lists already on disk (deterministic, and what a
+# rebuild should use); without it the lists are downloaded.
+#
+# LEMMA_OUT=<dir> to write elsewhere, LEMMA_LANGS="ru pl" for a subset.
+#
+# Publishing is manual and deliberately not a target: upload $(LEMMA_OUT)
+# wherever LEMMA_URL points (`gh release upload`, or a commit under the data
+# repository's lemmas/ path). The client verifies sha256 and pins no host, so
+# the two halves stay independent.
+LEMMA_OUT ?= dist/lemmas
+LEMMA_MODE = $(if $(LEMMA_SRC),-src $(LEMMA_SRC),-fetch)
+
+.PHONY: lemma-files
+lemma-files: ## Build the lemma catalogue into $(LEMMA_OUT) (LEMMA_SRC=<dir> for offline)
+	go run ./tools/lemmafiles $(LEMMA_MODE) -o $(LEMMA_OUT) $(LEMMA_LANGS)
+
 # ---- API contract -------------------------------------------------------
 # The OpenAPI document is hand-written and embedded, so a running server serves
 # its own contract at /api/openapi.yaml. It is hand-written because the

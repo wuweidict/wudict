@@ -11,53 +11,36 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>wudict Setup</title>
 <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+<link rel="stylesheet" href="/assets/setup.css?v={{CSS}}">
 <style>
-:root{--bg:#fbfaf8;--card:#fff;--fg:#2b2a28;--soft:#6d6a64;--faint:#a5a19a;
-  --accent:#e08600;--line:#e8e4dd;--ok:#4a7a4f;--err:#c0564f;--focus:#7aa7d1}
-@media (prefers-color-scheme: dark){:root{--bg:#191a1c;--card:#212327;--fg:#d8d5d0;
-  --soft:#96938d;--faint:#5f5c57;--accent:#e69a33;--line:#33363b;--ok:#7fae84;--err:#d98880}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
-  line-height:1.618;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:1em}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
-  box-shadow:0 4px 20px rgba(0,0,0,.08);max-width:560px;width:100%;padding:1.618em}
-h1{margin:0 0 .382em;font-size:22px}h1 b{color:var(--accent)}
-p{margin:.382em 0;color:var(--soft);font-size:14px}
-code{background:var(--bg);border:1px solid var(--line);border-radius:4px;
-  padding:0 .3em;font-size:12.5px;word-break:break-all}
-input{width:100%;font-size:15px;color:var(--fg);background:var(--bg);
-  border:1px solid var(--line);border-radius:8px;padding:.5em .7em;margin:.618em 0 .382em;outline:none}
+/* Page-specific only; the palette, card, buttons and typography come from
+   /assets/setup.css, which lemmas.html shares. */
 .frow{display:flex;align-items:center;gap:.4em}
-.frow input{margin:.3em 0}
+.frow input{margin:.3em 0;min-width:0}
 .frow .rm{flex:none;background:none;border:0;color:var(--faint);font-size:16px;
   cursor:pointer;padding:0 .2em;margin:0;line-height:1}
 .frow .rm:hover{color:var(--err)}
 .frow .st{flex:none;font-size:12px;min-width:8.5em;text-align:right;color:var(--soft)}
 .frow .st.ok{color:var(--ok)}.frow .st.err{color:var(--err)}
-button.link{background:none;border:0;color:var(--accent);font-size:13px;
-  cursor:pointer;padding:0;margin:.2em 0 .4em;text-decoration:underline}
-input:focus{border-color:var(--focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 25%,transparent)}
-#msg{min-height:1.5em;font-size:13.5px}
-#msg.ok{color:var(--ok)}#msg.err{color:var(--err)}
-/* .btn lets an anchor wear the button shape without pretending to be one:
-   navigation stays a link (⌘/middle-click, right-click, status bar, the "link"
-   role), it just looks like its neighbour. */
-.btn,button{font-size:15px;background:var(--accent);color:#fff;border:none;
-  border-radius:8px;padding:.5em 1.2em;cursor:pointer;margin-top:.618em;
-  display:inline-block;text-decoration:none;line-height:1.2}
-button:disabled{opacity:.45;cursor:default}
-.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
-#save+#cancel{margin-left:.5em}
-.warn{font-size:12.5px;color:var(--err);margin:.2em 0}
-.formats{color:var(--faint);font-size:12px;margin-top:1em}
-/* Same wordmark rule as the app: "WuWei" accented, "Dict" plain. */
-.about{color:var(--faint);font-size:11.5px;margin-top:.6em}
-.about b{color:var(--accent);font-weight:700}
-.about a{color:var(--soft);text-decoration:none;border-bottom:1px solid var(--line)}
-.about a:hover{color:var(--accent);border-bottom-color:currentColor}
-.sep{border:none;border-top:1px solid var(--line);margin:1.618em 0 1em}
-h2{margin:0 0 .2em;font-size:16px}
+/* Narrow viewports: two lines per folder, never three. A path is long and
+   "✓ 1,284 found" is 8.5em wide, so one shared line leaves the field too
+   narrow to read a folder name in - but wrapping only the status strands the
+   ✕ on a line of its own, adjacent to neither the field above it nor the
+   count below, and which field it deletes becomes a guess. So the field takes
+   line one and its OWN meta line follows: count on the left, ✕ pinned right
+   where a thumb already is. The input's basis is stated here rather than
+   inherited from setup.css's `input{width:100%}`, because a wrap that depends
+   on a width declared in another stylesheet is how the stranded ✕ happened. */
+@media (max-width:520px){
+  .frow{flex-wrap:wrap;row-gap:.15em;margin-bottom:.7em}
+  .frow input{flex:1 1 100%}
+  .frow .st{order:1;flex:1 1 0;min-width:0;text-align:left}
+  /* 18px plus padding is a ~32px touch target: the minimum for a control that
+     removes a dictionary root. margin-left:auto holds the right edge even
+     before validation has written a status. */
+  .frow .rm{order:2;margin-left:auto;font-size:18px;padding:.15em .35em}
+}
+#save~.btn{margin-left:.5em}
 label.keep{display:flex;gap:.5em;align-items:flex-start;font-size:13.5px;color:var(--soft);margin-top:.618em}
 label.keep input{width:auto;margin:.25em 0 0}
 label.keep em{font-style:normal;color:var(--faint);font-size:12.5px}
@@ -69,10 +52,6 @@ label.keep em{font-style:normal;color:var(--faint);font-size:12.5px}
 .row .n{color:var(--soft);font-variant-numeric:tabular-nums;font-size:12px}
 .tag{font-size:10.5px;border:1px solid var(--line);border-radius:99px;padding:0 .5em;color:var(--soft)}
 .tag.on{border-color:var(--accent);color:var(--accent)}
-/* !important: `label.keep` (0,1,1) outranks a bare `.hidden` (0,1,0), so the
-   "keep my N previously imported" checkbox stayed visible with an empty
-   library no matter the source order */
-.hidden{display:none!important}
 </style>
 </head>
 <body>
@@ -102,6 +81,14 @@ label.keep em{font-style:normal;color:var(--faint);font-size:12.5px}
 <div id="msg"></div>
 <button id="save" disabled>Use this folder</button>
 <a id="cancel" class="btn ghost hidden" href="/">Back to dictionaries</a>
+<!-- A control, not a footnote: installing word-form data is a thing the user
+     DOES on this page, like choosing a folder, so it stands with the other
+     two rather than reading as prose about them. -->
+<a id="lemmas" class="btn ghost" href="/lemmas"
+   title="Install the word-form data that lets an inflected word find its dictionary entry">🔤 Lemmatization</a>
+
+<p class="formats">Lemmatization installs the word-form data that lets
+   <i>understood</i> find <i>understand</i>.</p>
 
 <p class="formats">Supported: MDict (.mdx + .mdd) · StarDict (.ifo) · Aard2 (.slob) · Lingvo DSL (.dsl, .dsl.dz) · Babylon (.bgl) · prepared dictionary folders</p>
 <!-- First run is the one moment the app has the user's full attention and

@@ -515,7 +515,7 @@ func (tr *transformer) lexTagS() {
 		//
 		// [s] carries no link text of its own, so the glyph is the affordance.
 		tr.addHTML(`<a class="wudict-audio" href=` + quoteAttr(fname) + `>&#128266;</a>`)
-	case "bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp":
+	case "bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp", "avif":
 		tr.addHTML(`<img align="top" src=` + quoteAttr(fname) + ` alt=` + quoteAttr(fname) + ` />`)
 	}
 	tr.resFiles = append(tr.resFiles, fname)

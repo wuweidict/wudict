@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,7 +28,9 @@ import (
 	"github.com/wuweidict/wudict/internal/config"
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/htmlref"
+	"github.com/wuweidict/wudict/internal/lang"
 	"github.com/wuweidict/wudict/internal/logx"
+	"github.com/wuweidict/wudict/internal/morph"
 	"github.com/wuweidict/wudict/internal/search"
 	"github.com/wuweidict/wudict/internal/speex"
 	"github.com/wuweidict/wudict/internal/store"
@@ -38,6 +41,12 @@ var indexHTML []byte
 
 //go:embed web/setup.html
 var setupHTML string
+
+//go:embed web/lemmas.html
+var lemmasHTML []byte // the lemma-data installer (D91)
+
+//go:embed web/setup.css
+var setupCSS []byte // palette and controls shared by setup.html and lemmas.html
 
 //go:embed web/frame.js
 var frameJS []byte // bridge script for sandboxed article iframes
@@ -113,11 +122,33 @@ type Server struct {
 	// there is no stable id to list. See cors.go (D69).
 	BrowserExtensions []string
 
+	// Morph lemmatizes a word when a search finds nothing anywhere, so an
+	// inflected form still reaches its entry (O3, config MORPH_CACHE). Nil -
+	// which is what a Server built directly in a test has - is disabled, and
+	// every call site goes through Cache.Enabled.
+	Morph *morph.Cache
+
 	// WebOrigins lists http(s) page origins allowed to read the same three
 	// endpoints cross-origin (config WEB_ORIGINS). Empty - the default - means
 	// none: a web page gets nothing here. A single "*" allows any origin. See
 	// cors.go (D69).
 	WebOrigins []string
+
+	// LemmaDir is where /api/lemmas installs lemma files (config LEMMA_DIR) -
+	// the same folder Morph indexes, which is what makes an install visible to
+	// the next search without a restart.
+	LemmaDir string
+
+	// LemmaURL is the catalogue those installs come from (config LEMMA_URL).
+	// It is server state and never a request parameter: a client-chosen URL
+	// would turn this endpoint into a fetcher for whatever address the machine
+	// running wudict can reach.
+	LemmaURL string
+
+	// lemmas holds the installer's state: the running jobs, the cached
+	// catalogue and the cached file digests. Built on first use so a Server
+	// made directly in a test needs no constructor.
+	lemmas lemmaState
 }
 
 func New(reg *Registry) *Server {
@@ -241,6 +272,7 @@ func (s *Server) buildPage() {
 // answerable from the app itself, never only from a terminal.
 func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = io.WriteString(w, setupPage(s.reg.Dirs(), s.reg.Count()))
 }
 
@@ -264,7 +296,21 @@ func setupPage(dirs []string, serving int) string {
 	default:
 		intro = "No dictionary folder is configured yet."
 	}
-	return strings.ReplaceAll(setupHTML, "{{INTRO}}", intro)
+	return strings.ReplaceAll(strings.ReplaceAll(setupHTML, "{{INTRO}}", intro), "{{CSS}}", cssTag)
+}
+
+// cssTag content-addresses the shared stylesheet, so its week-long cache is
+// safe for exactly the reason frame.js's is (D45): the URL changes when the
+// bytes do.
+var cssTag = assetTag(setupCSS)
+
+// handleLemmasPage serves the lemma-data installer (D91). No state is baked
+// in: the page asks /api/lemmas for everything it draws, which is also what it
+// polls while a download runs.
+func (s *Server) handleLemmasPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(bytes.ReplaceAll(lemmasHTML, []byte("{{CSS}}"), []byte(cssTag)))
 }
 
 // plural renders a count with the right noun ("1 folder", "3 folders").
@@ -719,6 +765,10 @@ type streamSlot struct {
 //
 //	{"t":"begin","slots":[{dict,name}…]}   ordered slot layout
 //	{"t":"hit","i":N,dict,name,results…}   one dictionary's results
+//	{"t":"morph","from":…,"to":…,"lang":…} the hits that follow are for a
+//	                                       DIFFERENT word: nothing matched
+//	                                       what was typed, so its dictionary
+//	                                       form was searched instead (O3)
 //	{"t":"end"}                            all dictionaries done
 type streamMsg struct {
 	T       string        `json:"t"`
@@ -738,6 +788,14 @@ type streamMsg struct {
 	// number, because a megabyte figure is not a decision the reader can make.
 	Deferred bool  `json:"deferred,omitempty"`
 	Bytes    int64 `json:"bytes,omitempty"`
+
+	// The "morph" line: From is what the user typed, To the dictionary form
+	// actually searched, Lang the language that produced it. Every "hit" after
+	// it belongs to To - which is why it is a line of its own and not a flag on
+	// the hits: the client has to be able to SAY so.
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
+	Lang string `json:"lang,omitempty"`
 }
 
 // handleSearch streams results as newline-delimited JSON so the client can
@@ -851,9 +909,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	writeLine(streamMsg{T: "begin", Slots: begin})
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	search.StreamOpen(ctx, openers, mode, q, n, func(i int, h search.Hit) {
+	// renderHit turns one dictionary's answer into its NDJSON line. Extracted
+	// because the morphology wave below emits the same shape for the same
+	// slots - a second copy of the rewrite/format pipeline would be a second
+	// place for it to drift.
+	renderHit := func(i int, h search.Hit) streamMsg {
 		id := entries[i].ID
 		name := h.Meta.Name
 		if name == "" {
@@ -893,9 +953,156 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		case h.Err != nil:
 			m.Error = h.Err.Error()
 		}
-		writeLine(m)
+		return m
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	// Metas are kept because each carries the dictionary's declared language,
+	// and the morphology wave needs it. Nothing is opened to obtain them: the
+	// search callback is invoked for EVERY dictionary, hit or miss.
+	metas := make([]dict.Meta, len(entries))
+	// missed marks the dictionaries that actually searched and came back
+	// EMPTY - the only ones the second wave has anything to ask. One that hit
+	// has answered the question; one that was deferred (too heavy), errored,
+	// or does not support this mode has said nothing about the word, and
+	// asking it the same question again with a lemma gets the same refusal.
+	// If nothing missed there is no second wave at all, and no lemma pack is
+	// loaded to serve a search that never happened.
+	//
+	// Per dictionary, not per search: this used to run only when the WHOLE
+	// collection came back empty, which made lemmatization depend on what
+	// unrelated dictionaries were installed beside the one being read. One
+	// Babylon glossary carrying "estuviera" as a hand-listed alias of "estar"
+	// was enough to suppress the lemma probe for every proper Spanish
+	// dictionary in the same search - each of which indexes lemmas only, and
+	// each of which would have answered. The cost of the wider gate is that a
+	// language's pack can now load on a search that already partly succeeded;
+	// it is still bounded by MORPH_CACHE, and the retry still goes only to
+	// dictionaries that returned nothing.
+	missed := make([]bool, len(entries))
+	empty := 0
+	search.StreamOpen(ctx, openers, mode, q, n, func(i int, h search.Hit) {
+		metas[i] = h.Meta
+		// Callbacks are serialised by StreamOpen, so this needs no lock.
+		if h.Err == nil && !h.Skipped && len(h.Results) == 0 {
+			missed[i], empty = true, empty+1
+		}
+		writeLine(renderHit(i, h))
 	})
+	if empty > 0 {
+		s.lemmaWave(ctx, writeLine, renderHit, entries, metas, missed, openers, mode, q, n)
+	}
 	writeLine(streamMsg{T: "end"})
+}
+
+// lemmaWave is the second and last pass: for each dictionary that searched and
+// found NOTHING, it looks the word's dictionary form up instead - "knew" in a
+// dictionary that only holds "know", "fuiste" in one that only holds "ser".
+//
+// Running only on dictionaries that came back empty is what keeps this simple
+// and safe. Within a dictionary there is nothing to rank against, so no derived
+// hit can ever displace an exact one and no ordering has to be threaded through
+// the stream - a dictionary sends either a first-wave hit or a lemma hit, never
+// both. A MISDETECTED language costs one failed index probe, on a dictionary
+// that had already failed, because a candidate is validated by the real
+// headword index rather than shown on trust.
+//
+// Candidates are offered only to dictionaries of the matching language, which
+// is free - detection already produced that grouping - and is what stops
+// Spanish "sale" -> "salar" from being asked of an English dictionary.
+func (s *Server) lemmaWave(
+	ctx context.Context,
+	writeLine func(streamMsg),
+	renderHit func(int, search.Hit) streamMsg,
+	entries []*entry,
+	metas []dict.Meta,
+	missed []bool,
+	openers []search.Opener,
+	mode search.Mode,
+	q string,
+	n int,
+) {
+	// One word only. A phrase has no single lemma, and lemmatizing a token of
+	// it would answer a question nobody asked.
+	if !s.Morph.Enabled() || strings.ContainsAny(q, " \t\r\n") {
+		return
+	}
+	byLang := map[string][]int{}
+	for i := range entries {
+		if !missed[i] {
+			continue
+		}
+		code := metas[i].IndexLang // what the dictionary declares, if anything
+		if code == "" {
+			code = lang.FromPath(langPath(entries[i].Path), s.reg.Dirs())
+		}
+		if code == "" {
+			// The title, last of the three naming sources: it is the one the
+			// user did not choose - a downloaded file can be renamed, its
+			// title is whoever built it - so it speaks only when the file and
+			// the folders were silent.
+			code = lang.FromTitle(metas[i].Name)
+		}
+		if code == "" {
+			// The one language assumed without evidence. It is the smallest
+			// pack by a wide margin (7 MB against 65 for Russian), an
+			// unlabelled dictionary is more often English than anything else,
+			// and being wrong costs one probe on a search that already
+			// returned nothing. Every OTHER language must be stated.
+			code = "en"
+		}
+		if !s.Morph.Supports(code) {
+			continue
+		}
+		byLang[code] = append(byLang[code], i)
+	}
+	codes := make([]string, 0, len(byLang))
+	for c := range byLang {
+		codes = append(codes, c)
+	}
+	sort.Strings(codes) // map order is random; a response should not be
+
+	for _, code := range codes {
+		lemma, ok := s.Morph.Lemma(code, q)
+		if !ok {
+			continue // already a lemma, unknown word, or no pack
+		}
+		slots := byLang[code]
+		sub := make([]search.Opener, len(slots))
+		for k, i := range slots {
+			sub[k] = openers[i]
+		}
+		// Buffered, not streamed: "showing results for X" over an empty list
+		// is worse than saying nothing at all, and whether the list is empty is
+		// not known until the wave finishes. Bounded by n per dictionary, and
+		// asked only of dictionaries that have produced nothing.
+		var out []streamMsg
+		search.StreamOpen(ctx, sub, mode, lemma, n, func(k int, h search.Hit) {
+			if len(h.Results) == 0 {
+				return // a second miss is not news; the first was already sent
+			}
+			out = append(out, renderHit(slots[k], h))
+		})
+		if len(out) == 0 {
+			continue
+		}
+		writeLine(streamMsg{T: "morph", From: q, To: lemma, Lang: code})
+		for _, m := range out {
+			writeLine(m)
+		}
+	}
+}
+
+// langPath is the path language detection should read for a registry entry.
+// A prepared dictionary is addressed by its text.db, whose name says nothing;
+// the folder holding it carries the dictionary's own name, which is what the
+// naming conventions are written on.
+func langPath(p string) string {
+	if strings.EqualFold(filepath.Base(p), store.TextDBName) {
+		return filepath.Dir(p)
+	}
+	return p
 }
 
 // webMIME is the authoritative Content-Type for web-critical extensions.
@@ -917,9 +1124,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 var webMIME = map[string]string{
 	// images
 	".bmp": "image/bmp", ".gif": "image/gif", ".ico": "image/vnd.microsoft.icon",
-	".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
-	".svg": "image/svg+xml", ".tif": "image/tiff", ".tiff": "image/tiff",
+	".jpg":   "image/jpeg",
+	".jpeg":  "image/jpeg",
+	".jfif":  "image/jpeg",
+	".pjpeg": "image/jpeg",
+	".jpe":   "image/jpeg",
+	".png":   "image/png",
+	".svg":   "image/svg+xml", ".tif": "image/tiff", ".tiff": "image/tiff",
 	".webp": "image/webp",
+	".avif": "image/avif",
 	// text / markup / scripts
 	".css": "text/css", ".ini": "text/plain",
 	".js": "text/javascript", ".mjs": "text/javascript",
@@ -934,10 +1147,22 @@ var webMIME = map[string]string{
 	// video - dictionaries ship audio, so default to that.
 	".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg",
 	".oga": "audio/ogg", ".spx": "audio/ogg", ".wav": "audio/wav",
+
 	".m4a": "audio/mp4", ".m4b": "audio/mp4", ".aac": "audio/aac",
 	".webm": "audio/webm", ".weba": "audio/webm",
 	// video
-	".mp4": "video/mp4",
+	".mp4":  "video/mp4",
+	".mpg":  "video/mpeg",
+	".mpeg": "video/mpeg",
+	".mov":  "video/quicktime",
+	".3gp":  "video/3gpp",
+	".ogv":  "video/ogg",
+	".flac": "audio/flac",
+	".txt":  "text/plain",
+	".xml":  "application/xml",
+	".csv":  "text/csv",
+	".vtt":  "text/vtt",
+	".apng": "image/apng",
 }
 
 // resolveMIME prefers the web-critical override, else the backend's value.
