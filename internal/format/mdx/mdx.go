@@ -65,6 +65,7 @@ const linkPrefix = "@@@LINK="
 var reStyleTag = regexp.MustCompile("`\\d+`")
 
 type mddFile struct {
+	path    string
 	md      *gomdict.Mdict
 	entries []*gomdict.MDictKeywordEntry
 }
@@ -128,7 +129,7 @@ func Open(filename string) (*Dict, error) {
 				logx.Dict(d.meta.Name), filepath.Base(f), err)
 			continue
 		}
-		d.mdds = append(d.mdds, mddFile{md: rmd, entries: rents})
+		d.mdds = append(d.mdds, mddFile{path: f, md: rmd, entries: rents})
 	}
 	return d, nil
 }
@@ -148,24 +149,111 @@ func openIndexed(filename string) (*gomdict.Mdict, []*gomdict.MDictKeywordEntry,
 	return md, entries, nil
 }
 
-// companionMdds lists NAME.mdd, NAME.1.mdd … NAME.N.mdd files that exist.
+// companionMdds lists the .mdd resource containers belonging to one .mdx.
+//
+// The directory is READ, not probed. Probing NAME.mdd, NAME.1.mdd, NAME.2.mdd …
+// and stopping at the first gap loses every later file of a set numbered with a
+// hole in it, and loses it silently - a missing companion is indistinguishable
+// from a dictionary that never had one, so the only symptom is images and audio
+// that 404. Reading the folder also settles the extension's case, which matters
+// on Linux and Android where NAME.MDD is a different name from NAME.mdd.
+//
+// Three spellings count as companions, the set GoldenDict and unidict accept:
+//
+//	NAME.mdd        the primary container
+//	NAME.<n>.mdd    numbered, any n, gaps allowed
+//	NAME.<a><n>.mdd a letter then digits, as some repacks number their parts
+//
+// Order is the load order, and load order decides which file wins a duplicate
+// resource name (resourceIndex keeps the first): NAME.mdd, then the numbered
+// ones by VALUE - .2 before .10, which a string sort gets backwards - then the
+// rest by name.
 func companionMdds(mdxPath string) []string {
-	noExt := strings.TrimSuffix(mdxPath, filepath.Ext(mdxPath))
-	var out []string
-	for _, f := range []string{noExt + ".mdd", noExt + ".1.mdd"} {
-		if isFile(f) {
-			out = append(out, f)
+	dir := filepath.Dir(mdxPath)
+	base := filepath.Base(mdxPath)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		// An unreadable folder still has one name worth trying: the .mdx opened,
+		// so its own directory entry exists even if the listing was refused.
+		if f := strings.TrimSuffix(mdxPath, filepath.Ext(mdxPath)) + ".mdd"; isFile(f) {
+			return []string{f}
+		}
+		return nil
+	}
+
+	type cand struct {
+		name string
+		rank int // 0 primary, 1 numbered, 2 lettered
+		num  int
+	}
+	var found []cand
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		ext := filepath.Ext(n)
+		if !strings.EqualFold(ext, ".mdd") {
+			continue
+		}
+		s := strings.TrimSuffix(n, ext)
+		// Case-insensitive on the stem too: a folder holding both NAME.mdx and
+		// name.mdd is one dictionary spelled twice, not two.
+		if strings.EqualFold(s, stem) {
+			found = append(found, cand{n, 0, 0})
+			continue
+		}
+		if len(s) <= len(stem)+1 || !strings.EqualFold(s[:len(stem)], stem) || s[len(stem)] != '.' {
+			continue
+		}
+		suf := s[len(stem)+1:]
+		if num, ok := allDigits(suf); ok {
+			found = append(found, cand{n, 1, num})
+			continue
+		}
+		if isAlpha(suf[0]) {
+			if num, ok := allDigits(suf[1:]); ok {
+				found = append(found, cand{n, 2, num})
+			}
 		}
 	}
-	for n := 2; ; n++ {
-		f := fmt.Sprintf("%s.%d.mdd", noExt, n)
-		if !isFile(f) {
-			break
+	sort.Slice(found, func(i, j int) bool {
+		a, b := found[i], found[j]
+		if a.rank != b.rank {
+			return a.rank < b.rank
 		}
-		out = append(out, f)
+		if a.num != b.num {
+			return a.num < b.num
+		}
+		return a.name < b.name
+	})
+	out := make([]string, 0, len(found))
+	for _, c := range found {
+		out = append(out, filepath.Join(dir, c.name))
 	}
 	return out
 }
+
+// allDigits parses a non-empty run of ASCII digits. It is deliberately not
+// strconv.Atoi: an empty string, a sign, or leading whitespace must all fail,
+// and a suffix too long to fit an int is not a part number.
+func allDigits(s string) (int, bool) {
+	if s == "" || len(s) > 9 {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+		n = n*10 + int(s[i]-'0')
+	}
+	return n, true
+}
+
+func isAlpha(c byte) bool { return c|0x20 >= 'a' && c|0x20 <= 'z' }
 
 func (d *Dict) Meta() dict.Meta { return d.meta }
 

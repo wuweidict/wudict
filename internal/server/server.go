@@ -789,6 +789,13 @@ type streamMsg struct {
 	Deferred bool  `json:"deferred,omitempty"`
 	Bytes    int64 `json:"bytes,omitempty"`
 
+	// Indexing: this deferred dictionary is already being prepared, because
+	// something asked for it by name. Only ever set beside Deferred, and the
+	// difference matters to the reader: "tap to search" is an offer, and
+	// repeating it at a dictionary that is midway through a ten-minute ingest
+	// reads as nothing having happened the first time.
+	Indexing bool `json:"indexing,omitempty"`
+
 	// The "morph" line: From is what the user typed, To the dictionary form
 	// actually searched, Lang the language that produced it. Every "hit" after
 	// it belongs to To - which is why it is a line of its own and not a flag on
@@ -950,6 +957,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			// uncapped above, and which auto-indexes it so the deferral does
 			// not recur.
 			m.Deferred, m.Bytes = true, heavy.bytes
+			m.Indexing = entries[i].indexing()
 		case h.Err != nil:
 			m.Error = h.Err.Error()
 		}
@@ -1157,6 +1165,17 @@ var webMIME = map[string]string{
 	".mov":  "video/quicktime",
 	".3gp":  "video/3gpp",
 	".ogv":  "video/ogg",
+	".m4v":  "video/x-m4v",
+	// Formats no browser decodes, sent so the reader's own player can. Lingvo
+	// DSL names .avi as ITS video format and .asf as a sound one, GoldenDict
+	// adds .wmv and .flv (docs/DSL.md); the Microsoft image formats come from
+	// the same table. Registered types where one exists, the conventional
+	// x- name where it does not.
+	".avi": "video/x-msvideo", ".wmv": "video/x-ms-wmv",
+	".asf": "video/x-ms-asf", ".flv": "video/x-flv",
+	".mkv": "video/x-matroska",
+	".pcx": "image/x-pcx", ".dcx": "image/x-dcx",
+	".wmf": "image/wmf", ".emf": "image/emf",
 	".flac": "audio/flac",
 	".txt":  "text/plain",
 	".xml":  "application/xml",
@@ -1252,6 +1271,23 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 	// unparseable, so the dictionary's own tab script never runs and its
 	// entries silently show one tab of three. Say so once, and name the
 	// override that fixes it.
+	// A seekable resource is served through ServeContent, which answers Range
+	// requests. That is not an optimisation: a browser will not START a video
+	// it cannot seek - Safari in particular abandons playback outright when the
+	// first ranged probe comes back 200 - and a reader dragging the scrubber of
+	// a 13 MB clip would otherwise re-download it from byte zero.
+	// ServeContent keeps the Content-Type set above and adds Accept-Ranges,
+	// Content-Length and 206 handling. Zero modtime = no Last-Modified and no
+	// If-Modified-Since arithmetic; the ETag-less, immutable-ish
+	// Cache-Control above is what governs caching, exactly as on the copy path.
+	//
+	// Text resources keep the copy path: they are small, some containers hand
+	// them over non-seekable anyway, and the NUL check below only applies to
+	// them.
+	if rs, ok := rc.(io.ReadSeeker); ok && !isTextResource(name) {
+		http.ServeContent(w, r, name, time.Time{}, rs)
+		return
+	}
 	watch := &nulWatcher{r: rc, text: isTextResource(name)}
 	_, _ = io.Copy(w, watch)
 	if watch.seen {
@@ -1466,6 +1502,26 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	if q.Get("level") == "headwords" {
 		want.FullText = false
 	}
+	// The cheapest possible preparation: headwords, for a dictionary that has
+	// no database at all. It is the panel's "index" chip, and it exists as its
+	// own path because setFeatures opens the direct backend before it starts
+	// (registry.go) - which builds the very in-RAM headword index the whole
+	// operation is about replacing, at 300-500 bytes per headword, and holds it
+	// for the length of the ingest. On the dictionaries this chip is FOR - the
+	// heavy ones a phone's search budget declined, which is why they are still
+	// unprepared - that doubled working set is the difference between preparing
+	// and being killed. ensureBaseIndex parses the file once and never opens
+	// the backend, so the chip takes that door instead.
+	//
+	// Only when nothing is prepared yet: `level=headwords` on a dictionary that
+	// already has a database keeps its old meaning (turn full text off), which
+	// is a rebuild and belongs in setFeatures.
+	base := false
+	if q.Get("level") == "headwords" && !want.Contains && !want.Media {
+		if textDB, ok := preparedTextDB(e.Path); !ok || !fileExists(textDB) {
+			base = true
+		}
+	}
 
 	fl, ok := w.(http.Flusher)
 	if !ok {
@@ -1485,12 +1541,21 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	last := time.Now()
-	err = e.setFeatures(want, func(done, total int) {
+	progress := func(done, total int) {
 		if time.Since(last) > 200*time.Millisecond {
 			last = time.Now()
 			emit("progress", map[string]int{"done": done, "total": total})
 		}
-	})
+	}
+	if base {
+		// setFeatures takes this itself; ensureBaseIndex does not, because its
+		// other caller (demandIndex) chooses its own lane.
+		acquire(frontLimit)
+		err = e.ensureBaseIndex(progress)
+		release(frontLimit)
+	} else {
+		err = e.setFeatures(want, progress)
+	}
 	if err != nil {
 		emit("error", map[string]string{"error": err.Error()})
 		return

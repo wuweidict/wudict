@@ -8,6 +8,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -47,6 +48,18 @@ type upgraded struct {
 	srcErr error
 	srcW   atomic.Int64
 	srcUse atomic.Int64
+
+	// The middle rung of resource resolution (O8): containers found from the
+	// source PATH, and locations recorded in media.link.db. Both provide a
+	// resource without opening the dictionary, which is the entire point -
+	// `src` above costs hundreds of megabytes to serve eight kilobytes.
+	medMu    sync.Mutex
+	medOnce  bool // path-derived containers resolved (they are stable)
+	medSrc   []resource.Source
+	medLink  *store.Links     // nil when there is no usable locator
+	medFet   resource.Fetcher // opened with the locator, over its containers
+	medTried bool             // locator open attempted and failed; cleared by a rebuild
+	medBuild sync.Once        // one enumeration per process, however many misses
 }
 
 // source lazily opens the direct backend for resource fallback.
@@ -113,10 +126,23 @@ func (u *upgraded) Caps() dict.Caps { return u.Store.Caps() }
 // reached through the upgraded view, not only through a bare Store.
 func (u *upgraded) ContainsStale() bool { return u.Store.ContainsStale() }
 
+// Resource resolves in three rungs, cheapest first (D2, extended by O8):
+//
+//  1. the packed media.db the Store attaches - portable, and always right when
+//     it is there;
+//  2. the source's own containers and recorded locations - a stat or a block
+//     read, no dictionary opened;
+//  3. the full direct backend, which is correct for every format and every
+//     name and costs what a preview costs.
+//
+// Rung 3 remains the floor, so a format with no provider, a locator that has
+// not been built yet, and a resource nobody recorded all keep working. Reaching
+// it also schedules the enumeration that stops the NEXT article from doing so.
 func (u *upgraded) Resource(name string) (io.ReadCloser, string, error) {
-	// the embedded Store serves from its auto-attached sibling media.db
-	// (D2/D9); only fall back to the original source when that misses.
 	if rc, mime, err := u.Store.Resource(name); err == nil {
+		return rc, mime, nil
+	}
+	if rc, mime, ok := u.linked(name); ok {
 		return rc, mime, nil
 	}
 	src, err := u.source()
@@ -124,7 +150,108 @@ func (u *upgraded) Resource(name string) (io.ReadCloser, string, error) {
 		return nil, "", err
 	}
 	u.srcUse.Store(time.Now().UnixNano())
-	return src.Resource(name)
+	rc, mime, rerr := src.Resource(name)
+	if rerr == nil {
+		u.recordLinks(src)
+	}
+	return rc, mime, rerr
+}
+
+// linked answers from the path-derived containers, then from the locator.
+// A miss is not an error: it means "ask the next rung", and every failure in
+// here - no provider, no cache, an unreadable container - is exactly that.
+func (u *upgraded) linked(name string) (io.ReadCloser, string, bool) {
+	prov, ok := resource.Get(u.Meta().Format)
+	if !ok || u.srcPath == "" {
+		return nil, "", false
+	}
+	srcs, links, fet := u.media(prov)
+	// Packed before loose, which is the order the direct backend uses: MDict
+	// serves a file lying beside the .mdx only when no .mdd holds that name, so
+	// checking the folder first would answer differently for a dictionary that
+	// ships both spellings of one asset.
+	if links != nil && fet != nil {
+		if l, ok := links.Lookup(name); ok {
+			data, err := fet.Fetch(l.Part, l.Off, l.Size)
+			if err != nil {
+				logx.V("locator fetch failed for %s in %s: %v", name, filepath.Base(u.srcPath), err)
+			} else {
+				mime := l.MIME
+				if mime == "" {
+					mime = resource.MIME(name)
+				}
+				return io.NopCloser(bytes.NewReader(data)), mime, true
+			}
+		}
+	}
+	for _, s := range srcs {
+		if rc, err := s.Open(name); err == nil {
+			return rc, resource.MIME(name), true
+		}
+	}
+	return nil, "", false
+}
+
+// media resolves this dictionary's containers once and its locator on first
+// use, reopening the latter after a rebuild has produced one.
+func (u *upgraded) media(prov resource.Provider) ([]resource.Source, *store.Links, resource.Fetcher) {
+	u.medMu.Lock()
+	defer u.medMu.Unlock()
+	if !u.medOnce {
+		u.medOnce = true
+		if prov.Sources != nil {
+			u.medSrc = prov.Sources(u.srcPath)
+		}
+	}
+	if u.medLink == nil && !u.medTried && prov.Open != nil {
+		u.medTried = true
+		if path := store.LinkSibling(u.Store.Meta().Path); path != "" && fileExists(path) {
+			links, err := store.OpenLinks(path, u.Store.UUID())
+			if err != nil {
+				// The cache no longer describes the files it points into (or
+				// never did). Serving from it would hand back whatever now sits
+				// at those offsets, so it is deleted rather than distrusted.
+				logx.V("discarding %s: %v", filepath.Base(path), err)
+				_ = os.Remove(path)
+			} else if fet, ferr := prov.Open(links.Parts()); ferr != nil {
+				links.Close()
+			} else {
+				u.medLink, u.medFet = links, fet
+			}
+		}
+	}
+	return u.medSrc, u.medLink, u.medFet
+}
+
+// recordLinks enumerates the source's media locations in the background, once,
+// after a fallback has proved that this dictionary actually serves resources
+// the cheap rungs miss. It is best-effort throughout: the cache is an
+// optimization, and every path here already works without it.
+func (u *upgraded) recordLinks(src dict.Dictionary) {
+	lk, ok := src.(resource.Linker)
+	if !ok {
+		return
+	}
+	path := store.LinkSibling(u.Store.Meta().Path)
+	if path == "" || fileExists(path) {
+		return
+	}
+	u.medBuild.Do(func() {
+		go func() {
+			parts, links, err := lk.MediaLinks()
+			if err != nil || len(parts) == 0 || len(links) == 0 {
+				return
+			}
+			if err := store.WriteLinks(path, parts, links, u.Store.UUID()); err != nil {
+				logx.V("could not record media locations for %s: %v", filepath.Base(u.srcPath), err)
+				return
+			}
+			logx.V("recorded %d media locations for %s", len(links), filepath.Base(u.srcPath))
+			u.medMu.Lock()
+			u.medTried = false // a locator exists now: open it on the next miss
+			u.medMu.Unlock()
+		}()
+	})
 }
 
 func (u *upgraded) Close() error {
@@ -134,6 +261,19 @@ func (u *upgraded) Close() error {
 	u.srcMu.Unlock()
 	if src != nil {
 		src.Close()
+	}
+	u.medMu.Lock()
+	srcs, links, fet := u.medSrc, u.medLink, u.medFet
+	u.medSrc, u.medLink, u.medFet = nil, nil, nil
+	u.medMu.Unlock()
+	for _, s := range srcs {
+		s.Close()
+	}
+	if fet != nil {
+		fet.Close()
+	}
+	if links != nil {
+		links.Close()
 	}
 	return u.Store.Close() // Store.Close also closes its attached media.db
 }
@@ -205,7 +345,12 @@ type entry struct {
 
 	ingestMu  sync.Mutex  // one ingest at a time per dictionary
 	autoTried atomic.Bool // first-search auto-index, attempted once
-	demanded  atomic.Bool // user-demanded index, attempted once (see demandIndex)
+	demanded  atomic.Bool // a user-demanded index is queued or running (demandIndex)
+	// demandFail is when the last demanded ingest failed, in Unix nanoseconds.
+	// It is what keeps a retryable failure from becoming a per-keystroke storm:
+	// a search naming ONE dictionary is a demand, and the selector produces one
+	// of those per character typed.
+	demandFail atomic.Int64
 }
 
 // noPackableMedia reports whether a prior full ingest found nothing to pack,
@@ -218,9 +363,10 @@ func (e *entry) noPackableMedia() bool {
 
 // maybeAutoIndex prepares this dictionary's headword index in the background
 // the first time it is searched, unless it already has one. Attempted at most
-// once per process; failures (e.g. a read-only library, no ingest reader for
-// the format) are swallowed - auto-indexing is a silent convenience, never a
-// hard requirement.
+// once per process; a failure (e.g. a read-only library, no ingest reader for
+// the format) is reported and not retried - auto-indexing is a convenience,
+// never a hard requirement. What the user asks for by name IS retried; see
+// demandIndex.
 //
 // Automatic while it is cheap; on demand once it is not. This fires from a
 // SUCCESSFUL open only, which is what bounds it: a dictionary the fan-out cap
@@ -245,6 +391,20 @@ func (e *entry) maybeAutoIndex() {
 	if CurrentPower() != PowerActive {
 		return
 	}
+	// Never for a backend that carries its own on-disk index. This is a
+	// property of the backend, not a name check, so a format that later gains
+	// it inherits the behaviour without another special case. For ZIM it is
+	// also the difference between an idle library and a runaway one:
+	// preparing it EXPANDS the data ~3.5x (the source packs whole clusters
+	// with zstd, a text.db compresses one article at a time with DEFLATE,
+	// D24), so a 123 MB wiktionary would silently become a 431 MB text.db and
+	// an 8 GB wikipedia something no one asked for.
+	e.dMu.RLock()
+	si, selfIdx := e.d.(selfIndexed)
+	e.dMu.RUnlock()
+	if selfIdx && si.SelfIndexed() {
+		return
+	}
 	if !e.autoTried.CompareAndSwap(false, true) {
 		return
 	}
@@ -260,7 +420,10 @@ func (e *entry) maybeAutoIndex() {
 		// ensureBaseIndex is a no-op when this dictionary is already
 		// prepared, at whatever level its owner chose
 		if err := e.ensureBaseIndex(nil); err != nil {
-			logx.V("auto-index %s: %v", e.Path, err)
+			// Once per process, and said out loud: an auto-index is not
+			// retried, so this line is the only account of why a dictionary
+			// stayed unprepared.
+			logx.Warn("could not prepare %s: %v", filepath.Base(e.Path), err)
 		} else {
 			logx.V("auto-index %s: index ready", e.Path)
 		}
@@ -270,7 +433,7 @@ func (e *entry) maybeAutoIndex() {
 // demandIndex prepares this dictionary's headword index because the user asked
 // for THIS dictionary: they chose it in the selector, followed a link into it,
 // or opened a section the fan-out cap had deferred. Same work as
-// maybeAutoIndex, one difference - the queue.
+// maybeAutoIndex, two differences - the queue, and what a failure means.
 //
 // maybeAutoIndex waits on indexLimit, which is one worker and, on a library of
 // a hundred dictionaries, hours long. That is right for a convenience nobody
@@ -282,13 +445,27 @@ func (e *entry) maybeAutoIndex() {
 // alongside at most one background one; the ceiling on concurrent ingests goes
 // from one to two, and only ever because someone asked.
 //
-// Attempted once per process, like maybeAutoIndex and for the same reason: a
-// search runs on every keystroke, and a demand that re-queued an ingest per
-// keystroke would be a far worse defect than the one this fixes. A pending
-// background attempt for the same dictionary is not cancelled - whichever
-// arrives second finds the index built and returns immediately.
+// A FAILED demand is retried, unlike a failed auto-index. The once-per-process
+// flag exists to stop a search from re-queueing an ingest on every keystroke,
+// not to make one unwritable folder or one full disk permanent for the life of
+// the process - which is what it was doing, silently, because the deferred
+// section went on offering the same tap that could no longer do anything. The
+// flag is therefore released on failure and demandRetryAfter takes over the job
+// it was really doing: typing cannot re-queue anything, and a person who reads
+// the message and taps again gets a real second attempt.
+//
+// No power check, deliberately, and this is the one place that omits one. Every
+// other expensive thing here starts on the program's initiative and must not
+// start while the screen is off; this one starts because a finger touched the
+// screen. A demand declined for a stale power state - a thermal warning, a
+// battery-saver flag the shell has not yet cleared - is a dictionary that
+// searches but never prepares, with nothing said about why. The work is
+// bounded (one dictionary, one front slot) and it is the work the user is
+// waiting on.
+const demandRetryAfter = 30 * time.Second
+
 func (e *entry) demandIndex() {
-	if CurrentPower() != PowerActive {
+	if f := e.demandFail.Load(); f != 0 && time.Since(time.Unix(0, f)) < demandRetryAfter {
 		return
 	}
 	if !e.demanded.CompareAndSwap(false, true) {
@@ -297,17 +474,23 @@ func (e *entry) demandIndex() {
 	go func() {
 		acquire(frontLimit)
 		defer release(frontLimit)
-		if CurrentPower() != PowerActive {
-			e.demanded.Store(false) // deferred, not cancelled: the next demand does it
+		if err := e.ensureBaseIndex(nil); err != nil {
+			// Warn, not V: this is the whole reason the dictionary keeps
+			// asking to be tapped, and at V the user never sees it.
+			logx.Warn("could not prepare %s: %v", filepath.Base(e.Path), err)
+			e.demandFail.Store(time.Now().UnixNano())
+			e.demanded.Store(false) // the next demand, after the cooldown, retries
 			return
 		}
-		if err := e.ensureBaseIndex(nil); err != nil {
-			logx.V("demand-index %s: %v", e.Path, err)
-		} else {
-			logx.V("demand-index %s: index ready", e.Path)
-		}
+		logx.V("demand-index %s: index ready", e.Path)
 	}()
 }
+
+// indexing reports that a demanded ingest is queued or running for this
+// dictionary, which is what turns the deferred section's "tap to search" into
+// "preparing…". It stays true after a successful one - harmless, because a
+// prepared dictionary weighs nothing and is never deferred again.
+func (e *entry) indexing() bool { return e.demanded.Load() }
 
 // open opens the source backend and, when a cached text.db (and
 // media.db) exists for it, wraps it into the upgraded view.
@@ -488,11 +671,30 @@ func previewWeight(d dict.Dictionary, m dict.Meta) int64 {
 	if _, ok := d.(storeBacked); ok {
 		return 0 // answers from SQLite: the index lives on disk, not in RAM
 	}
+	if sw, ok := d.(selfWeighing); ok {
+		return sw.PreviewBytes() // it knows; the estimate below does not
+	}
 	if m.EntryCount <= 0 {
 		return 0
 	}
 	return int64(m.EntryCount) * previewBytesPerEntry
 }
+
+// selfWeighing is a backend that measures its own resident cost instead of
+// being estimated from a headword count. The estimate assumes an in-memory
+// headword index, which every format built until ZIM: that one searches its
+// own file with a binary search and keeps no map, so the estimate over-charged
+// it by two orders of magnitude and would have held it under permanent
+// eviction pressure for memory it never allocated.
+type selfWeighing interface{ PreviewBytes() int64 }
+
+// selfIndexed is a backend whose own file already answers exact and prefix
+// lookup at no resident cost. Preparation stays fully available for these -
+// the per-dictionary switches, `wudict ingest` - but it stops being automatic,
+// because the one thing maybeAutoIndex buys for other formats (getting a
+// headword index off the heap and onto disk) is already true here. See
+// maybeAutoIndex.
+type selfIndexed interface{ SelfIndexed() bool }
 
 // storeBacked matches anything answering from a prepared database - the
 // `upgraded`/`native` wrappers, and the formats that embed a *store.Store

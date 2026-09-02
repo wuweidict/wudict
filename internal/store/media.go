@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/htmlref"
 )
@@ -50,14 +52,40 @@ func OpenMedia(path string) (*Media, error) {
 func (m *Media) Close() error { return m.db.Close() }
 
 func (m *Media) Resource(name string) (io.ReadCloser, string, error) {
+	// Spellings tried in order, each one a way the SAME file can be named:
+	// exact, then case-insensitively (MDD names are indexed lower-cased while
+	// an article may reference mixed case, and loose files are packed under
+	// their real name), then the two Unicode normalisations.
+	//
+	// Normalisation matters wherever a non-ASCII name came off a filesystem:
+	// macOS hands out "espan\u0303ol.pdf" (NFD) while the article, written by
+	// the dictionary's author, says "espa\u00f1ol.pdf" (NFC). The two are the
+	// same name to a human and different byte strings to SQLite, and COLLATE
+	// NOCASE folds case only - so without this a packed dictionary 404s on a
+	// file it demonstrably contains, only for accented names, only on some
+	// machines. resource.Key does the same job for the container backends.
+	nfc, nfd := norm.NFC.String(name), norm.NFD.String(name)
+	type probe struct {
+		q, arg string
+	}
+	probes := []probe{
+		{"SELECT mime, data FROM resource WHERE name = ?", name},
+		{"SELECT mime, data FROM resource WHERE name = ? COLLATE NOCASE", name},
+	}
+	if nfc != name {
+		probes = append(probes, probe{"SELECT mime, data FROM resource WHERE name = ? COLLATE NOCASE", nfc})
+	}
+	if nfd != name && nfd != nfc {
+		probes = append(probes, probe{"SELECT mime, data FROM resource WHERE name = ? COLLATE NOCASE", nfd})
+	}
 	var mime string
 	var data []byte
-	err := m.db.QueryRow("SELECT mime, data FROM resource WHERE name = ?", name).Scan(&mime, &data)
-	if err == sql.ErrNoRows {
-		// MDD names are indexed lower-cased while an article may reference
-		// mixed case (and loose files are packed under their real name), so a
-		// miss retries case-insensitively rather than 404-ing on spelling.
-		err = m.db.QueryRow("SELECT mime, data FROM resource WHERE name = ? COLLATE NOCASE", name).Scan(&mime, &data)
+	err := sql.ErrNoRows
+	for _, p := range probes {
+		err = m.db.QueryRow(p.q, p.arg).Scan(&mime, &data)
+		if err != sql.ErrNoRows {
+			break
+		}
 	}
 	if err == sql.ErrNoRows {
 		return nil, "", dict.ErrNotFound
@@ -65,8 +93,18 @@ func (m *Media) Resource(name string) (io.ReadCloser, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	return io.NopCloser(bytes.NewReader(data)), mime, nil
+	// A *bytes.Reader, kept seekable. io.NopCloser hides Seek behind a plain
+	// io.Reader, and the resource handler tests for io.ReadSeeker to decide
+	// whether it can answer Range requests - so wrapping it that way made every
+	// packed video and PDF unseekable although the whole blob is already in
+	// memory (server.handleResource).
+	return readSeekNopCloser{bytes.NewReader(data)}, mime, nil
 }
+
+// readSeekNopCloser is io.NopCloser that keeps the Seek method.
+type readSeekNopCloser struct{ *bytes.Reader }
+
+func (readSeekNopCloser) Close() error { return nil }
 
 // References are found with the shared HTML tokenizer (internal/htmlref), not
 // a pattern over the markup. The regex this replaced accepted quoted values

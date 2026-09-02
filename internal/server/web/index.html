@@ -1140,7 +1140,14 @@ function provenance(d){
 }
 function renderPanel(){
   syncPanelHeader();
-  const el=$("panelList");el.innerHTML="";
+  const el=$("panelList");
+  /* Every card is replaced, so the scroll offset has to be carried over by
+     hand. Measured on a phone: an ingest that ran for nine minutes ends in a
+     loadDicts(), and without this the panel snaps back to the top - throwing
+     the reader away from the one dictionary they were watching, at the exact
+     moment they were waiting to see it finish. */
+  const scroller=el.closest(".panel-card"), top=scroller?scroller.scrollTop:0;
+  el.innerHTML="";
   const ord=orderedDicts();
   for(const d of ord){
     const off=disabled.has(d.id);
@@ -1156,7 +1163,22 @@ function renderPanel(){
       ["fts","full-text",d.caps?.FTS,0],
       ["media","media",!!d.mediaDB,d.mediaSize||0],
     ];
-    let caps="";
+    /* The index itself, first in the run of chips. Two states, because the
+       dictionary only has two: "🚀 index" while there is none — it is searched
+       the slow way through its own format until there is — and the size once
+       there is one. A size rather than a tick: a number is what the reader can
+       act on, and it is the same number that was in the meta line above until
+       now (the word "indexed" stays there). The done state is .locked, so the
+       click handler leaves it alone: it is a fact, not a switch. Removing an
+       index is Remove… → "index only", which asks first, as deleting should.
+       No chip at all when the source is gone — a prepared-only dictionary
+       cannot be rebuilt, and dbSize covers it anyway. */
+    const indexed=(d.dbSize||0)>0;
+    let caps=indexed
+      ? `<span class="feat on locked" title="Indexed - ${mb(d.dbSize)} on disk">${mb(d.dbSize)}</span>`
+      : canToggle
+        ? `<span class="feat" data-feat="base" title="Build this dictionary's index - until then it is searched the slow way, through its own format">\u{1F680} index</span>`
+        : "";
     for(const[key,label,on,bytes]of feats){
       if(key==="media"&&!on&&!d.hasMedia)continue; // nothing to pack
       const size=on&&bytes?" "+mb(bytes):"";
@@ -1194,11 +1216,12 @@ function renderPanel(){
         </span>
         <input type="checkbox" class="en" ${off?"":"checked"} title="${off?"Disabled — excluded from All dictionaries":"Enabled"}">
       </div>
-      <div class="meta">${esc(d.format||"?")}${d.entries?" · "+d.entries.toLocaleString()+" entries":""}${d.dbSize?" · "+mb(d.dbSize)+" indexed":""}</div>
+      <div class="meta">${esc(d.format||"?")}${d.entries?" · "+d.entries.toLocaleString()+" entries":""}${d.dbSize?" · indexed":""}</div>
       <div>${caps}</div><div class="acts">${acts}</div>
       ${provenance(d)}`;
     el.appendChild(div);
   }
+  if(scroller)scroller.scrollTop=top;
 }
 
 /* drag-to-reorder via the gripper (chevrons cover keyboard/precise moves) */
@@ -1522,22 +1545,39 @@ function runIngest(id,opts,label){
   if(label.dataset.busy)return Promise.resolve(); // ignore repeat clicks
   label.dataset.busy="1";
   const name=dictLabel(dicts.find(d=>d.id===id)||{path:""});
-  const show=t=>{
+  /* Two lengths of the same message: the chip is one of four in a row inside
+     a 420px panel, so "indexing… 2,395,000/2,965,310" wraps the row onto a
+     second line and reflows the card at every update - measured on a phone,
+     four times a second, for nine minutes. The chip gets a percentage, which
+     never changes width; the status line, which has the room, keeps the
+     counts. */
+  const show=(t,long)=>{
     label.textContent=t;
-    setStatus('<span class="spin"></span>'+(opts.statusPrefix||"")+esc(name)+" — "+esc(t));
+    setStatus('<span class="spin"></span>'+(opts.statusPrefix||"")+esc(name)+" — "+esc(long||t));
   };
   const removing=Object.values(opts).some(v=>v===0);
-  show(removing?"removing…":"preparing…");
+  // "indexing" for the index chip, because that is the word every other
+  // dictionary app uses for this and the chip says it too; "preparing" stays
+  // for the feature switches, which add to an index that already exists.
+  const verb=opts.base?"indexing":"preparing";
+  show(removing?"removing…":verb+"…");
   label.classList.remove("act");label.classList.add("busy");
   label.style.textDecoration="none";label.style.cursor="default";
   const params=Object.entries(opts)
     .filter(([k])=>k==="contains"||k==="fts"||k==="media")
-    .map(([k,v])=>"&"+k+"="+(v?1:0)).join("");
+    .map(([k,v])=>"&"+k+"="+(v?1:0)).join("")+
+    // level=headwords on a dictionary with no database is the one path that
+    // does NOT open the backend first (handleIngest): on the heavy dictionaries
+    // this chip exists for, opening it would hold a second copy of the index
+    // being built for the length of the build.
+    (opts.base?"&level=headwords":"");
   return new Promise(resolve=>{
     const es=new EventSource("/api/ingest?dict="+id+params);
     es.addEventListener("progress",ev=>{
       const p=JSON.parse(ev.data);
-      show("preparing… "+p.done.toLocaleString()+(p.total?"/"+p.total.toLocaleString():""));
+      const counts=p.done.toLocaleString()+(p.total?"/"+p.total.toLocaleString():"");
+      show(verb+"… "+(p.total?Math.min(100,Math.floor(p.done/p.total*100))+"%":p.done.toLocaleString()),
+        verb+"… "+counts);
     });
     es.addEventListener("done",async()=>{
       es.close();
@@ -1739,8 +1779,14 @@ addEventListener("message",e=>{
        own script would execute with our origin and our access to the article
        cache and the prefs API. An article can already open popups (the sandbox
        grants allow-popups), so nothing here widens what a dictionary can do —
-       but this message must never become the one way it gains more. */
-    if(/^https?:\/\//i.test(d.url))window.open(d.url,"_blank","noopener,noreferrer");
+       but this message must never become the one way it gains more.
+       /res/ is admitted alongside http(s) because a DSL attachment — a PDF, a
+       video container no browser plays — is served from OUR origin, and the
+       article cannot usefully display it in place. It is a path-absolute
+       reference with a fixed first segment, so it can only ever name this
+       app's resource route: no scheme to smuggle, and "//host" cannot match. */
+    if(/^https?:\/\//i.test(d.url)||/^\/res\//.test(d.url))
+      window.open(d.url,"_blank","noopener,noreferrer");
   }else if(d.t==="jserr"&&d.fid){
     /* A dictionary's own script threw. That is not fatal to us and must not
        interrupt reading - but a dead article and a working one look identical,
@@ -1890,6 +1936,16 @@ const TAPS=matchMedia("(pointer:coarse)").matches;
    this dictionary alone, which the server does not cap, and which also puts it
    in line to be prepared — so the same tap answers the question now and stops
    it being asked again. */
+/* The label a deferred section wears. "preparing…" means the server already
+   has this dictionary in its front ingest queue because something asked for it
+   by name — it is NOT a disabled state, and the section stays tappable: the
+   uncapped single-dictionary search answers in seconds while the ingest behind
+   it takes minutes. What it stops is the page offering the same tap over and
+   over at a dictionary that is already doing the work, which reads as the first
+   tap having done nothing. */
+function deferLabel(indexing){
+  return indexing?"preparing…":(TAPS?"tap":"click")+" to search";
+}
 function loadDeferred(det,box,h,mode,q){
   if(det.dataset.loading)return;
   det.dataset.loading="1";
@@ -1920,7 +1976,7 @@ function loadDeferred(det,box,h,mode,q){
     if(!cnt)return;
     const aborted=err.name==="AbortError";
     cnt.classList.toggle("hint",aborted); // an error is not an offer: drop the link colour
-    cnt.textContent=aborted?(TAPS?"tap":"click")+" to search"
+    cnt.textContent=aborted?deferLabel(det.dataset.indexing==="1")
                            :"⚠ "+(err.message||"could not search this dictionary");
   });
 }
@@ -1980,8 +2036,9 @@ function renderSlot(box,h,mode,q,perDict){
     const det=document.createElement("details");
     det.className="dict";
     det.dataset.deferred=h.dict; // also what excludes it from expand-all
+    if(h.indexing)det.dataset.indexing="1";
     det.innerHTML=`<summary>${esc(hitName(h))}`+
-      `<span class="count hint">${TAPS?"tap":"click"} to search</span></summary>`;
+      `<span class="count hint">${deferLabel(h.indexing)}</span></summary>`;
     // `toggle` does not bubble, so this is bound to the element rather than
     // delegated on #out. It is not `once`: a failed load re-arms itself.
     det.addEventListener("toggle",()=>{if(det.open)loadDeferred(det,box,h,mode,q)});
@@ -2345,15 +2402,11 @@ document.addEventListener("click",e=>{
     e.preventDefault();playAudio(href.startsWith("/res/")||/^https?:/i.test(href)?href:resURL(dictID,href));
   }else if(a.querySelector("img")&&href.startsWith("/res/")){
     e.preventDefault();playAudio(href);
+  }else if(a.classList.contains("wudict-file")){
+    // A dictionary's own attachment is opened in a new tab.
+    e.preventDefault();window.open(href,"_blank","noopener,noreferrer");
   }else if(/^https?:\/\//i.test(href)&&dd){
-    // An external link OUT of an article — Cambridge points at
-    // dictionary.cambridge.org three times in one entry. Following it in place
-    // costs the user their search; in the iframe renderer the same click does
-    // visibly worse, since that sandbox has no allow-top-navigation and the
-    // website loads inside the small box where the article was. One cause, two
-    // shapes of damage, so one answer in both renderers: a new tab.
-    // Scoped to links inside an article (`dd`) — the panel's own links are
-    // ordinary navigation and stay that way.
+    // An external link OUT of an article.
     e.preventDefault();window.open(href,"_blank","noopener,noreferrer");
   }else if(href.startsWith("#")&&dd){
     // A PLAIN in-page anchor. NEITHER renderer can leave this to the browser.

@@ -42,7 +42,7 @@ func stem(src string) string {
 // spelling, so a compressed DSL is ".dsl.dz" and not ".dz".
 func mainExt(src string) string {
 	lower := strings.ToLower(src)
-	for _, e := range []string{".dsl.dz", ".dsl", ".mdx", ".ifo", ".slob", ".bgl"} {
+	for _, e := range []string{".dsl.dz", ".dsl", ".mdx", ".ifo", ".slob", ".bgl", ".zim"} {
 		if strings.HasSuffix(lower, e) {
 			return e
 		}

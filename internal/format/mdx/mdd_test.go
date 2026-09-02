@@ -143,3 +143,61 @@ func TestMDDIsNotDiscovered(t *testing.T) {
 		t.Errorf("discovery picked up %v - .mdd files are a dictionary's companions, not dictionaries", found)
 	}
 }
+
+// companionMdds is filename logic and nothing else, so it is tested as such:
+// no .mdx or .mdd here is a real file, only a real NAME.
+//
+// The case that motivated the rewrite is "gap": a set numbered .1 .3 .4 used to
+// stop dead at the missing .2, and every resource in the later files vanished
+// with no error anywhere - the dictionary simply looked as though it had none.
+func TestCompanionMdds(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		files []string
+		want  []string
+	}{
+		{"none", []string{"x.mdx"}, nil},
+		{"primary", []string{"x.mdx", "x.mdd"}, []string{"x.mdd"}},
+		{
+			"gap", []string{"x.mdx", "x.mdd", "x.1.mdd", "x.3.mdd", "x.4.mdd"},
+			[]string{"x.mdd", "x.1.mdd", "x.3.mdd", "x.4.mdd"},
+		},
+		{
+			// .10 after .2, which a plain string sort puts first. Load order
+			// decides who wins a duplicate resource name, so it is not cosmetic.
+			"numeric order", []string{"x.mdx", "x.10.mdd", "x.2.mdd", "x.mdd"},
+			[]string{"x.mdd", "x.2.mdd", "x.10.mdd"},
+		},
+		{"uppercase ext", []string{"x.mdx", "x.MDD"}, []string{"x.MDD"}},
+		{"lettered part", []string{"x.mdx", "x.mdd", "x.a1.mdd"}, []string{"x.mdd", "x.a1.mdd"}},
+		{
+			// Another dictionary's files share the folder. Only the ones whose
+			// stem is ours may be opened: "xy.mdd" is not a companion of "x.mdx",
+			// and neither is a bare "1.mdd".
+			"neighbours", []string{"x.mdx", "x.mdd", "xy.mdd", "y.mdd", "1.mdd", "x..mdd", "x.1x.mdd"},
+			[]string{"x.mdd"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, f := range tc.files {
+				if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := companionMdds(filepath.Join(dir, "x.mdx"))
+			var names []string
+			for _, p := range got {
+				names = append(names, filepath.Base(p))
+			}
+			if len(names) != len(tc.want) {
+				t.Fatalf("got %v, want %v", names, tc.want)
+			}
+			for i := range names {
+				if names[i] != tc.want[i] {
+					t.Fatalf("got %v, want %v", names, tc.want)
+				}
+			}
+		})
+	}
+}

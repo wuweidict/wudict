@@ -41,7 +41,7 @@ there. For Arm, use the `wudict-windows-arm64-purego.exe` build.
 | Create a desktop shortcut | off | an icon on the desktop |
 | Start wuDict at sign-in | off | a Startup entry that runs it with `--no-browser` |
 | Add wuDict to my `PATH` | **on** | `wudict` works in PowerShell and `cmd` |
-| Offer wuDict in *Open with* | **on** | for `.mdx`, `.dsl`, `.slob` and `.bgl` files |
+| Offer wuDict in *Open with* | **on** | for `.mdx`, `.dsl`, `.slob`, `.bgl` and `.zim` files |
 
 Every one of them is reversible. Re-run the installer, or clear it by hand; the
 uninstaller removes all four.

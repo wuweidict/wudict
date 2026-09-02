@@ -16,10 +16,12 @@ import (
 
 	"github.com/wuweidict/wudict/internal/dict"
 
+	_ "github.com/wuweidict/wudict/internal/format/bgl"
 	_ "github.com/wuweidict/wudict/internal/format/dsl"
 	_ "github.com/wuweidict/wudict/internal/format/mdx"
 	_ "github.com/wuweidict/wudict/internal/format/slob"
 	_ "github.com/wuweidict/wudict/internal/format/stardict"
+	_ "github.com/wuweidict/wudict/internal/format/zim"
 )
 
 func TestCorruptDictionariesErrorCleanly(t *testing.T) {
@@ -39,6 +41,16 @@ func TestCorruptDictionariesErrorCleanly(t *testing.T) {
 		"f.ifo": {0xFF, 0xFE, 0x00, 0x01, 0x02},
 		// dsl.dz: not gzip at all
 		"g.dsl.dz": []byte("plainly not gzip"),
+		// bgl: gzip magic, nothing behind it
+		"h.bgl": {0x12, 0x34, 0x00, 0x1E, 0x00, 0x00},
+		// bgl: garbage
+		"i.bgl": []byte("not a babylon glossary"),
+		// zim: correct magic, header cut short
+		"j.zim": {0x5A, 0x49, 0x4D, 0x04, 0x06, 0x00, 0x03, 0x00},
+		// zim: header-sized, but every pointer is zero
+		"k.zim": append([]byte{0x5A, 0x49, 0x4D, 0x04}, bytes.Repeat([]byte{0}, 76)...),
+		// zim: garbage
+		"l.zim": []byte("not a zim file at all"),
 	}
 	for name, data := range cases {
 		p := filepath.Join(dir, name)

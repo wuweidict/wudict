@@ -52,6 +52,7 @@ type Reader struct {
 
 	// metadata gathered during the first pass
 	title          []byte
+	desc           []byte
 	numEntries     int
 	sourceLang     *language
 	targetLang     *language
@@ -206,8 +207,13 @@ func NewReader(path string) (*Reader, error) {
 		base := filepath.Base(path)
 		name = strings.TrimSuffix(base, filepath.Ext(base))
 	}
-	desc := ""
-	if r.sourceLang != nil && r.targetLang != nil {
+	// Babylon writes a real description (block type 3, code 0x09) as HTML with
+	// <br> line breaks. It is flattened to one line: `wudict info` prints it
+	// and info.txt stores it as one `key = value`, neither of which survives an
+	// embedded newline. Only when the file carries none does the language pair
+	// stand in - which is what every BGL used to show, description or not.
+	desc := plainInfo(r.targetEncoding, r.desc)
+	if desc == "" && r.sourceLang != nil && r.targetLang != nil {
 		desc = r.sourceLang.name + " → " + r.targetLang.name
 	}
 	srcLang := ""
@@ -305,6 +311,11 @@ func (r *Reader) readType3(blk []byte) {
 	switch code {
 	case 0x01:
 		r.title = val
+	case 0x09:
+		// The glossary's own description. Kept raw: the charset codes that say
+		// how to decode it (0x1A/0x1B) arrive AFTER it in the block stream, so
+		// like the title it can only be decoded once the first pass is over.
+		r.desc = val
 	case 0x07:
 		if i := uintBE(val); i >= 0 && i < len(languageByCode) {
 			r.sourceLang = &languageByCode[i]

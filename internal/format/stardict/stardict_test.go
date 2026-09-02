@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/wuweidict/wudict/internal/resource"
 )
 
 // buildStarDict writes a synthetic dictionary: 3 idx entries (one
@@ -251,5 +253,30 @@ func TestIntegrationRealStarDict(t *testing.T) {
 	res, err := d.Exact(keys[0], 5)
 	if err != nil || len(res) == 0 || res[0].Body == "" {
 		t.Fatalf("Exact(%q): %d results, err=%v", keys[0], len(res), err)
+	}
+}
+
+// StarDict's resources are a `res/` folder beside the .ifo, so the provider
+// finds them from the path alone (O8) - the .dict is never opened.
+func TestMediaSourcesFromPathAlone(t *testing.T) {
+	dir := t.TempDir()
+	res := filepath.Join(dir, "res")
+	if err := os.MkdirAll(res, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(res, "bell.wav"), []byte("riff"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcs := MediaSources(filepath.Join(dir, "x.ifo"))
+	if len(srcs) != 1 {
+		t.Fatalf("want the res folder, got %d sources", len(srcs))
+	}
+	rc, err := srcs[0].Open("bell.wav")
+	if err != nil {
+		t.Fatalf("res/bell.wav: %v", err)
+	}
+	rc.Close()
+	if p, ok := resource.Get("stardict"); !ok || p.Sources == nil {
+		t.Fatal("stardict registered no media provider")
 	}
 }

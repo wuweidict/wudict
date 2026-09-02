@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/resource"
 	"golang.org/x/text/encoding/charmap"
 )
 
@@ -88,6 +89,79 @@ func TestTransformMedia(t *testing.T) {
 	}
 	if len(res) != 2 || res[0] != "audio/x.mp3" || res[1] != "img.png" {
 		t.Errorf("resFiles: %v", res)
+	}
+}
+
+// TestTransformMediaKinds pins the whole media zone, kind by kind. The
+// regression it guards is silence: an unrecognised extension used to emit
+// nothing at all, so a [s]video.mp4[/s] card rendered as a blank gap with the
+// file name recorded but unreachable.
+func TestTransformMediaKinds(t *testing.T) {
+	cases := []struct {
+		in, want string
+		res      []string
+	}{
+		// video a browser plays, inline and unfetched until pressed
+		{`[s]video.mp4[/s]`,
+			`<video class="wudict-video" controls preload="none" src="video.mp4"></video>`,
+			[]string{"video.mp4"}},
+		// [video] is the x5 synonym of [s] - identical output, not a variant
+		{`[video]clip.webm[/video]`,
+			`<video class="wudict-video" controls preload="none" src="clip.webm"></video>`,
+			[]string{"clip.webm"}},
+		// a document: file link, name as text, file:// so the article rewriter
+		// maps it to /res/ regardless of extension
+		{`[s]español.pdf[/s]`,
+			`<a class="wudict-file" href="file://español.pdf">&#128196; español.pdf</a>`,
+			[]string{"español.pdf"}},
+		// Lingvo's own video container, which no browser decodes: a link, not
+		// an inline player that could never play
+		{`[s]clip.avi[/s]`,
+			`<a class="wudict-file" href="file://clip.avi">&#128196; clip.avi</a>`,
+			[]string{"clip.avi"}},
+		// nor are Lingvo's Microsoft image formats <img>
+		{`[s]plate.wmf[/s]`,
+			`<a class="wudict-file" href="file://plate.wmf">&#128196; plate.wmf</a>`,
+			[]string{"plate.wmf"}},
+		// an extension-less payload is a file too - never dropped
+		{`[s]README[/s]`,
+			`<a class="wudict-file" href="file://README">&#128196; README</a>`,
+			[]string{"README"}},
+		// a hostile name: quotes and ampersands escape in both the attribute
+		// and the text, and the class attribute cannot be broken out of
+		{`[s]a"b&c.pdf[/s]`,
+			`<a class="wudict-file" href="file://a&quot;b&amp;c.pdf">&#128196; a"b&amp;c.pdf</a>`,
+			[]string{`a"b&c.pdf`}},
+		// [preview] is accepted inside the zone and has no effect; it must not
+		// become part of the file name
+		{`[s][preview]video.mp4[/preview][/s]`,
+			`<video class="wudict-video" controls preload="none" src="video.mp4"></video>`,
+			[]string{"video.mp4"}},
+		// audio and images are unchanged, byte for byte
+		{`[s]x.mp3[/s]`, `<a class="wudict-audio" href="x.mp3">&#128266;</a>`, []string{"x.mp3"}},
+		{`[s]X.PNG[/s]`, `<img align="top" src="X.PNG" alt="X.PNG" />`, []string{"X.PNG"}},
+		// an empty zone names no file and must not be recorded as one
+		{`[s][/s]`, ``, nil},
+	}
+	for _, c := range cases {
+		got, res, err := transformBody(c.in, "KEY")
+		if err != nil {
+			t.Errorf("transformBody(%q) error: %v", c.in, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("transformBody(%q)\n got %q\nwant %q", c.in, got, c.want)
+		}
+		if len(res) != len(c.res) {
+			t.Errorf("transformBody(%q) resFiles = %v, want %v", c.in, res, c.res)
+			continue
+		}
+		for i := range res {
+			if res[i] != c.res[i] {
+				t.Errorf("transformBody(%q) resFiles = %v, want %v", c.in, res, c.res)
+				break
+			}
+		}
 	}
 }
 
@@ -494,5 +568,163 @@ func TestReaderHeaderTabsAndSubEntries(t *testing.T) {
 	wantSub := []string{"подстатьями", "подстатья"}
 	if len(sub.Headwords) != 2 || sub.Headwords[0] != wantSub[0] || sub.Headwords[1] != wantSub[1] {
 		t.Errorf("sub headwords: %q want %q", sub.Headwords, wantSub)
+	}
+}
+
+// A prepared DSL reaches its media through the source path alone (O8): no
+// parsing, no headwords, nothing opened but the archive. The provider must
+// therefore find the same containers loadSources would, and be registered so
+// the server can reach it without opening the dictionary.
+// Sub-card headings: the "@" may be preceded by whitespace and by DSL tags,
+// the space after it is optional, several headings may be piled on consecutive
+// lines to share one card, and each heading contributes its own "- " link to
+// the parent article (one per expanded key). Checked against GoldenDict and
+// Lingvo rendering of the same source.
+func TestReaderSubCardHeadings(t *testing.T) {
+	src := "#NAME\t\"Test\"\n" +
+		"\n" +
+		"dictionary\n" +
+		"\t[m1]1) словарь\n" +
+		"\t[m1]2) справочник\n" +
+		"\t[*]\n" +
+		"\t@ explanatory dictionary\n" +
+		"\t[m1]↑ a space between \\@ and the heading is allowed\n" +
+		"\t@standard dictionary\n" +
+		"\t[m1]нормативный словарь\n" +
+		"\t@ dictionary making\n" +
+		"\t@ dictionary compiling\n" +
+		"\t[m1]↑ several headings for one sub-card\n" +
+		"\t[m1]@ *Служ{[']}е{[/']}бная (информ{[']}а{[/']}ция{ о словаре}) для составителя{*}\n" +
+		"\t[m2]A very complex heading\n" +
+		"\t[m3]@\n" +
+		"\t[/*]\n"
+	p := writeDSL(t, "subcards.dsl", []byte(src))
+	r, err := NewReader(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	var got []dict.Entry
+	for {
+		e, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, e)
+	}
+	if len(got) != 5 {
+		t.Fatalf("entries: %d want 5 (main + 4 sub-cards): %+v", len(got), got)
+	}
+
+	main := got[0]
+	if len(main.Headwords) != 1 || main.Headwords[0] != "dictionary" {
+		t.Errorf("main headwords: %q", main.Headwords)
+	}
+	wantLinks := []string{
+		"explanatory dictionary",
+		"standard dictionary",
+		"dictionary making",
+		"dictionary compiling",
+		"*Служебная информация для составителя",
+		"*Служебная для составителя",
+	}
+	pos := 0
+	for _, w := range wantLinks {
+		want := `- <a href="bword://` + w + `">`
+		i := strings.Index(main.Body[pos:], want)
+		if i < 0 {
+			t.Fatalf("link %q missing or out of order in main body: %q", w, main.Body)
+		}
+		pos += i + len(want)
+	}
+	if n := strings.Count(main.Body, "bword://"); n != len(wantLinks) {
+		t.Errorf("main body has %d links, want %d: %q", n, len(wantLinks), main.Body)
+	}
+
+	wantSubs := [][]string{
+		{"explanatory dictionary"},
+		{"standard dictionary"},
+		{"dictionary making", "dictionary compiling"},
+		{"*Служебная информация для составителя", "*Служебная для составителя"},
+	}
+	for i, want := range wantSubs {
+		heads := got[i+1].Headwords
+		if len(heads) != len(want) {
+			t.Errorf("sub %d headwords: %q want %q", i, heads, want)
+			continue
+		}
+		for j := range want {
+			if heads[j] != want[j] {
+				t.Errorf("sub %d headwords: %q want %q", i, heads, want)
+				break
+			}
+		}
+	}
+	if b := got[1].Body; !strings.Contains(b, "a space between @ and the heading") {
+		t.Errorf("sub 0 body: %q", b)
+	}
+	if b := got[2].Body; !strings.Contains(b, "нормативный словарь") {
+		t.Errorf("sub 1 body: %q", b)
+	}
+	if b := got[3].Body; !strings.Contains(b, "several headings for one sub-card") {
+		t.Errorf("sub 2 body: %q", b)
+	}
+	// The trailing "[m3]@" closes the last card; its body must not leak into
+	// the parent, and the parent must not swallow the closing line.
+	if b := got[4].Body; !strings.Contains(b, "A very complex heading") {
+		t.Errorf("sub 3 body: %q", b)
+	}
+	if strings.Contains(main.Body, "A very complex heading") || strings.Contains(main.Body, "@") {
+		t.Errorf("main body kept sub-card content: %q", main.Body)
+	}
+}
+
+// dslEscape round-trip: a sub-headword carrying DSL metacharacters has to come
+// back out of the generated [ref] unchanged.
+func TestDslEscapeRoundTrip(t *testing.T) {
+	for _, key := range []string{`a[b]~c`, `x\y`, `a@b`, `p<q>r`, "plain"} {
+		body, _, err := transformBody("\t[m2][ref]"+dslEscape(key)+"[/ref][/m]", "head")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `href="bword://` + escape(key) + `"`
+		if !strings.Contains(body, want) {
+			t.Errorf("dslEscape(%q): body %q lacks %q", key, body, want)
+		}
+	}
+}
+
+func TestMediaSourcesFromPathAlone(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "big.dsl")
+	files := filepath.Join(dir, "big.dsl.files")
+	if err := os.MkdirAll(files, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(files, "kubok.jpg"), []byte("jpeg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The .dsl itself is never read: the file does not even exist.
+	srcs := MediaSources(src)
+	if len(srcs) < 2 {
+		t.Fatalf("want the .files folder and the dictionary's own folder, got %d", len(srcs))
+	}
+	var found bool
+	for _, s := range srcs {
+		if rc, err := s.Open("kubok.jpg"); err == nil {
+			rc.Close()
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("the .files folder was not among the sources")
+	}
+	if p, ok := resource.Get("dsl"); !ok || p.Sources == nil {
+		t.Fatal("dsl registered no media provider")
 	}
 }

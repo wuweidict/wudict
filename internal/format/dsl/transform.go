@@ -365,7 +365,10 @@ func (tr *transformer) processTag(tag string, attrs map[string]string) error {
 		tr.lexRefText(attrs)
 	case tag == "url":
 		tr.lexURLText(attrs)
-	case tag == "s":
+	case tag == "s", tag == "video":
+		// [video] is an undocumented exact synonym of [s], accepted by the
+		// Lingvo x5 compiler (lingvo-ref "Тэги мультимедиа"): same syntax, same
+		// effect, so the same lexer - not a second one that could drift.
 		tr.lexTagS()
 	case tag == "c":
 		color := "green"
@@ -406,8 +409,11 @@ func (tr *transformer) processTag(tag string, attrs map[string]string) error {
 	case tag == "sub":
 		tr.addHTML("<sub>")
 	case tag == "trn", tag == "!trn", tag == "trs", tag == "!trs",
-		tag == "lang", tag == "com":
-		// stripped wrappers
+		tag == "lang", tag == "com", tag == "preview":
+		// stripped wrappers. [preview] is legal only INSIDE [s]/[video], where
+		// lexTagS consumes it; the compiler accepts it and it has no effect
+		// (lingvo-ref "Тэг [preview]···[/preview]"), so a stray one outside a
+		// media zone is dropped rather than printed.
 	default:
 		// unknown tag: dropped, content kept (pyglossary logs a warning)
 	}
@@ -486,22 +492,57 @@ func (tr *transformer) collectRefText(doubleAngle bool) string {
 	return b.String()
 }
 
-// lexTagS handles [s]file[/s]: audio object or inline image; the file
-// name is recorded for the resource set.
+// mediaKind is what a browser can do with one [s] payload.
+type mediaKind int
+
+const (
+	mediaFile mediaKind = iota // the default: hand it over as a link
+	mediaAudio
+	mediaImage
+	mediaVideo
+)
+
+// mediaExt classifies the media zone by extension. Lingvo's [s] supports
+// images, sound AND video, and an author may
+// put anything else in the .files folder besides - a PDF plate, a document.
+// Only what a browser can actually render or decode is named here; everything
+// else is deliberately absent and becomes a file link.
+//
+// The formats Lingvo names but a browser cannot handle are the reason this is
+// an allowlist rather than a "video/ prefix" test: .avi, .wmv, .flv, .mkv and
+// .mpg are Lingvo's and GoldenDict's own video formats, and an inline <video>
+// pointed at one is a permanently broken player. As a link they reach the
+// system player instead, which is exactly what Lingvo does with them. Same
+// for its .pcx, .dcx, .wmf and .emf images, which no browser draws.
+var mediaExt = map[string]mediaKind{
+	// Sound. Lingvo documents .wav alone; the rest arrive from GoldenDict-era
+	// dictionaries, and .spx is transcoded to WAV when served (D18).
+	"wav": mediaAudio, "mp3": mediaAudio, "ogg": mediaAudio,
+	"spx": mediaAudio, "m4a": mediaAudio,
+	// Images.
+	"bmp": mediaImage, "gif": mediaImage, "ico": mediaImage,
+	"jpeg": mediaImage, "jpg": mediaImage, "png": mediaImage,
+	"svg": mediaImage, "tif": mediaImage, "tiff": mediaImage,
+	"webp": mediaImage, "avif": mediaImage,
+	// Video.
+	"mp4": mediaVideo, "webm": mediaVideo, "ogv": mediaVideo,
+	"mov": mediaVideo, "m4v": mediaVideo, "3gp": mediaVideo,
+}
+
+// lexTagS handles [s]file[/s] (and its [video] synonym): one media file,
+// rendered by kind, its name recorded for the resource set.
+//
+// Every kind renders something. Emitting nothing for an unrecognised extension
+// - which is what this did - loses the file silently: the article shows a gap
+// where the author put a video or a PDF, and no part of the pipeline
+// downstream can recover a reference that was never written.
 func (tr *transformer) lexTagS() {
-	var b strings.Builder
-	for !tr.end() {
-		c := tr.next()
-		if c == '[' {
-			tr.pos--
-			break
-		}
-		b.WriteByte(c)
+	fname := tr.collectMediaName()
+	if fname == "" {
+		return
 	}
-	fname := b.String()
-	ext := strings.TrimPrefix(strings.ToLower(path.Ext(fname)), ".")
-	switch ext {
-	case "wav", "mp3", "ogg", "spx", "m4a":
+	switch mediaExt[strings.TrimPrefix(strings.ToLower(path.Ext(fname)), ".")] {
+	case mediaAudio:
 		// A link, not GoldenDict's `<object type="audio/x-wav">`. That spelling
 		// is a plugin-era embedding vector: `clean` has to drop it as unsafe
 		// and rescue the URL back out (server/articleformat.go audioObject),
@@ -515,8 +556,56 @@ func (tr *transformer) lexTagS() {
 		//
 		// [s] carries no link text of its own, so the glyph is the affordance.
 		tr.addHTML(`<a class="wudict-audio" href=` + quoteAttr(fname) + `>&#128266;</a>`)
-	case "bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp", "avif":
+	case mediaImage:
 		tr.addHTML(`<img align="top" src=` + quoteAttr(fname) + ` alt=` + quoteAttr(fname) + ` />`)
+	case mediaVideo:
+		// preload="none" is what makes this affordable: a card may carry
+		// several videos of tens of megabytes each, and nothing is fetched
+		// until the reader presses play. src is a fetch site, so the article
+		// rewriter points it at /res/{dict}/ with no special case, and `clean`
+		// already keeps <video src|controls> (server/articleformat.go).
+		tr.addHTML(`<video class="wudict-video" controls preload="none" src=` + quoteAttr(fname) + `></video>`)
+	default:
+		// Anything else - a PDF, a document, one of Lingvo's own formats no
+		// browser handles. The `file://` pseudo-scheme is the author saying
+		// "this names MY file": the rewriter honours it (server/rewrite.go
+		// isResourceRef) and rewrites the link to /res/ whatever the
+		// extension, so a dictionary's own container is served in full without
+		// widening dict.IsAssetName - which is also the allowlist for files
+		// lying LOOSE beside an .mdx, a boundary this must not touch.
+		//
+		// The file name is the link text because it is all there is: [s] has no
+		// text of its own, and a bare glyph would not say what it opens.
+		tr.addHTML(`<a class="wudict-file" href=` + quoteAttr("file://"+fname) +
+			`>&#128196; ` + escape(fname) + `</a>`)
 	}
 	tr.resFiles = append(tr.resFiles, fname)
+}
+
+// collectMediaName reads the file name filling the media zone. Only a bare
+// name with an extension is legal there - no path, no nested tags, no spaces
+// around it (lingvo-ref) - so the scan stops at the first `[`, and the one tag
+// the compiler does accept inside is skipped: [preview] was rejected during
+// x5's development and has no effect, but a dictionary written against that
+// compiler still contains it, and reading it as part of the name would ask the
+// container for a file called "[preview]x.avi".
+func (tr *transformer) collectMediaName() string {
+	var b strings.Builder
+	for !tr.end() {
+		if tr.follows("[preview]") {
+			tr.pos += len("[preview]")
+			continue
+		}
+		if tr.follows("[/preview]") {
+			tr.pos += len("[/preview]")
+			continue
+		}
+		c := tr.next()
+		if c == '[' {
+			tr.pos--
+			break
+		}
+		b.WriteByte(c)
+	}
+	return strings.TrimSpace(b.String())
 }

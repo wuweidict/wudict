@@ -372,6 +372,14 @@
 		} else if (/\.(mp3|ogg|wav|spx|m4a)([?#]|$)/i.test(href)) {
 			e.preventDefault();
 			playURL(href);
+		} else if (a.classList && a.classList.contains("wudict-file")) {
+			// A dictionary attachment this page cannot display (PDF, document,
+			// a DSL video format no browser decodes). Following it in place
+			// is the one thing that must not happen: with no
+			// allow-top-navigation the sandbox would load it INSIDE this small
+			// box, in place of the article. The parent opens the tab instead.
+			e.preventDefault();
+			HOST.postMessage({ t: "open", url: href }, "*");
 		} else if (href.charAt(0) === "#") {
 			// A fragment link inside an about:srcdoc document. This container
 			// splits the two URLs that decide what "#x" means: the DOCUMENT URL

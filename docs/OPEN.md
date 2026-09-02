@@ -375,3 +375,305 @@ So the work is *a trigger plus a call*, reusing the paths that feed
 Every one of those is a preference or a capability check. **None is dictionary
 knowledge**, which is the whole point.
 
+
+---
+
+## O5 — Babylon's per-dictionary part-of-speech table (block 0x27) — **ON HOLD**
+
+`internal/format/bgl/tables.go` maps a definition's `0x02` field to an English
+label from a static `partOfSpeechByCode` (0x30 → "noun", 0x31 → "adjective", …),
+faithfully ported from pyglossary's `bgl_pos.py`. Some BGLs carry **their own**
+table in metadata block type 3, code `0x27`, as a pipe-separated list:
+
+```
+style=1|48,s.|49,adj.|50,v.|51,adv.|52,interj.|53,pron.|54,p…
+```
+
+48 is 0x30. So `Babylon English-Spanish` declares 0x30 = "s." (*sustantivo*)
+where we render "noun", and `Babylon Spanish-English` declares 0x30 = "n." — the
+same code, two labels, chosen by the dictionary. Where the block exists we are
+overriding the author with a hardcoded English word.
+
+**Why it is on hold rather than done.** Measured over the maintainer's 21-file
+BGL corpus: **2 files** carry a populated `0x27`, both official Babylon
+products; 4 carry a single `0x00` byte, the rest carry nothing. Two samples is
+not enough to be sure of the grammar (what `style=1` selects, whether the codes
+are always decimal, what a second `style=` group would mean), and getting it
+wrong changes rendered article text for everyone. The static table is right for
+19 of 21 files today.
+
+**If it is taken up:** parse `0x27` in `readType3`, keep the bytes raw as
+`title`/`desc` are (charset codes arrive later), build a `map[byte]string` after
+`detectEncoding`, and consult it in `collectDefiFields` *before* falling back to
+`partOfSpeechByCode`. Strictly additive — an absent or unparseable block leaves
+today's behaviour exactly as it is.
+
+## O6 — Dictionary icons — **ON HOLD (no consumer yet)**
+
+Several formats ship an icon and we read none of them. `dict.Meta` has no field
+for one, and nothing in the UI or the CLI would display it, so this is a
+*feature* waiting on a design, not a gap in the readers.
+
+**What is already known, so the research is not repeated:**
+
+- **BGL.** The icon is metadata block type 3, code **`0x0B`**, and its payload
+  is a plain `.ico` file (`00 00 01 00` ICONDIR, multiple sizes: 16×16, 32×32
+  and 48×48 at 8/24/32bpp were present in the samples). Sizes observed: 1.4 KB
+  to 565 KB. `unidict/docs/bgl_format.md §5.1` calls `0x0B` "Browsing Enabled
+  (bool)" and names `0x24` "Icon2" — **that document is wrong on both counts**;
+  `0x24` was empty in every file that had it. Measured, not read.
+- **MDX** carries no icon. **StarDict** has no icon field in `.ifo` (some
+  distributions ship a loose `NAME.png` beside it, by convention only).
+
+**Where it would go.** Not a new mechanism: `text.db`'s `meta` table already
+holds a dictionary's name, description and source, and `info.txt` is regenerated
+*from* it (`internal/store/library.go`). An icon is one more meta row — a blob,
+or a file `icon.png` written into the library folder beside `text.db` — captured
+at ingest and served by the API. The prepared folder is already self-describing;
+this is one field, not an architecture.
+
+**The order of work is deliberate:** decide the UI first (dictionary panel? the
+`/setup` list? favicon of a single-dictionary view?), then add the `Meta` field
+and the one or two readers that can fill it. Capturing icons with nothing to
+show them is dead weight in the ingest path and in every `text.db`.
+
+## O7 — DSL optional-part headwords are indexed as 2 variants, not 2ⁿ — **ON HOLD**
+
+`internal/format/dsl/title.go` `transformTitle` emits exactly two lookup keys
+per headword line: `Full`, with every `(optional)` part kept, and `Alt`, with
+every one dropped. It is a faithful port of pyglossary's `TitleTransformer`.
+Lingvo and GoldenDict index every *combination*, so `abandonar(se)(lo)` should
+also be findable as `abandonarse` and `abandonarlo`; we index only
+`abandonarselo` and `abandonar`.
+
+**Why it is on hold.** Measured over the maintainer's DSL corpus — ~1.2 M
+headword lines across 20 files — **49 lines** have two or more optional groups
+(0.004%); most files have none at all. With a single group our two variants are
+already the complete set, which is why this has never been noticed. The change
+would touch the ingest hot path of every DSL dictionary, and would need a cap
+(2⁴ = 16 keys) so a pathological headword cannot explode the key count, to make
+49 headwords findable.
+
+**If it is taken up:** rewrite `transformTitle`'s accumulation to collect
+`(text, optional)` segments and derive `Full`/`Alt`/`Display` plus a capped
+variant product from them, rather than building the three strings in one pass.
+`title_test.go` already pins the current behaviour and would guard the rewrite.
+
+---
+
+## O8 — Serve media by locator instead of by opening the whole dictionary — **DONE for mdx/stardict/dsl (D95); slob still open**
+
+*Provoked by unidict's UDX, whose resource values are locations
+(`mdd_index(4)+offset(8)+size(8)`) rather than bytes. The idea is right; the
+reason it is right is not the one it looks like.*
+
+### The premise that has to be corrected first
+
+**We already do not copy media bytes by default.** `AUTO_INDEX` prepares
+headwords only; `media.db` is opt-in (D24), and there is no locator database of
+any kind in the tree today. So "store locations, not bytes" **buys no disk and
+saves no ingest time** — both are already banked.
+
+What the default actually costs is this: with no `media.db`, every resource
+falls through `upgraded.Resource` to `upgraded.source()`
+(`internal/server/registry.go:52`), which is `dict.Open` on the original file —
+**the full direct backend**. For an `.mdx` that decompresses every key block and
+decodes every headword; then `Open` does the same for each companion `.mdd`
+(`internal/format/mdx/mdx.go:124`); then `resourceIndex()` builds a map over
+every resource entry. At the ~350 B/headword of `docs.local/PERF.md §3.1`, a
+300 k-headword MDX with a 500 k-file MDD is **≈280 MB resident and seconds of
+CPU to serve one 8 KB `.ogg`** — and the handle is evictable, so the next
+article after a janitor pass pays it again.
+
+**The locator is therefore not an alternative to `media.db`. It is the missing
+floor under the mode we already ship as the default.** Nothing is traded away
+for it, which is why it is worth doing at all.
+
+### Why it is cheap: the key index is expensive, the record index is not
+
+`gomdict.BuildIndex` is monolithic — `readKeyBlockInfo` → `readKeyEntries` →
+`readRecordBlockMeta` → `readRecordBlockInfo` → `buildRecordRangeTree`. Only the
+first two are expensive, and **nothing in the last three depends on them**:
+`readRecordBlockMeta` needs exactly one value,
+
+```go
+recordBlockStartOffset := keyBlockInfo.keyBlockEntriesStartOffset + keyBlockMeta.keyBlockDataTotalSize
+```
+
+and `keyBlockEntriesStartOffset` is assigned at `mdict_base.go:484` as pure
+arithmetic on `keyBlockMeta`, which `gomdict.New()` already produced. So a new
+
+```go
+func (mdict *Mdict) BuildRecordIndex() error   // no key blocks, no keywords
+```
+
+is a dozen lines, and its cost is **~24 B per record BLOCK, not per file**:
+a 5 GB `.mdd` at 64 KB blocks is ~80 k blocks ≈ a 1–2 MB read and a few MB of
+structs. Two orders of magnitude under the 280 MB. `MDictKeywordEntry` is
+`{RecordStartOffset, RecordEndOffset}` into the *decompressed* stream, so those
+two numbers plus the block table are the whole of what `locateByKeywordEntry`
+consumes — which is exactly UDX's 20-byte value, arrived at independently.
+**v3 is easier**: `scanV3Blocks` already runs in `New()` and
+`locateByKeywordEntryV3` re-scans the block table per call from `meta.v3Offsets`,
+needing no key state at all.
+
+### The locator is a CACHE, not an artifact — this is the whole design
+
+It is derivable from the source, disposable, and its absence is never an error.
+That settles every hard question at once:
+
+- **It is not part of D20's portable unit.** So it is not `media.db` and does not
+  touch `media.db`'s meaning. Proposed sibling name `media.link.db` (alt:
+  `media.map.db`); `info.txt` describes it as a cache and deleting it is always
+  safe.
+- **It needs no ingest changes.** Build it **lazily, on the first media miss** —
+  the one expensive open is the cost paid *today* on every miss, now paid once.
+  Dictionaries whose articles reference no media never build one.
+- **After it exists the janitor can drop the direct backend permanently**
+  instead of thrashing a 280 MB cache entry.
+
+**Modes are a resolution order, not a switch.** `upgraded.Resource` gains one
+rung, ordered by cost, and `media.db` keeps winning when present:
+
+```
+1. Store.Resource        packed bytes in media.db   (unchanged, D2/D24)
+2. locator + pread       media.link.db              (new)
+3. u.source()            full direct backend         (last resort, as it should always have been)
+```
+
+Having both packed and linked is redundant, never wrong. **Portable mode is not
+endangered by this and must stay**: a linked folder serves media only while the
+original file is where it was.
+
+### Shape
+
+```sql
+-- media.link.db
+CREATE TABLE part(id INTEGER PRIMARY KEY, path TEXT, size INTEGER, mtime INTEGER);
+CREATE TABLE link(name TEXT PRIMARY KEY, mime TEXT, part INTEGER, off INTEGER, len INTEGER);
+```
+
+```go
+// internal/dict — producer, implemented by the format at build time
+type MediaLink struct{ Name, MIME string; Part int; Off, Len int64 }
+type MediaLinker interface {
+    MediaParts() []string
+    MediaLinks() ([]MediaLink, error)
+}
+// consumer — registered per format, opened cheaply at serve time
+type MediaFetcher interface {
+    Fetch(part int, off, size int64) ([]byte, error)
+    Close() error
+}
+```
+
+Serving is format-agnostic; only the opener is format-specific.
+
+*Corrected while implementing:* the `*os.File` + `ReadAt` sketch above is wrong
+for MDict, whose records live in COMPRESSED blocks — a raw file offset names
+nothing. The recorded offset is into the decompressed record stream, and the
+read goes through `gomdict.LocateAt`, which is the existing record path with a
+synthesized entry. The "small LRU of decompressed record blocks" needs no work
+either: `MdictBase.blkCache`/`blkOrder` already is one, bounded at
+`recordBlockCacheCap`, so the 20-audio-icon page already collapses to ~2
+decompressions.
+
+### Per format, honestly
+
+| format | linkable | note |
+|---|---|---|
+| **mdx/mdd** | **yes — the whole point** | `BuildRecordIndex` above; hundreds of thousands of files is the normal case |
+| **stardict, dsl** | **yes, and trivially** | resources are already loose dirs / zips behind `internal/resource`. No offsets are needed at all — the locator degenerates to *recording the resource ROOTS* so the dictionary is never opened. Kills the worst case (parsing a 400 MB DSL to serve one image) for almost no code. **Do this first.** |
+| **slob** | yes, later | `getItem(bin, item)`: `part`=bin, `off`=item; the bin offset table is small |
+| **bgl** | **no** | one gzip stream, no random access, and `loadRes` holds every resource in RAM. Packed or source-open only. Its resources are few and small; this is not a loss. |
+
+### Where it backfires — the non-negotiables
+
+1. **A locator is offsets into a specific byte sequence.** If the user
+   re-downloads or recompresses the `.mdd`, stale offsets serve *wrong bytes* —
+   an `.ogg` where a `.png` was — not a clean 404. `part.size`/`part.mtime` must
+   be revalidated on open (one `stat`) and the cache dropped on mismatch. We
+   already store `source_size`/`source_mtime` in `text.db` meta, so this is a
+   pattern the code already has.
+2. **Scoped storage.** Path-based `pread` is fine for the current Android port
+   (D52 execs a native binary over real paths), but a future SAF/content-URI
+   source would force packed mode. Stated so it is not a surprise.
+3. **A linked folder is not self-contained.** That is the honest cost, and the
+   reason packed mode stays and stays advertised.
+
+### UI: the locator has NO UI, and that is the design
+
+A cache does not get a chip. What already exists is D24's media switch, and only
+its wording needs to become honest:
+
+- off (default) — *"Media stays in the original files"*
+- on — *"Copy media into this folder"* + size — *"works on its own even if the
+  original is deleted or the card is removed"*
+
+One new state deserves surfacing, and only when the promise actually breaks:
+source gone **and** not packed. `WriteInfo` already detects exactly this
+(`[no longer on disk - this folder is now the only copy]`), so the panel shows
+`⚠ media offline` **only then**, offering "Copy media in" when the source is
+still reachable.
+
+**Refused: a three-way none/linked/packed mode selector.** It exposes MDict
+internals to someone who wants to look up a word, has an obviously-correct
+default, and would be a support surface forever.
+
+### Decision matrix
+
+| | disk | ingest | RAM to serve | first byte | standalone | survives an edited source |
+|---|---|---|---|---|---|---|
+| today, unpacked *(default)* | 0 | 0 | **~280 MB** | **seconds** | no | yes |
+| **linked** *(proposed)* | ~40 MB cache | 0 (lazy) | ~5 MB | ~1 ms | no | yes, revalidated |
+| packed *(D24, opt-in)* | = source media | minutes–hours | ~0 | ~1 ms | **yes** | yes |
+
+The only row being deleted is the current default's RAM and latency.
+
+### Phasing
+
+**P1** stardict/dsl resource roots — no new format code, immediate. **Shipped.**
+**P2** `gomdict.BuildRecordIndex` + `media.link.db` + the mdd fetcher — the win. **Shipped.**
+**P3** slob — still open, and the only part of O8 left.
+**Never** bgl. **Untouched** `media.db`.
+
+Shipped as D95: `internal/resource/link.go` (the provider registry),
+`internal/gomdict` (`BuildRecordIndex`, `LocateAt`), `internal/format/mdx/link.go`,
+the extracted `MediaSources` in the dsl and stardict backends,
+`internal/store/link.go` (`media.link.db`), and the three-rung `upgraded.Resource`
+in `internal/server/registry.go`.
+
+---
+
+## O9 — Auto-preparation has no size threshold — **ON HOLD**
+
+*Found while adding ZIM (P92), which needed an exemption from `maybeAutoIndex`
+and got one on a property (`SelfIndexed`) rather than on size. The general
+version of the problem was left here on purpose.*
+
+`entry.maybeAutoIndex` (`internal/server/registry.go`) fires once per process on
+the first successful search and prepares with `store.Plan{}` — headwords only,
+which is cheap **per entry** and unbounded **per dictionary**. The cost model
+behind D13 was a normal dictionary: tens of thousands of headwords, a text.db
+smaller than the source. Two things break it:
+
+- **Entry count.** A 300 k-headword MDX pays a multi-second ingest and a
+  hundreds-of-megabytes write on a search the user expected to be instant. The
+  first-run indexing storm in `docs.local/PERF.md` is this, multiplied by a
+  corpus.
+- **Compression ratio.** A source that packs whole blocks beats a `text.db` that
+  DEFLATEs one row at a time (D24) by enough that preparation *expands* the
+  library. ZIM is the extreme case (~14× vs ~3.5×, a 123 MB file becoming a
+  ~431 MB text.db), which is why it declines automation outright — but the same
+  arithmetic applies weakly to block-compressed MDX.
+
+The fix is one threshold: above N headwords (or an estimated text.db size),
+`maybeAutoIndex` returns and the panel's index chip (D93) becomes the only way
+in — the dictionary still works, from its own backend, exactly as a ZIM does.
+
+**Why it is parked.** It changes behaviour for dictionaries that work well today,
+and N has to be defensible against measurement rather than picked. It also
+interacts with D92 (a *demanded* index is never gated, and would stay ungated)
+and with the preview weight the entry already reports. Nothing here is urgent:
+the pathological case has an exemption, and the merely-large case is slow once
+per process, not wrong.

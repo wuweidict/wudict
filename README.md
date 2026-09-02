@@ -2,7 +2,7 @@
 
 Fast, _native_, self-contained, multi-format dictionary server that runs in your
 browser at [http://localhost:6888](http://localhost:6888). One native binary, no
-dependencies; set the folders with your .mdx/.slob/.bgl/.ifo dictionaries, and search them all at
+dependencies; set the folders with your .mdx/.slob/.bgl/.zim/.ifo dictionaries, and search them all at
 once.
 
 **Supported formats**
@@ -14,6 +14,7 @@ once.
 | Aard2 | `.slob`                             | zlib/bz2/lzma2; embedded images/audio/css |
 | Lingvo DSL | `.dsl`, `.dsl.dz`                   | UTF-8/16/32 auto-detected; `*.dsl.files.zip` resources; auto-indexed |
 | Babylon | `.bgl`                              | gzip block stream; source/target charset auto-detected (Latin / Cyrillic / CJK code pages); embedded images; indexed automatically on first open |
+| ZIM | `.zim`                              | Kiwix/Wikimedia offline archives; see https://library.kiwix.org
 | WuWeiDict | cache folder (`text.db`)            | wuDict's own SQLite-based format (see *Sharing*, below) |
 
 ## Quick start
@@ -35,7 +36,7 @@ for writing `DICT_DIR` in the configuration file at `~/.wudict/wudict.toml`.
 `DICT_DIR` accepts more than one folder:
 
 As an alternative to the [setup page](http://localhost:6888/setup) you can configure the dictionary folders from
-the console via cli args, env vars or by directly editing the config file at `~/.wudict/wudict.toml`:
+the console via cli args, env vars or by directly editing the config file at `~/.wudict/wudict.toml` (recommended):
 ```sh
 # as one or more CLI args:
 wudict --dict-dir ~/Dictionaries --dict-dir /Volumes/Data/Dicts   # repeat the flag
@@ -44,7 +45,7 @@ wudict --dict-dir ~/Dictionaries --dict-dir /Volumes/Data/Dicts   # repeat the f
 DICT_DIR="~/Dictionaries:/Volumes/Data/Dicts" wudict              # separate with ":" for linux/mac and ";" on Windows
 ```
 
-in `wudict.toml`:
+in `wudict.toml` (the recommended way):
 ```toml
 DICT_DIR = ["~/Dictionaries", "/Volumes/Data/Dicts"]
 ```
@@ -117,7 +118,7 @@ console window, and shows a **tray icon** instead, logging to
 [Inno Setup 6.3+](https://jrsoftware.org/isinfo.php); github's CI builds it for every
 release). The wudict setup wizard has options to add a desktop shortcut,
 *start at sign-in*, add to `PATH`, and **Open with → wuDict** for `.mdx`,
-`.dsl`, `.slob` and `.bgl`.
+`.dsl`, `.slob`, `.bgl` and `.zim`.
 
 Opening a dictionary file — from the installer's association or by hand as
 `wudict path\to\some.mdx` — serves the **parent folder** and opens

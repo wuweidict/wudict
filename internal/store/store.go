@@ -210,6 +210,10 @@ func (s *Store) Meta() dict.Meta { return s.meta }
 // dictionary stands on its own.
 func (s *Store) SourcePath() string { return s.srcPath }
 
+// UUID is the dict_uuid a sibling file must carry to be this dictionary's:
+// media.db is checked against it, and so is the derived media.link.db.
+func (s *Store) UUID() string { return s.uuid }
+
 func (s *Store) Caps() dict.Caps {
 	return dict.Caps{Exact: true, Prefix: true, Contains: s.hasTrigram, FTS: s.ftsOK}
 }

@@ -44,7 +44,8 @@ WUDICT_TEST_MDX      ?= $(HOME)/Downloads/Language/mdict/es-es-Espasa-Calpe-2016
 WUDICT_TEST_STARDICT ?= $(HOME)/Downloads/Language/stardict/eng-eng-stanford-ep.ifo
 WUDICT_TEST_SLOB     ?= $(HOME)/Downloads/Language/aard/es-es-Espasa-Calpe-2016.slob
 WUDICT_TEST_DSL      ?= $(HOME)/Downloads/Language/DSL/es-es-Espasa-Calpe-2016/es-es-Espasa-Calpe-2016.dsl
-TEST_ENV = WUDICT_TEST_MDX="$(WUDICT_TEST_MDX)" WUDICT_TEST_STARDICT="$(WUDICT_TEST_STARDICT)" WUDICT_TEST_SLOB="$(WUDICT_TEST_SLOB)" WUDICT_TEST_DSL="$(WUDICT_TEST_DSL)"
+WUDICT_TEST_ZIM      ?= $(HOME)/Downloads/Language/ZIM/wiktionary_ro_all_nopic_2026-07.zim
+TEST_ENV = WUDICT_TEST_MDX="$(WUDICT_TEST_MDX)" WUDICT_TEST_STARDICT="$(WUDICT_TEST_STARDICT)" WUDICT_TEST_SLOB="$(WUDICT_TEST_SLOB)" WUDICT_TEST_DSL="$(WUDICT_TEST_DSL)" WUDICT_TEST_ZIM="$(WUDICT_TEST_ZIM)"
 
 # Args for `make run-*` targets, e.g.: make run ARGS="list ~/Dictionaries"
 ARGS ?=
@@ -58,7 +59,7 @@ help: ## Show this help
 	@echo "wudict make targets:"; echo
 	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z0-9_.-]+:.*##/{printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo
-	@echo "Vars: ARGS=<cli args>  WUDICT_TEST_MDX|_STARDICT|_SLOB|_DSL=<integration fixtures>"
+	@echo "Vars: ARGS=<cli args>  WUDICT_TEST_MDX|_STARDICT|_SLOB|_DSL|_ZIM=<integration fixtures>"
 
 # ---- build & run --------------------------------------------------------
 

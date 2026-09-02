@@ -30,6 +30,10 @@ func init() {
 	// handle the gunzip. matchKey prefers this longest suffix.
 	dict.RegisterFormat(".dsl.dz", openFn)
 	dict.RegisterReader(".dsl.dz", readFn)
+	// O8: a prepared DSL reaches its media through the path alone. No Fetcher -
+	// DSL keeps nothing inside the .dsl itself, so there is no location to
+	// record and the Sources below are the complete answer.
+	resource.Register("dsl", resource.Provider{Sources: MediaSources})
 }
 
 // Dict is the DSL "direct" backend. DSL has no native index, so Open
@@ -146,11 +150,27 @@ func (d *Dict) sources() []resource.Source {
 }
 
 func (d *Dict) loadSources() {
+	res := MediaSources(d.srcPath)
+	d.resMu.Lock()
+	d.res = res
+	d.resMu.Unlock()
+}
+
+// MediaSources builds the resource containers of a DSL from its PATH alone -
+// no parsing, no headwords, nothing opened but the archives themselves.
+//
+// A prepared DSL used to reach its images by opening the whole .dsl again
+// (registry.go's resource fallback), which for a large one means parsing
+// hundreds of megabytes of text to serve a thumbnail. Everything below is
+// derived from the file name, so the prepared folder - which records the source
+// path - can do it directly. Registered as the format's O8 provider; the method
+// above is the same call, so the two can never drift apart.
+func MediaSources(srcPath string) []resource.Source {
 	// A ".dsl.dz" names its resources after either the compressed file or the
 	// ".dsl" inside it; both spellings are in the wild.
-	bases := []string{d.srcPath}
-	if strings.EqualFold(filepath.Ext(d.srcPath), ".dz") {
-		bases = append(bases, strings.TrimSuffix(d.srcPath, filepath.Ext(d.srcPath)))
+	bases := []string{srcPath}
+	if strings.EqualFold(filepath.Ext(srcPath), ".dz") {
+		bases = append(bases, strings.TrimSuffix(srcPath, filepath.Ext(srcPath)))
 	}
 	var res []resource.Source
 	for _, b := range bases {
@@ -165,9 +185,5 @@ func (d *Dict) loadSources() {
 	}
 	// Last: a file lying loose beside the .dsl. Exact paths only - this
 	// folder is not the dictionary's own, so it is never walked or listed.
-	res = append(res, resource.NewDirExact(filepath.Dir(d.srcPath)))
-
-	d.resMu.Lock()
-	d.res = res
-	d.resMu.Unlock()
+	return append(res, resource.NewDirExact(filepath.Dir(srcPath)))
 }

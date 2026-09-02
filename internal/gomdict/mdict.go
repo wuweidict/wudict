@@ -97,6 +97,56 @@ func (mdict *Mdict) BuildIndex() error {
 	return nil
 }
 
+// BuildRecordIndex reads ONLY what is needed to fetch a record by its offsets:
+// the record-block meta, the record-block table, and the range tree over it.
+// It is the cheap half of BuildIndex - no key-block info, no keyword entries.
+//
+// Those two halves look coupled and are not. readRecordBlockMeta needs exactly
+// one value from the key side,
+//
+//	keyBlockInfo.keyBlockEntriesStartOffset + keyBlockMeta.keyBlockDataTotalSize
+//
+// and keyBlockEntriesStartOffset is pure arithmetic on keyBlockMeta (see
+// decodeKeyBlockInfo, which assigns it as keyBlockInfoCompressedSize +
+// keyBlockInfoStartOffset). readDictHeader/readKeyBlockMeta have already run in
+// init(), so that arithmetic is available here and no key block is ever
+// decompressed.
+//
+// The saving is the whole point: the key side costs a struct and a decoded
+// string PER ENTRY - hundreds of megabytes for an .mdd holding a few hundred
+// thousand files - while the record side costs one small read and ~24 bytes per
+// record BLOCK, of which even a 5 GB container has only tens of thousands. It
+// is what makes serving a resource from a recorded (offset, size) cheap enough
+// to replace opening the dictionary.
+func (mdict *Mdict) BuildRecordIndex() error {
+	if mdict.meta.version >= 3.0 {
+		// v3 records are reached through meta.v3Offsets, which scanV3Blocks
+		// already filled in during init(), and locateByKeywordEntryV3 walks the
+		// block table itself on every call. Nothing to precompute.
+		return nil
+	}
+	if mdict.keyBlockMeta == nil {
+		return errors.New("mdict: record index needs the key-block meta from init()")
+	}
+	if mdict.keyBlockInfo == nil {
+		mdict.keyBlockInfo = &mdictKeyBlockInfo{
+			keyBlockEntriesStartOffset: mdict.keyBlockMeta.keyBlockInfoCompressedSize +
+				mdict.keyBlockMeta.keyBlockInfoStartOffset,
+		}
+	}
+	if err := mdict.readRecordBlockMeta(); err != nil {
+		return err
+	}
+	if err := mdict.readRecordBlockInfo(); err != nil {
+		return err
+	}
+	mdict.buildRecordRangeTree()
+	return nil
+}
+
+// FilePath is the container this Mdict was opened from.
+func (mdict *Mdict) FilePath() string { return mdict.filePath }
+
 func (mdict *Mdict) Name() string {
 	_, rawpath := filepath.Split(mdict.filePath)
 	rawpath = strings.TrimRight(rawpath, ".mdx")
@@ -168,6 +218,36 @@ func (mdict *Mdict) LocateByKeywordEntry(entry *MDictKeywordEntry) ([]byte, erro
 		return mdict.locateByKeywordEntryV3(entry)
 	}
 	return mdict.MdictBase.locateByKeywordEntry(entry)
+}
+
+// LocateAt fetches a record from its recorded position, with no keyword entry
+// and therefore no key index: the two numbers below are everything the record
+// side consumes (see locateByKeywordEntry, which reads nothing else off the
+// entry). Pair it with BuildRecordIndex to serve a resource out of an .mdd that
+// was never fully opened.
+//
+// size < 0 means "to the end of the containing block", which is how the LAST
+// entry of a container is stored - readKeyEntries only ever fills in the end
+// offset of an entry's predecessor, so the final one has none. The sentinel for
+// that differs between layouts (0 for v1/v2, negative for v3), so it is
+// translated here rather than by every caller.
+func (mdict *Mdict) LocateAt(off, size int64) ([]byte, error) {
+	if off < 0 {
+		return nil, errors.New("mdict: negative record offset")
+	}
+	entry := &MDictKeywordEntry{RecordStartOffset: off}
+	switch {
+	case size > 0:
+		entry.RecordEndOffset = off + size
+	case size == 0:
+		// A genuinely empty record. Returning early matters: leaving the end
+		// offset at 0 would be read as the sentinel and hand back the whole
+		// block instead of nothing.
+		return nil, nil
+	case mdict.meta.version >= 3.0:
+		entry.RecordEndOffset = -1 // locateByKeywordEntryV3 clamps a negative end
+	}
+	return mdict.LocateByKeywordEntry(entry)
 }
 
 func (mdict *Mdict) LocateByKeywordIndex(index *MDictKeywordIndex) ([]byte, error) {

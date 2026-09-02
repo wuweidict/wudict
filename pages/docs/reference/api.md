@@ -125,8 +125,13 @@ A `hit` can report `skipped`, `deferred` or `error` instead of results:
 -   **`skipped`** - this dictionary does not support the requested mode. Ask
     `/api/dicts` for `caps` before offering a mode.
 -   **`deferred`** - this dictionary was not opened, because the search reached
-    its memory cap. Not an error. Asking for that dictionary alone answers it.
-    See [`SEARCH_MEMORY`](configuration.md#search_memory).
+    its memory cap. Not an error. Asking for that dictionary alone answers it -
+    and that request also puts it at the front of the queue to be prepared, so
+    the deferral stops recurring. See
+    [`SEARCH_MEMORY`](configuration.md#search_memory).
+-   **`indexing`** - only alongside `deferred`: that preparation is already
+    under way, so a client should say "preparing" rather than offer the same
+    request again.
 -   **`error`** - this dictionary failed. The others still answered.
 
 A search is cancelled after 30 seconds.

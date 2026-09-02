@@ -30,6 +30,9 @@ func init() {
 	dict.RegisterFormat(".ifo", func(path string) (dict.Dictionary, error) { return Open(path) })
 	dict.RegisterReader(".ifo", func(path string) (dict.Reader, error) { return NewReader(path) })
 	dict.RegisterProber(".ifo", probe)
+	// O8: `res/` and res.zip are found from the path; nothing lives inside the
+	// .dict that a resource needs, so no Fetcher is registered.
+	resource.Register("stardict", resource.Provider{Sources: MediaSources})
 }
 
 type idxEntry struct {
@@ -434,7 +437,22 @@ func (d *Dict) sources() []resource.Source {
 }
 
 func (d *Dict) loadSources() {
-	dir := filepath.Dir(d.basePath)
+	res := MediaSources(d.basePath)
+	d.resMu.Lock()
+	d.res = res
+	d.resMu.Unlock()
+}
+
+// MediaSources builds a StarDict's resource containers from its PATH alone: the
+// `res/` folder and `res.zip` that sit beside the .ifo. Nothing here needs the
+// dictionary open, which is why a prepared StarDict can serve its media without
+// re-reading the .idx it has already replaced. Registered as the format's O8
+// provider; loadSources calls it, so the two cannot drift.
+//
+// Any path inside the dictionary's folder identifies it - the .ifo, or the
+// basePath with its extension already dropped - since only the folder is used.
+func MediaSources(anyPath string) []resource.Source {
+	dir := filepath.Dir(anyPath)
 	var res []resource.Source
 	if r := filepath.Join(dir, "res"); resource.IsDir(r) {
 		res = append(res, resource.NewDir(r))
@@ -442,9 +460,7 @@ func (d *Dict) loadSources() {
 	if z, err := resource.OpenZip(filepath.Join(dir, "res.zip")); err == nil {
 		res = append(res, z)
 	}
-	d.resMu.Lock()
-	d.res = res
-	d.resMu.Unlock()
+	return res
 }
 
 func fold(s string) string { return dict.Fold(s) }

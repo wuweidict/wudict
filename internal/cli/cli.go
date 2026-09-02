@@ -43,6 +43,7 @@ import (
 	_ "github.com/wuweidict/wudict/internal/format/mdx"      // register .mdx
 	_ "github.com/wuweidict/wudict/internal/format/slob"     // register .slob
 	_ "github.com/wuweidict/wudict/internal/format/stardict" // register .ifo
+	_ "github.com/wuweidict/wudict/internal/format/zim"      // register .zim
 )
 
 // Version is stamped by the Makefile via
@@ -63,7 +64,7 @@ const (
 
 func usage() string {
 	return fmt.Sprintf(`WuWeiDict %s - multi-format dictionary server
-MDict (.mdx/.mdd) · StarDict (.ifo) · Aard2 (.slob) · Lingvo DSL (.dsl/.dsl.dz) · WuWeiDict (.text.db)
+MDict (.mdx/.mdd) · StarDict (.ifo) · Aard2 (.slob) · Lingvo DSL (.dsl/.dsl.dz) · openZIM (.zim) · WuWeiDict (.text.db)
 
 USAGE
   wudict [command] [flags] [args]
@@ -962,7 +963,7 @@ func cmdServe(args []string) (err error) {
 		return fmt.Errorf("DICT_DIR and DB_DIR are the same folder:\n"+
 			"  %s\n"+
 			"  DB_DIR contains internally cached dictionaries; DICT_DIR must point at\n"+
-			"  the folder with your dictionary files (.mdx, .ifo, .slob, .dsl, .bgl).\n"+
+			"  the folder with your dictionary files (.mdx, .ifo, .slob, .dsl, .bgl, .zim).\n"+
 			"  To only use cached dictionaries, leave DICT_DIR unset and set USE_CACHED = \"1\".", libDir)
 	}
 	dict.ExcludeDir(libDir)

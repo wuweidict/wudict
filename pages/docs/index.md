@@ -55,6 +55,12 @@ on your disk.
     `.bgl`. Character sets are detected automatically, resources are read from
     inside the file.
 
+-   :fontawesome-solid-globe:{ .lg .middle } **ZIM**
+
+    ---
+
+    `.zim`. Kiwix and Wikimedia archives, searched straight from the file.
+
 -   :fontawesome-solid-box-archive:{ .lg .middle } **wuDict library**
 
     ---

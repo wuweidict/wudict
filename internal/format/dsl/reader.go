@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -227,41 +228,64 @@ func (r *Reader) parseBlock(termLines, textLines []string) (dict.Entry, []dict.E
 
 	var mainText strings.Builder
 	var subs []dict.Entry
-	var subTitle titleResult
-	subKey, subText := "", strings.Builder{}
+	// One sub-card may carry several headings piled on consecutive "@" lines,
+	// and each heading may expand into two lookup keys ("(...)" optional part),
+	// so both are lists. linesInCard is what tells a pile from the start of the
+	// next card: an "@" line with body lines behind it closes, one without
+	// simply adds another heading (goldendict-ng src/dict/dsl.cc, the
+	// insidedCards loop).
+	var subHeads []string
+	var subText strings.Builder
+	subOpen, linesInCard := false, 0
 	flushSub := func() {
-		if subKey == "" {
+		defer func() {
+			subHeads = nil
+			subText.Reset()
+			subOpen, linesInCard = false, 0
+		}()
+		var heads, refs []string
+		for _, h := range subHeads {
+			t := transformTitle(h)
+			if t.Full == "" {
+				continue
+			}
+			heads = append(heads, t.Full)
+			refs = append(refs, t.Full)
+			if t.Alt != "" && t.Alt != t.Full {
+				heads = append(heads, t.Alt)
+				refs = append(refs, t.Alt)
+			}
+		}
+		if len(heads) == 0 {
 			return
 		}
-		body, _, err := transformBody(strings.TrimRight(subText.String(), "\n"), subKey)
+		body, _, err := transformBody(strings.TrimRight(subText.String(), "\n"), heads[0])
 		if err == nil {
-			heads := []string{subKey}
-			if subTitle.Alt != "" && subTitle.Alt != subKey {
-				heads = append(heads, subTitle.Alt)
-			}
 			subs = append(subs, dict.Entry{Headwords: heads, Body: body, Kind: dict.BodyHTML})
 		}
-		// The back-reference is re-parsed as DSL, so the key has to survive a
-		// second pass: an unescaped "[" or "~" in a sub-headword would be read
-		// as markup and swallow the link.
-		mainText.WriteString("\t[m2][ref]" + dslEscape(subKey) + "[/ref][/m]\n")
-		subKey = ""
-		subTitle = titleResult{}
-		subText.Reset()
+		for _, k := range refs {
+			// The back-reference is re-parsed as DSL, so the key has to survive
+			// a second pass: an unescaped "[" or "~" in a sub-headword would be
+			// read as markup and swallow the link. The leading "- " is what
+			// Lingvo and GoldenDict both draw in front of a sub-card link.
+			mainText.WriteString("\t[m2]- [ref]" + dslEscape(k) + "[/ref][/m]\n")
+		}
 	}
 	for _, line := range textLines {
-		s := strings.TrimSpace(line)
-		if s == "@" {
+		if head, ok := atSignHeading(line); ok {
+			if subOpen && linesInCard == 0 && head != "" {
+				subHeads = append(subHeads, head) // another heading for the same card
+				continue
+			}
 			flushSub()
+			if head != "" {
+				subHeads = append(subHeads, head)
+				subOpen = true
+			}
 			continue
 		}
-		if after, ok := strings.CutPrefix(s, "@ "); ok {
-			flushSub()
-			subTitle = transformTitle(strings.TrimSpace(after))
-			subKey = subTitle.Full
-			continue
-		}
-		if subKey != "" {
+		if subOpen {
+			linesInCard++
 			subText.WriteString(line + "\n")
 			continue
 		}
@@ -284,5 +308,21 @@ func (r *Reader) parseBlock(termLines, textLines []string) (dict.Entry, []dict.E
 func dslEscape(s string) string { return dslEscaper.Replace(s) }
 
 var dslEscaper = strings.NewReplacer(
-	`\\`, `\\\\`, "[", `\\[`, "]", `\\]`, "~", `\\~`, "<", `\\<`, ">", `\\>`, "@", `\\@`,
+	`\`, `\\`, "[", `\[`, "]", `\]`, "~", `\~`, "<", `\<`, ">", `\>`, "@", `\@`,
 )
+
+// atSignHeading recognises a sub-card line. Lingvo puts the "@" first on the
+// line, but leading whitespace and leading DSL tags are allowed before it
+// ("[m1]@ heading" is legal and common), and the space after it is optional:
+// "@heading" and "@ heading" are the same thing. An empty heading closes the
+// current sub-card. Mirrors isAtSignFirst() in goldendict-ng
+// src/dict/dsl_details.cc.
+var atSignLine = regexp.MustCompile(`^[ \t]*(?:\[[^\]]+\][ \t]*)*@`)
+
+func atSignHeading(line string) (string, bool) {
+	loc := atSignLine.FindStringIndex(line)
+	if loc == nil {
+		return "", false
+	}
+	return strings.TrimSpace(line[loc[1]:]), true
+}

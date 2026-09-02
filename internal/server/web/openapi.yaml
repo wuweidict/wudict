@@ -977,6 +977,12 @@ components:
         bytes:
           type: integer
           description: What the declined open was estimated to cost. For logs.
+        indexing:
+          type: boolean
+          description: >
+            Only beside deferred: this dictionary is already being prepared,
+            because something asked for it by name. It will stop being deferred
+            once the ingest finishes.
         error:
           type: string
           description: This dictionary failed. The others still answered.
@@ -1004,7 +1010,7 @@ components:
         name: { type: string }
         format:
           type: string
-          enum: [mdx, stardict, slob, dsl, bgl, wudict]
+          enum: [mdx, stardict, slob, dsl, bgl, zim, wudict]
         path:
           type: string
           description: The source file, or the text.db of a prepared dictionary.

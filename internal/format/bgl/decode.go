@@ -154,6 +154,23 @@ func (r *Reader) plainTitle(bTitle []byte) string {
 	return strings.TrimSpace(s)
 }
 
+// plainInfo flattens one type-3 metadata string (title, description) to a
+// single line of plain text. Unlike plainTitle it takes its encoding as an
+// argument and does not run the charset-tag scan: these blocks are written in
+// the glossary's own charset and carry no <charset> tags.
+func plainInfo(enc string, b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	s := strings.Trim(decodeBytes(enc, b), "\x00")
+	s = replaceHTMLEntities(s, false)
+	s = stripHTMLTags(s) // also what turns <br> into a space
+	s = removeControlChars(s)
+	// Fields collapses every whitespace run, so the tag-shaped spaces above do
+	// not leave gaps and no newline reaches info.txt.
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // renderDefi turns a definition's collected fields into HTML, prepending the
 // part of speech, title and transcriptions. Port of reader_defi.processDefi
 // (the collect step is split out so a caller that also wants the title -

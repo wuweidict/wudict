@@ -19,7 +19,17 @@ var assetExt = map[string]bool{
 	".svg": true, ".bmp": true, ".ico": true, ".avif": true,
 	".mp3": true, ".ogg": true, ".oga": true, ".wav": true, ".spx": true,
 	".m4a": true, ".opus": true, ".flac": true, ".aac": true,
-	".mp4": true, ".webm": true, ".ogv": true,
+	".mp4": true, ".webm": true, ".ogv": true, ".mov": true, ".m4v": true,
+	".3gp": true,
+	// Video and image formats a browser cannot render, but a dictionary does
+	// bundle: these are Lingvo's and GoldenDict's own media formats (DSL
+	// see docs/DSL.md). They are served so the reader can save them
+	// as attachments.
+	".avi": true, ".wmv": true, ".mkv": true, ".mpg": true, ".mpeg": true,
+	".asf": true, ".flv": true,
+	".pcx": true, ".dcx": true, ".wmf": true, ".emf": true,
+	".tif": true, ".tiff": true,
+	".pdf":  true,
 	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
 	".json": true, ".xml": true, ".txt": true,
 }

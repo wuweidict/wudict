@@ -26,6 +26,7 @@ import (
 	_ "github.com/wuweidict/wudict/internal/format/mdx"
 	_ "github.com/wuweidict/wudict/internal/format/slob"
 	_ "github.com/wuweidict/wudict/internal/format/stardict"
+	_ "github.com/wuweidict/wudict/internal/format/zim"
 )
 
 // A soft memory limit has exactly one lever: collect harder. Set below what

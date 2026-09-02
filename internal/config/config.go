@@ -341,7 +341,7 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 # Priority: CLI flag > environment variable > this file > built-in default.
 # All keys are optional - uncomment a line to override its default.
 
-# DICT_DIR    = "~/Dictionaries"      # folder with dictionaries (.mdx, .ifo, .slob, .dsl, .bgl)
+# DICT_DIR    = "~/Dictionaries"      # folder with dictionaries (.mdx, .ifo, .slob, .dsl, .bgl, .zim)
 #                                     # several folders: ["~/Dictionaries", "/Volumes/Ext/Dicts"]
 #                                     # (in the environment separate them with ":", ";" on Windows)
 #                                     # none of them may be the DB_DIR folder
