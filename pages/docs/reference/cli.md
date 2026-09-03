@@ -5,11 +5,11 @@ description: Every wudict command, flags and args.
 
 # Command line
 
-``` text title="the command flow"
+``` text title="the command structure"
 wudict [command] [flags] [args]
 ```
 
-`wudict --help` prints the whole reference. `wudict --version` prints the
+User `wudict --help` for complete reference, `wudict --version` prints the
 version.
 
 ## Commands

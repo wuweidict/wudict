@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Every WuWeiDict setting - the flag, the environment variable, the TOML key, and the default.
+description: Every wuDict setting - the flag, the environment variable, the TOML key, and the default.
 ---
 
 # Configuration
@@ -15,12 +15,12 @@ and in the file.
 built-in default.**
 
 This is the answer to "I edited `wudict.toml` and nothing changed": something
-above it sets the same value. WuWeiDict knows where each value came from, and the
+above it sets the same value. wuDict knows where each value came from, and the
 setup page refuses to pretend that saving to the file will take effect.
 
 ## Where the config file lives
 
-WuWeiDict reads the first file it finds.
+wuDict reads the first file it finds.
 
 1. the `--config` flag, or the `CONFIG_PATH` environment variable
 2. `wudict.toml` next to the executable - see [portable mode](#portable-mode)
@@ -33,7 +33,7 @@ start prints the file in effect.
 `~/.wudict/state.json` holds your dictionary order and your on/off switches.
 That file is written by the app, not by you.
 
-### Every file WuWeiDict owns
+### Every file wuDict owns
 
 | What | macOS and Linux | Windows | Android |
 | --- | --- | --- | --- |
@@ -43,7 +43,7 @@ That file is written by the app, not by you.
 | State (order, switches) | `~/.wudict/state.json` | `%USERPROFILE%\.wudict\state.json` | as above |
 | Log, when there is no console | `~/Library/Logs/wudict.log` on macOS, `~/.wudict/wudict.log` on Linux | `%LOCALAPPDATA%\wudict\wudict.log` | Android's own log |
 
-Your dictionary files are not in this list. WuWeiDict reads them where they
+Your dictionary files are not in this list. wuDict reads them where they
 are and never writes to them. [`DB_DIR`](#db_dir) moves the library; the rest
 of the table follows the config file.
 
@@ -53,7 +53,7 @@ Put a `wudict.toml` next to the executable. It then wins over every user
 location, and settings are saved back to it. Use this for a USB stick or a
 self-contained folder.
 
-WuWeiDict never creates that file by itself. An executable's folder usually
+wuDict never creates that file by itself. An executable's folder usually
 belongs to someone else, such as `~/go/bin` or `/opt/homebrew/bin`.
 
 ## Everyday settings
@@ -91,7 +91,7 @@ The library folder: one subfolder per prepared dictionary.
 | Flag | `--db-dir <path>` |
 | Default | `~/.wudict/db` |
 
-It must not be the same folder as `DICT_DIR`. WuWeiDict refuses to start when they
+It must not be the same folder as `DICT_DIR`. wuDict refuses to start when they
 are the same.
 
 ### SERVER_IP and SERVER_PORT
@@ -103,7 +103,7 @@ are the same.
 
 `127.0.0.1` is the loopback address, reachable from your machine only. Set
 `0.0.0.0` to accept connections from your network. Only do that on a network
-you trust; WuWeiDict has no login.
+you trust; wuDict has no login.
 
 ### NO_BROWSER
 
@@ -176,7 +176,7 @@ Path to the external `speexdec` program.
 | Flag | `--speexdec <path>` |
 | Default | found next to the executable, then on `PATH` |
 
-WuWeiDict prints which decoder it resolved at startup, or an install hint when it
+wuDict prints which decoder it resolved at startup, or an install hint when it
 found none.
 
 ## Desktop integration
@@ -288,16 +288,23 @@ Store article text plain instead of compressed.
 
 ## Lemmatization
 
-When a dictionary comes back with nothing, WuWeiDict looks the word's
-dictionary form up and asks that dictionary again: `knew` finds *know*,
-`fuiste` finds *ser*, `идет` finds *идти*. It fires only on an empty answer,
-and only for a single word, so nothing it produces can push a real hit down the
-page.
+When you enable lemmatization for a language wuDict will be able to find inflected forms,
+for example search for `knew` will find *know*, `fuiste` will find *ser*, `идет` will find *идти*. 
 
-It is decided one dictionary at a time. A glossary that happens to list
-`understood` itself answers straight away; the dictionaries beside it that index
-only *understand* are still asked for *understand*, instead of being silenced by their
-neighbour's hit.
+???+ danger "IMPORTANT"
+    For lemmatization to work, wuDict _must_ be able to detect the dictionary language.
+    Babylon (.bgl) contains data about the headword language, which is sufficient.
+    Most other dictionaries do no declare the language data.
+    wuDict uses a best guess strategy in the following order:
+    - if the dictionary file starts with e.g. `es-es` or `spa-eng` (for example, spa-eng-oxford.mdx)
+    then the first language code will be used for lemmatization
+    - if the dictionary **title** contains a valid language code then that is used 
+    - if the dictionary parent folder is a valid language 
+    code such as `es` or `spa` then this will be used as the lemmatization language.
+    - if none of the previous checks found a language code then English is used by default, 
+    which means that for English dictionaries you do not need to rename your files or the parent 
+    subfolders to match `en` or `eng`.
+
 
 ### MORPH_CACHE
 
@@ -317,17 +324,12 @@ How many languages of lemma data stay in memory.
     above this count.
 
     A loaded language costs from 7 MB (English) to 65 MB (Russian). `0` never
-    loads any and never lemmatizes, which is also what you want if you would
-    rather a failed search simply stay failed.
-
-    A dictionary is only offered its own language's lemma — Spanish `sale` →
-    *salar* is never asked of an English dictionary. WuWeiDict works the
-    language out from what the dictionary declares, then its file name, its
-    folders and its title; one it cannot place is searched as English.
+    loads any lemmatizers, and disables lemmatization.
 
 ### LEMMA_DIR
 
-The folder every language but English is loaded from.
+The folder where lemmatization files are stored 
+(except English which is embedded OOTB into the binary).
 
 ??? info "Values, default, and the file format"
 
@@ -337,23 +339,17 @@ The folder every language but English is loaded from.
     | Values | a folder path |
     | Default | `~/.wudict/lemmas` |
 
-    Spanish, Russian, German, French, Italian and anything else is installed
-    here rather than shipped inside WuWeiDict — the six languages that used to
-    be built in were 9 MB of a 20 MB program, carried by everyone who never
-    searched in them.
 
     You do not have to fill this folder by hand. Open **🔤 Lemmatization** on
     the settings page (or in the ⚙ panel beside the search box) and tick a
     language: it downloads, installs, and takes effect immediately — no
     restart. That page is the only route on Android, which has no shell. From
-    a terminal, `wudict lemmas download ru` does the same; see
-    [the `lemmas` command](cli.md#lemmas). Everything below is what those
-    write, and what to write yourself for a language neither offers.
+    a terminal, `wudict lemmas download fr de es it ru` does the same; see
+    [the `lemmas` command](cli.md#lemmas). 
 
     One file per language, named after the language: `pl.txt`, `pol.tsv`,
     `polish.txt.gz`. The extension must be `.txt` or `.tsv`, optionally
-    `.gz`-compressed; anything else in the folder is ignored. The folder does
-    not have to exist.
+    `.gz`-compressed; anything else in the folder is ignored.
 
     Each line is a lemma followed by its forms, separated by tabs and written
     in lower case:
@@ -369,20 +365,16 @@ The folder every language but English is loaded from.
     downloaded. Blank or malformed lines are skipped rather than failing the
     file.
 
-    An `en.txt` replaces the English WuWeiDict ships, if you have a better
+    An `en.txt` replaces the English wuDict ships, if you have a better
     list than the one built in.
 
     The folder is indexed at startup and again whenever the lemmatization page
-    installs or removes something, so a language obtained there is searchable
-    at once; a file you drop in by hand is picked up at the next start. A
-    language is loaded under the same [`MORPH_CACHE`](#morph_cache) budget as a
-    built-in one — so `MORPH_CACHE = "0"` ignores the folder entirely, and the
-    lemmatization page says so rather than letting you download data nothing
-    will read.
+    installs or removes something, so a language installed via the web ui
+    is already enabled; if you place a file manually it will be picked up after wuDict is restarted.
 
 ### LEMMA_URL
 
-The catalogue `wudict lemmas` installs languages from.
+By default wuDict installs lemmatization languages from https://github.com/wuweidict/lemmas.
 
 ??? info "Values, default, and using your own"
 
@@ -391,33 +383,28 @@ The catalogue `wudict lemmas` installs languages from.
     | Flag | `-url` on the `lemmas` commands |
     | Used by | `wudict lemmas`, and the 🔤 Lemmatization page |
     | Values | a URL, or the path of a `manifest.json` on disk |
-    | Default | the published WuWeiDict lemma catalogue |
+    | Default | the published wuDict lemma catalogue |
 
-    You will not normally set this. It exists for two cases: an installation
-    with no route to the internet, and a mirror of your own.
+    The `-url` parameter can be used to override the lemmas source and can point
+    either to a custom URL e.g. https://example.com/manifest.json
+    OR to a local folder such as `/path/to/lemmas/manifest.json`.
 
-    For the first, copy the published folder — the `.tsv.gz` files and the
-    `manifest.json` beside them — onto the machine and point at it:
+    So, for example, if you cloned the lemmas site locally you can use:
 
-    ``` sh
+    ``` sh title="using an offline lemmas repository"
     wudict lemmas download -url /media/usb/lemmas/manifest.json ru pl
     ```
-
-    Everything else is unchanged: each file is still checked against the
-    SHA-256 digest the manifest publishes, which is what makes the source
-    interchangeable. WuWeiDict pins no host and never takes a file name from
-    the catalogue — a language installs as `<code>.tsv.gz` and nowhere else.
 
     The lemma data itself is published under the
     [ODbL](https://opendatacommons.org/licenses/odbl/1-0/) and derived from
     [michmech/lemmatization-lists](https://github.com/michmech/lemmatization-lists);
-    an `ATTRIBUTION.txt` sits beside the files.
+    see `ATTRIBUTION.txt` in the default lemmas site.
 
 ## Access
 
 ### BROWSER_EXTENSIONS
 
-Which browser extensions may look words up in this server.
+Configures browser extensions that can access the wuDict server.
 
 | | |
 | --- | --- |
@@ -428,9 +415,8 @@ Which browser extensions may look words up in this server.
 BROWSER_EXTENSIONS = ["chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
 ```
 
-An extension reaches three read-only endpoints: `/api/dicts`, `/api/search` and
-`/res/`. It never reaches your settings, your preferences or your library. Web
-pages reach none of them.
+An extension can access three read-only endpoints: `/api/dicts`, `/api/search` and
+`/res/`. It cannot access wuDicts settings, and wuDict internal endpoints.
 
 Firefox generates a new `moz-extension://` origin per installation, so there is
 no stable origin to list there.
@@ -439,24 +425,18 @@ no stable origin to list there.
 
 Which **web pages** may look words up in this server with JavaScript.
 
-| | |
-| --- | --- |
-| Flag | none, environment and file only |
-| Default | blank: no web page may |
+| |                                                  |
+| --- |--------------------------------------------------|
+| Flag | none, environment and file only                  |
+| Default | blank: CORS restrictions enforced all any domain |
 
-``` toml title="two pages of your own"
+``` toml title="whitelisting CORS domains"
 WEB_ORIGINS = ["http://localhost:3000", "https://notes.example.com"]
 ```
 
-The defaults of the two keys are opposite, on purpose. An extension is
-something you chose to install, so `BROWSER_EXTENSIONS` starts open and you
-narrow it. A web page is whatever you happened to open, so `WEB_ORIGINS` starts
-closed and you widen it, one origin at a time.
-
-An allowed page reaches the same three read-only endpoints an extension does -
-`/api/dicts`, `/api/search` and `/res/` - and nothing else. It cannot read your
-settings, your preferences or your library, and it cannot prepare, remove or
-rescan a dictionary.
+Whitelisted domain only read only operations are allowed -
+`/api/dicts`, `/api/search` and `/res/`. No access to
+settings, library internals, or operations that modify state.
 
 #### Writing an origin
 
@@ -474,34 +454,21 @@ allow `https://localhost:3000`. The default port may be written or left out -
 `https://x.example` and `https://x.example:443` mean the same thing, because
 that is what the browser means by them.
 
-`null` is never allowed. It is what a `file://` page and a sandboxed iframe
-send, and every one of them sends the same string, so it names nobody.
-
 #### The wildcard
 
 ``` toml
 WEB_ORIGINS = "*"
 ```
 
-Every site you visit may then read every dictionary you have, for as long as
-WuWeiDict is running. That is useful while you are developing a page and know
-what is open in the browser. It is a standing invitation otherwise.
+With `*` every site you visit may read every dictionary you have, when wuDict serveris running. That is useful while you are developing a page and know
+what is open in the browser. Only use it if know what you are doing.
 
-The server prints the setting on every start, so an allowlist you left behind
-is visible rather than forgotten:
+The server prints the setting on every start:
 
 ``` text
   address       http://127.0.0.1:6888
   web origins   any website may read your dictionaries (WEB_ORIGINS = "*")
 ```
-
-#### Chrome and private addresses
-
-`127.0.0.1` is a private address. Chrome sends a preflight before any request to
-one from a page that is not itself local, and drops the request unless the
-answer opts in. WuWeiDict answers that preflight for origins you allowed, so
-this needs nothing from you - but it is why an allowed page may still be blocked
-by a Chrome policy or an extension that suppresses local network access.
 
 #### What this does not cover
 
@@ -521,8 +488,7 @@ The config file to read, instead of searching the four locations.
 | Flag | `--config <path>` |
 | Default | unset |
 
-This one exists as a flag and an environment variable only. A config file
-cannot name itself.
+This one exists as a flag and an environment variable only.
 
 ## A complete example
 

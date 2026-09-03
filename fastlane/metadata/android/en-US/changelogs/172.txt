@@ -1,0 +1,8 @@
+v3.6 - Major Update bringing new features and fixes
+
+- ZIM dictionaries support - get yours at https://library.kiwix.org/
+- morphology: searching 'understood' shows results for 'understand', built-in for English
+- morophology for other languages: click ☰ > ⚙️ > click *Lemmatization*
+- DSL attachments and video support
+- wudict desktop only: download morphology languages from console: `wudict lemmas list` then e.g. `wudict lemmas download es fr de it`
+- wudict desktop only: `wudict dump -o somedir /path/dict.mdx` to export to a pyglossary-compatible .CSV
