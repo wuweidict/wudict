@@ -36,7 +36,7 @@ Questions, not symptoms. For a symptom, see
     ```
 
     Windows and Android put the same tree elsewhere. See
-    [every file WuWeiDict owns](../reference/configuration.md#every-file-wuweidict-owns).
+    [every file WuWeiDict owns](../reference/configuration.md#every-file-wudict-owns).
 
 ??? question "Can I move my library to another machine?"
 
