@@ -23,8 +23,8 @@
 | `<name>.dsl.files.zip` | GoldenDict's resource archive | `[V]` first source in `MediaSources` |
 | `<name>.dsl.files/` | resource folder (also `<name>.files/` for a `.dz`) | `[V]` second source, walked and indexed |
 | beside the `.dsl` | loose resources | `[V]` last source, `NewDirExact` — exact paths only, never walked or listed (the folder is not the dictionary's own; other dictionaries live there) |
-| `<name>.ann` | annotation/about text, `#LANGUAGE`-partitioned | `[V]` **ignored** |
-| `<name>_abrv.dsl` | abbreviations shown on hover | `[V]` **ignored** |
+| `<name>.ann` | annotation/about text, `#LANGUAGE`-partitioned | `[V]` **read live** for the About surface (§1.2); never ingested |
+| `<name>_abrv.dsl` | abbreviations shown on hover | `[V]` **absorbed** into the parent at ingest (§1.1) and hidden from discovery |
 | `<name>.bmp` | dictionary icon | `[V]` **ignored** (`#ICON_FILE` likewise parsed into the header map and unused) |
 | `<name>.lsd` | Lingvo's compiled binary form | `[V]` not supported, not planned |
 
@@ -34,6 +34,69 @@ media from the recorded source path without reopening/reparsing the `.dsl`. `[V]
 
 A `.dsl.dz` names its resources after either the compressed file or the `.dsl`
 inside it; both spellings exist in the wild and both are tried. `[V]`
+
+### 1.1 The `_abrv` companion `[V]`
+
+In Lingvo a `<name>_abrv.dsl` is not a dictionary: it is the glossary that
+supplies the expansion shown on hover over a `[p]…[/p]` label ("plural" over
+`pl`). wudict follows Lingvo and never lists it.
+
+- **Pairing** — `dict.AbbrevCompanion` / `dict.IsAbbrevCompanion`
+  (`internal/dict/companions.go`), name-based, case-insensitive, both `.dsl`
+  and `.dsl.dz` spellings. **Orphan rule:** a `*_abrv.dsl` is a companion only
+  when a sibling `<stem>.dsl{,.dz}` exists, so a genuine standalone
+  abbreviation dictionary keeps working. An explicit path
+  (`wudict lookup x_abrv.dsl`) always opens, like an `.mdd`.
+- **Hiding** — `dict.Discover` skips companions, and the server's
+  `libraryPaths` skips a library folder whose recorded source is one, which
+  retires folders prepared by an older build (the folders stay on disk; removal
+  is the user's call through the panel).
+- **Absorbing** — `internal/format/dsl/abbrev.go` loads the companion with the
+  same reader (headword → plain-text expansion, exact key plus a case-folded
+  fallback) and `closeLabel` bakes a hit into the article as
+  `<abbr class="wudict-abbr" title="…">`. Baking at ingest is what makes the
+  tooltip free everywhere: shadow DOM, sandboxed iframe, the Android WebView,
+  `-format clean` (both the element and `title=` survive) and `wudict dump`,
+  with no client code. A miss emits exactly the pre-existing bytes.
+- **Bounds** — companion over 8 MiB ignored; 20 000 keys; 200 runes per
+  expansion; self-referential and empty entries dropped. A malformed companion
+  is a `-v` note, never an ingest failure.
+- **Staleness** — the parent records `abbrev_path`/`_size`/`_mtime`/`_count` in
+  `meta` (via the reader's optional `ExtraMeta`), and `store.AbbrevChanged`
+  compares them, treating present↔absent as changed. The server re-indexes on a
+  mismatch through the background index lane, one dictionary at a time.
+
+### 1.2 The `.ann` annotation `[V]`
+
+A `<name>.ann` beside the dictionary is its editorial blurb — publisher,
+edition, copyright, often in several languages at once. It is *display text*:
+it is part of no article, so unlike the `_abrv` companion (§1.1) it is **never
+ingested, never baked and never a staleness input**. It is read live whenever
+someone asks for it, which costs nothing until they do.
+
+- **Path** — chop `.dsl` / `.dsl.dz`, append `.ann`; `.ANN` is tried too, for a
+  Windows-authored set on a case-sensitive filesystem. `internal/format/dsl/ann.go`,
+  registered as a `dict.RegisterAbout("dsl", …)` provider — a path-only,
+  per-format registry (`internal/dict/about.go`) modelled on `resource.Register`.
+  An `_abrv.ann` is never read: the companion is not a dictionary, so nothing
+  asks it for an About.
+- **Encoding** — `decodedScanner` + `detectEncoding`, shared with the
+  dictionary reader (§2). Every `.ann` in the reference corpus is UTF-16LE with
+  a BOM; CRLF is stripped. Gzip is sniffed from the magic bytes, not the name.
+- **`#LANGUAGE` sections — all of them, in file order.** When line 1 starts with
+  `#LANGUAGE`, each such line opens a section whose quoted name becomes a
+  heading; anywhere else the line is prose, which is how goldendict reads it
+  too. Unlike goldendict, **no section is selected by system locale and none is
+  dropped**: picking one hides the Russian annotation of a Ru-Ru dictionary from
+  a reader running an English UI.
+- **Bounds** — 256 KiB cap, truncated with `…` rather than refused; a missing,
+  unreadable, empty or heading-only file is simply "no annotation", never an
+  error.
+- **Where it surfaces** — `GET /api/about?dict=<id>` (same-origin only; not in
+  the D69 CORS allowlist, because the response names a file on the user's
+  disk), the panel card's **About** disclosure, and `wudict info`. The
+  `#INDEX_LANGUAGE → #CONTENTS_LANGUAGE` string the header synthesises
+  (`reader.go`) is the **fallback**, shown when a dictionary ships no `.ann`.
 
 ## 2. Encodings
 
@@ -75,7 +138,7 @@ non-`#`, non-blank line starts the entries. `[D]`/`[V]`
 | `#SOURCE_CODE_PAGE` | ANSI code page | `[V]` parsed, **not honoured** (§2) |
 | `#INCLUDE "path"` | splice another `.dsl` at compile time; `\\` doubled in the path; absolute or relative | `[D]` `[V]` **not supported** — the directive line is swallowed as a header key and its file is never read, so those entries are silently missing |
 | `#ICON_FILE` | icon path (undocumented by ABBYY) | `[V]` parsed, unused |
-| `#LANGUAGE` | only in `.ann` files, partitions the annotation by UI language | `[D]` n/a — `.ann` is not read |
+| `#LANGUAGE` | only in `.ann` files, partitions the annotation by UI language | `[V]` every section is kept and shown, none selected by locale (§1.2) |
 
 ## 4. Entry-block grammar
 
@@ -421,8 +484,6 @@ Open, **not** fixed here — each with what correct behaviour would be:
 | `[br]` | emit `<br/>`; one `case tag == "br"` in `processTag`, no close tag. `[V]` gap |
 | `^` command | invert the case of the next character; matters mostly as `^~` (mirrored headword at the start of a sentence). Needs a rune-aware branch in `run`, not a byte one. `[V]` gap |
 | `#INCLUDE` | read the referenced `.dsl` (relative to the including file, `\\` unescaped, `\` → `/`) and continue the block stream through it; guard against cycles and absolute Windows paths. Entries are currently missing with no diagnostic. `[V]` gap |
-| `_abrv.dsl` | a companion dictionary of abbreviations Lingvo shows on hover; would want its own store and a `title=`/tooltip pass. `[V]` gap |
-| `.ann` | annotation text, partitioned by `#LANGUAGE` sections; belongs in `Meta.Description`/an about panel. `[V]` gap |
 | `#SOURCE_CODE_PAGE` | select a `charmap` decoder for BOM-less ANSI files (§2). `[V]` gap |
 | `[lang id=…]` | could become `<span lang="…">` for hyphenation/voice selection; attributes are currently dropped. `[V]` gap |
 | `[trn1]` | behaves as an unwrapped unknown tag; harmless today, but it should be listed with the other search-processing wrappers so the intent is explicit. `[V]` gap |

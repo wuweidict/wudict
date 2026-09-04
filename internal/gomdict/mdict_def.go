@@ -59,6 +59,13 @@ type MdictBase struct {
 	blkMu    sync.Mutex
 	blkCache map[int64][]byte // record-block start offset -> decompressed block
 	blkOrder []int64          // FIFO eviction order
+
+	// v3 record-block table. v1/v2 get theirs from readRecordBlockInfo, which
+	// the format hands them; v3 has no such section to read, so the table is
+	// derived by walking the block chain once (recordBlockTableV3) and then
+	// binary-searched. nil until built.
+	v3RecMu     sync.Mutex
+	v3RecBlocks []v3RecordBlock
 }
 
 /********************************

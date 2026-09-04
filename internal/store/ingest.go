@@ -103,6 +103,17 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 		return rep, err
 	}
 	defer db.Close()
+	// One connection, deliberately. An ingest is a single writer, so a pool
+	// buys nothing - and the scratch tables below are TEMP tables, which live
+	// on the connection that made them. A second connection would not see them.
+	db.SetMaxOpenConns(1)
+	// TEMP tables belong in the temp FILE, not in RAM: they exist precisely to
+	// keep a 2.9M-headword ingest off the heap, and temp_store=MEMORY would put
+	// them right back on it. SQLite's default is already FILE on every build we
+	// ship; saying so makes it independent of how the driver was compiled.
+	if _, err = db.Exec("PRAGMA temp_store = FILE"); err != nil {
+		return rep, err
+	}
 
 	if _, err = db.Exec(fmt.Sprintf(`
 		PRAGMA user_version = %d;
@@ -151,11 +162,32 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 		return rep, err
 	}
 
-	type pendingLink struct{ w, target string }
-	var links []pendingLink
-	idByWord := map[string]int64{} // headword -> first entry id
-	idByFold := map[string]int64{} // lowercased headword -> first entry id
-	var id, subEntries int64
+	// Redirect resolution, on disk rather than on the heap.
+	//
+	// This used to be two Go maps of EVERY headword (raw and lowercased) plus a
+	// slice of every pending link, all held until the scan finished. On a
+	// 2.9M-entry dictionary that measured 805 MB of live heap - on a phone with
+	// 52 MB free, which is a kill by the low-memory killer, not a slow ingest.
+	//
+	// Both are scratch tables now. wref is (headword, folded headword, id) per
+	// entry; plink is one row per unresolved redirect. TEMP means SQLite keeps
+	// them in its own temp file and discards them when the connection closes,
+	// so nothing here reaches the text.db that ships.
+	if _, err = tx.Exec(`
+		CREATE TEMP TABLE wref(w TEXT NOT NULL, lw TEXT NOT NULL, id INTEGER NOT NULL);
+		CREATE TEMP TABLE plink(w TEXT NOT NULL, target TEXT NOT NULL);
+	`); err != nil {
+		return rep, err
+	}
+	insWref, err := tx.Prepare("INSERT INTO wref(w, lw, id) VALUES(?, ?, ?)")
+	if err != nil {
+		return rep, err
+	}
+	insLink, err := tx.Prepare("INSERT INTO plink(w, target) VALUES(?, ?)")
+	if err != nil {
+		return rep, err
+	}
+	var id, subEntries, linkCount int64
 	total := srcMeta.EntryCount
 
 	for {
@@ -174,7 +206,10 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 			continue
 		}
 		if e.LinkTo != "" {
-			links = append(links, pendingLink{w: hw, target: e.LinkTo})
+			if _, err = insLink.Exec(hw, e.LinkTo); err != nil {
+				return rep, err
+			}
+			linkCount++
 			continue
 		}
 		body, err2 := NormalizeBody(e)
@@ -202,12 +237,8 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 		if isSubEntry(hw) {
 			subEntries++
 		}
-		if _, ok := idByWord[hw]; !ok {
-			idByWord[hw] = id
-		}
-		lw := strings.ToLower(hw)
-		if _, ok := idByFold[lw]; !ok {
-			idByFold[lw] = id
+		if _, err = insWref.Exec(hw, strings.ToLower(hw), id); err != nil {
+			return rep, err
 		}
 		for _, extra := range e.Headwords[1:] {
 			extra = strings.TrimSpace(extra)
@@ -218,21 +249,34 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 			}
 		}
 		if progress != nil && id%batchSize == 0 {
-			progress(int(id), total)
+			progress(clampDone(int(id), total), total)
 		}
 	}
 
 	unresolved := 0
-	for _, l := range links {
-		target, ok := idByWord[l.target]
-		if !ok {
-			target, ok = idByFold[strings.ToLower(l.target)]
-		}
-		if !ok {
-			unresolved++
-			continue
-		}
-		if _, err = insAlias.Exec(l.w, target); err != nil {
+	// records whose row has landed, in the unit `total` counts (see below).
+	donerec := clampDone(int(id), total)
+	if linkCount > 0 {
+		// A redirect's row is written HERE, not in the loop above, and on a
+		// dictionary that is mostly inflections that is most of the work: this
+		// one is 69,002 articles against 2,812,317 @@@LINKs, so the scan tops
+		// out at 2% of EntryCount and this pass carries the other 98%. Reported
+		// in the same unit as the scan - one record, whenever its row lands -
+		// so the count is monotone and, when the source header told the truth,
+		// ends exactly at total.
+		//
+		// It is `total` that cannot be trusted: it is the source's own
+		// EntryCount, and a hand-edited DSL #ENTRY_COUNT or a truncated MDX
+		// will disagree with the records actually read. Clamped rather than
+		// believed - a bar that reads 103% is a bug report about arithmetic,
+		// while one that sits at 100% while the last records land is what the
+		// client already renders as "finishing…".
+		if unresolved, err = resolveLinks(tx, insAlias, func(done int) {
+			donerec = clampDone(int(id)+done, total)
+			if progress != nil {
+				progress(donerec, total)
+			}
+		}); err != nil {
 			return rep, err
 		}
 	}
@@ -262,9 +306,23 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 	if srcMeta.IndexLang != "" {
 		metaKV["index_lang"] = srcMeta.IndexLang
 	}
+	if srcMeta.ContentsLang != "" {
+		metaKV["contents_lang"] = srcMeta.ContentsLang
+	}
 	if st, err2 := os.Stat(srcMeta.Path); err2 == nil {
 		metaKV["source_size"] = fmt.Sprint(st.Size())
 		metaKV["source_mtime"] = st.ModTime().UTC().Format(time.RFC3339)
+	}
+	// A format may have absorbed an auxiliary file of its own - DSL's
+	// abbreviation glossary - and needs to record what it absorbed so a later
+	// run can tell this text.db from one built without it. Never allowed to
+	// overwrite a key this ingester owns.
+	if ex, ok := r.(interface{ ExtraMeta() map[string]string }); ok {
+		for k, v := range ex.ExtraMeta() {
+			if _, taken := metaKV[k]; k != "" && !taken {
+				metaKV[k] = v
+			}
+		}
 	}
 	for k, v := range metaKV {
 		if _, err = tx.Exec("INSERT INTO meta(key, value) VALUES(?, ?)", k, v); err != nil {
@@ -296,7 +354,9 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 		return rep, err
 	}
 	if progress != nil {
-		progress(int(id), total)
+		// donerec, not id: id counts articles, and on a redirect-heavy
+		// dictionary that would end the run by snapping the bar back to 2%.
+		progress(donerec, total)
 	}
 	rep = Report{Entries: int(id), UnresolvedLinks: unresolved}
 	syncFile(tmp)
@@ -309,6 +369,132 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 		_ = WriteInfo(filepath.Dir(dbPath))
 	}
 	return rep, nil
+}
+
+// linkPage bounds how many pending redirects are held in memory at once while
+// they are resolved. The rows are read in pages rather than streamed because
+// the ingest runs on a single connection: an open cursor would block the
+// per-link lookups issued against the same connection.
+const linkPage = 10000
+
+// resolveLinks turns every pending redirect into an alias row and reports how
+// many had no target.
+//
+// It reproduces the two-map lookup it replaced EXACTLY: the old code tried the
+// raw headword first and fell back to the lowercased one, and in both cases
+// took the lowest entry id. One folded lookup covers both - a raw match implies
+// a folded match - so the candidates come back in id order and the first row
+// whose headword matches the target verbatim wins, else the first row at all.
+//
+// Folding is Go's strings.ToLower on both sides, not SQL. SQLite's NOCASE and
+// lower() are ASCII-only, so "ÁBACO" would stop resolving to "ábaco" the moment
+// this moved into the query - a silent regression on exactly the accented
+// languages this dictionary is written in.
+// clampDone keeps a progress numerator inside the denominator the source
+// header supplied. A total of 0 means "unknown" throughout this file and is
+// reported as a bare count by the client, so it is left alone.
+func clampDone(done, total int) int {
+	if total > 0 && done > total {
+		return total
+	}
+	return done
+}
+
+func resolveLinks(tx *sql.Tx, insAlias *sql.Stmt, done func(int)) (int, error) {
+	if _, err := tx.Exec("CREATE INDEX temp.ix_wref_lw ON wref(lw)"); err != nil {
+		return 0, err
+	}
+	sel, err := tx.Prepare("SELECT w, id FROM wref WHERE lw = ? ORDER BY id")
+	if err != nil {
+		return 0, err
+	}
+	defer sel.Close()
+	page, err := tx.Prepare("SELECT rowid, w, target FROM plink WHERE rowid > ? ORDER BY rowid LIMIT ?")
+	if err != nil {
+		return 0, err
+	}
+	defer page.Close()
+
+	type pending struct {
+		w, target string
+	}
+	unresolved := 0
+	processed := 0
+	var after int64
+	buf := make([]pending, 0, linkPage)
+	for {
+		rows, err := page.Query(after, linkPage)
+		if err != nil {
+			return unresolved, err
+		}
+		buf = buf[:0]
+		for rows.Next() {
+			var rowid int64
+			var p pending
+			if err := rows.Scan(&rowid, &p.w, &p.target); err != nil {
+				rows.Close()
+				return unresolved, err
+			}
+			after = rowid
+			buf = append(buf, p)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return unresolved, err
+		}
+		rows.Close()
+		if len(buf) == 0 {
+			return unresolved, nil
+		}
+		for _, l := range buf {
+			id, ok, err := lookupTarget(sel, l.target)
+			if err != nil {
+				return unresolved, err
+			}
+			if !ok {
+				unresolved++
+				continue
+			}
+			if _, err := insAlias.Exec(l.w, id); err != nil {
+				return unresolved, err
+			}
+		}
+		// Every link in the page is processed whether or not it resolved, so
+		// the count reaches linkCount exactly and the caller's total is met.
+		processed += len(buf)
+		if done != nil {
+			done(processed)
+		}
+	}
+}
+
+// lookupTarget finds the entry a redirect points at: the lowest-id entry whose
+// headword equals target, else the lowest-id entry whose folded headword does.
+func lookupTarget(sel *sql.Stmt, target string) (int64, bool, error) {
+	rows, err := sel.Query(strings.ToLower(target))
+	if err != nil {
+		return 0, false, err
+	}
+	defer rows.Close()
+	var fallback int64
+	var haveFallback bool
+	for rows.Next() {
+		var w string
+		var id int64
+		if err := rows.Scan(&w, &id); err != nil {
+			return 0, false, err
+		}
+		if w == target {
+			return id, true, nil
+		}
+		if !haveFallback {
+			fallback, haveFallback = id, true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, err
+	}
+	return fallback, haveFallback, nil
 }
 
 // isSubEntry reports an MDict-style expandable section stored as a headword

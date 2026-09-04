@@ -43,9 +43,11 @@ That file is written by the app, not by you.
 | State (order, switches) | `~/.wudict/state.json` | `%USERPROFILE%\.wudict\state.json` | as above |
 | Log, when there is no console | `~/Library/Logs/wudict.log` on macOS, `~/.wudict/wudict.log` on Linux | `%LOCALAPPDATA%\wudict\wudict.log` | Android's own log |
 
-Your dictionary files are not in this list. wuDict reads them where they
-are and never writes to them. [`DB_DIR`](#db_dir) moves the library; the rest
-of the table follows the config file.
+Your dictionary files are not in this list. wuDict reads them where they are
+and leaves them alone until you ask it not to — the only thing that touches
+them is **Remove**, which deletes what it says it deletes.
+[`DB_DIR`](#db_dir) moves the library; the rest of the table follows the config
+file.
 
 ### Portable mode
 
@@ -103,7 +105,9 @@ are the same.
 
 `127.0.0.1` is the loopback address, reachable from your machine only. Set
 `0.0.0.0` to accept connections from your network. Only do that on a network
-you trust; wuDict has no login.
+you trust; wuDict has no login. Deleting a dictionary is the one thing those
+visitors cannot do — [`ALLOW_REMOTE_DELETE`](#allow_remote_delete) is off
+unless you turn it on.
 
 ### NO_BROWSER
 
@@ -139,6 +143,30 @@ Also list prepared dictionaries whose original files are gone.
 | Default | off |
 
 The setup page sets this when you click **Use these dictionaries**.
+
+### ALLOW_REMOTE_DELETE
+
+Whether a browser on **another machine** may delete a dictionary.
+
+| |                                |
+| --- |--------------------------------|
+| Flag | `--allow-remote-delete <0\|1>` |
+| Default | off                            |
+
+Deleting from the machine running wuDict is always allowed — it is your
+library and your disk, and **🗑 Remove…** in the ☰ panel is how you do it.
+This setting is only about the other case: a browser somewhere else on the
+network, which has proved nothing about who is holding it.
+
+With [`SERVER_IP`](#server_ip-and-server_port) set to `0.0.0.0` anyone who can
+reach the port can use the page. Set `ALLOW_REMOTE_DELETE = "1"` if you
+want to allow LAN users to delete dictionaries.
+
+!!! warning "There is no undo"
+
+    Removal is irreversible! The files do not go to the Trash or the Recycle Bin, and
+    nothing in wuDict brings them back. `wudict rm` without `-f` prints
+    exactly what would go, which is the way to check before committing.
 
 ### VERBOSE
 
@@ -500,5 +528,6 @@ SERVER_IP   = "127.0.0.1"
 SERVER_PORT = "9000"
 NO_BROWSER  = "1"
 AUTO_INDEX  = "on"
+ALLOW_REMOTE_DELETE = "0"
 WEB_ORIGINS = ["http://localhost:3000"]
 ```

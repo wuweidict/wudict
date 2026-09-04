@@ -63,6 +63,39 @@ wudict ingest ~/Dicts
 `ingest` skips what is already prepared. Add `-headwords` for the small index
 only, `-contains` for the substring index, and `-full` to pack media as well.
 
+## Removing a dictionary
+
+Open the ☰ panel and find the dictionary. Click the **file row** — the small
+line naming its files, just above *About this dictionary* — to expand it. It
+lists every path that belongs to this dictionary, and **🗑 Remove…** sits at
+the foot of that list, because the list is exactly what removal deletes.
+
+Clicking it turns the row into a confirmation that names what each choice
+takes:
+
+| Choice | What goes |
+| --- | --- |
+| **💥 delete everything** | the prepared index *and* the dictionary files |
+| **index only** | the library folder; the dictionary files stay and can be prepared again |
+| **dictionary files only** | the source files, once the prepared copy can stand alone (media packed) |
+
+Deleting everything is the default on purpose. With
+[`AUTO_INDEX`](../reference/configuration.md#auto_index) on, deleting only the
+index of a dictionary whose file is still in a scanned folder frees the space
+until the next search rebuilds it.
+
+**↩ cancel** backs out and puts the file list back as it was.
+
+!!! danger "There is no undo"
+
+    Files are unlinked, not moved to the Trash or the Recycle Bin. wuDict
+    cannot bring them back, and neither can the panel.
+
+This is available on every platform. Deleting from another machine over the
+network is a separate switch —
+[`ALLOW_REMOTE_DELETE`](../reference/configuration.md#allow_remote_delete),
+OFF by default.
+
 ## Removing FTS and contains indexes
 
 Turn an index off with the same ☰ panel switch that turned it on.

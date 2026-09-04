@@ -16,24 +16,29 @@ import (
 	"github.com/wuweidict/wudict/internal/store"
 )
 
-// Removing a dictionary from the running app (D63).
+// Removing a dictionary from the running app (D63, amended).
 //
-// D7 answered "how does a user delete a dictionary?" with *the file manager
-// does that*, and gave every path a Reveal control to get there in one click.
-// That is a delegation, and it has a precondition: another custodian exists
-// and the user can reach it. Android falsifies the precondition - the library
-// and (in the Play flavour) the dictionaries themselves live in
-// /sdcard/Android/data/<pkg>/files, which DocumentsUI filters out of the
-// picker, which every third-party file manager is locked out of since Android
-// 11, and which ACTION_OPEN_DOCUMENT_TREE refuses to grant. The only
-// operations Android defines on those bytes are *uninstall the app* and *clear
-// storage*, both of which take the whole library and the config with them.
+// The first cut offered removal only where the app could not hand the user to
+// a file manager instead - `!(isLoopback && revealPossible())`, the exact
+// complement of Reveal, which in practice meant Android. That rule was wrong
+// in both directions. It withheld the operation from the desktop user sitting
+// at the keyboard, who owns these files and whose alternative was copying a
+// path into Finder; and, because "not loopback" is the branch where Reveal is
+// impossible, it *granted* the operation to every remote browser on the LAN -
+// the one caller acting on someone else's disk, and the one this endpoint
+// should be most careful with.
 //
-// So this is not "a delete button for Android". It is the missing primitive:
-// wudict had no removal at any layer - not in the API, not in the CLI, only
-// `clean` for orphans - and the desktop hid that behind Finder. The endpoint
-// is offered exactly where the handoff is not (see removalOffered), the CLI
-// has it everywhere, and the desktop UI is unchanged.
+// The rule is now the same one every other machine-acting control uses
+// (reveal, power): loopback is the trusted caller. This is a personal app
+// managing a library its user owns; managing includes throwing things away,
+// and doing it from the page you are already looking at beats copying a path
+// into a file manager. A remote browser is a different question, so it gets a
+// different answer: ALLOW_REMOTE_DELETE, off by default because that caller
+// has authenticated as nobody, on in one line for a server whose LAN its owner
+// trusts with an irreversible operation.
+//
+// The primitive is unchanged and lives at every layer: DELETE /api/library,
+// `wudict rm`, and store.RemovePrepared as the single file-deleting surface.
 //
 // Two objects, never conflated:
 //
@@ -196,9 +201,9 @@ func (e *entry) closeNow() {
 // Both default to 1: "remove this dictionary". See Remove for why that is the
 // default rather than the cautious-looking prepared-only.
 func (s *Server) handleRemoveLibrary(w http.ResponseWriter, r *http.Request) {
-	if !removalOffered(r) {
-		httpErr(w, 403, "this machine has a file manager: remove the folder there instead (%s)",
-			revealLabel())
+	if !s.removalOffered(r) {
+		httpErr(w, 403, "deleting from another machine is off: set ALLOW_REMOTE_DELETE = \"1\" "+
+			"in wudict.toml, or do it on the machine running wudict")
 		return
 	}
 	q := r.URL.Query()
@@ -223,11 +228,11 @@ func (s *Server) handleRemoveLibrary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, rep)
 }
 
-// removalOffered is the exact complement of the Reveal control: the app offers
-// to delete a dictionary precisely when it cannot hand the user to a file
-// manager that would. On a desktop at the keyboard that is never - D7 stands
-// untouched - and on Android, where no file manager may open the app's own
-// external files dir, it is always.
-func removalOffered(r *http.Request) bool {
-	return !(isLoopback(r) && revealPossible())
+// removalOffered says whether this caller may delete. Loopback always may: the
+// user at the keyboard owns the files, and the platform they are on is not the
+// question. Everyone else is a browser on another machine, and needs to have
+// been invited - ALLOW_REMOTE_DELETE, which defaults to OFF (see config) and is
+// what a server bound to 0.0.0.0 turns off.
+func (s *Server) removalOffered(r *http.Request) bool {
+	return isLoopback(r) || s.AllowRemoteDelete
 }

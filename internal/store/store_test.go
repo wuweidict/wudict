@@ -1208,3 +1208,59 @@ func TestForeignMediaRejectedOnce(t *testing.T) {
 		t.Errorf("rejection not remembered: media=%v tried=%v", s.media != nil, s.mediaTried)
 	}
 }
+
+// A redirect-heavy dictionary is the case the counter used to get wrong: its
+// rows land in the link-resolution pass, not in the scan, so a numerator that
+// counted only articles stopped at a few percent and then jumped to done. The
+// count must be monotone and must finish at the total the denominator promised.
+func TestIngestProgressCoversRedirects(t *testing.T) {
+	const links = 3 * linkPage // several pages, so the paging itself reports
+	entries := []dict.Entry{h("uno", "<p>one</p>"), h("dos", "<p>two</p>")}
+	for i := 0; i < links; i++ {
+		entries = append(entries, dict.Entry{
+			Headwords: []string{fmt.Sprintf("alias-%d", i)},
+			LinkTo:    "uno",
+		})
+	}
+	// One redirect that resolves to nothing: it is still a record the scan
+	// counted, so it must still be counted as processed.
+	entries = append(entries, dict.Entry{Headwords: []string{"huérfano"}, LinkTo: "missing"})
+
+	total := len(entries)
+	r := &fakeReader{
+		meta:    dict.Meta{Name: "Redirects", Format: "mdx", Path: "/nonexistent/r.mdx", EntryCount: total},
+		entries: entries,
+	}
+
+	var last int
+	var sawMid bool
+	rep, err := IngestPlan(r, filepath.Join(t.TempDir(), "text.db"), Plan{}, func(done, tot int) {
+		if tot != total {
+			t.Errorf("total = %d, want %d", tot, total)
+		}
+		if done < last {
+			t.Errorf("progress went backwards: %d after %d", done, last)
+		}
+		if done > tot {
+			t.Errorf("progress %d exceeds total %d", done, tot)
+		}
+		last = done
+		// Something must be reported from the middle of the link pass; before
+		// the fix the highest count seen was the 2 articles.
+		if done > 2 && done < tot {
+			sawMid = true
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Entries != 2 || rep.UnresolvedLinks != 1 {
+		t.Fatalf("report = %+v, want 2 entries / 1 unresolved", rep)
+	}
+	if !sawMid {
+		t.Error("no progress reported during link resolution")
+	}
+	if last != total {
+		t.Errorf("final progress = %d, want %d", last, total)
+	}
+}

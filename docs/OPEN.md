@@ -408,9 +408,9 @@ wrong changes rendered article text for everyone. The static table is right for
 `partOfSpeechByCode`. Strictly additive — an absent or unparseable block leaves
 today's behaviour exactly as it is.
 
-## O6 — Dictionary icons — **ON HOLD (no consumer yet)**
+## O6 — Dictionary icons — **ON HOLD (a consumer now exists; still unscheduled)**
 
-Several formats ship an icon and we read none of them. `dict.Meta` has no field
+Several formats ship an icon, and we read none of them. `dict.Meta` has no field
 for one, and nothing in the UI or the CLI would display it, so this is a
 *feature* waiting on a design, not a gap in the readers.
 
@@ -436,6 +436,17 @@ this is one field, not an architecture.
 `/setup` list? favicon of a single-dictionary view?), then add the `Meta` field
 and the one or two readers that can fill it. Capturing icons with nothing to
 show them is dead weight in the ingest path and in every `text.db`.
+
+**Update (D98).** The UI question above is now half answered: the panel card has
+an **About** disclosure (`GET /api/about`, `internal/server/about.go`) showing
+what a dictionary says about itself, and an icon belongs at the head of it. What
+still blocks the work is unchanged and is the *other* half: About is a text
+surface end to end — a provider returns text, one function normalises it, the
+client inserts a string — while an icon is bytes that need a media route, a
+cache key and an ingest-time capture. Also unresolved: DSL's own icon is a
+loose `<name>.bmp` (BMP, which browsers do not reliably render), ZIM's is
+`Illustration_48x48@1`, slob's a tag, and BGL's the block above — four different
+retrievals for one 48-pixel square. Not scheduled.
 
 ## O7 — DSL optional-part headwords are indexed as 2 variants, not 2ⁿ — **ON HOLD**
 
@@ -645,7 +656,7 @@ in `internal/server/registry.go`.
 
 ---
 
-## O9 — Auto-preparation has no size threshold — **ON HOLD**
+## O9 — Auto-preparation has no size threshold — **DONE (D99)**
 
 *Found while adding ZIM (P92), which needed an exemption from `maybeAutoIndex`
 and got one on a property (`SelfIndexed`) rather than on size. The general
@@ -671,9 +682,22 @@ The fix is one threshold: above N headwords (or an estimated text.db size),
 `maybeAutoIndex` returns and the panel's index chip (D93) becomes the only way
 in — the dictionary still works, from its own backend, exactly as a ZIM does.
 
-**Why it is parked.** It changes behaviour for dictionaries that work well today,
-and N has to be defensible against measurement rather than picked. It also
-interacts with D92 (a *demanded* index is never gated, and would stay ungated)
-and with the preview weight the entry already reports. Nothing here is urgent:
-the pathological case has an exemption, and the merely-large case is slow once
-per process, not wrong.
+**Closed by D99.** N is now `autoIndexMaxEntries` = 1,000,000 headwords, and it
+gates `maybeAutoIndex` **only** — a demanded index stays ungated, D92 unchanged.
+The number is defensible rather than picked: the dictionary that forced the
+question carries 2.9 M keys, and the corpus that had to keep working
+automatically tops out well under a million.
+
+The second half of the fix is the chip (D93). Its *absent* state now carries an
+estimate of what preparing would cost, calibrated at render time against the
+user's own already-indexed dictionaries rather than a constant — the measured
+spread is 614 B/entry median against 1041 B/entry in aggregate over the large
+ones, which is too wide for one number to stand in for. The estimate is worded
+and styled so it can never read as a measured size: `est.`, a `~`, a tooltip
+that says so in words, and neither the `.on` nor the `.locked` styling that the
+real on-disk size chip has.
+
+The compression-ratio half of the problem statement is **not** addressed here
+and stays with ZIM's property-based exemption: an entry count is a cheap,
+already-populated number, while a ratio is not knowable before the ingest that
+the gate exists to avoid.

@@ -416,9 +416,13 @@ paths:
         Removes the prepared folder, the original files, or both. Both default
         to on, which is "remove this dictionary".
 
-        Offered only where the app cannot hand you to a file manager instead -
-        in practice, Android. A desktop gets a 403 and the name of its own
-        reveal command, because deleting files is the file manager's job.
+        **Irreversible.** Files are unlinked, not moved to a Trash or Recycle
+        Bin, and nothing here can be undone.
+
+        From the machine running wudict this is always allowed - it is your
+        library and your disk. From a browser on another machine it follows
+        `ALLOW_REMOTE_DELETE` (default off); with that off, the remote caller
+        gets a 403 and `canDelete: false` in `GET /api/config`.
       parameters:
         - name: dict
           in: query
@@ -443,7 +447,7 @@ paths:
             # free the indexes only, keeping the original file
             curl -s -X DELETE 'http://127.0.0.1:6888/api/library?dict=oxford&source=0'
 
-            # Answers 403 on a desktop, by design: your file manager does this job.
+            # There is no dry run here - `wudict rm` is the one that previews.
       responses:
         '200':
           description: What was removed.
@@ -453,7 +457,9 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
-          description: This machine has a file manager. Remove the folder there.
+          description: >
+            Deleting from another machine is off (ALLOW_REMOTE_DELETE = "0").
+            Do it on the machine running wudict, or turn the setting on.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -747,6 +753,125 @@ paths:
           description: The body is not valid JSON.
         '500':
           description: The state file could not be written.
+
+  /api/demand:
+    post:
+      tags: [internal]
+      operationId: demand
+      x-internal: true
+      summary: Prepare this dictionary now, because the user chose it
+      description: >
+        Selecting a dictionary is a statement that it is about to be searched,
+        so its headword index is prepared at once rather than waiting for the
+        first query to discover it is missing. On a large dictionary that first
+        query would otherwise have to search the source format directly, which
+        is what the search budget is too short for.
+
+
+        The request returns as soon as the work is queued; the ingest outlives
+        it. Progress is not reported here - a client learns the dictionary is
+        ready from `/api/dicts`, where `dbSize` becomes non-zero.
+
+
+        Idempotent: repeated selection of the same dictionary neither queues a
+        second ingest nor restarts a running one, and a failed preparation is
+        retried only after a cooldown. Does nothing when `AUTO_INDEX` is off,
+        where preparation is the dictionary panel's job; the response then
+        reports `indexing: false`.
+
+
+        Same-origin only. It is not part of the client API a browser extension
+        reaches (D69): it starts work and writes to the user's library folder.
+      parameters:
+        - name: dict
+          in: query
+          required: true
+          description: Dictionary id, as returned by `/api/dicts`.
+          schema: { type: string }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s -X POST 'http://127.0.0.1:6888/api/demand?dict=<id>'
+      responses:
+        '200':
+          description: >
+            The demand was recorded. `indexing` reports whether a preparation
+            for this dictionary is now queued or running, which is false when it
+            is already prepared and when `AUTO_INDEX` is off.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [indexing]
+                properties:
+                  indexing: { type: boolean }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/about:
+    get:
+      tags: [internal]
+      operationId: about
+      x-internal: true
+      summary: What a dictionary says about itself
+      description: >
+        The dictionary's own annotation: the publisher's blurb, the edition, the
+        copyright. Composed from the live sidecar beside the source file where
+        the format ships one (Lingvo's `<stem>.ann`) and otherwise from the
+        description its header declared, then normalised server-side - plain
+        text escaped, markup reduced to prose elements - so a client renders
+        `html` as-is and needs no sanitiser of its own.
+
+
+        Same-origin only. It is not part of the client API a browser extension
+        reaches (D69): an annotation names a file on the user's disk. It is also
+        deliberately absent from `/api/dicts`, which is built without opening
+        any dictionary; this endpoint is fetched lazily, per dictionary.
+      parameters:
+        - name: dict
+          in: query
+          required: true
+          description: Dictionary id, as returned by `/api/dicts`.
+          schema: { type: string }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s 'http://127.0.0.1:6888/api/about?dict=<id>'
+      responses:
+        '200':
+          description: >
+            The composed annotation. `html` is empty when the dictionary
+            declares nothing, which is not an error - the client then shows no
+            disclosure.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, html]
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  format: { type: string }
+                  html:
+                    type: string
+                    description: Normalised, ready to insert. Empty when there is nothing to say.
+                  source:
+                    type: string
+                    description: The sidecar the text came from, absent when the header supplied it.
+                  indexLang:
+                    type: string
+                    description: ISO 639-1 code of the headword language, as the dictionary declared it.
+                  contentsLang:
+                    type: string
+                    description: ISO 639-1 code of the article language, where the format declares one (DSL).
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
 
   /api/reveal:
     get:
@@ -1107,8 +1232,9 @@ components:
         canDelete:
           type: boolean
           description: >
-            The exact complement of canReveal: removal is offered where no file
-            manager can be handed the folder instead.
+            Whether THIS caller may delete a dictionary: always true from the
+            machine running wudict, and from a remote browser only when
+            ALLOW_REMOTE_DELETE is on.
         pathAliases:
           type: array
           description: >

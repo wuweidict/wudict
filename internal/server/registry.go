@@ -301,7 +301,7 @@ func SetIndexWorkers(n int) {
 	indexLimit = make(chan struct{}, n)
 }
 
-// acquire blocks until a slot is free, honouring cancellation.
+// acquire blocks until a slot is free.
 func acquire(sem chan struct{}) { sem <- struct{}{} }
 func release(sem chan struct{}) { <-sem }
 
@@ -320,6 +320,17 @@ type entry struct {
 	dMu sync.RWMutex
 	d   dict.Dictionary
 	err error
+
+	// backing is the prepared database this entry's derived state was resolved
+	// against - the text.db that open() found, or "" for a dictionary that had
+	// none and was opened directly. Everything below (the memoized backend and
+	// error, autoTried, demanded, demandFail, abbrevTried) is a conclusion
+	// drawn from that resolution, and none of it survives the file it was drawn
+	// from: a library folder deleted from outside the app used to leave an
+	// entry serving a SQLite handle whose file was gone, and a rescan kept it
+	// because it kept the entry. Rescan now re-derives this and resets what
+	// disagrees (revalidate). dMu-guarded, like d and err.
+	backing string
 
 	lastUse atomic.Int64 // unix nanos, for LRU eviction
 	weight  atomic.Int64 // estimated bytes held by a preview backend (0 if cheap)
@@ -351,6 +362,9 @@ type entry struct {
 	// a search naming ONE dictionary is a demand, and the selector produces one
 	// of those per character typed.
 	demandFail atomic.Int64
+	// abbrevTried marks this dictionary as already considered by the
+	// abbreviation upgrade sweep, so a rescan does not re-queue it.
+	abbrevTried atomic.Bool
 }
 
 // noPackableMedia reports whether a prior full ingest found nothing to pack,
@@ -406,6 +420,31 @@ func (e *entry) maybeAutoIndex() {
 		return
 	}
 	if !e.autoTried.CompareAndSwap(false, true) {
+		return
+	}
+	// Automatic only while it is cheap (O9). Above the gate the convenience
+	// stops being one: a 2.9 M-headword dictionary measured 17 s of saturated
+	// CPU and 553 MB peak on a laptop, and it is not the program's place to
+	// spend minutes of a phone's battery and a gigabyte of its disk on a
+	// dictionary nobody has asked for yet. Checked here rather than in
+	// previewWeight's budget because that budget prices the OPEN, which has
+	// already happened by the time this runs, and prices nothing about the
+	// ingest that follows it.
+	//
+	// The gate is the background lane's alone. demandIndex - the user chose
+	// this dictionary - stays ungated (D92): size is a reason to not do this
+	// unasked, never a reason to refuse what was asked for.
+	if n := entryCountOf(e); n > autoIndexMaxEntries {
+		// A format that prepares itself at open - DSL ingests inside dsl.Open -
+		// is already past this gate by the time anyone can read the line, and
+		// telling its owner to "select the dictionary to prepare it" describes
+		// work that has happened. The gate still returns: ensureBaseIndex would
+		// no-op anyway, and a size ceiling has nothing to say about a library
+		// that already exists.
+		if _, prepared := preparedTextDB(e.Path); !prepared {
+			logx.V("auto-index %s: %d entries is over the %d automatic ceiling; "+
+				"select the dictionary to prepare it", e.Path, n, autoIndexMaxEntries)
+		}
 		return
 	}
 	go func() {
@@ -474,6 +513,11 @@ func (e *entry) demandIndex() {
 	go func() {
 		acquire(frontLimit)
 		defer release(frontLimit)
+		// Someone is waiting on this one, so it keeps every core it was
+		// started with even if the screen goes off mid-ingest (power.go
+		// HoldActiveProcs). The background lane deliberately gets no such
+		// exemption.
+		defer HoldActiveProcs()()
 		if err := e.ensureBaseIndex(nil); err != nil {
 			// Warn, not V: this is the whole reason the dictionary keeps
 			// asking to be tapped, and at V the user never sees it.
@@ -514,9 +558,12 @@ func (e *entry) open() (dict.Dictionary, error) {
 		return d, err
 	}
 	start := time.Now()
+	// Read before the open, so the recorded resolution is the one this open
+	// actually acted on rather than whatever disk looked like once it finished.
+	backing := backingDB(e.Path)
 	d, err = openUpgradedOrDirect(e.Path)
 	e.dMu.Lock()
-	e.d, e.err = d, err
+	e.d, e.err, e.backing = d, err, backing
 	e.dMu.Unlock()
 	if err != nil {
 		logx.V("open %s: FAILED: %v", e.Path, err)
@@ -713,20 +760,49 @@ type storeBacked interface{ SourcePath() string }
 // killed.
 const previewBytesPerEntry = 350
 
+// autoIndexMaxEntries is the headword count above which preparation stops
+// happening on the program's own initiative (O9). Measured against the local
+// 152-dictionary corpus: a prepared headwords-only text.db costs ~1 KB per
+// entry in aggregate, so this ceiling is about a gigabyte of disk and, at
+// previewBytesPerEntry, a third of a gigabyte resident during the scan. Only
+// two dictionaries in that corpus are above it. It is a ceiling on what is
+// automatic, not on what is possible.
+const autoIndexMaxEntries = 1_000_000
+
+// entryCountOf reads the headword count off an already-open backend. It never
+// opens one: maybeAutoIndex runs from a successful open, so the backend is
+// there, and a nil one (a test entry, an evicted backend) reports 0 - which
+// reads as "under the ceiling" and preserves the previous behaviour for
+// anything that cannot be measured.
+func entryCountOf(e *entry) int {
+	e.dMu.RLock()
+	d := e.d
+	e.dMu.RUnlock()
+	if d == nil {
+		return 0
+	}
+	return d.Meta().EntryCount
+}
+
 // evict drops this entry's open backend so its memory can be reclaimed. It
 // refuses while the dictionary is being prepared, and closes after a grace so
 // requests already reading from it finish. The next open reopens the file.
-func (e *entry) evict() int64 { return e.drop(false) }
+func (e *entry) evict() int64 { n, _ := e.drop(false); return n }
 
 // drop is evict, plus the option to close a backend that weighs nothing.
 // Weightless means "prepared": it answers from SQLite and holds no headword
 // map, so the budget has no reason to touch it - but its file descriptors and
 // page cache are still real, and under PowerRestricted they are worth giving
 // back. Returns the bytes the eviction accounting knows about, which for a
-// prepared dictionary is honestly zero.
-func (e *entry) drop(force bool) int64 {
+// prepared dictionary is honestly zero. The second result says whether a
+// backend was actually let go, which the byte count cannot: zero bytes is both
+// "closed a prepared dictionary" and "declined, an ingest holds it". Only
+// revalidate needs the difference - it must not record a new resolution for a
+// backend it failed to drop - but the distinction belongs here rather than in a
+// second, subtly different close path.
+func (e *entry) drop(force bool) (int64, bool) {
 	if !e.ingestMu.TryLock() {
-		return 0 // being prepared right now: leave it alone
+		return 0, false // being prepared right now: leave it alone
 	}
 	defer e.ingestMu.Unlock()
 	e.dMu.Lock()
@@ -734,7 +810,7 @@ func (e *entry) drop(force bool) int64 {
 	w := e.weight.Load()
 	if d == nil || (w == 0 && !force) {
 		e.dMu.Unlock()
-		return 0
+		return 0, false
 	}
 	e.d, e.err = nil, nil
 	e.weight.Store(0)
@@ -751,7 +827,7 @@ func (e *entry) drop(force bool) int64 {
 	} else {
 		logx.V("closed %s", filepath.Base(e.Path))
 	}
-	return w
+	return w, true
 }
 
 // scheduleReclaim hands freed pages back to the OS shortly after a batch of
@@ -913,6 +989,7 @@ func NewRegistry(dictDirs []string, useCached bool, opts ...Option) (*Registry, 
 		return r, err
 	}
 	r.Warm()
+	r.upgradeAbbrev()
 	r.startJanitor()
 	return r, nil
 }
@@ -934,6 +1011,7 @@ func (r *Registry) SetUseCached(on bool) error {
 		return err
 	}
 	r.Warm()
+	r.upgradeAbbrev()
 	return nil
 }
 
@@ -970,6 +1048,7 @@ func (r *Registry) SetDirs(dirs []string) error {
 		return err
 	}
 	r.Warm()
+	r.upgradeAbbrev()
 	return nil
 }
 
@@ -994,14 +1073,13 @@ func (r *Registry) Rescan() error {
 		paths = append(paths, lib...)
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	seen := map[string]bool{}
 	// Rebuilt, not appended to: an id that no longer discovers to anything -
 	// a dictionary deleted (D63) or a drive unmounted - must stop resolving.
 	// Keeping it made `get` hand out an entry that is not in the list, so a
 	// removed dictionary stayed addressable by anyone still holding its id.
 	byID := make(map[string]*entry, len(paths))
-	var entries []*entry
+	var entries, kept []*entry
 	for _, p := range paths {
 		id := pathID(p)
 		if seen[id] {
@@ -1011,9 +1089,24 @@ func (r *Registry) Rescan() error {
 		e, ok := r.byID[id] // keep the open backend across a rescan
 		if !ok {
 			e = &entry{ID: id, Path: p, reg: r}
+		} else {
+			kept = append(kept, e)
 		}
 		byID[id] = e
 		entries = append(entries, e)
+	}
+	// Entries the scan no longer finds. Dropping them from the map is what
+	// stops them resolving; it is not what closes them, and until it did they
+	// leaked - a dictionary deleted or unmounted from outside the app left its
+	// backend open, holding descriptors and, in preview mode, a headword map of
+	// hundreds of bytes per entry, with nothing left in the registry able to
+	// reach it. The janitor sweeps r.entries, so an entry that has just left it
+	// is unreachable by design.
+	var gone []*entry
+	for id, e := range r.byID {
+		if !seen[id] {
+			gone = append(gone, e)
+		}
 	}
 	r.byID = byID
 	sort.Slice(entries, func(i, j int) bool {
@@ -1022,6 +1115,20 @@ func (r *Registry) Rescan() error {
 	r.entries = entries
 	r.fromLib = fromLib
 	r.roots = roots
+	r.mu.Unlock()
+
+	// Outside the registry lock: this stats the library and can close backends,
+	// and holding the write lock across that would stall every search for the
+	// duration of a filesystem walk. The lists are private to this call, and
+	// each entry's own state is guarded by its own locks.
+	for _, e := range kept {
+		e.revalidate()
+	}
+	for _, e := range gone {
+		if _, dropped := e.drop(true); dropped {
+			logx.V("rescan: %s is gone; closed it", filepath.Base(e.Path))
+		}
+	}
 	return nil
 }
 
@@ -1056,6 +1163,13 @@ func libraryPaths(discovered []string) []string {
 		if e.Source != "" {
 			if abs, err := filepath.Abs(e.Source); err == nil && seen[filepath.Clean(abs)] {
 				continue // its source is in the dictionary folder: same dictionary
+			}
+			// A DSL abbreviation glossary prepared by an older build. Its
+			// content now belongs to its parent, so the folder is retired from
+			// the list rather than shown; the folder itself is left on disk for
+			// the user to remove through the panel like any other.
+			if dict.IsAbbrevCompanion(e.Source) {
+				continue
 			}
 		}
 		out = append(out, e.TextDB)
@@ -1299,6 +1413,92 @@ func preparedFor(path string) (string, bool) {
 	return store.PreparedFor(path)
 }
 
+// backingDB names the prepared database that exists on disk for a dictionary
+// path right now, or "" when there is none. It is the identity a cached open is
+// checked against, so it answers from stat() and the folder's info.txt claim
+// only.
+//
+// Deliberately not preparedFor: that one also asks whether the SOURCE has
+// changed since it was indexed, which reads the meta table out of every
+// candidate text.db - a SQLite open per dictionary, on a path a rescan walks
+// once per entry. The two disagree on exactly one state (source edited, index
+// still present), and there the cached open is stale but not broken: it serves
+// the previous edition's articles until something re-ingests it, which is what
+// it did before this check existed. What this catches is the state that IS
+// broken - the database the handle reads is gone.
+func backingDB(path string) string {
+	if store.IsTextDB(path) {
+		if fileExists(path) {
+			return path
+		}
+		return ""
+	}
+	if dir, ok := store.LookupDir(path); ok {
+		return store.TextDBPath(dir) // LookupDir already required the text.db
+	}
+	return ""
+}
+
+// revalidate re-derives this entry against the filesystem and resets whatever
+// no longer matches it. Called for every entry that survives a rescan, which is
+// what makes "Rescan folders" mean reconcile rather than re-list.
+//
+// Two things are reset, for two different reasons.
+//
+// A memoized OPEN ERROR is always cleared. entry.open caches failures on
+// purpose - a fan-out over a hundred dictionaries must not retry a broken file
+// once per keystroke - but nothing ever cleared that cache, so a dictionary
+// that failed to open once stayed failed for the life of the process however
+// thoroughly the user fixed it. A rescan is the user asking for exactly that
+// retry, and paying for it once, here, is the whole point of the button.
+//
+// A backend resolved against a DIFFERENT database than the one now on disk is
+// dropped, along with the conclusions drawn from it: autoTried and demanded
+// both mean "this dictionary has been prepared, or has refused to be", and a
+// library folder that no longer exists refutes both. Without this, deleting a
+// prepared folder from the file manager left the entry holding a handle to it -
+// answering searches until SQLite needed a new connection, then failing every
+// one with "unable to open database file" - and neither preparation lane would
+// rebuild it, because both were already marked as done. It is also what makes
+// the in-app removal path honest: Remove closes the backend and says the
+// dictionary "will be indexed again the next time it is searched", which was
+// true only after a restart, since autoTried outlived the data it described.
+func (e *entry) revalidate() {
+	now := backingDB(e.Path)
+	e.dMu.Lock()
+	e.err = nil
+	changed := now != e.backing
+	open := e.d != nil
+	if !changed || !open {
+		// Nothing to let go of: record the resolution and be done. Doing it
+		// under the same lock keeps "backing describes e.d" true for readers.
+		e.backing = now
+	}
+	e.dMu.Unlock()
+	if !changed {
+		return
+	}
+	if open {
+		if _, dropped := e.drop(true); !dropped {
+			// An ingest holds this entry. It ends in reopen(), which resolves
+			// and records afresh, so leaving backing untouched here is not a
+			// leak of the stale value - it is the next rescan's business if
+			// that ingest fails instead.
+			return
+		}
+		e.dMu.Lock()
+		e.backing = now
+		e.dMu.Unlock()
+	}
+	// The dictionary this entry describes is not the one its flags describe.
+	e.autoTried.Store(false)
+	e.demanded.Store(false)
+	e.demandFail.Store(0)
+	e.abbrevTried.Store(false)
+	logx.V("rescan: %s changed underneath us (prepared=%v); reopening on next use",
+		filepath.Base(e.Path), now != "")
+}
+
 func (r *Registry) all() []*entry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -1341,6 +1541,15 @@ type features struct {
 func (e *entry) setFeatures(want features, progress store.Progress) error {
 	acquire(frontLimit) // the user is waiting: never queue behind background work
 	defer release(frontLimit)
+	// Same exemption demandIndex takes, for the same reason and with better
+	// evidence: this is the longest user-visible operation the app has, it is
+	// running because a person ticked a box and is watching a progress bar, and
+	// it used to be the one front-lane job that dropped to a single core the
+	// moment the screen dimmed - and the only one the Android shell was never
+	// told about, so the foreground service that exists to keep a long rebuild
+	// alive did not cover the rebuild most likely to be killed. Refcounted, so
+	// nesting with a concurrent demand is safe.
+	defer HoldActiveProcs()()
 	e.ingestMu.Lock()
 	defer e.ingestMu.Unlock()
 
@@ -1376,6 +1585,11 @@ func (e *entry) setFeatures(want features, progress store.Progress) error {
 		err = e.rebuild(name, textDB, plan, progress)
 	case store.SourceChanged(textDB, e.Path):
 		logx.V("%ssource changed since it was prepared - re-indexing", logx.Dict(name))
+		err = e.rebuild(name, textDB, plan, progress)
+	case abbrevStale(textDB, e.Path):
+		// the abbreviation glossary is baked into the articles, so a changed,
+		// added or deleted companion means the articles are wrong
+		logx.V("%sabbreviation glossary changed since it was indexed - re-indexing", logx.Dict(name))
 		err = e.rebuild(name, textDB, plan, progress)
 	case have.FullText != want.FullText || have.Contains != want.Contains:
 		err = e.rebuild(name, textDB, plan, progress)
@@ -1439,7 +1653,7 @@ func (e *entry) reopen() error {
 	}
 	e.dMu.Lock()
 	old := e.d
-	e.d, e.err = fresh, nil
+	e.d, e.err, e.backing = fresh, nil, backingDB(e.Path)
 	// the weight must follow the view, not the one it replaced: a prepared
 	// dictionary holds no headword map, so it weighs nothing and must never
 	// become an eviction candidate
@@ -1523,6 +1737,114 @@ func (e *entry) packMedia(cur dict.Dictionary, textDB, mediaDB string, progress 
 // ensureBaseIndex builds the cheap find-only index when a dictionary has none
 // (D13's silent auto-index). It never strips or rebuilds: a dictionary the
 // user has already enriched must not be quietly demoted.
+// abbrevStale reports that the abbreviation expansions baked into a prepared
+// dictionary no longer match the companion beside its source - added, edited,
+// or removed. A dictionary that never had one and recorded none is not stale.
+func abbrevStale(textDB, srcPath string) bool {
+	companion, _ := dict.AbbrevCompanion(srcPath)
+	return store.AbbrevChanged(textDB, companion)
+}
+
+// upgradeAbbrev re-indexes dictionaries prepared before their abbreviation
+// glossary could be absorbed. DSL bakes those expansions into the article HTML
+// at ingest, so there is no way to add them to data already on disk; the only
+// fix is to build it again.
+//
+// This is the one sweep in the program that starts work nobody asked for on a
+// whole library, so where it runs matters more than what it does. It takes the
+// BACKGROUND lane (indexLimit, one at a time, FIFO), never the front one, and
+// never runs from Warm or open - a rebuild triggered by pre-opening would turn
+// a startup into an hours-long, invisible re-index of everything. Here it is a
+// drip: one dictionary at a time, deferred entirely while the process is not
+// active, and each one attempted once per process.
+//
+// Only dictionaries whose companion is present on disk are swept. The reverse
+// case - a companion deleted after it was absorbed - would cost a meta read per
+// dictionary in the library to detect, and is caught by setFeatures the next
+// time anything about that dictionary is changed.
+func (r *Registry) upgradeAbbrev() {
+	var todo []*entry
+	for _, e := range r.all() {
+		if store.IsTextDB(e.Path) {
+			continue
+		}
+		if _, ok := dict.AbbrevCompanion(e.Path); !ok {
+			continue
+		}
+		if e.abbrevTried.Load() {
+			continue
+		}
+		todo = append(todo, e)
+	}
+	if len(todo) == 0 {
+		return
+	}
+	go func() {
+		for _, e := range todo {
+			acquire(indexLimit)
+			// the queue is FIFO and an ingest takes minutes, so the state that
+			// permitted this may be long gone by the time the slot is ours
+			if CurrentPower() != PowerActive {
+				release(indexLimit)
+				return
+			}
+			// Claimed HERE, not at collection. Marking the whole list up front
+			// and then abandoning it on a power transition left every entry
+			// behind this one flagged as tried and never tried at all - and
+			// the sweep runs only from NewRegistry/SetUseCached/SetDirs, so
+			// "attempted once per process" became "attempted never" for the
+			// tail. On a phone, where the screen goes off mid-ingest as a
+			// matter of course, that was the normal outcome rather than the
+			// edge one. Claiming at the start of the work also means a
+			// transient failure - a full disk - is not made permanent for the
+			// life of the process by an entry that never got its turn.
+			if !e.abbrevTried.CompareAndSwap(false, true) {
+				release(indexLimit)
+				continue
+			}
+			err := e.reabsorbAbbrev()
+			release(indexLimit)
+			if err != nil {
+				logx.Warn("could not re-index %s for abbreviations: %v", filepath.Base(e.Path), err)
+			}
+		}
+	}()
+}
+
+// reabsorbAbbrev rebuilds this dictionary's prepared data so its articles carry
+// the abbreviation glossary again. The plan is read back from what was already
+// built, so a dictionary the user gave full-text or contains keeps them instead
+// of silently dropping to headwords. The rebuild is the same atomic
+// temp+rename as any other, so an interrupted upgrade leaves the old data
+// intact and the next run tries again.
+func (e *entry) reabsorbAbbrev() error {
+	e.ingestMu.Lock()
+	defer e.ingestMu.Unlock()
+	if store.IsTextDB(e.Path) {
+		return nil
+	}
+	dir, ok := store.LookupDir(e.Path)
+	if !ok {
+		return nil // not prepared yet: its first ingest will absorb the companion
+	}
+	textDB := store.TextDBPath(dir)
+	if !fileExists(textDB) || !abbrevStale(textDB, e.Path) {
+		return nil
+	}
+	plan := store.Plan{}
+	if m, err := store.ReadMeta(textDB); err == nil {
+		plan.FullText = m["ingest_level"] != string(store.LevelHeadwords)
+		plan.Contains = m["has_trigram"] == "1"
+	}
+	name := e.probeName()
+	logx.V("%sabbreviation glossary not yet absorbed - re-indexing", logx.Dict(name))
+	if err := e.rebuild(name, textDB, plan, nil); err != nil {
+		return err
+	}
+	_ = store.WriteInfo(dir)
+	return e.reopen()
+}
+
 func (e *entry) ensureBaseIndex(progress store.Progress) error {
 	e.ingestMu.Lock()
 	defer e.ingestMu.Unlock()

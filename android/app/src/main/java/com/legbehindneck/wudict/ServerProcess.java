@@ -200,6 +200,11 @@ class ServerProcess {
         // still charged for is memory we did not release. Costs a page-fault
         // per page on reuse; that is the cheaper side of the trade here.
         env.put("GODEBUG", "madvdontneed=1");
+        // Ask the server to announce work a person is waiting on, so this shell
+        // can hold a foreground service across it (IndexService). Opt-in per
+        // process rather than a config setting: the markers are a private
+        // protocol between these two processes and are noise anywhere else.
+        env.put("WUDICT_BUSY_LINES", "1");
         pb.directory(home);
         pb.redirectErrorStream(true);
         try {
@@ -296,12 +301,24 @@ class ServerProcess {
         }
     }
 
+    // The server's out-of-band markers, read off the same stream as its log
+    // (WUDICT_BUSY_LINES above). "1" means an ingest a person is waiting on has
+    // started, "0" that the last one finished; they are refcounted on the
+    // server side, so this sees one of each and not one per dictionary.
+    private static final String BUSY_ON = "@wudict busy 1";
+    private static final String BUSY_OFF = "@wudict busy 0";
+
     private void logOutput(InputStream in) {
         Thread t = new Thread(() -> {
             try (BufferedReader r = new BufferedReader(new InputStreamReader(in))) {
                 for (String line; (line = r.readLine()) != null; ) {
                     Log.d(TAG, line);
-                    if (!line.trim().isEmpty()) lastLine = line; // not isBlank(): API 35+
+                    String marker = line.trim();
+                    if (BUSY_ON.equals(marker) || BUSY_OFF.equals(marker)) {
+                        IndexService.busy(app, BUSY_ON.equals(marker));
+                        continue; // a marker is not a diagnosis; keep lastLine
+                    }
+                    if (!marker.isEmpty()) lastLine = line; // not isBlank(): API 35+
                 }
             } catch (IOException ignored) {
                 // process ended; nothing more to log
@@ -336,6 +353,11 @@ class ServerProcess {
     }
 
     private void stop() {
+        // Whatever it was preparing died with it, so the notification and the
+        // service holding the app up must go with it too. Doing this from the
+        // stdout reader instead would not be enough: a killed child closes the
+        // stream without ever emitting the closing marker.
+        IndexService.busy(app, false);
         Process p = process;
         if (p != null) {
             // No graceful shutdown: Java's destroy() is a hard kill. That is

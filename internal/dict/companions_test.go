@@ -133,3 +133,59 @@ func eqPaths(t *testing.T, got, want []string) {
 		}
 	}
 }
+
+// An "_abrv.dsl" is a glossary map for the dictionary of the same stem, not a
+// dictionary of its own. Pairing must survive both compressed spellings and the
+// case a Windows-made dictionary arrives in - and must NOT claim an orphan,
+// which is a real standalone dictionary that merely ends in _abrv.
+func TestAbbrevCompanion(t *testing.T) {
+	dir := t.TempDir()
+	main := touch(t, filepath.Join(dir, "AmericanaEnRu.dsl"))
+	abrv := touch(t, filepath.Join(dir, "AmericanaEnRu_abrv.dsl"))
+
+	if got, ok := AbbrevCompanion(main); !ok || got != abrv {
+		t.Errorf("AbbrevCompanion(main) = %q, %v; want %q, true", got, ok, abrv)
+	}
+	if !IsAbbrevCompanion(abrv) {
+		t.Error("the companion beside its parent must be recognized")
+	}
+	if IsAbbrevCompanion(main) {
+		t.Error("the parent is not a companion")
+	}
+	// a companion has no companion of its own: no recursion into _abrv_abrv
+	if got, ok := AbbrevCompanion(abrv); ok {
+		t.Errorf("AbbrevCompanion(companion) = %q, want none", got)
+	}
+
+	// compressed spellings pair too
+	dz := t.TempDir()
+	dzMain := touch(t, filepath.Join(dz, "ru-en.dsl.dz"))
+	dzAbrv := touch(t, filepath.Join(dz, "ru-en_abrv.dsl.dz"))
+	if got, ok := AbbrevCompanion(dzMain); !ok || got != dzAbrv {
+		t.Errorf("AbbrevCompanion(.dz) = %q, %v; want %q, true", got, ok, dzAbrv)
+	}
+	// the suffix test is case-insensitive: a Windows-made "_ABRV.DSL" is the
+	// same companion. Only the SUFFIX - the parent must exist as spelled, so
+	// this stays correct on a case-sensitive filesystem.
+	up := t.TempDir()
+	touch(t, filepath.Join(up, "Collins.dsl"))
+	if !IsAbbrevCompanion(touch(t, filepath.Join(up, "Collins_ABRV.DSL"))) {
+		t.Error("uppercase _ABRV.DSL must pair with its parent")
+	}
+
+	// ORPHAN: no parent beside it, so it stays an ordinary dictionary
+	lone := touch(t, filepath.Join(t.TempDir(), "Glossary_abrv.dsl"))
+	if IsAbbrevCompanion(lone) {
+		t.Error("an _abrv with no parent must remain a dictionary")
+	}
+	// a file literally named "_abrv.dsl" names no parent stem at all
+	if IsAbbrevCompanion(touch(t, filepath.Join(t.TempDir(), "_abrv.dsl"))) {
+		t.Error("bare _abrv.dsl has no parent")
+	}
+	// a non-DSL main file has no abbreviation companion
+	mdx := touch(t, filepath.Join(dir, "Oxford.mdx"))
+	touch(t, filepath.Join(dir, "Oxford_abrv.dsl"))
+	if got, ok := AbbrevCompanion(mdx); ok {
+		t.Errorf("AbbrevCompanion(mdx) = %q, want none", got)
+	}
+}

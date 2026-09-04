@@ -45,10 +45,13 @@ type configInfo struct {
 	RevealLabel string `json:"revealLabel"`
 	CanReveal   bool   `json:"canReveal"`
 
-	// CanDelete is CanReveal's complement (D63): the app offers to remove a
-	// dictionary exactly where it cannot hand the user to a file manager that
-	// would do it. False on a desktop at the keyboard, true on Android, where
-	// nothing else on the device may open the app's own external files dir.
+	// CanDelete says this caller may remove a dictionary (D63 amended). True
+	// from the machine running wudict, whatever platform that is - the user at
+	// the keyboard owns those files, and managing a library includes throwing
+	// part of it away. From a remote browser it follows ALLOW_REMOTE_DELETE,
+	// which defaults to OFF. It used to be CanReveal's exact complement, which
+	// withheld the control from precisely the user who owns the files and
+	// handed it to every browser on the LAN.
 	CanDelete bool `json:"canDelete"`
 
 	// PathAliases shorten the prefix that is identical on every row and
@@ -202,7 +205,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// not offering it: the click fails, and the user concludes the files
 		// are unreachable rather than that this button is.
 		CanReveal: isLoopback(r) && revealPossible(),
-		CanDelete: removalOffered(r),
+		// Deleting, unlike revealing, is something this app can always do
+		// itself - so the question is only WHO is asking (D63 amended).
+		CanDelete: s.removalOffered(r),
 	}
 	if info.DictDirOrigin == "" {
 		info.DictDirOrigin = config.OriginDefault

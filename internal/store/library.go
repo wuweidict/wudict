@@ -289,6 +289,41 @@ func SourceChanged(textDB, srcPath string) bool {
 	return sourceHash(srcPath) != want
 }
 
+// AbbrevChanged reports whether the abbreviation glossary a text.db was built
+// with differs from the one beside its source now. DSL absorbs that companion
+// at ingest and bakes the expansions into the articles, so the answer decides
+// whether those articles still tell the truth.
+//
+// The four cases, and why the "neither" one matters: a companion that is
+// present but was never recorded means the data was prepared before this
+// existed and has no tooltips; one that was recorded but is gone means the
+// baked expansions must come out; a size or mtime that moved means it was
+// edited. A dictionary that has no companion and recorded none is FRESH - which
+// is what keeps every companion-less dictionary in the library out of the
+// upgrade sweep.
+func AbbrevChanged(textDB, companionPath string) bool {
+	meta, err := ReadMeta(textDB)
+	if err != nil {
+		return false // unreadable meta is FindOrphans' business, not ours
+	}
+	recorded := meta["abbrev_size"] != ""
+	if companionPath == "" {
+		return recorded
+	}
+	st, err := os.Stat(companionPath)
+	if err != nil {
+		return recorded
+	}
+	if !recorded {
+		return true
+	}
+	if n, err := strconv.ParseInt(meta["abbrev_size"], 10, 64); err != nil || n != st.Size() {
+		return true
+	}
+	t, err := time.Parse(time.RFC3339, meta["abbrev_mtime"])
+	return err != nil || !t.Equal(st.ModTime().UTC().Truncate(time.Second))
+}
+
 // PreparedFor returns the text.db already prepared for a source file, if one
 // exists and still matches the source. Purely read-only - the caller decides
 // whether to fall back to the direct backend or to (re)build.

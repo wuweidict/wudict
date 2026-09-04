@@ -22,7 +22,7 @@ config: ingest = off | text | full        (global default, per-dictionary overri
 - **Capability tiers**: backends advertise `Caps.Exact/Prefix/Contains/FullText` (D16 renamed `Fuzzy`→`Contains`). the panel shows contains/full-text/media as per-dictionary switches with their measured sizes (D24), and a search mode a dictionary lacks offers to add it inline; the headword index is prepared on its own (D13, `AUTO_INDEX = on|off`).
 - **D15 (2026-07-25)**: the ingested pair is the *native* mode and direct readers are *preview*. Read D15 before optimizing anything on the direct side.
 - **DSL/BGL exception**: no native index ⇒ direct mode transparently prepares the library folder on first open — with the same cheap plan as any other format (headwords + article text stored so it is readable at all; full-text and contains stay opt-in, D24) (auto-ingest, no user ceremony). Its resources (`.files.zip`) stay lazy.
-- Sources are never modified. `meta` stores source size/mtime/hash; changed source ⇒ stale-DB prompt (re-ingest or fall back to direct).
+- Sources are never *modified*: nothing writes into a dictionary file. They can be **deleted**, but only by an explicit removal (D63 amended: `DELETE /api/library`, `wudict rm`) — never as a side effect of ingest, search or cleanup. `meta` stores source size/mtime/hash; changed source ⇒ stale-DB prompt (re-ingest or fall back to direct).
 
 ### Direct-backend feasibility notes (why this is OK)
 - MDX/MDD: solved — `gomdict` already does indexed lookup incl. MDD resources.

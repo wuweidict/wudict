@@ -16,6 +16,7 @@ android/app/build/
 android/app/src/main/jniLibs/
 android/local.properties
 /CLAUDE.local.md
+code-review/
 
 # Play release (fastlane). The lanes and the listing ARE tracked -
 # fastlane/metadata/android/ is also the layout F-Droid reads. What must never

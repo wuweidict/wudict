@@ -115,9 +115,19 @@ uninstall the app; your *Dictionaries* folder is never touched.
 
 ## Remove one dictionary
 
-Open **☰**, find the dictionary, and delete it there. The panel shows how much disk space it takes on your phone.
+Open **☰**, find the dictionary, and tap its **file row** to expand it —
+**🗑 Remove…** is at the foot of the list of files it would delete. The panel
+shows how much disk space the dictionary takes on your phone, and the
+confirmation names what each choice takes. There is no undo — see
+[Removing a dictionary](../dictionaries/library.md#removing-a-dictionary) for
+what the three choices mean.
 
 *Settings ▸ Apps ▸ wuDict ▸ Manage space* opens the same panel.
+
+On Android this is the **only** way to free one dictionary's space: nothing
+else on the phone may open `Android/data`, so the alternatives the platform
+offers are uninstalling the app and clearing its storage, which take the whole
+library with them.
 
 ## Battery and memory
 

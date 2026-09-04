@@ -29,6 +29,7 @@ import (
 
 	"github.com/wuweidict/wudict/internal/config"
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/htmlref"
 	"github.com/wuweidict/wudict/internal/logx"
 	"github.com/wuweidict/wudict/internal/morph"
 	"github.com/wuweidict/wudict/internal/resource"
@@ -282,6 +283,17 @@ SERVE FLAGS
                           program - are not affected by any of this.)
                           env: WEB_ORIGINS    toml: WEB_ORIGINS
                           default: no web page
+
+  --allow-remote-delete <0|1>
+                          May a browser on ANOTHER machine delete a
+                          dictionary? Deleting from the machine running
+                          wudict is always allowed - it is your library and
+                          your disk. This governs the remote case only, and
+                          matters when SERVER_IP is not 127.0.0.1: on a
+                          shared network, "0" leaves every other machine able
+                          to read and search, and unable to delete.
+                          env: ALLOW_REMOTE_DELETE  toml: ALLOW_REMOTE_DELETE
+                          default: 0
 
   --ip           <addr>   Listen IP address
                           env: SERVER_IP      toml: SERVER_IP
@@ -543,11 +555,53 @@ func cmdInfo(args []string) error {
 		// and printing it here would make a guess look like metadata.
 		fmt.Printf("language:    %s (declared)\n", m.IndexLang)
 	}
-	if m.Description != "" {
-		fmt.Printf("description: %s\n", m.Description)
+	// What the dictionary says about ITSELF - the sidecar annotation where the
+	// format ships one (Lingvo's <stem>.ann), else the header description. Same
+	// composition order the About panel uses (internal/server/about.go), so the
+	// terminal and the page never disagree about which one wins.
+	for i, line := range aboutLines(strings.TrimPrefix(m.Format, "wudict:"), args[0], m.Description) {
+		if i == 0 {
+			fmt.Printf("description: %s\n", line)
+			continue
+		}
+		fmt.Printf("             %s\n", line)
 	}
 	printDictFiles(files)
 	return nil
+}
+
+// aboutLines is the annotation, flattened for a terminal: one line per section,
+// headed by the language the section declared. Markup is reduced to its text
+// rather than printed as tags - an MDX header description is routinely a small
+// HTML document.
+func aboutLines(format, srcPath, desc string) []string {
+	var out []string
+	add := func(lang, text string) {
+		if strings.ContainsRune(text, '<') {
+			text = htmlref.Text(text, nil)
+		}
+		for _, line := range strings.Split(text, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				if lang != "" {
+					line = "[" + lang + "] " + line
+					lang = ""
+				}
+				out = append(out, line)
+			}
+		}
+	}
+	if a, ok := dict.AboutFor(format, srcPath); ok {
+		for _, sec := range a.Sections {
+			add(sec.Lang, sec.Text)
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if strings.TrimSpace(desc) != "" {
+		add("", desc)
+	}
+	return out
 }
 
 // dictFile is one thing on disk that belongs to this dictionary: the file
@@ -861,6 +915,10 @@ func cmdServe(args []string) (err error) {
 	useCached := fs.Bool("use-cached", false, "also serve previously imported dictionaries from the library (env/toml: USE_CACHED)")
 	noCompress := fs.Bool("no-compress", false, "store article text uncompressed - larger databases (env/toml: NO_COMPRESS)")
 	indexWorkers := fs.String("index-workers", "", "dictionaries to prepare at once; \"auto\" = every core (env/toml: INDEX_WORKERS)")
+	// A string, not a Bool: "" has to mean "unset, defer to env and toml",
+	// which a bool flag cannot express - it would override a file that says
+	// "1" with its own false on every run.
+	remoteDelete := fs.String("allow-remote-delete", "", "may another machine delete a dictionary: 0 (default) or 1 (env/toml: ALLOW_REMOTE_DELETE)")
 	ip := fs.String("ip", "", "listen IP (env/toml: SERVER_IP)")
 	port := fs.String("port", "", "listen port (env/toml: SERVER_PORT)")
 	configPath := fs.String("config", "", "path to wudict.toml (env: CONFIG_PATH)")
@@ -877,7 +935,7 @@ func cmdServe(args []string) (err error) {
 	flagVals := map[string]string{
 		"DICT_DIR": dictDirs.String(), "DB_DIR": *dbDir,
 		"SERVER_IP": *ip, "SERVER_PORT": *port,
-		"SPEEXDEC": *speexdec,
+		"SPEEXDEC": *speexdec, "ALLOW_REMOTE_DELETE": *remoteDelete,
 	}
 	if *noBrowser {
 		flagVals["NO_BROWSER"] = "1"
@@ -1090,6 +1148,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	// caller-chosen address would make the endpoint fetch whatever the host
 	// running wudict can reach.
 	srv.LemmaDir, srv.LemmaURL = cfg.LemmaDir, cfg.LemmaURL
+	srv.AllowRemoteDelete = cfg.AllowRemoteDelete
 	srv.BrowserExtensions = cfg.BrowserExtensions
 	srv.WebOrigins = cfg.WebOrigins
 

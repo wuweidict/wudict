@@ -13,7 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding"
@@ -33,6 +36,18 @@ type Reader struct {
 	scanner *bufio.Scanner
 	meta    dict.Meta
 	header  map[string]string
+	path    string
+
+	// The abbreviation companion is parsed on the first entry, not in
+	// NewReader: Open builds a Reader for its name alone on every open of an
+	// already-prepared dictionary, and that path must not pay for a file it
+	// will never transform with.
+	abbrevOnce sync.Once
+	abbrev     *abbrevMap
+	// plainBody is set for the scan of a companion itself: its articles are
+	// the tooltip text, so they must not be prefixed with their own headword,
+	// and it has no companion of its own to absorb.
+	plainBody bool
 
 	buffered  []string     // lookahead lines
 	pending   []dict.Entry // sub-entries queued behind the main entry
@@ -45,7 +60,7 @@ func NewReader(path string) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &Reader{f: f, header: map[string]string{}}
+	r := &Reader{f: f, header: map[string]string{}, path: path}
 	if err := r.init(path); err != nil {
 		f.Close()
 		return nil, err
@@ -53,22 +68,73 @@ func NewReader(path string) (*Reader, error) {
 	return r, nil
 }
 
-func (r *Reader) init(path string) error {
-	var src io.Reader = r.f
-	if strings.HasSuffix(strings.ToLower(path), ".dz") {
-		gz, err := gzip.NewReader(r.f)
+// newAbbrevReader opens a DSL as an abbreviation glossary rather than as a
+// dictionary. Same parser, two suppressions - see Reader.plainBody.
+func newAbbrevReader(path string) (*Reader, error) {
+	r, err := NewReader(path)
+	if err != nil {
+		return nil, err
+	}
+	r.plainBody = true
+	return r, nil
+}
+
+// abbrevs resolves this dictionary's abbreviation companion, once.
+func (r *Reader) abbrevs() *abbrevMap {
+	if r.plainBody {
+		return nil
+	}
+	r.abbrevOnce.Do(func() { r.abbrev = loadAbbrev(r.path) })
+	return r.abbrev
+}
+
+// ExtraMeta records what was absorbed, so a later run can tell a text.db built
+// with this companion from one built without it, or with an older copy of it.
+// Written only when a companion was actually found: a dictionary that has none
+// records nothing, and therefore never looks stale for the lack of it.
+func (r *Reader) ExtraMeta() map[string]string {
+	a := r.abbrevs()
+	if a == nil {
+		return nil
+	}
+	return map[string]string{
+		"abbrev_path":  a.path,
+		"abbrev_size":  strconv.FormatInt(a.size, 10),
+		"abbrev_mtime": a.mtime.Format(time.RFC3339),
+		"abbrev_count": strconv.Itoa(a.count),
+	}
+}
+
+// decodedScanner turns an already-open Lingvo file into a line scanner: gunzip
+// when gzipped, then whatever charset detectEncoding sniffs. Shared by the
+// dictionary reader and by the .ann annotation loader (ann.go), so a Lingvo
+// file - which is UTF-16LE far more often than not - is decoded in exactly one
+// place. path is used for the error text only.
+func decodedScanner(f *os.File, path string, gzipped bool) (*bufio.Scanner, error) {
+	var src io.Reader = f
+	if gzipped {
+		gz, err := gzip.NewReader(f)
 		if err != nil {
-			return fmt.Errorf("dsl %s: %w", path, err)
+			return nil, fmt.Errorf("dsl %s: %w", path, err)
 		}
 		src = gz
 	}
 	br := bufio.NewReaderSize(src, 1<<20)
 	enc, err := detectEncoding(br)
 	if err != nil {
-		return fmt.Errorf("dsl %s: %w", path, err)
+		return nil, fmt.Errorf("dsl %s: %w", path, err)
 	}
-	r.scanner = bufio.NewScanner(transform.NewReader(br, enc.NewDecoder()))
-	r.scanner.Buffer(make([]byte, 0, 1<<20), 1<<24)
+	sc := bufio.NewScanner(transform.NewReader(br, enc.NewDecoder()))
+	sc.Buffer(make([]byte, 0, 1<<20), 1<<24)
+	return sc, nil
+}
+
+func (r *Reader) init(path string) error {
+	sc, err := decodedScanner(r.f, path, strings.HasSuffix(strings.ToLower(path), ".dz"))
+	if err != nil {
+		return err
+	}
+	r.scanner = sc
 
 	// header: leading #KEY "value" lines; first non-# line starts entries
 	for r.scanner.Scan() {
@@ -112,6 +178,10 @@ func (r *Reader) init(path string) error {
 		// re-parsed out of desc. Lingvo writes collation names here
 		// ("SpanishModernSort"), which internal/lang absorbs.
 		IndexLang: lang.FromDeclared(from),
+		// #CONTENTS_LANGUAGE is the other end of the pair, and until the About
+		// panel existed it survived only as the middle of the desc string
+		// above. Recorded as a code so a consumer never has to parse " → ".
+		ContentsLang: lang.FromDeclared(to),
 	}
 	return nil
 }
@@ -259,7 +329,7 @@ func (r *Reader) parseBlock(termLines, textLines []string) (dict.Entry, []dict.E
 		if len(heads) == 0 {
 			return
 		}
-		body, _, err := transformBody(strings.TrimRight(subText.String(), "\n"), heads[0])
+		body, _, err := transformBodyAbbrev(strings.TrimRight(subText.String(), "\n"), heads[0], r.abbrevs())
 		if err == nil {
 			subs = append(subs, dict.Entry{Headwords: heads, Body: body, Kind: dict.BodyHTML})
 		}
@@ -293,11 +363,11 @@ func (r *Reader) parseBlock(termLines, textLines []string) (dict.Entry, []dict.E
 	}
 	flushSub()
 
-	body, _, err := transformBody(strings.TrimRight(mainText.String(), "\n"), terms[0])
+	body, _, err := transformBodyAbbrev(strings.TrimRight(mainText.String(), "\n"), terms[0], r.abbrevs())
 	if err != nil {
 		return dict.Entry{}, nil, fmt.Errorf("dsl: entry %q: %w", terms[0], err)
 	}
-	if len(displayTitles) > 0 {
+	if len(displayTitles) > 0 && !r.plainBody {
 		body = strings.Join(displayTitles, "<br/>") + "<br/>" + body
 	}
 	return dict.Entry{Headwords: terms, Body: body, Kind: dict.BodyHTML}, subs, nil

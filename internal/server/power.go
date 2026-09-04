@@ -5,11 +5,14 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"runtime/metrics"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/wuweidict/wudict/internal/logx"
@@ -92,12 +95,81 @@ func SetActiveProcs(n int) {
 	runtime.GOMAXPROCS(n)
 }
 
+// demandHold counts operations a person is currently waiting on - today, a
+// demanded index (registry.go demandIndex). It is the one exemption from the
+// rule below, and it exists because the rule was punishing exactly the wrong
+// work: a user taps "index this dictionary", the screen dims thirty seconds
+// later, the shell reports PowerBackground, and the ingest they are waiting for
+// drops to a single thread for the rest of its run. The app is not idle; it is
+// doing the thing it was just asked to do.
+//
+// Note that this is the ONLY demotion that reaches the server on Android. The
+// Go process is exec'd by the shell (D52) and does not follow the app's cgroup
+// move - measured: the shell sat in /background while its child stayed in
+// /top-app - so nothing else was going to slow this down.
+var demandHold atomic.Int32
+
+// HoldActiveProcs marks user-waited work as running and returns the release.
+// Safe to nest; parallelism is restored when the last holder releases.
+func HoldActiveProcs() func() {
+	if demandHold.Add(1) == 1 {
+		emitBusy(true)
+	}
+	applyProcs(CurrentPower())
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			if demandHold.Add(-1) == 0 {
+				emitBusy(false)
+			}
+			applyProcs(CurrentPower())
+		})
+	}
+}
+
+// busyLines is the shell-to-child private protocol, off unless the shell asks
+// for it. The Android shell sets WUDICT_BUSY_LINES=1 when it execs the server
+// (ServerProcess), the same way it sets GODEBUG - it is not configuration, it
+// is one process telling another what it is prepared to listen to. Everywhere
+// else these lines would be noise in a terminal.
+var busyLines = os.Getenv("WUDICT_BUSY_LINES") == "1"
+
+// emitBusy tells the shell that work a person is waiting on has started or
+// finished, so it can hold a foreground service across it.
+//
+// This is the one thing the server has to say that the shell cannot ask for.
+// Every other platform exchange runs the other way - the shell knows the
+// lifecycle and POSTs it to /api/power - but the freezer and the low-memory
+// killer act on a process the shell believes to be idle, and only the server
+// knows it is not. A ten-minute ingest killed at minute six leaves nothing
+// behind but a partial database; that is the failure this prevents, and it is
+// not one more CPU would have prevented.
+//
+// Over stdout, which the shell already reads line by line (ServerProcess
+// logOutput), rather than a callback the exec'd child has no way to make: no
+// port back, no Binder, no JNI (D52). The marker is prefixed so it can never
+// be confused with a log line.
+//
+// Fire-and-forget by design. A missed marker costs a foreground service that
+// was not started - exactly today's behaviour - so nothing here is worth an
+// error path.
+func emitBusy(busy bool) {
+	if !busyLines {
+		return
+	}
+	if busy {
+		fmt.Println("@wudict busy 1")
+	} else {
+		fmt.Println("@wudict busy 0")
+	}
+}
+
 func applyProcs(p Power) {
 	n := int(activeProcs.Load())
 	if n < 1 {
 		return
 	}
-	if p != PowerActive {
+	if p != PowerActive && demandHold.Load() == 0 {
 		n = 1 // a background process must never look like a busy one
 	}
 	runtime.GOMAXPROCS(n)
@@ -282,7 +354,8 @@ func (r *Registry) shed(everything bool) int64 {
 	}
 	if everything {
 		for _, e := range r.all() {
-			freed += e.drop(true)
+			n, _ := e.drop(true)
+			freed += n
 		}
 	}
 	// no FreeOSMemory here: every close above schedules its own, coalesced

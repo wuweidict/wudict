@@ -91,6 +91,13 @@ func (s *Server) routes() []route {
 		{"GET", "/api/prefs", s.handlePrefs, "/api/prefs", false},
 		{"PUT", "/api/prefs", s.handleSavePrefs, "/api/prefs", false},
 		{"GET", "/api/reveal", s.handleReveal, "/api/reveal", false},
+		// "I picked this one": prepare it now, before a query exists
+		// (demand.go). Never CORS - it starts work and writes to the library.
+		{"POST", "/api/demand", s.handleDemand, "/api/demand", false},
+		// what a dictionary says about itself (about.go). Never CORS: an
+		// annotation names a sidecar file on the user's disk, and the list
+		// endpoint an extension does get deliberately carries no description.
+		{"GET", "/api/about", s.handleAbout, "/api/about", false},
 		// what the platform is doing to us (D64) - the Android shell's channel
 		// for onStop / onTrimMemory / thermal / battery-saver, which the
 		// exec'd server has no other way of learning.

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -877,56 +878,6 @@ func (mdict *MdictBase) keywordEntryToIndex(item *MDictKeywordEntry) (*MDictKeyw
 
 }
 
-func (mdict *MdictBase) keywordEntryToIndex1(item *MDictKeywordEntry) (*MDictKeywordIndex, error) {
-
-	var recordBlockInfo *MdictRecordBlockInfoListItem
-
-	var i = 0
-	for ; i < len(mdict.recordBlockInfo.recordInfoList)-1; i++ {
-		curr := mdict.recordBlockInfo.recordInfoList[i]
-		next := mdict.recordBlockInfo.recordInfoList[i+1]
-		if item.RecordStartOffset >= curr.deCompressAccumulatorOffset && item.RecordStartOffset < next.deCompressAccumulatorOffset {
-			recordBlockInfo = curr
-			break
-		}
-	}
-
-	// the last one
-	if i == len(mdict.recordBlockInfo.recordInfoList)-1 {
-		lastOne := mdict.recordBlockInfo.recordInfoList[len(mdict.recordBlockInfo.recordInfoList)-1]
-		if item.RecordStartOffset < lastOne.deCompressAccumulatorOffset+lastOne.deCompressSize {
-			recordBlockInfo = lastOne
-		}
-	}
-
-	if recordBlockInfo == nil {
-		return nil, fmt.Errorf("key-item record info not found (recordStartOffset=%d)", item.RecordStartOffset)
-	}
-
-	recordBlockStartOffset := recordBlockInfo.compressAccumulatorOffset + mdict.recordBlockInfo.recordBlockDataStartOffset
-	recordBlockLen := recordBlockInfo.compressSize
-
-	start := item.RecordStartOffset - recordBlockInfo.deCompressAccumulatorOffset
-	var end int64
-	if item.RecordEndOffset == 0 {
-		end = int64(recordBlockLen)
-	} else {
-		end = item.RecordEndOffset - recordBlockInfo.deCompressAccumulatorOffset
-	}
-
-	return &MDictKeywordIndex{
-		KeywordEntry: *item,
-		RecordBlock: MDictKeywordIndexRecordBlock{
-			DataStartOffset:          recordBlockStartOffset,
-			CompressSize:             recordBlockInfo.compressSize,
-			DeCompressSize:           recordBlockInfo.deCompressSize,
-			KeyWordPartStartOffset:   start,
-			KeyWordPartDataEndOffset: end,
-		},
-	}, nil
-
-}
-
 func (mdict *MdictBase) locateByKeywordIndex(index *MDictKeywordIndex) ([]byte, error) {
 	return locateDefByKWIndex(index,
 		mdict.filePath,
@@ -1032,27 +983,26 @@ func locateDefByKWIndex(index *MDictKeywordIndex, filePath string, isRecordEncry
 	return data, nil
 }
 
+// recordBlockAt returns the record block holding a decompressed offset.
+//
+// recordInfoList is built by readRecordBlockInfo in file order, so
+// deCompressAccumulatorOffset is sorted by construction and the offset can be
+// found by binary search. It used to be a linear scan, once per lookup - free
+// on the dozen-block dictionaries it was written against, and the second half
+// of the O(N*B) ingest cost on a large one.
+func (mdict *MdictBase) recordBlockAt(offset int64) *MdictRecordBlockInfoListItem {
+	list := mdict.recordBlockInfo.recordInfoList
+	i := sort.Search(len(list), func(i int) bool {
+		return list[i].deCompressAccumulatorOffset+list[i].deCompressSize > offset
+	})
+	if i == len(list) || offset < list[i].deCompressAccumulatorOffset {
+		return nil
+	}
+	return list[i]
+}
+
 func (mdict *MdictBase) locateByKeywordEntry(item *MDictKeywordEntry) ([]byte, error) {
-	var recordBlockInfo *MdictRecordBlockInfoListItem
-
-	var i = 0
-	for ; i < len(mdict.recordBlockInfo.recordInfoList)-1; i++ {
-		curr := mdict.recordBlockInfo.recordInfoList[i]
-		next := mdict.recordBlockInfo.recordInfoList[i+1]
-		if item.RecordStartOffset >= curr.deCompressAccumulatorOffset && item.RecordStartOffset < next.deCompressAccumulatorOffset {
-			recordBlockInfo = curr
-			break
-		}
-	}
-
-	// the last one
-	if i == len(mdict.recordBlockInfo.recordInfoList)-1 {
-		lastOne := mdict.recordBlockInfo.recordInfoList[len(mdict.recordBlockInfo.recordInfoList)-1]
-		if item.RecordStartOffset < lastOne.deCompressAccumulatorOffset+lastOne.deCompressSize {
-			recordBlockInfo = lastOne
-		}
-	}
-
+	recordBlockInfo := mdict.recordBlockAt(item.RecordStartOffset)
 	if recordBlockInfo == nil {
 		return nil, fmt.Errorf("key-item record info not found (recordStartOffset=%d)", item.RecordStartOffset)
 	}
@@ -1101,13 +1051,52 @@ const recordBlockCacheCap = 8
 // a block skip the re-open + re-decompress - the dominant per-lookup cost. The
 // returned slice is shared read-only; callers only sub-slice it, never mutate.
 func (mdict *MdictBase) decompressedRecordBlock(startOffset, compLen int64, info *MdictRecordBlockInfoListItem) ([]byte, error) {
+	return mdict.cachedBlock(startOffset, func() ([]byte, error) {
+		return mdict.decodeRecordBlock(startOffset, compLen, info)
+	})
+}
+
+// cachedBlock returns the decompressed block identified by key, calling decode
+// on a miss. One implementation for both layouts: the v1/v2 and v3 record
+// sections decode differently but cache identically, and two copies of a
+// bounded FIFO is one copy too many.
+//
+// decode runs OUTSIDE the lock. Holding a mutex across a zlib inflate would
+// serialise every concurrent lookup in the process behind the slowest one; the
+// cost of letting two callers decode the same block in a rare race is one
+// wasted inflate, and the first result to arrive is kept.
+func (mdict *MdictBase) cachedBlock(key int64, decode func() ([]byte, error)) ([]byte, error) {
 	mdict.blkMu.Lock()
-	if blk, ok := mdict.blkCache[startOffset]; ok {
+	if blk, ok := mdict.blkCache[key]; ok {
 		mdict.blkMu.Unlock()
 		return blk, nil
 	}
 	mdict.blkMu.Unlock()
 
+	blk, err := decode()
+	if err != nil {
+		return nil, err
+	}
+
+	mdict.blkMu.Lock()
+	defer mdict.blkMu.Unlock()
+	if existing, ok := mdict.blkCache[key]; ok {
+		return existing, nil // lost the race; one block is one block
+	}
+	if mdict.blkCache == nil {
+		mdict.blkCache = make(map[int64][]byte, recordBlockCacheCap)
+	}
+	mdict.blkCache[key] = blk
+	mdict.blkOrder = append(mdict.blkOrder, key)
+	if len(mdict.blkOrder) > recordBlockCacheCap {
+		delete(mdict.blkCache, mdict.blkOrder[0])
+		mdict.blkOrder = mdict.blkOrder[1:]
+	}
+	return blk, nil
+}
+
+// decodeRecordBlock reads and decodes one v1/v2 record block.
+func (mdict *MdictBase) decodeRecordBlock(startOffset, compLen int64, info *MdictRecordBlockInfoListItem) ([]byte, error) {
 	file, err := os.Open(mdict.filePath)
 	if err != nil {
 		return nil, err
@@ -1146,19 +1135,6 @@ func (mdict *MdictBase) decompressedRecordBlock(startOffset, compLen int64, info
 		}
 	}
 
-	mdict.blkMu.Lock()
-	if mdict.blkCache == nil {
-		mdict.blkCache = make(map[int64][]byte, recordBlockCacheCap)
-	}
-	if _, exists := mdict.blkCache[startOffset]; !exists {
-		mdict.blkCache[startOffset] = recordBlock
-		mdict.blkOrder = append(mdict.blkOrder, startOffset)
-		if len(mdict.blkOrder) > recordBlockCacheCap {
-			delete(mdict.blkCache, mdict.blkOrder[0])
-			mdict.blkOrder = mdict.blkOrder[1:]
-		}
-	}
-	mdict.blkMu.Unlock()
 	return recordBlock, nil
 }
 

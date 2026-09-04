@@ -16,4 +16,11 @@
      <string name="lookup_starting">Looking up “%1$s”…</string>
      <string name="lookup_empty">Nothing to look up</string>
      <string name="lookup_open_app">Open in wuDict</string>
+
+     <!-- The foreground service that keeps a demanded ingest alive
+          (IndexService). The channel name is what appears in the system's
+          notification settings, so it names the work rather than the app. -->
+     <string name="index_channel">Preparing dictionaries</string>
+     <string name="index_title">Preparing a dictionary</string>
+     <string name="index_text">Building the search index. This can take a few minutes.</string>
 </resources>

@@ -207,8 +207,8 @@ android-go-purego: ## NDK-less fallback lib (pure-Go sqlite; .spx audio unavaila
 # Two flavours (D62), one binary: `foss` is the GitHub/F-Droid build and keeps
 # All-files access; `play` declares no storage permission and imports through
 # SAF. Both package the same libwudict.so, so android-go is a shared prereq.
-.PHONY: apk
-apk: android-go ## Build the FOSS debug APK (needs Android SDK: ANDROID_HOME or local.properties)
+.PHONY: apk-apk-foss-debug
+apk-apk-foss-debug: android-go ## Build the FOSS debug APK (needs Android SDK: ANDROID_HOME or local.properties)
 	cd android && ./gradlew assembleFossDebug
 	@echo "android/app/build/outputs/apk/foss/debug/$(BINARY)-foss-debug.apk"
 

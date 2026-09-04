@@ -11,6 +11,8 @@ package dsl
 import (
 	"path"
 	"strings"
+
+	"github.com/wuweidict/wudict/internal/store"
 )
 
 // stripComments removes `{{...}}` comments. A comment may itself contain a
@@ -90,13 +92,21 @@ type transformer struct {
 	labelOpen  bool
 	currentKey string
 	resFiles   []string
+	abbrev     *abbrevMap
 }
 
 // transformBody renders a whole DSL entry body to HTML. currentKey replaces
 // `~`. The surrounding whitespace is the file's own indentation, not content,
 // so it is dropped - but only here, at the outer edge of a complete article.
 func transformBody(text, currentKey string) (html string, resFiles []string, err error) {
-	html, resFiles, err = transformFragment(text, currentKey)
+	return transformBodyAbbrev(text, currentKey, nil)
+}
+
+// transformBodyAbbrev is transformBody with the dictionary's abbreviation
+// glossary in hand, so [p] labels it knows can carry their expansion. A nil map
+// is the no-companion case and produces byte-identical output.
+func transformBodyAbbrev(text, currentKey string, ab *abbrevMap) (html string, resFiles []string, err error) {
+	html, resFiles, err = transformFragmentAbbrev(text, currentKey, ab)
 	if err != nil {
 		return "", nil, err
 	}
@@ -106,9 +116,14 @@ func transformBody(text, currentKey string) (html string, resFiles []string, err
 // transformFragment is transformBody without the trim, for markup that is
 // concatenated with text on either side of it.
 func transformFragment(text, currentKey string) (html string, resFiles []string, err error) {
+	return transformFragmentAbbrev(text, currentKey, nil)
+}
+
+func transformFragmentAbbrev(text, currentKey string, ab *abbrevMap) (html string, resFiles []string, err error) {
 	tr := &transformer{
 		input:      stripComments(text),
 		currentKey: currentKey,
+		abbrev:     ab,
 	}
 	if err := tr.run(); err != nil {
 		return "", nil, err
@@ -175,8 +190,22 @@ func escape(s string) string { return textEscaper.Replace(s) }
 // close the attribute and start a new one.
 func quoteAttr(s string) string { return `"` + attrEscaper.Replace(s) + `"` }
 
+// closeLabel flushes a [p] label. When the dictionary's abbreviation companion
+// knows this label, the whole coloured run is wrapped in an <abbr> carrying the
+// expansion: the browser draws its own tooltip, no client code is involved, and
+// both the element and the title= survive `-format clean`. The class is for
+// styling only and is dropped there, which is why it carries nothing the reader
+// needs. With no expansion the bytes are exactly what they always were.
 func (tr *transformer) closeLabel() {
-	tr.out.WriteString(`<i class="p"><font color="green">` + tr.label.String() + "</font></i>")
+	label := tr.label.String()
+	tr.out.WriteString(`<i class="p">`)
+	if exp, ok := tr.abbrev.lookup(collapseSpace(store.StripHTML(label))); ok {
+		tr.out.WriteString(`<abbr class="wudict-abbr" title=` + quoteAttr(exp) + `>`)
+		tr.out.WriteString(`<font color="green">` + label + "</font></abbr>")
+	} else {
+		tr.out.WriteString(`<font color="green">` + label + "</font>")
+	}
+	tr.out.WriteString("</i>")
 	tr.label.Reset()
 	tr.labelOpen = false
 }

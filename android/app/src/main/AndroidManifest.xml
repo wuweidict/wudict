@@ -8,6 +8,16 @@
          app-wide rather than via a networkSecurityConfig domain list. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Preparing a dictionary the user asked for is minutes of work in a
+         process the platform otherwise reads as idle, and the freezer and the
+         low-memory killer both act on that reading. FOREGROUND_SERVICE covers
+         every level; the DATA_SYNC grant is required from API 34, where the
+         service type is enforced rather than advisory. Neither is a runtime
+         permission and neither is ever prompted for. See IndexService for why
+         this - and not a priority boost - is the mechanism that helps. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <!-- INTERNET is the only permission this manifest declares (D62). Every
          storage permission belongs to the `foss` flavour's manifest, because
          the `play` flavour has none: its dictionaries live in the app's own
@@ -90,6 +100,14 @@
                 <data android:host="lookup" android:scheme="wudict" />
             </intent-filter>
         </activity>
+
+        <!-- Holds the process up while a demanded ingest runs (IndexService).
+             Not exported: it is started by this app's own shell, off the
+             server's busy markers, and has nothing to say to anyone else. -->
+        <service
+            android:name=".IndexService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- "Manage space" in App Info (D63). Launched by the Settings app, so
              exported; translucent and finished in onCreate, so it is a

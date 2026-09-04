@@ -29,21 +29,31 @@ type Config struct {
 	// "decide from how the app was launched" - a GUI launch (a macOS .app, the
 	// double-clicked wudict.exe) gets an icon, a terminal or a service does not.
 	// TRAY=1 or TRAY=0 overrides that decision in either direction (D74).
-	Tray          *bool  // TRAY
-	Verbose       bool   // VERBOSE=1: verbose logging
-	Speexdec      string // SPEEXDEC: path to the external speexdec binary (.spx audio)
-	SpeexBackend  string // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
-	AutoIndex     string // AUTO_INDEX: on|off - prepare a dictionary's index on first search
-	UseCached     bool   // USE_CACHED=1: also list previously imported dictionaries from the db dir
-	NoCompress    bool   // NO_COMPRESS=1: store article text verbatim (bigger databases)
-	IndexWorkers  int    // INDEX_WORKERS: how many dictionaries may be indexed at once
-	MemoryLimit   int64  // MEMORY_LIMIT: soft heap ceiling in bytes (0 = none)
-	PreviewMemory int64  // PREVIEW_MEMORY: cap on RAM held by unprepared dictionaries (0 = unlimited)
-	SearchMemory  int64  // SEARCH_MEMORY: cap on RAM ONE search may materialise (0 = uncapped)
-	MorphCache    int    // MORPH_CACHE: how many lemma packs stay resident (0 = no lemmatization)
-	LemmaDir      string // LEMMA_DIR: folder of installed lemma files (adds/overrides languages)
-	LemmaURL      string // LEMMA_URL: manifest `wudict lemmas` installs languages from
-	Source        string // path of the wudict.toml that was loaded ("" if none)
+	Tray         *bool  // TRAY
+	Verbose      bool   // VERBOSE=1: verbose logging
+	Speexdec     string // SPEEXDEC: path to the external speexdec binary (.spx audio)
+	SpeexBackend string // SPEEX_BACKEND: internal (in-process libspeex, default) | external (speexdec binary)
+	AutoIndex    string // AUTO_INDEX: on|off - prepare a dictionary's index on first search
+	UseCached    bool   // USE_CACHED=1: also list previously imported dictionaries from the db dir
+
+	// AllowRemoteDelete (ALLOW_REMOTE_DELETE) governs whether a browser on
+	// ANOTHER machine may delete a dictionary. Removal from the machine
+	// running wudict is always allowed - this is a personal app managing its
+	// own library, and the user at the keyboard owns those files. The default
+	// is false: the server has no authentication, so a caller that is not this
+	// machine has proved nothing, and the one irreversible operation is the
+	// wrong place to be generous. Set it to "1" when the server is bound to a
+	// network address and the LAN is trusted with deletions.
+	AllowRemoteDelete bool   // ALLOW_REMOTE_DELETE
+	NoCompress        bool   // NO_COMPRESS=1: store article text verbatim (bigger databases)
+	IndexWorkers      int    // INDEX_WORKERS: how many dictionaries may be indexed at once
+	MemoryLimit       int64  // MEMORY_LIMIT: soft heap ceiling in bytes (0 = none)
+	PreviewMemory     int64  // PREVIEW_MEMORY: cap on RAM held by unprepared dictionaries (0 = unlimited)
+	SearchMemory      int64  // SEARCH_MEMORY: cap on RAM ONE search may materialise (0 = uncapped)
+	MorphCache        int    // MORPH_CACHE: how many lemma packs stay resident (0 = no lemmatization)
+	LemmaDir          string // LEMMA_DIR: folder of installed lemma files (adds/overrides languages)
+	LemmaURL          string // LEMMA_URL: manifest `wudict lemmas` installs languages from
+	Source            string // path of the wudict.toml that was loaded ("" if none)
 
 	// BrowserExtensions (BROWSER_EXTENSIONS) pins which browser-extension
 	// origins may read /api/dicts, /api/search and /res/ cross-origin. Empty =
@@ -102,7 +112,10 @@ func defaults() Config {
 		SearchMemory:  searchMemoryDefault(),
 		MorphCache:    morphCacheDefault(),
 		LemmaDir:      filepath.Join(home, ".wudict", "lemmas"),
-		LemmaURL:      DefaultLemmaURL,
+		// off by default: see the field comment - loopback deletes regardless,
+		// so this only ever opens the LAN case, and that is opt-in.
+		AllowRemoteDelete: false,
+		LemmaURL:          DefaultLemmaURL,
 	}
 }
 
@@ -199,6 +212,12 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	}
 	if v := get("USE_CACHED"); v != "" && v != "0" && !strings.EqualFold(v, "false") {
 		cfg.UseCached = true
+	}
+	if v := get("ALLOW_REMOTE_DELETE"); v != "" {
+		// Set at all means on, except for the explicit negatives - so a user
+		// who writes "0"/"false"/"off"/"no" to be sure gets what they meant
+		// rather than the opposite.
+		cfg.AllowRemoteDelete = !isOff(v)
 	}
 	if v := get("NO_COMPRESS"); v != "" && v != "0" && !strings.EqualFold(v, "false") {
 		cfg.NoCompress = true
@@ -394,6 +413,10 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 #                                     # Android defaults to a fraction of the device's RAM.
 # NO_COMPRESS = "0"                   # "1" = store article text uncompressed (databases roughly 3x larger,
 #                                     #       marginally faster reads; only worth it with disk to spare)
+# ALLOW_REMOTE_DELETE = "0"           # may a browser on ANOTHER machine delete a dictionary?
+#                                     # Deleting from this machine is always allowed. "1" = a browser
+#                                     # on the LAN may too; only meaningful when SERVER_IP is not
+#                                     # 127.0.0.1, and there is no undo.
 # USE_CACHED  = "0"                   # "1" = also list previously imported dictionaries kept in DB_DIR
 #                                     #       (set from the setup page: "Use these dictionaries")
 # BROWSER_EXTENSIONS = []             # which browser extensions may read this server from a web page
@@ -877,3 +900,15 @@ func (c Config) Addr() string { return c.IP + ":" + c.Port }
 // and carries digests and measured memory costs the raw lists do not have;
 // `tools/lemmafiles` is the only thing that ever reads michmech.
 const DefaultLemmaURL = "https://raw.githubusercontent.com/wuweidict/lemmas/main/manifest.json"
+
+// isOff reads a boolean written the way a person writes one in a config file.
+// Only needed for keys whose default is TRUE: for those the empty string means
+// "unset, keep the default", so the parse has to recognise the negatives
+// rather than the positives.
+func isOff(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "0", "false", "off", "no", "n":
+		return true
+	}
+	return false
+}

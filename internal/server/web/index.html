@@ -28,6 +28,11 @@
   --fg:#2b2a28; --fg-soft:#6d6a64; --fg-faint:#a5a19a;
   --accent:#e08600; --accent-soft:#fff3e0;
   --link:#5b7a99; --link-hover:#3f5e7d;
+  /* Deleting is the only irreversible thing this app does, so it gets a colour
+     of its own rather than borrowing the error red - and it is a token,
+     because it has to survive the theme swap below like everything else. */
+  --danger:#c0564f; --danger-soft:#fdeceb; --danger-line:#e2aca7;
+  --safe:#3f7a52; --safe-soft:#e9f5ec; --safe-line:#b3d6bd;
   --line:#e8e4dd; --line-soft:#f1eee8;
   --hl:#fff0b3; --hl-fg:#5c4a00;
   --focus:#7aa7d1;
@@ -45,6 +50,8 @@ html[data-theme="dark"]{
   --fg:#d8d5d0; --fg-soft:#96938d; --fg-faint:#5f5c57;
   --accent:#e69a33; --accent-soft:#3a2d18;
   --link:#8fb0cc; --link-hover:#b3cde3;
+  --danger:#e8776f; --danger-soft:#3a1d1a; --danger-line:#7a3b36;
+  --safe:#79c08f; --safe-soft:#1b2f22; --safe-line:#3d6349;
   --line:#33363b; --line-soft:#2a2c30;
   --hl:#4a3f10; --hl-fg:#ffe38a;
   --focus:#5b86ad;
@@ -56,6 +63,8 @@ html[data-theme="dark"]{
     --fg:#d8d5d0; --fg-soft:#96938d; --fg-faint:#5f5c57;
     --accent:#e69a33; --accent-soft:#3a2d18;
     --link:#8fb0cc; --link-hover:#b3cde3;
+    --danger:#e8776f; --danger-soft:#3a1d1a; --danger-line:#7a3b36;
+    --safe:#79c08f; --safe-soft:#1b2f22; --safe-line:#3d6349;
     --line:#33363b; --line-soft:#2a2c30;
     --hl:#4a3f10; --hl-fg:#ffe38a;
     --focus:#5b86ad;
@@ -355,23 +364,61 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 .pd .tag.on{color:var(--accent);border-color:var(--accent)}
 .act{color:var(--link);cursor:pointer;text-decoration:underline;
   text-underline-offset:2px;font-size:12px;margin-right:var(--sp-2)}
-/* Removal (D63). Deliberately the quietest control on the card: plain,
-   uncoloured, no icon — it is offered only where the platform gives the user
-   no other way to delete these files (Android), and it must not compete with
-   the switches above it, which are the actions a user actually wants. The
-   danger colour appears only in the confirmation, on the button that acts. */
-.pd .rm{color:var(--fg-faint);cursor:pointer;font-size:11.5px;
-  text-decoration:underline;text-underline-offset:2px}
-.pd .rm:hover{color:#c0564f}
-.pd .rmq{font-size:11.5px;color:var(--fg-soft);display:block;line-height:1.7}
+/* Removal (D63, amended). It lives inside the collapsed file list (.provbody),
+   which is why it is allowed to be this loud: a card at rest shows none of it,
+   and by the time any of it is on screen the user has opened the section that
+   lists exactly what would be deleted. Danger colour on the trigger, a
+   hazard-striped panel for the confirmation, and the irreversible choice is
+   the only filled button on the card. Loud is not the same as easy: the
+   choices still name what they delete, and cancel is still the quiet one. */
+/* A rule of its own above the control: the paths end, the danger begins. */
+.pd .rmwrap{margin-top:.45em;padding-top:.4em;border-top:1px dashed var(--line)}
+.pd .rm{display:inline-block;color:var(--danger);cursor:pointer;font-size:11px;
+  font-weight:600;letter-spacing:.02em;border:1px solid var(--danger-line);
+  border-radius:99px;padding:.1em .6em;background:var(--danger-soft);
+  user-select:none;transition:background var(--t-1),color var(--t-1)}
+.pd .rm:hover{background:var(--danger);color:#fff;border-color:var(--danger)}
+/* The confirmation is a hazard panel, not a sentence: diagonal stripes in the
+   danger colour at low alpha, so it reads as cordoned-off area at a glance and
+   still passes contrast for the text on top of it. */
+.pd .rmq{display:block;font-size:11.5px;color:var(--fg-soft);line-height:1.7;
+  border:1px solid var(--danger);border-radius:8px;padding:.5em .6em;
+  margin-top:.2em;background:var(--danger-soft);
+  background-image:repeating-linear-gradient(-45deg,
+    color-mix(in srgb,var(--danger) 9%,transparent) 0 6px,
+    transparent 6px 14px)}
 .pd .rmq b{color:var(--fg)}
-.pd .rmgo{display:inline-block;border:1px solid #c0564f;border-radius:99px;
-  padding:.05em .55em;margin:.15em .25em .15em 0;font-size:10.5px;
-  color:#c0564f;cursor:pointer;user-select:none}
-.pd .rmgo:hover{background:#c0564f;color:#fff}
-.pd .rmgo.busy{border-style:dashed;cursor:default;background:none;color:var(--fg-faint)}
-.pd .rmno{color:var(--fg-faint);cursor:pointer;font-size:10.5px;
-  text-decoration:underline;text-underline-offset:2px;margin-left:.25em}
+.pd .rmq .rmwarn{display:block;color:var(--danger);font-weight:700;
+  font-size:12px;letter-spacing:.01em;margin-bottom:.15em}
+.pd .rmgo{display:inline-block;border:1px solid var(--danger);border-radius:99px;
+  padding:.1em .6em;margin:.35em .3em .1em 0;font-size:10.5px;font-weight:600;
+  color:var(--danger);background:var(--bg-card);cursor:pointer;user-select:none}
+.pd .rmgo:hover{background:var(--danger);color:#fff}
+/* The irreversible one is filled in, and breathes. Everything else on this
+   card is a thin outline, so a solid block of danger colour is unmistakably
+   not one of them. */
+.pd .rmgo[data-rm="all"]{background:var(--danger);color:#fff;
+  box-shadow:0 0 0 0 color-mix(in srgb,var(--danger) 60%,transparent);
+  animation:rmpulse var(--t-6) ease-out infinite}
+.pd .rmgo[data-rm="all"]:hover{background:var(--danger);
+  filter:brightness(1.08);animation:none}
+@keyframes rmpulse{
+  0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--danger) 55%,transparent)}
+  70%{box-shadow:0 0 0 .45em transparent}
+  100%{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion:reduce){.pd .rmgo[data-rm="all"]{animation:none}}
+.pd .rmgo.busy{border-style:dashed;cursor:default;background:none;
+  color:var(--fg-faint);animation:none;box-shadow:none;filter:none}
+/* Cancel is a button too, and green — the one way out of a panel that is
+   otherwise entirely red. It is a peer of the others in shape and size, but
+   outlined where the irreversible one is filled and pulsing: equal standing,
+   not equal pull. Green also carries the meaning by itself, which matters on a
+   phone where the labels are small and the thumb is fast. */
+.pd .rmno{display:inline-block;border:1px solid var(--safe-line);border-radius:99px;
+  padding:.1em .6em;margin:.35em .3em .1em .15em;font-size:10.5px;font-weight:600;
+  color:var(--safe);background:var(--safe-soft);cursor:pointer;user-select:none;
+  transition:background var(--t-1),color var(--t-1)}
+.pd .rmno:hover{background:var(--safe);border-color:var(--safe);color:#fff}
 /* A provenance row is a PATH plus optional annotations, held as separate
    elements rather than composed into one sentence — the path carries what it
    copies in data-full, so nothing downstream has to take a display string
@@ -427,12 +474,44 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 #folders .rv{color:var(--fg-faint);font-size:11px;cursor:pointer}
 #folders .rv:hover{color:var(--link);text-decoration:underline}
 #folders .frow:hover .rv{color:var(--fg-soft)}
-#folders .facts{display:flex;flex-wrap:wrap;gap:.4em 1.2em;align-items:baseline;margin-top:.7em}
-/* Three peer actions look like peers. "Edit folders…" is an <a> and was
-   inheriting link styling, which made it the loudest of the three purely
-   because of its element name. */
-#folders .facts .act{color:var(--fg-soft);text-decoration:none;font-size:11.5px}
-#folders .facts .act:hover{color:var(--link);text-decoration:underline}
+/* Not peers, and no longer drawn as peers. These three are frequent controls
+   and wear a bounded hit region: on the web an affordance is a BOUNDARY, not a
+   pictograph beside a word — a border is what says "aim here", which is the one
+   thing the emoji that used to sit here never said. Quietest possible bounding
+   in this system: --line (the faintest rule) over --bg-card, which on --bg is
+   barely a tint, so the edge does all the work and no colour is spent — and
+   colour is load-bearing here (--accent means "on"), so a row of saturated
+   glyphs was spending the one pre-attentive channel the design reserves.
+   font-family:inherit is not optional: #rescanBtn is a real <button> now, and a
+   button that does not ask for it renders in the UA stack, not var(--font). */
+#folders .facts{display:flex;flex-wrap:wrap;gap:.45em;align-items:center;margin-top:.7em}
+#folders .facts .act{display:inline-flex;align-items:center;gap:.4em;
+  font-family:inherit;font-size:11.5px;line-height:1.2;padding:.28em .6em;margin:0;
+  color:var(--fg-soft);background:var(--bg-card);
+  border:1px solid var(--line);border-radius:8px;
+  text-decoration:none;cursor:pointer;transition:color .12s,border-color .12s}
+#folders .facts .act:hover{color:var(--fg);border-color:var(--fg-faint);text-decoration:none}
+#folders .facts .act:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+/* One step fainter than the label, so the glyph reads as a mark on the control
+   rather than as a second word. Both idioms below (fill and stroke) resolve
+   through currentColor, so this one declaration colours all three — and they
+   follow the theme, which is exactly what emoji could not do. */
+#folders .facts .act svg{width:14px;height:14px;flex:none;color:var(--fg-faint)}
+#folders .facts .act:hover svg{color:var(--fg-soft)}
+/* Reveals a choice, so it is drawn like every other disclosure in this panel
+   (#folders, .prov, .pd .about) and not like the buttons above it — a border
+   here would promise an action that this control does not perform. The marker
+   is driven by aria-expanded, which openFtsAll/closeFtsAll already maintain, so
+   there is no second source of truth to drift from #ftsAllBox.hidden. */
+.ftsdisc{display:inline-flex;align-items:center;gap:.35em;margin-top:.7em;
+  background:none;border:0;padding:.1em .15em .1em 0;font:inherit;font-size:11.5px;
+  color:var(--fg-soft);cursor:pointer;text-align:left;border-radius:4px;
+  transition:color .12s}
+.ftsdisc::before{content:"▸";color:var(--fg-faint);font-size:9px;
+  display:inline-block;width:1em;flex:none}
+.ftsdisc[aria-expanded="true"]::before{content:"▾"}
+.ftsdisc:hover{color:var(--fg)}
+.ftsdisc:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
 /* An action that spends disk and CPU states its price where it is triggered,
    in the same breath as the trigger — not in a tooltip, and not after the
    fact (D31). Quiet by design: this is an extra, never a repair. */
@@ -471,6 +550,32 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
    details.dict that does not exist here. */
 .pd .companions{color:var(--fg-soft)}
 .pd .provbody{margin:.2em 0 0 1em;display:flex;flex-direction:column;gap:.1em}
+/* "About" — what the dictionary says about ITSELF (/api/about). Same
+   disclosure MECHANICS as .prov above, one size up, because this one is prose
+   to be read rather than a path to be copied — but deliberately not the same
+   chrome. It was a byte-for-byte clone, and two identical carets stacked one
+   row apart read as a single list split by accident rather than as two things.
+   The hairline moves this into the card's footer register, below the file
+   facts, where a description belongs. The body is fetched on first open: an
+   annotation can be a page long and there is one per dictionary. */
+.pd .about{font-size:11px;color:var(--fg-faint);overflow-wrap:break-word;
+  margin-top:.45em;padding-top:.4em;border-top:1px solid var(--line-soft)}
+.pd .about>summary{cursor:pointer;list-style:none;color:var(--fg-faint);
+  border-radius:4px;padding:.05em .15em;margin-left:-.15em;transition:background .12s,color .12s}
+.pd .about>summary:hover{color:var(--fg-soft);background:var(--line-soft)}
+.pd .about>summary:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.pd .about>summary::-webkit-details-marker{display:none}
+.pd .about>summary::before{content:"▸";color:var(--fg-soft);display:inline-block;width:1em;font-size:9px}
+.pd .about[open]>summary::before{content:"▾"}
+.pd .aboutbody{margin:.2em 0 0 1em;line-height:1.45}
+.pd .aboutbody p{margin:.25em 0}
+.pd .aboutbody h4{margin:.5em 0 .1em;font-size:10px;text-transform:uppercase;
+  letter-spacing:.04em;color:var(--fg-soft);font-weight:600}
+.pd .aboutbody h4:first-child{margin-top:0}
+.pd .aboutbody a{color:var(--fg-soft);text-decoration:none;border-bottom:1px solid var(--line)}
+.pd .aboutbody a:hover{color:var(--link);border-bottom-color:currentColor}
+.pd .aboutbody ul,.pd .aboutbody ol{margin:.25em 0;padding-left:1.2em}
+.pd .aboutlangs{margin-top:.4em;color:var(--fg-soft)}
 
 /* ── responsive ────────────────────────────────────────────────────── */
 @media (max-width:600px){
@@ -559,7 +664,7 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
      exactly when an eager "type and hit Enter" used to reach the search path
      with an empty dictionary list. -->
 <form id="frm" class="col" role="search" aria-busy="true">
-<span class="brand">WuWei<small>Dict</small></span>
+<span class="brand">wu<small>Dict</small></span>
 <!-- The search pill. Above 600px it is display:contents, so the field and the
      two selects are direct flex children of the form exactly as they always
      were and the desktop bar is unchanged. Below it the pill becomes the row:
@@ -633,28 +738,42 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
     <svg class="cog" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M6.56 1.05L9.44 1.05L9.07 2.81L10.91 3.57L11.90 2.07L13.93 4.10L12.43 5.09L13.19 6.93L14.95 6.56L14.95 9.44L13.19 9.07L12.43 10.91L13.93 11.90L11.90 13.93L10.91 12.43L9.07 13.19L9.44 14.95L6.56 14.95L6.93 13.19L5.09 12.43L4.10 13.93L2.07 11.90L3.57 10.91L2.81 9.07L1.05 9.44L1.05 6.56L2.81 6.93L3.57 5.09L2.07 4.10L4.10 2.07L5.09 3.57L6.93 2.81ZM5.50 8.00a2.50 2.50 0 1 0 5.00 0a2.50 2.50 0 1 0 -5.00 0Z"/></svg>
     <span class="fsum" id="folderSummary"></span></summary>
   <div id="folderBody"></div>
+  <!-- Monochrome inline SVG, never emoji, for the reason already stated on the
+       cog above: a colour blob on one platform and flat on another, off its own
+       baseline, and unable to inherit currentColor — so it cannot follow the
+       theme or the muted hierarchy this row is supposed to sit in. -->
   <div class="facts">
-    <a class="act" id="editFolders" href="/setup">✏️ Edit folders…</a>
-    <span class="act" id="rescanBtn" title="Re-scan every folder and re-open the dictionaries found (takes a moment)">♻️ Rescan folders</span>
+    <a class="act" id="editFolders" href="/setup"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M1.6 4a1 1 0 0 1 1-1h3.3l1.5 1.7h6a1 1 0 0 1 1 1v6.3a1 1 0 0 1-1 1H2.6a1 1 0 0 1-1-1z"/></svg>Edit folders…</a>
+    <!-- A real <button>, not a <span>: as a span with no tabindex this action
+         could not be reached by keyboard at all. -->
+    <button type="button" class="act" id="rescanBtn" title="Re-scan every folder and re-open the dictionaries found (takes a moment)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13.3 8a5.3 5.3 0 1 1-1.7-3.9"/><path d="M13.6 2v3h-3"/></svg>Rescan folders</button>
     <!-- Word-form data is installed long after first run - "why does estuviera
          find nothing?" is a question asked while searching, not while choosing
-         folders - so the link lives here as well as on the setup page. -->
-    <a class="act" id="lemmaLink" href="/lemmas" title="Install the word-form data that lets an inflected word find its dictionary entry">🔤 Lemmatization…</a>
-    <!-- Quiet, and shaped like its two peers: verb, object, scope, ellipsis.
-         The shouted version ("ENABLE … GLOBALLY!") gave the panel's least-used
-         and most expensive action its loudest voice, which is the hierarchy
-         upside down — and every word it was shouting is stated precisely, one
-         click away, in the disclosure this opens. The "…" is the honest
-         signal: this reveals a choice, it does not act.
-         "full-text search" and not a friendlier paraphrase: it is the term the
-         mode dropdown, the per-dictionary switch and the result summaries all
-         use, and this action's whole job is to flip that switch in bulk.
-         "every dictionary" and not "globally": the scope is the one thing a
-         user must not misread here, and "dictionaries" is the unit this panel
-         already counts in. -->
-    <span class="act" id="ftsAllBtn" role="button" tabindex="0" aria-expanded="false" aria-controls="ftsAllBox"
-      title="Optional. Every dictionary can already be searched by headword; full-text search also looks inside article text, and uses noticeably more disk space.">⚡️ Enable full-text search for every dictionary…</span>
+         folders - so the link lives here as well as on the setup page.
+         One stem, two forms: not a conventional glyph, which is why it keeps
+         its label and its title. Nothing conventional means "inflection", and
+         borrowing the book from the top bar would make that glyph mean two
+         things, which is to say neither. -->
+    <a class="act" id="lemmaLink" href="/lemmas" title="Install the word-form data that lets an inflected word find its dictionary entry"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.2 8h2.6"/><path d="M4.8 8V5a1.4 1.4 0 0 1 1.4-1.4h4.4"/><path d="M4.8 8v3a1.4 1.4 0 0 0 1.4 1.4h4.4"/></svg>Lemmatization…</a>
   </div>
+  <!-- Quiet, and NOT shaped like the three above: verb, object, scope,
+       ellipsis, on a line of its own beside the box it opens.
+       The shouted version ("ENABLE … GLOBALLY!") gave the panel's least-used
+       and most expensive action its loudest voice, which is the hierarchy
+       upside down — and every word it was shouting is stated precisely, one
+       click away, in the disclosure this opens. The "…" is the honest
+       signal: this reveals a choice, it does not act — so it wears the ▸ the
+       rest of the panel uses for that, and not the border the buttons above
+       use to promise one. Giving it their chrome would make the promise the
+       wording spent three sentences avoiding.
+       "full-text search" and not a friendlier paraphrase: it is the term the
+       mode dropdown, the per-dictionary switch and the result summaries all
+       use, and this action's whole job is to flip that switch in bulk.
+       "every dictionary" and not "globally": the scope is the one thing a
+       user must not misread here, and "dictionaries" is the unit this panel
+       already counts in. -->
+  <button type="button" class="ftsdisc" id="ftsAllBtn" aria-expanded="false" aria-controls="ftsAllBox"
+    title="Optional. Every dictionary can already be searched by headword; full-text search also looks inside article text, and uses noticeably more disk space.">Enable full-text search for every dictionary…</button>
   <div id="ftsAllBox" class="bulkbox" hidden></div>
   <!-- About: last row of the only chrome panel the app has. Users already open
        this for their folder paths, so the identity/version/links live where
@@ -1067,7 +1186,15 @@ function syncChips(){
   $("dictLbl").textContent=all?"":opt.text;
   $("dictChip").classList.toggle("dflt",all);
 }
-$("dict").onchange=e=>{localStorage.setItem("wudict_dict",e.target.value);syncChips();if($("q").value.trim())doSearch()};
+/* Picking a dictionary is already a statement that it is about to be searched,
+   so its index is demanded on the selection itself and not on the first query
+   (D92, /api/demand). Only when there is nothing to re-run: a search of one
+   dictionary carries the same demand server-side, so doSearch() would make this
+   request redundant. Fire-and-forget - the ingest outlives the response, and
+   the chip catches up on the next loadDicts(). */
+$("dict").onchange=e=>{const v=e.target.value;localStorage.setItem("wudict_dict",v);syncChips();
+  if($("q").value.trim())doSearch();
+  else if(v&&v!=="all")fetch("/api/demand?dict="+encodeURIComponent(v),{method:"POST"}).catch(()=>{})};
 /* Mode had no change handler at all: it took effect on the next submit. That
    was survivable while a 🔍 button sat next to it, but the narrow bar has no
    submit button, so picking a mode would have appeared to do nothing at all.
@@ -1134,9 +1261,35 @@ function provenance(d){
     if(d.folder)rows.push(note("contains: text.db"+(d.mediaDB?" + media.db":"")+" + info.txt"));
     else if(d.mediaDB)rows.push(label(d.mediaDB,{pre:"media:"}));
   }
+  /* Removal lives HERE, at the foot of the file list, and nowhere else.
+     Two reasons, and the second is the real one:
+
+     - Alarm has a cost. Danger colouring earns its keep on a control the user
+       has chosen to look at; on every card at rest it is a panel that shouts
+       at someone who came to switch on full-text search. One disclosure click
+       separates the calm list from the loud thing.
+     - It is semantically the same object. This summary names exactly what
+       Remove deletes — the dictionary file, its companions, the prepared
+       folder — so the section title IS the answer to "what would this take?",
+       and the buttons below simply choose how much of the list to act on.
+
+     canDelete is the server's answer to "may THIS caller delete?" — yes from
+     the machine running wudict, and from a remote browser only when
+     ALLOW_REMOTE_DELETE is on. Never a platform test done here: the page does
+     not know what it is running on, and must not guess. */
+  const canDel=!!(cfgInfo&&cfgInfo.canDelete);
+  if(canDel)rows.push(`<div class="rmwrap">${rmTrigger()}</div>`);
+  // The flat one-line form has nowhere to put a control, so a card that can be
+  // deleted always gets the disclosure - even when the body holds nothing else.
   if(!rows.length)return `<div class="prov1" title="${escAttr(full)}">${head}</div>`;
   return `<details class="prov"><summary title="${escAttr(full)}">${head}</summary>`+
     `<div class="provbody">${rows.join("")}</div></details>`;
+}
+
+/* The trigger, in one place: rendered into the file list, and restored there
+   when a confirmation is cancelled. */
+function rmTrigger(){
+  return `<span class="rm" title="Delete this dictionary and its files — permanently, with no undo">🗑 Remove…</span>`;
 }
 function renderPanel(){
   syncPanelHeader();
@@ -1174,10 +1327,26 @@ function renderPanel(){
        No chip at all when the source is gone — a prepared-only dictionary
        cannot be rebuilt, and dbSize covers it anyway. */
     const indexed=(d.dbSize||0)>0;
+    /* What it would cost, on the ABSENT state only. A 2.9 M-entry dictionary
+       is a gigabyte of disk and minutes of a phone's battery, and the chip
+       that starts that used to say nothing about either; O9 is the decision
+       that the size be shown before it is spent, not after.
+
+       The estimate is calibrated on the user's own corpus, exactly as
+       ftsAddedBytes is, and for the same reason: bytes-per-entry runs from 107
+       to 94 k across real dictionaries, so no hard-coded multiplier is honest.
+       With nothing to calibrate against it says nothing rather than inventing
+       a number.
+
+       It must never be mistaken for the real figure sitting in the .on.locked
+       chip next to it, which is a measurement of a file on disk. Hence "est.",
+       hence "~", hence plain .feat styling - the estimate is an argument for
+       clicking, the size is a fact about what a click already produced. */
+    const est=indexed?0:baseIndexBytes(d);
     let caps=indexed
       ? `<span class="feat on locked" title="Indexed - ${mb(d.dbSize)} on disk">${mb(d.dbSize)}</span>`
       : canToggle
-        ? `<span class="feat" data-feat="base" title="Build this dictionary's index - until then it is searched the slow way, through its own format">\u{1F680} index</span>`
+        ? `<span class="feat" data-feat="base" title="Build this dictionary's index - until then it is searched the slow way, through its own format.${est?` Not indexed: the ~${mb(est)} is an estimate of what indexing WOULD use, worked out from your dictionaries that already have an index - not a measurement of this one.`:""}">🚀 index${est?` · est. ~${mb(est)}`:""}</span>`
         : "";
     for(const[key,label,on,bytes]of feats){
       if(key==="media"&&!on&&!d.hasMedia)continue; // nothing to pack
@@ -1199,12 +1368,6 @@ function renderPanel(){
     // media, a source to pack it from, and it isn't already packed.
     let acts="";
     if(d.error)acts=`<span class="err">${esc(d.error)}</span>`;
-    /* Removal (D63) is offered only where the app cannot hand the user to a
-       file manager instead — canDelete is the server's answer to that, not a
-       platform test done here. On a desktop this branch never runs and the
-       card is byte-for-byte what it was. */
-    if(cfgInfo&&cfgInfo.canDelete)
-      acts+=`<span class="rm" title="Delete this dictionary from this device">Remove…</span>`;
     div.innerHTML=`<div class="hd">
         <span class="grip" draggable="true" title="Drag to reorder">⠿</span>
         <b>${esc(dictLabel(d))}</b>
@@ -1218,7 +1381,8 @@ function renderPanel(){
       </div>
       <div class="meta">${esc(d.format||"?")}${d.entries?" · "+d.entries.toLocaleString()+" entries":""}${d.dbSize?" · indexed":""}</div>
       <div>${caps}</div><div class="acts">${acts}</div>
-      ${provenance(d)}`;
+      ${provenance(d)}
+      <details class="about"><summary>About this dictionary</summary><div class="aboutbody">…</div></details>`;
     el.appendChild(div);
   }
   if(scroller)scroller.scrollTop=top;
@@ -1248,9 +1412,37 @@ $("panelList").addEventListener("drop",e=>{
   let to=ids.indexOf(pd.dataset.id);if(after)to++;
   ids.splice(to,0,dragId);prefOrder=ids;savePrefs();clearDrop();dragId=null;renderPanel();
 });
-$("panelBtn").onclick=()=>{$("panel").classList.add("show");loadFolders()};
-$("closePanel").onclick=()=>$("panel").classList.remove("show");
-$("panel").onclick=e=>{if(e.target.id==="panel")$("panel").classList.remove("show")};
+/* The panel is a full-height overlay OVER the results, and every switch in it
+   — enable/disable, the master switch, drag-reorder — changes what an "All
+   dictionaries" search answers with and in what order. Re-running per click
+   would fire one streaming search per toggle (up to `dicts.length` of them
+   during an "enable all" sweep), each aborting the last through searchSeq,
+   while the user sees none of it behind the overlay. So the query is re-issued
+   once, on close, and only if the enabled set or its order actually moved —
+   opening the panel to read an About card or check a path must not throw away
+   a finished answer, its scroll offset and its open <details>. Same rule the
+   bulk-FTS, ingest and mid-stream-load paths already follow: when the
+   searchable corpus changes under a live query, re-issue the query. */
+let panelSnap=null;
+function panelState(){return enabledOrderedIds().join("\u0000")}
+function showPanel(){panelSnap=panelState();$("panel").classList.add("show");loadFolders()}
+function hidePanel(){
+  if(!$("panel").classList.contains("show"))return;
+  $("panel").classList.remove("show");
+  const was=panelSnap;panelSnap=null;
+  /* Only an "All dictionaries" answer is built from the enabled set. A view
+     scoped to one dictionary — by the selector, or one-shot by a bword:// link
+     (lastScope) — reads that dictionary whether or not it is enabled, so the
+     panel cannot have changed it; and re-running here would carry no scopeOnce
+     and silently widen a cross-reference view back to "all". */
+  if(!lastQuery||was===null||lastScope||$("dict").value!=="all")return;
+  // an empty enabled set is a real answer here, not a no-op: doSearch renders
+  // "all dictionaries are disabled" rather than a zero-hit "not found"
+  if(was!==panelState())doSearch();
+}
+$("panelBtn").onclick=showPanel;
+$("closePanel").onclick=hidePanel;
+$("panel").onclick=e=>{if(e.target.id==="panel")hidePanel()};
 $("rescanBtn").onclick=()=>{loadDicts(true).then(loadFolders)};
 
 /* Folders & configuration ------------------------------------------------ */
@@ -1391,6 +1583,28 @@ function ftsAddedBytes(todo){
   const grown=want*(bytes/entries),have=todo.reduce((n,d)=>n+(d.dbSize||0),0);
   return grown>have?grown-have:0;
 }
+/* The same calibration as ftsAddedBytes, for the index that has not been built
+   yet: bytes per entry across the dictionaries that DO have one, restricted to
+   headword-only indexes because that is what building this one produces (a
+   full-text index is several times larger and would overstate it wildly).
+   Zero when there is nothing to calibrate against, which the caller renders as
+   silence. */
+let baseRate=0,baseRateFor=null;
+function baseIndexBytes(d){
+  if(!d.entries)return 0;
+  /* The calibration is a property of the whole corpus, not of the card being
+     drawn, and renderPanel calls this once per unprepared card — so computing
+     it inside the function made one panel render O(cards x dictionaries).
+     Memoised on the identity of the `dicts` array, which /api/dicts replaces
+     wholesale on every refresh, so a new list recalculates and a redraw of the
+     same list does not. */
+  if(baseRateFor!==dicts){
+    let bytes=0,entries=0;
+    for(const o of dicts)if(o.dbSize&&o.entries&&!o.caps?.FTS){bytes+=o.dbSize;entries+=o.entries}
+    baseRate=entries?bytes/entries:0;baseRateFor=dicts;
+  }
+  return baseRate?Math.round(d.entries*baseRate):0;
+}
 function closeFtsAll(){
   $("ftsAllBox").hidden=true;
   $("ftsAllBtn").setAttribute("aria-expanded","false");
@@ -1417,7 +1631,6 @@ function openFtsAll(){
   $("ftsAllBtn").setAttribute("aria-expanded","true");
 }
 $("ftsAllBtn").onclick=()=>{$("ftsAllBox").hidden?openFtsAll():closeFtsAll()};
-$("ftsAllBtn").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();$("ftsAllBtn").onclick()}};
 $("ftsAllBox").addEventListener("click",async e=>{
   if(e.target.id==="ftsAllNo"){closeFtsAll();return}
   if(e.target.id!=="ftsAllGo")return;
@@ -1437,6 +1650,40 @@ $("ftsAllBox").addEventListener("click",async e=>{
   setStatus(`✓ full-text search enabled on ${todo.length} ${todo.length===1?"dictionary":"dictionaries"}`);
   await loadDicts();if(lastQuery)doSearch();
 });
+/* The About body is fetched once, on the first open, and kept on the element
+   afterwards: /api/dicts deliberately carries no description (an annotation has
+   no business on every row of a list built without opening anything), so the
+   text only exists once someone asks for it. `toggle` does not bubble — hence
+   the capture phase, which is also why this is one listener and not one per
+   card. */
+$("panelList").addEventListener("toggle",async e=>{
+  const det=e.target;
+  if(!det.classList||!det.classList.contains("about")||!det.open||det.dataset.loaded)return;
+  det.dataset.loaded="1";
+  const pd=det.closest(".pd"),body=det.querySelector(".aboutbody");
+  try{
+    const r=await fetch("/api/about?dict="+encodeURIComponent(pd.dataset.id));
+    if(!r.ok)throw new Error(r.status);
+    const j=await r.json();
+    /* Inserted as markup on purpose: the server normalised it (escaped if it
+       was plain text, reduced to prose elements if it was markup), so this is
+       the one client that does NOT need a sanitiser of its own. */
+    body.innerHTML=(j.html||`<p>✨ Emptiness Found! ✨ 🤷 ✨</p>`)+aboutLangs(j);
+  }catch(err){
+    body.textContent="Not available.";
+    det.dataset.loaded=""; // a failed fetch is worth retrying on the next open
+  }
+},true);
+/* The declared language pair, which is a fact about the dictionary and not part
+   of its prose — shown only where the dictionary itself declared it (DSL is the
+   only format that names both ends). */
+function aboutLangs(j){
+  const parts=[];
+  if(j.indexLang)parts.push("headwords "+esc(j.indexLang));
+  if(j.contentsLang)parts.push("articles "+esc(j.contentsLang));
+  if(!parts.length)return "";
+  return `<div class="aboutlangs">${parts.join(" · ")}</div>`;
+}
 $("panelList").addEventListener("click",e=>{
   const mv=e.target.closest("[data-mv]");
   if(mv){moveDict(mv.closest(".pd").dataset.id,mv.dataset.mv);return}
@@ -1456,7 +1703,10 @@ $("panelList").addEventListener("click",e=>{
   const rm=e.target.closest(".rm");
   if(rm){askRemoval(rm.closest(".pd"));return}
   const no=e.target.closest(".rmno");
-  if(no){renderPanel();return}
+  // Cancel restores the trigger in place rather than redrawing the panel: a
+  // full render would collapse the file list the user opened to get here, and
+  // scroll every other card back to wherever renderPanel decides.
+  if(no){const w=no.closest(".rmwrap");if(w)w.innerHTML=rmTrigger();return}
   const go=e.target.closest("[data-rm]");
   if(go){
     if(go.dataset.busy)return;
@@ -1467,12 +1717,16 @@ $("panelList").addEventListener("click",e=>{
   runIngest(act.closest(".pd").dataset.id,{fts:1},act);
 });
 
-/* ── removing a dictionary (D63) ─────────────────────────────────────────
-   Two clicks, no modal: the card turns into its own confirmation, so the
-   dictionary being deleted is the one the user is looking at and nothing is
-   named twice. Each choice states what it deletes and what that costs — no
-   "are you sure?", which asks the user to re-read a question they already
-   answered rather than telling them anything.
+/* ── removing a dictionary (D63, amended) ────────────────────────────────
+   Three clicks, no modal: open the file list, Remove…, then the choice. The
+   list is the disclosure the control hides behind, and it is not a speed bump
+   bolted on — it is the inventory of exactly what would go, so the user reads
+   the consequence on the way to the button rather than in a dialog after it.
+   The confirmation then replaces the trigger in place, so the dictionary being
+   deleted is the one under the paths on screen and nothing is named twice.
+   Each choice states what it deletes and what that costs — no "are you sure?",
+   which asks the user to re-read a question they already answered rather than
+   telling them anything.
 
    Delete-everything is the default because preparation is automatic: deleting
    only the index of a dictionary whose file is still in a scanned folder
@@ -1487,7 +1741,10 @@ $("panelList").addEventListener("click",e=>{
    that made the import's keep/delete question unanswerable. */
 function askRemoval(pd){
   const d=dicts.find(x=>x.id===pd.dataset.id);if(!d)return;
-  const acts=pd.querySelector(".acts");if(!acts)return;
+  // The confirmation replaces the trigger where it stands - at the foot of the
+  // file list it is about, already open, with the paths it would delete listed
+  // directly above it.
+  const wrap=pd.querySelector(".rmwrap");if(!wrap)return;
   const idx=(d.dbSize||0)+(d.mediaSize||0);
   const prepared=idx>0||!!d.mediaDB;
   // "dictionary files only" is a genuine option exactly once: the dictionary is
@@ -1495,13 +1752,16 @@ function askRemoval(pd){
   // The server enforces this too (D24 §4) — this only avoids offering what
   // would be refused.
   const canDropSource=!!d.source&&prepared&&(!!d.mediaDB||!d.hasMedia);
-  let btns=`<span class="rmgo" data-rm="all">delete${d.source?" everything":""}</span>`;
+  let btns=`<span class="rmgo" data-rm="all">💥 delete${d.source?" everything":""}</span>`;
   if(d.source&&prepared)btns+=`<span class="rmgo" data-rm="index">index only${idx?" · "+mb(idx):""}</span>`;
   if(canDropSource)btns+=`<span class="rmgo" data-rm="source">dictionary files only</span>`;
-  acts.innerHTML=`<span class="rmq">Delete <b>${esc(dictLabel(d))}</b>`+
-    (d.source?` — the prepared index${idx?" ("+mb(idx)+")":""} and the dictionary files`
-             :` — this is the only copy, there are no dictionary files to rebuild it from`)+
-    `<br>${btns}<span class="rmno">cancel</span></span>`;
+  // The heading states the irreversibility once, at the top, in the danger
+  // colour — the buttons below it say WHAT goes, not how bad it is.
+  wrap.innerHTML=`<span class="rmq"><span class="rmwarn">😱 No undo. No Trash. Gone.</span>`+
+    `Delete <b>${esc(dictLabel(d))}</b>`+
+    (d.source?` — the prepared index${idx?" ("+mb(idx)+")":""} <b>AND</b> the dictionary files`
+             :` — ⚠️ this is the only copy, there are no dictionary files to rebuild it from`)+
+    `<br>${btns}<span class="rmno">↩ cancel</span></span>`;
 }
 
 async function runRemove(id,kind,node){
@@ -1522,7 +1782,7 @@ async function runRemove(id,kind,node){
     setStatus("⚠ "+esc(name)+" — "+esc(err.message||String(err)));
     return;
   }
-  setStatus("✓ "+esc(name)+" — deleted, "+mb(rep.freed||0)+" freed"+
+  setStatus("💀 "+esc(name)+" — deleted, "+mb(rep.freed||0)+" freed"+
     (rep.note?" · "+esc(rep.note):""));
   // The server has already rescanned; this refetches the list it now reports,
   // and redraws the panel (and the folder section's counts) from it.
@@ -1576,7 +1836,12 @@ function runIngest(id,opts,label){
     es.addEventListener("progress",ev=>{
       const p=JSON.parse(ev.data);
       const counts=p.done.toLocaleString()+(p.total?"/"+p.total.toLocaleString():"");
-      show(verb+"… "+(p.total?Math.min(100,Math.floor(p.done/p.total*100))+"%":p.done.toLocaleString()),
+      /* The steps after the counted work - two CREATE INDEXes, the commit,
+         ANALYZE - are one opaque SQLite call each and can report nothing; on a
+         redirect-heavy dictionary they are ~15% of the wall time. Naming that
+         "finishing…" beats a percentage parked at 100. */
+      const pct=p.total?Math.min(100,Math.floor(p.done/p.total*100)):-1;
+      show(verb+"… "+(pct<0?p.done.toLocaleString():pct>=100?"finishing…":pct+"%"),
         verb+"… "+counts);
     });
     es.addEventListener("done",async()=>{
@@ -2272,7 +2537,7 @@ $("q").addEventListener("input",()=>{
 /* keyboard: "/" focuses search */
 document.addEventListener("keydown",e=>{
   if(e.key==="/"&&document.activeElement!==$("q")){e.preventDefault();$("q").focus();$("q").select()}
-  if(e.key==="Escape")$("panel").classList.remove("show");
+  if(e.key==="Escape")hidePanel();
 });
 
 /* clicks inside shadow roots arrive via composedPath */

@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+
+	"github.com/wuweidict/wudict/internal/logx"
 )
 
 // v3 block type tags (big-endian uint32 in the block directory).
@@ -191,22 +194,45 @@ func (mdict *MdictBase) readKeyEntriesV3() error {
 	return nil
 }
 
-// locateByKeywordEntryV3 looks up the record bytes for a single keyword entry
-// by scanning the v3 record-data blocks.
+// ── the v3 record-block table ────────────────────────────────────────────
 //
-// Record data block layout (same per-block structure as key data):
+// A v3 record section is a chain, not an index:
 //
 //	[4-byte BE] number of record blocks
-//	[8-byte BE] total decompressed size (unused)
+//	[8-byte BE] total decompressed size
 //	For each block:
 //	  [4-byte BE] decompressed size
 //	  [4-byte BE] compressed size
 //	  [compressed_size bytes] block data (decoded via decodeBlockV3)
 //
-// We walk the blocks tracking the cumulative decompressed offset until we
-// find the block containing the entry's RecordStartOffset, then slice the
-// record bytes out of the decompressed block.
-func (mdict *MdictBase) locateByKeywordEntryV3(entry *MDictKeywordEntry) ([]byte, error) {
+// Nothing in that layout says where block k begins - the only way to know is to
+// add up the k-1 headers before it. locateByKeywordEntryV3 used to do exactly
+// that on EVERY lookup, reading each preceding block's payload in full merely to
+// get past it: O(N*B) reads and N whole-block decompressions for an N-entry
+// ingest. On a 2.9M-entry dictionary that is 66.9 GB of read() against a 26.6 MB
+// file, and it does not finish.
+//
+// The chain is walked ONCE instead, seeking over payloads rather than reading
+// them (one 8-byte header read per block, no decompression), and the result is
+// this table. Every later lookup is a binary search over decompAcc plus one
+// block decompression, which the shared FIFO cache then usually serves for
+// free.
+type v3RecordBlock struct {
+	fileOff    int64 // where this block's compressed payload starts in the file
+	compSize   int64 // bytes on disk
+	decompSize int64 // bytes once decoded
+	decompAcc  int64 // decompressed offset of this block's first byte
+}
+
+// recordBlockTableV3 returns the table, building it on first use. Safe for
+// concurrent callers: the whole build is under v3RecMu, so a second caller
+// waits rather than walking the chain again.
+func (mdict *MdictBase) recordBlockTableV3() ([]v3RecordBlock, error) {
+	mdict.v3RecMu.Lock()
+	defer mdict.v3RecMu.Unlock()
+	if mdict.v3RecBlocks != nil {
+		return mdict.v3RecBlocks, nil
+	}
 	if mdict.meta.v3Offsets == nil {
 		return nil, fmt.Errorf("v3 record: block offsets not scanned")
 	}
@@ -216,63 +242,158 @@ func (mdict *MdictBase) locateByKeywordEntryV3(entry *MDictKeywordEntry) ([]byte
 		return nil, err
 	}
 	defer f.Close()
-
-	if _, err := f.Seek(mdict.meta.v3Offsets.recordData, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("v3 record: seek: %w", err)
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
 	}
+	fileSize := st.Size()
 
-	var numBlocks uint32
-	if err := binary.Read(f, binary.BigEndian, &numBlocks); err != nil {
-		return nil, fmt.Errorf("v3 record: read numBlocks: %w", err)
+	pos := mdict.meta.v3Offsets.recordData
+	var head [12]byte
+	if _, err := f.ReadAt(head[:], pos); err != nil {
+		return nil, fmt.Errorf("v3 record: read section header: %w", err)
 	}
-	var totalSize uint64
-	if err := binary.Read(f, binary.BigEndian, &totalSize); err != nil {
-		return nil, fmt.Errorf("v3 record: read totalSize: %w", err)
+	numBlocks := binary.BigEndian.Uint32(head[0:4])
+	// The 8-byte total decompressed size is redundant with the table for
+	// LOCATION, but it is the only cross-check the format offers against a
+	// truncated or mis-declared chain, so it is kept and compared after the
+	// walk. Compared, not enforced: a writer that got this field wrong would
+	// otherwise turn a dictionary that reads perfectly well into a hard
+	// failure, and every block header the walk touches is already validated
+	// against the file's own size. A mismatch is a note in the log for the
+	// person diagnosing records that resolve to nothing near the end.
+	totalSize := int64(binary.BigEndian.Uint64(head[4:12]))
+	pos += 12
+
+	// The count comes from the file, so it is hostile until proven otherwise:
+	// preallocating for it unchecked would let a corrupt uint32 ask for 128 GB.
+	// Every block costs at least its 8-byte header, so the file size is a hard
+	// upper bound on how many there can be.
+	if maxBlocks := (fileSize - pos) / 8; int64(numBlocks) > maxBlocks {
+		return nil, fmt.Errorf("v3 record: block count %d exceeds what a %d-byte file can hold", numBlocks, fileSize)
 	}
+	tbl := make([]v3RecordBlock, 0, numBlocks)
 
-	var decompressedOffset int64
-	var decompressed []byte
-	var foundBlock bool
-
+	var acc int64
+	var hdr [8]byte
 	for i := uint32(0); i < numBlocks; i++ {
-		var decompSize uint32
-		var compSize uint32
-		if err := binary.Read(f, binary.BigEndian, &decompSize); err != nil {
-			return nil, fmt.Errorf("v3 record: block %d: read decompSize: %w", i, err)
+		if _, err := f.ReadAt(hdr[:], pos); err != nil {
+			return nil, fmt.Errorf("v3 record: block %d: read header: %w", i, err)
 		}
-		if err := binary.Read(f, binary.BigEndian, &compSize); err != nil {
-			return nil, fmt.Errorf("v3 record: block %d: read compSize: %w", i, err)
+		decompSize := int64(binary.BigEndian.Uint32(hdr[0:4]))
+		compSize := int64(binary.BigEndian.Uint32(hdr[4:8]))
+		pos += 8
+		if compSize > fileSize-pos {
+			return nil, fmt.Errorf("v3 record: block %d: compressed size %d runs past end of file", i, compSize)
 		}
-		blockData := make([]byte, compSize)
-		if _, err := io.ReadFull(f, blockData); err != nil {
-			return nil, fmt.Errorf("v3 record: block %d: read data: %w", i, err)
-		}
-
-		if decompressedOffset+int64(decompSize) > entry.RecordStartOffset {
-			// This block contains the record.
-			out, err := mdict.decodeBlockV3(blockData, int(decompSize))
-			if err != nil {
-				return nil, fmt.Errorf("v3 record: block %d: decode: %w", i, err)
-			}
-			decompressed = out
-			foundBlock = true
-			break
-		}
-		decompressedOffset += int64(decompSize)
+		tbl = append(tbl, v3RecordBlock{
+			fileOff: pos, compSize: compSize, decompSize: decompSize, decompAcc: acc,
+		})
+		pos += compSize
+		acc += decompSize
 	}
 
-	if !foundBlock {
-		return nil, fmt.Errorf("v3 record: no block contains offset %d", entry.RecordStartOffset)
+	if totalSize != 0 && acc != totalSize {
+		logx.V("v3 record: %s declares %d decompressed bytes, %d blocks account for %d",
+			mdict.filePath, totalSize, len(tbl), acc)
 	}
 
-	start := entry.RecordStartOffset - decompressedOffset
-	end := entry.RecordEndOffset - decompressedOffset
-	if end < 0 || end > int64(len(decompressed)) {
-		end = int64(len(decompressed))
+	mdict.v3RecBlocks = tbl
+	return tbl, nil
+}
+
+// blockV3 decodes one record block, through the same bounded FIFO cache the
+// v1/v2 path uses. A sequential ingest scan asks for the same block for
+// thousands of consecutive entries, so the cache is what turns N decompressions
+// into one per block.
+func (mdict *MdictBase) blockV3(b *v3RecordBlock) ([]byte, error) {
+	return mdict.cachedBlock(b.fileOff, func() ([]byte, error) {
+		f, err := os.Open(mdict.filePath)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		raw := make([]byte, b.compSize)
+		if _, err := f.ReadAt(raw, b.fileOff); err != nil {
+			return nil, fmt.Errorf("v3 record: read block at %d: %w", b.fileOff, err)
+		}
+		return mdict.decodeBlockV3(raw, int(b.decompSize))
+	})
+}
+
+// locateByKeywordEntryV3 returns the record bytes for one keyword entry: a
+// binary search for the block holding RecordStartOffset, then that block.
+//
+// RecordEndOffset carries two spellings of "unknown" - 0 from an entry that was
+// never given an end, negative from readKeyEntriesV3's explicit sentinel for the
+// last entry - and both mean "to the end of the containing block".
+func (mdict *MdictBase) locateByKeywordEntryV3(entry *MDictKeywordEntry) ([]byte, error) {
+	tbl, err := mdict.recordBlockTableV3()
+	if err != nil {
+		return nil, err
 	}
-	if start < 0 || start > int64(len(decompressed)) {
-		return nil, fmt.Errorf("v3 record: start offset %d out of range [0,%d]", start, len(decompressed))
+	if len(tbl) == 0 {
+		return nil, fmt.Errorf("v3 record: dictionary has no record blocks")
 	}
 
-	return decompressed[start:end], nil
+	start := entry.RecordStartOffset
+	if start < 0 {
+		return nil, fmt.Errorf("v3 record: negative start offset %d", start)
+	}
+	// The same predicate the old linear walk used - first block whose
+	// decompressed range ends past the offset - decided in O(log B).
+	i := sort.Search(len(tbl), func(i int) bool {
+		return tbl[i].decompAcc+tbl[i].decompSize > start
+	})
+	if i == len(tbl) {
+		return nil, fmt.Errorf("v3 record: no block contains offset %d", start)
+	}
+
+	last := tbl[len(tbl)-1]
+	total := last.decompAcc + last.decompSize
+	end := entry.RecordEndOffset
+	if end <= 0 || end > total || end < start {
+		end = tbl[i].decompAcc + tbl[i].decompSize
+	}
+
+	// The common case by far: the record lives inside one block, and the answer
+	// is a sub-slice of the cached block with no copy.
+	if end <= tbl[i].decompAcc+tbl[i].decompSize {
+		blk, err := mdict.blockV3(&tbl[i])
+		if err != nil {
+			return nil, err
+		}
+		lo, hi := start-tbl[i].decompAcc, end-tbl[i].decompAcc
+		if hi > int64(len(blk)) {
+			hi = int64(len(blk))
+		}
+		if lo < 0 || lo > hi {
+			return nil, fmt.Errorf("v3 record: offset %d out of range in block %d", start, i)
+		}
+		return blk[lo:hi], nil
+	}
+
+	// A record straddling a block boundary. The old code silently truncated it
+	// at the block edge; the table makes stitching it back together trivial, so
+	// it is stitched. Bounded by `end`, which is already clamped to the total.
+	out := make([]byte, 0, end-start)
+	for j := i; j < len(tbl) && tbl[j].decompAcc < end; j++ {
+		blk, err := mdict.blockV3(&tbl[j])
+		if err != nil {
+			return nil, err
+		}
+		lo := int64(0)
+		if j == i {
+			lo = start - tbl[j].decompAcc
+		}
+		hi := end - tbl[j].decompAcc
+		if hi > int64(len(blk)) {
+			hi = int64(len(blk))
+		}
+		if lo < 0 || lo > hi {
+			return nil, fmt.Errorf("v3 record: offset %d out of range in block %d", start, j)
+		}
+		out = append(out, blk[lo:hi]...)
+	}
+	return out, nil
 }

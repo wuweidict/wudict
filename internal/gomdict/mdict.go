@@ -120,10 +120,11 @@ func (mdict *Mdict) BuildIndex() error {
 // to replace opening the dictionary.
 func (mdict *Mdict) BuildRecordIndex() error {
 	if mdict.meta.version >= 3.0 {
-		// v3 records are reached through meta.v3Offsets, which scanV3Blocks
-		// already filled in during init(), and locateByKeywordEntryV3 walks the
-		// block table itself on every call. Nothing to precompute.
-		return nil
+		// v3 has no record-block info section to read; the equivalent table is
+		// derived by walking the block chain once. Doing it here rather than on
+		// first lookup keeps the cost where the caller asked for it.
+		_, err := mdict.recordBlockTableV3()
+		return err
 	}
 	if mdict.keyBlockMeta == nil {
 		return errors.New("mdict: record index needs the key-block meta from init()")

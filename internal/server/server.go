@@ -122,6 +122,12 @@ type Server struct {
 	// there is no stable id to list. See cors.go (D69).
 	BrowserExtensions []string
 
+	// AllowRemoteDelete lets a browser on another machine delete a dictionary
+	// (config ALLOW_REMOTE_DELETE). Loopback may regardless; this is only
+	// about the remote caller. New() sets it false, matching the config
+	// default, so a Server built directly in a test behaves like a real one.
+	AllowRemoteDelete bool
+
 	// Morph lemmatizes a word when a search finds nothing anywhere, so an
 	// inflected form still reaches its entry (O3, config MORPH_CACHE). Nil -
 	// which is what a Server built directly in a test has - is disabled, and
@@ -152,7 +158,7 @@ type Server struct {
 }
 
 func New(reg *Registry) *Server {
-	s := &Server{reg: reg, mux: http.NewServeMux()}
+	s := &Server{reg: reg, mux: http.NewServeMux(), AllowRemoteDelete: false}
 	// The surface is a table (routes.go), so it can be asserted about: the
 	// CORS boundary and the OpenAPI document are both checked against it.
 	for _, rt := range s.routes() {
@@ -805,6 +811,12 @@ type streamMsg struct {
 	Lang string `json:"lang,omitempty"`
 }
 
+// demandSearchBudget is how long a search of ONE named dictionary may take
+// before it is cut off. Generous rather than unlimited: the request still holds
+// a goroutine and an open backend, so it needs an end, but the end is there to
+// catch a wedged backend, not to police a slow one.
+const demandSearchBudget = 5 * time.Minute
+
 // handleSearch streams results as newline-delimited JSON so the client can
 // render each dictionary's accordion the instant it completes, in the
 // caller's preference order (SPEC §6, progressive rendering). The `dict`
@@ -958,13 +970,36 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			// not recur.
 			m.Deferred, m.Bytes = true, heavy.bytes
 			m.Indexing = entries[i].indexing()
+		case errors.Is(h.Err, context.DeadlineExceeded):
+			// Never Go's own words. "context deadline exceeded" is what an
+			// unindexed dictionary looked like from the outside while a preview
+			// search crawled through its source format, and it told the user
+			// nothing they could act on - which is the whole content of the
+			// message they need.
+			if entries[i].indexing() {
+				m.Error = "timed out — still preparing this dictionary"
+			} else {
+				m.Error = "timed out — index this dictionary to search it"
+			}
+		case errors.Is(h.Err, context.Canceled):
+			m.Error = "search cancelled"
 		case h.Err != nil:
 			m.Error = h.Err.Error()
 		}
 		return m
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	// The ceiling exists to stop ONE slow dictionary from holding a wide
+	// fan-out open, and 30 s is right for that. It is the wrong shape for a
+	// search of a single named dictionary: there is nothing to fan out, the
+	// user chose this one, and an unprepared dictionary searched through its
+	// own format on a phone can legitimately take longer than that to answer.
+	// Cutting it off there produced a timeout instead of a result.
+	budget := 30 * time.Second
+	if demand {
+		budget = demandSearchBudget
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), budget)
 	defer cancel()
 	// Metas are kept because each carries the dictionary's declared language,
 	// and the morphology wave needs it. Nothing is opened to obtain them: the

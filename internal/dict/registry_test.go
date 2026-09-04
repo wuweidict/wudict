@@ -332,3 +332,32 @@ func TestDedupeDirs(t *testing.T) {
 		t.Errorf("a subfolder must survive dedupe: %q", got)
 	}
 }
+
+// Discovery must not list a DSL abbreviation companion: its content is absorbed
+// into the parent at ingest, and a card of its own is exactly the junk row the
+// bug report is about. An orphan _abrv - no parent beside it - is a normal
+// dictionary and must still be found.
+func TestDiscoverHidesAbbrevCompanion(t *testing.T) {
+	RegisterFormat(".dsl", func(path string) (Dictionary, error) { return fakeDict{}, nil })
+	dir := t.TempDir()
+	for _, f := range []string{"X.dsl", "X_abrv.dsl", "Y_abrv.dsl"} {
+		if err := os.WriteFile(filepath.Join(dir, f), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := Discover(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, p := range got {
+		seen[filepath.Base(p)] = true
+	}
+	if len(got) != 2 || !seen["X.dsl"] || !seen["Y_abrv.dsl"] {
+		t.Fatalf("Discover = %v, want X.dsl and Y_abrv.dsl only", got)
+	}
+	// an explicit path still opens: hiding is a discovery rule, not a ban
+	if !IsDictionaryFile(filepath.Join(dir, "X_abrv.dsl")) {
+		t.Error("an explicit companion path must remain openable")
+	}
+}

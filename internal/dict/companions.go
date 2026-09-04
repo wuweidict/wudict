@@ -112,6 +112,62 @@ func indexCompanions(src string) []string {
 	return nil
 }
 
+// abbrevSuffixes are the spellings of DSL's abbreviation glossary, longest
+// first so a ".dsl.dz" companion is recognised before the ".dsl" inside its
+// name. Appended to the STEM, exactly like every other companion here.
+var abbrevSuffixes = []string{"_abrv.dsl.dz", "_abrv.dsl"}
+
+// AbbrevCompanion returns the abbreviation glossary belonging to the DSL main
+// file src, if one exists beside it. A `_abrv.dsl` is not a dictionary: Lingvo
+// writes it as the expansion map for the [p] labels of its parent, which is why
+// the parent absorbs it at ingest and it is not discovered on its own.
+func AbbrevCompanion(src string) (string, bool) {
+	switch mainExt(src) {
+	case ".dsl", ".dsl.dz":
+	default:
+		return "", false
+	}
+	if abbrevParentStem(src) != "" {
+		return "", false // a companion has no companion of its own
+	}
+	base := stem(src)
+	for _, suf := range abbrevSuffixes {
+		if p := base + suf; !strings.EqualFold(p, src) && fileExists(p) {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+// IsAbbrevCompanion reports whether path is an abbreviation glossary that has a
+// parent to belong to. The parent check is what keeps this safe: a lone
+// "foo_abrv.dsl" in a folder of its own is somebody's real abbreviation
+// dictionary and stays an ordinary one. Name and stat only - no bytes are read.
+func IsAbbrevCompanion(path string) bool {
+	base := abbrevParentStem(path)
+	if base == "" {
+		return false
+	}
+	return fileExists(base+".dsl") || fileExists(base+".dsl.dz")
+}
+
+// abbrevParentStem strips the companion suffix, yielding the path its parent
+// would be named after. Empty when path is not spelled like a companion, or
+// when nothing would be left in front of the suffix ("_abrv.dsl" alone).
+func abbrevParentStem(path string) string {
+	lower := strings.ToLower(path)
+	for _, suf := range abbrevSuffixes {
+		if !strings.HasSuffix(lower, suf) {
+			continue
+		}
+		if len(filepath.Base(path)) == len(suf) {
+			return "" // "_abrv.dsl" with nothing in front of it names no parent
+		}
+		return path[:len(path)-len(suf)]
+	}
+	return ""
+}
+
 // SourceFiles lists every file that makes up the dictionary whose main file is
 // src - the main file first, then its index companions, then its media - and
 // only those that exist right now. It is the answer to "what would be deleted

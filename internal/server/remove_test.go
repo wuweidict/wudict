@@ -13,12 +13,31 @@ import (
 	"testing"
 )
 
-// deleteReq issues a DELETE from a non-loopback address (httptest's default),
-// which is the world where removal is offered: no file manager to hand off to.
+// localReq issues a request from the machine running wudict - the caller that
+// may always delete, whatever ALLOW_REMOTE_DELETE says.
+func localReq(t *testing.T, s *Server, method, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	return rec
+}
+
+// deleteReq is the ordinary case these tests are about: the user at the
+// keyboard deleting from their own machine.
 func deleteReq(t *testing.T, s *Server, path string) *httptest.ResponseRecorder {
 	t.Helper()
+	return localReq(t, s, "DELETE", path)
+}
+
+// remoteReq is a browser on another machine - httptest's default address,
+// which is not loopback. ALLOW_REMOTE_DELETE governs this one, and it is off
+// unless a test says otherwise.
+func remoteReq(t *testing.T, s *Server, method, path string) *httptest.ResponseRecorder {
+	t.Helper()
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("DELETE", path, nil))
+	s.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
 	return rec
 }
 
@@ -36,48 +55,69 @@ func idOf(t *testing.T, s *Server, base string) string {
 	return ""
 }
 
-// The desktop is unchanged: at the keyboard, with a file manager present, the
-// endpoint refuses and the UI is told not to offer it (D63).
-func TestRemovalNotOfferedOnADesktop(t *testing.T) {
+// The desktop is where the user owns the files, so removal is offered there
+// too (D63 amended) - the presence of a file manager is no longer the test,
+// and Reveal is still offered beside it.
+func TestRemovalOfferedOnADesktop(t *testing.T) {
 	s := newTestServer(t)
 	restore := revealPossible
 	revealPossible = func() bool { return true }
 	defer func() { revealPossible = restore }()
 
-	req := httptest.NewRequest("DELETE", "/api/library?dict=whatever", nil)
-	req.RemoteAddr = "127.0.0.1:5555"
-	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, req)
-	if rec.Code != 403 {
-		t.Fatalf("DELETE from a desktop = %d, want 403: %s", rec.Code, rec.Body.String())
+	var info map[string]any
+	rec := localReq(t, s, "GET", "/api/config")
+	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info["canDelete"] != true || info["canReveal"] != true {
+		t.Errorf("canDelete=%v canReveal=%v on a desktop, want true/true",
+			info["canDelete"], info["canReveal"])
+	}
+	// and the endpoint agrees: it gets as far as validating the parameters
+	// rather than refusing the caller.
+	if rec := localReq(t, s, "DELETE", "/api/library?dict=nosuch"); rec.Code != 400 {
+		t.Errorf("DELETE from the local machine = %d, want 400 (unknown dictionary), not a refusal: %s",
+			rec.Code, rec.Body.String())
+	}
+}
+
+// A browser on another machine is a different caller, and the one the setting
+// is about. It is off by default: remote DELETE 403s naming the setting,
+// canDelete tells the remote page not to draw the control, and the local
+// machine is unaffected.
+func TestRemoteRemovalRefusedByDefault(t *testing.T) {
+	s := newTestServer(t)
+
+	rec := remoteReq(t, s, "DELETE", "/api/library?dict=whatever")
+	if rec.Code != 403 || !strings.Contains(rec.Body.String(), "ALLOW_REMOTE_DELETE") {
+		t.Fatalf("remote DELETE = %d %s, want 403 naming the setting", rec.Code, rec.Body.String())
 	}
 
 	var info map[string]any
-	greq := httptest.NewRequest("GET", "/api/config", nil)
-	greq.RemoteAddr = "127.0.0.1:5555"
-	grec := httptest.NewRecorder()
-	s.ServeHTTP(grec, greq)
+	grec := remoteReq(t, s, "GET", "/api/config")
 	if err := json.Unmarshal(grec.Body.Bytes(), &info); err != nil {
 		t.Fatal(err)
 	}
 	if info["canDelete"] != false {
-		t.Errorf("canDelete = %v on a desktop, want false", info["canDelete"])
+		t.Errorf("canDelete = %v for a remote page, want false", info["canDelete"])
+	}
+	if rec := localReq(t, s, "DELETE", "/api/library?dict=nosuch"); rec.Code == 403 {
+		t.Error("the local machine was refused too; the setting is about remote callers only")
 	}
 }
 
-// Where there is no file manager - Android, and any remote browser - it is
-// offered, and canDelete says so.
-func TestRemovalOfferedWithoutAFileManager(t *testing.T) {
+// ALLOW_REMOTE_DELETE = "1" invites the remote browser in: canDelete says so
+// whether or not this machine has a file manager, and the endpoint gets as far
+// as validating parameters rather than refusing the caller.
+func TestRemoteRemovalAllowedWhenEnabled(t *testing.T) {
 	s := newTestServer(t)
+	s.AllowRemoteDelete = true
 	restore := revealPossible
 	revealPossible = func() bool { return false }
 	defer func() { revealPossible = restore }()
 
 	var info map[string]any
-	req := httptest.NewRequest("GET", "/api/config", nil)
-	req.RemoteAddr = "127.0.0.1:5555"
-	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, req)
+	rec := remoteReq(t, s, "GET", "/api/config")
 	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
 		t.Fatal(err)
 	}
@@ -85,10 +125,10 @@ func TestRemovalOfferedWithoutAFileManager(t *testing.T) {
 		t.Errorf("canDelete=%v canReveal=%v, want true/false", info["canDelete"], info["canReveal"])
 	}
 
-	if rec := deleteReq(t, s, "/api/library"); rec.Code != 400 {
+	if rec := remoteReq(t, s, "DELETE", "/api/library"); rec.Code != 400 {
 		t.Errorf("DELETE with no dict = %d, want 400", rec.Code)
 	}
-	if rec := deleteReq(t, s, "/api/library?dict=nosuch"); rec.Code != 400 {
+	if rec := remoteReq(t, s, "DELETE", "/api/library?dict=nosuch"); rec.Code != 400 {
 		t.Errorf("DELETE of an unknown dictionary = %d, want 400", rec.Code)
 	}
 }
