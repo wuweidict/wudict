@@ -124,7 +124,7 @@ Questions, not symptoms. For a symptom, see
 
     [Inflected words](../start/search.md#inflected-words)
 
-    **IMPORTANT**: Dictionary formats like `.mdx`, `.slob` and others contain
+    ** 💡 IMPORTANT**: Dictionary formats like `.mdx`, `.slob` and others contain
     NO DATA about the actual language of the headwords in the dictionary.
     Lemmatization will only work for these dictionaries if their filename starts 
     e.g. with `es-es`,  `fr-en` (will be detected as French). 
