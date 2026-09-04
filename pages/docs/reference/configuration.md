@@ -296,6 +296,7 @@ for example search for `knew` will find *know*, `fuiste` will find *ser*, `ид�
     Babylon (.bgl) contains data about the headword language, which is sufficient.
     Most other dictionaries do no declare the language data.
     wuDict uses a best guess strategy in the following order:
+
     - if the dictionary file starts with e.g. `es-es` or `spa-eng` (for example, spa-eng-oxford.mdx)
     then the first language code will be used for lemmatization
     - if the dictionary **title** contains a valid language code then that is used 
