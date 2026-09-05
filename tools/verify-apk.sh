@@ -6,8 +6,10 @@
 # Asserts the two properties that make the flavour split worth having (D62),
 # on APKs that already exist — build them first with `make apk` / `make apk-play`.
 #
-#   1. the Play APK declares NO storage permission (that is the whole point);
-#      the FOSS APK still declares All-files access (the split did not leak);
+#   1. the Play APK declares no permission beyond the three install-time,
+#      never-prompted ones it is entitled to, and NO storage permission (that
+#      is the whole point); the FOSS APK still declares All-files access (the
+#      split did not leak);
 #   2. both still ship libwudict.so with extractNativeLibs=true, because the
 #      server is EXEC'd from nativeLibraryDir and a compressed lib is not a
 #      file (D52) — a packaging change is exactly what would break this
@@ -46,16 +48,25 @@ if [ -n "$PLAY" ]; then
         if ! echo "$perms" | grep -q 'android.permission.INTERNET'; then
             fail "$apk lost INTERNET"
         fi
-        # INTERNET and nothing else. Stated as a whole-set assertion rather
-        # than a list of things to be absent, because the next permission to
-        # creep in is by definition one nobody thought to forbid — a feature
-        # added to the shell is exactly how it would arrive.
+        # An explicit allow-set, not a list of things to be absent: the next
+        # permission to creep in is by definition one nobody thought to forbid
+        # — a feature added to the shell is exactly how it would arrive. Adding
+        # a name here is a deliberate act; the three below are install-time and
+        # never prompted, so none of them costs the user a dialog.
+        #
+        #   INTERNET                     the WebView reaches the loopback server
+        #   FOREGROUND_SERVICE           IndexService survives the freezer and
+        #   FOREGROUND_SERVICE_DATA_SYNC the LMK while preparing (API 34+ needs
+        #                                the typed grant as well)
+        #
+        # Anchored alternation: an unanchored 'FOREGROUND_SERVICE' would also
+        # wave through FOREGROUND_SERVICE_LOCATION and every other subtype.
         extra=$(echo "$perms" | sed -n "s/^uses-permission: name='\([^']*\)'.*/\1/p" \
-            | grep -v '^android.permission.INTERNET$' || true)
+            | grep -vE '^android\.permission\.(INTERNET|FOREGROUND_SERVICE|FOREGROUND_SERVICE_DATA_SYNC)$' || true)
         if [ -n "$extra" ]; then
-            fail "$apk declares more than INTERNET: $extra"
+            fail "$apk declares permissions outside the allowed set: $extra"
         fi
-        echo "ok: $apk declares INTERNET and nothing else"
+        echo "ok: $apk declares only the allowed permissions"
     done
 else
     echo "skip: no play APK built (make apk-play)"

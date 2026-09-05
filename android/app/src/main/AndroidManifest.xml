@@ -18,10 +18,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
-    <!-- INTERNET is the only permission this manifest declares (D62). Every
-         storage permission belongs to the `foss` flavour's manifest, because
-         the `play` flavour has none: its dictionaries live in the app's own
-         external files dir, which is permission-free on every API level. -->
+    <!-- Those three are everything this manifest declares, and none of them
+         is ever prompted for (D62). Every storage permission belongs to the
+         `foss` flavour's manifest, because the `play` flavour has none: its
+         dictionaries live in the app's own external files dir, which is
+         permission-free on every API level. tools/verify-apk.sh asserts the
+         set, so a fourth entry here fails the build until it is added there
+         deliberately. -->
 
     <application
         android:allowBackup="false"
