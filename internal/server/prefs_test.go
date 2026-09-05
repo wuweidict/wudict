@@ -31,6 +31,7 @@ func newPrefsServer(t *testing.T) (*Server, string) {
 type prefsResp struct {
 	Exists bool       `json:"exists"`
 	Dicts  []DictPref `json:"dicts"`
+	UI     *UIPrefs   `json:"ui"`
 }
 
 func putPrefs(t *testing.T, s *Server, body string) prefsResp {
@@ -216,4 +217,57 @@ func TestPrefsInMemoryWithoutAPath(t *testing.T) {
 	if !p.Off("x", "/a/b.mdx") {
 		t.Error("in-memory state did not stick")
 	}
+}
+
+// The two settings share one file and one write, but not one request: the
+// client that reorders dictionaries and the client that resizes text are the
+// same page sending different bodies, and neither may erase the other.
+func TestPrefsUI(t *testing.T) {
+	s, state := newPrefsServer(t)
+	all := s.reg.all()
+	if len(all) != 2 {
+		t.Fatalf("want 2 dictionaries, got %d", len(all))
+	}
+	a, b := all[0].ID, all[1].ID
+	order := `{"dicts":[{"id":"` + b + `"},{"id":"` + a + `"}]}`
+
+	for _, tc := range []struct {
+		name string
+		body string
+		want int // 0 = no ui record at all
+	}{
+		{"set", `{"ui":{"fontSize":24}}`, 24},
+		{"dicts alone leave it", order, 24},
+		{"over the ceiling clamps", `{"ui":{"fontSize":900}}`, FontSizeMax},
+		{"under the floor clamps", `{"ui":{"fontSize":1}}`, FontSizeMin},
+		{"zero is unset", `{"ui":{}}`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := putPrefs(t, s, tc.body); got.UI.size() != tc.want {
+				t.Fatalf("PUT echoed %d, want %d", got.UI.size(), tc.want)
+			}
+			var back prefsResp
+			getJSON(t, s, "/api/prefs", &back)
+			if back.UI.size() != tc.want {
+				t.Fatalf("GET returned %d, want %d", back.UI.size(), tc.want)
+			}
+			// and it is on disk, not merely in memory
+			if got := LoadPrefs(state).UI().size(); got != tc.want {
+				t.Fatalf("reloaded %d, want %d", got, tc.want)
+			}
+		})
+	}
+	// the reorder above must have survived every ui-only write since
+	var back prefsResp
+	getJSON(t, s, "/api/prefs", &back)
+	if len(back.Dicts) != 2 || back.Dicts[0].ID != b {
+		t.Fatalf("ui writes disturbed the dictionary order: %+v", back.Dicts)
+	}
+}
+
+func (u *UIPrefs) size() int {
+	if u == nil {
+		return 0
+	}
+	return u.FontSize
 }

@@ -454,7 +454,36 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 #folders .cog{width:14px;height:14px;flex:none;transition:transform .2s}
 #folders>summary:hover .cog{transform:rotate(30deg)}
 #folders[open] .cog{transform:rotate(60deg)}
-#folders .fsum{color:var(--fg-faint)}
+/* Takes the slack so the stepper is always hard right, and truncates rather
+   than wrapping: this line must stay ONE line at 320px, and the count is the
+   half that can afford to lose its tail. */
+#folders .fsum{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;color:var(--fg-faint)}
+/* ── article text size ──────────────────────────────────────────────
+   On the settings LINE, not inside the drawer it opens: this is adjusted
+   while reading, and a control you must first open a configuration panel to
+   reach is a control that stops being used. No "Font size" label either —
+   "17px" already says what the number is, and a word here would cost the
+   row the ~50px it needs to survive a 320px phone beside a count like
+   "12 folders · 1613 dictionaries".
+   The buttons are never `disabled` at the bounds, only dimmed: a disabled
+   button receives no pointer event, so the press would fall through to the
+   <summary> and toggle the whole panel — a dead control that does something
+   else instead is worse than one that does nothing. Clamping in applyFS is
+   what actually holds the range; .lim only says so. */
+#folders .fs{flex:none;display:flex;align-items:center;gap:2px}
+#folders .fs button{font:inherit;line-height:1;margin:0;padding:0;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--fg-soft);background:var(--bg-card);border:1px solid var(--line);
+  border-radius:6px;transition:color .12s,border-color .12s,opacity .12s}
+#folders .fs button:hover{color:var(--fg);border-color:var(--fg-faint)}
+#folders .fs button:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+#folders .fsbtn{width:22px;height:22px;font-size:13px}
+#folders .fsbtn.lim{opacity:.3}
+/* min-width holds "32px" — the widest value — so the two buttons never move
+   as the number changes; tabular-nums holds the digits still within it. */
+#folders .fsval{height:22px;min-width:34px;padding:0 3px;font-size:11px;
+  color:var(--fg-faint);font-variant-numeric:tabular-nums}
 #folders .grp{margin:.5em 0 .2em;color:var(--fg-faint);font-size:11px;
   text-transform:uppercase;letter-spacing:.05em}
 /* One row = a path (long, variable) beside its facts (short, fixed). The old
@@ -736,7 +765,16 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 <details id="folders">
   <summary title="Folders &amp; configuration" aria-label="Folders and configuration">
     <svg class="cog" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M6.56 1.05L9.44 1.05L9.07 2.81L10.91 3.57L11.90 2.07L13.93 4.10L12.43 5.09L13.19 6.93L14.95 6.56L14.95 9.44L13.19 9.07L12.43 10.91L13.93 11.90L11.90 13.93L10.91 12.43L9.07 13.19L9.44 14.95L6.56 14.95L6.93 13.19L5.09 12.43L4.10 13.93L2.07 11.90L3.57 10.91L2.81 9.07L1.05 9.44L1.05 6.56L2.81 6.93L3.57 5.09L2.07 4.10L4.10 2.07L5.09 3.57L6.93 2.81ZM5.50 8.00a2.50 2.50 0 1 0 5.00 0a2.50 2.50 0 1 0 -5.00 0Z"/></svg>
-    <span class="fsum" id="folderSummary"></span></summary>
+    <span class="fsum" id="folderSummary"></span>
+    <!-- Inside the <summary> on purpose. Every handler below calls
+         preventDefault(), which is what actually stops the details from
+         toggling: the toggle is the click's DEFAULT ACTION, so cancelling it
+         is the fix, and stopPropagation alone would not have worked. -->
+    <span class="fs" id="fsCtl">
+      <button type="button" class="fsbtn" id="fsDown" aria-label="Smaller article text">&#8722;</button>
+      <button type="button" class="fsval" id="fsVal" title="Article text size — click to reset" aria-label="Article text size; click to reset">15px</button>
+      <button type="button" class="fsbtn" id="fsUp" aria-label="Larger article text">+</button>
+    </span></summary>
   <div id="folderBody"></div>
   <!-- Monochrome inline SVG, never emoji, for the reason already stated on the
        cog above: a colour blob on one platform and flat on another, off its own
@@ -830,6 +868,9 @@ async function loadPrefs(){
     if(!r.ok)throw new Error("HTTP "+r.status);
     const st=await r.json(),rows=st.dicts||[];
     prefsReady=true;
+    // Read before the exists branch below returns: on a first run there is no
+    // ui record, but there is also nothing here that can go wrong.
+    if(st.ui)applyFS(st.ui.fontSize,false);
     if(!st.exists){adoptLocalPrefs();return} // first run: keep whatever we had
     prefOrder=rows.map(d=>d.id);
     disabled=new Set(rows.filter(d=>d.off).map(d=>d.id));
@@ -850,7 +891,8 @@ function savePrefs(now){
   // it would destroy the real one.
   if(!prefsReady){setStatus("⚠ settings are not being saved — reload the page");return}
   if(!now){prefsTimer=setTimeout(()=>savePrefs(true),400);return}
-  const body=JSON.stringify({dicts:orderedDicts().map(d=>({id:d.id,name:dictLabel(d),off:disabled.has(d.id)}))});
+  const body=JSON.stringify({dicts:orderedDicts().map(d=>({id:d.id,name:dictLabel(d),off:disabled.has(d.id)})),
+    ui:{fontSize:articleFS}});
   if(body===prefsSent)return;
   prefsSent=body;
   fetch("/api/prefs",{method:"PUT",headers:{"Content-Type":"application/json"},body})
@@ -908,6 +950,55 @@ $("wideBtn").onclick=()=>{
   localStorage.setItem("wudict_wide",on?"1":"");applyWide(on);
 };
 applyWide(localStorage.getItem("wudict_wide")==="1");
+
+/* ── article text size ───────────────────────────────────────────────
+   One number, two rendering paths, and only one of them needs any work.
+
+   Shadow-root articles inherit it. `:host{all:initial}` resets every CSS
+   property, but `all` is defined not to touch CUSTOM properties, so --wd-fs
+   crosses the shadow boundary untouched: a single setProperty on <html>
+   resizes every article already on the page and every one rendered after,
+   with no per-article JS and nothing to keep in sync.
+
+   Iframes are separate documents, where no custom property can reach. They
+   get the size baked into their srcdoc at creation (frameDoc) and a message
+   for every change after it; frame.js re-measures and re-reports its height,
+   because bigger text is a taller article and the parent sizes the frame
+   from that number.
+
+   Scope is the ARTICLE surface, deliberately not the chrome: the browser's
+   own zoom already scales chrome, does it better, and is one keystroke away.
+   This exists because dictionary text is the one thing zoom handles badly —
+   it takes the search field and the panel with it.
+
+   Clamped, not stepped through a list, and the ceiling is well past what
+   this layout was drawn for: a reader who needs 32px needs it more than the
+   layout needs to stay pretty. */
+const FS_MIN=11,FS_MAX=32,FS_DEF=15;
+let articleFS=FS_DEF;
+function applyFS(px,save){
+  const n=Math.min(FS_MAX,Math.max(FS_MIN,Math.round(+px||FS_DEF)));
+  const moved=n!==articleFS;
+  articleFS=n;
+  document.documentElement.style.setProperty("--wd-fs",n+"px");
+  $("fsVal").textContent=n+"px";
+  $("fsDown").classList.toggle("lim",n<=FS_MIN);
+  $("fsUp").classList.toggle("lim",n>=FS_MAX);
+  if(moved)for(const f of document.querySelectorAll("iframe.article"))
+    f.contentWindow&&f.contentWindow.postMessage({t:"fs",px:n},"*");
+  // Debounced inside savePrefs, so holding + costs one PUT and not twenty.
+  if(save&&moved)savePrefs();
+}
+/* Suppression on the CONTAINER, action on the buttons. Toggling is the
+   click's default action, so preventDefault is the whole fix — and putting it
+   on the wrapper also catches the 2px gaps between the three buttons, which
+   are still inside the <summary> and would otherwise open the panel. It runs
+   on the way back up, which is in time: the default action is taken after
+   dispatch, not during it. */
+$("fsCtl").addEventListener("click",e=>{e.preventDefault();e.stopPropagation()});
+for(const [id,step] of [["fsDown",-1],["fsUp",1],["fsVal",0]])
+  $(id).addEventListener("click",()=>applyFS(step?articleFS+step:FS_DEF,true));
+applyFS(FS_DEF,false);   // paints --wd-fs and the .lim state before any load
 
 /* Expand all results — a view toggle that is deliberately NOT remembered.
    It lives for the page and nothing else: no localStorage, no state.json.
@@ -1884,7 +1975,7 @@ function resURL(dictID,ref){
    back when the host carries data-dark (Dark-Reader approach) */
 const shadowBase=`<style>
 :host{all:initial;display:block;font-family:${"-apple-system,Helvetica,Arial,sans-serif"};
-  font-size:15px;line-height:1.618;color:#1a1a1a;word-break:break-word}
+  font-size:var(--wd-fs,15px);line-height:1.618;color:#1a1a1a;word-break:break-word}
 img,video,svg{max-width:100%;height:auto}
 a{color:#5b7a99;cursor:pointer}
 table{max-width:100%;border-collapse:collapse}
@@ -2004,7 +2095,9 @@ function renderFrame(dd,body,dictID,frag){
 }
 function frameDoc(content,fid,dark,dictID,frag){
   return '<!DOCTYPE html><html class="'+(dark?'dark':'')+'"><head><meta charset="utf-8">'+
-    '<style>html{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.618;color:#1a1a1a;background:#fff;overflow-y:hidden}'+
+    /* Baked in, because a custom property cannot cross into another
+       document; changes AFTER creation arrive by postMessage instead. */
+    '<style>html{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:'+articleFS+'px;line-height:1.618;color:#1a1a1a;background:#fff;overflow-y:hidden}'+
     'body{margin:8px}img,video,svg{max-width:100%;height:auto}'+
     'html.dark{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.92)}'+
     'html.dark :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){filter:invert(1) hue-rotate(180deg)}'+

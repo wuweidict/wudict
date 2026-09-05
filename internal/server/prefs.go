@@ -12,10 +12,10 @@ import (
 )
 
 // StateFile holds the part of the UI that describes the COLLECTION rather than
-// the browser looking at it: which dictionaries are searched, and in what
-// order. Everything that describes the browser instead - theme, wide mode, the
-// last dictionary picked in the dropdown - stays in localStorage, where it
-// belongs.
+// the browser looking at it: which dictionaries are searched, in what order,
+// and how big their text is set (see UIPrefs). Everything that describes the
+// browser instead - theme, wide mode, the last dictionary picked in the
+// dropdown - stays in localStorage, where it belongs.
 //
 // The split is not cosmetic. localStorage is keyed by origin, so
 // scheme://host:port is part of the identity: changing SERVER_PORT, reaching
@@ -47,8 +47,43 @@ type DictPref struct {
 	Off  bool   `json:"off,omitempty"`  // excluded from "All dictionaries"
 }
 
+// UIPrefs is the part of the reading experience that belongs to the PERSON
+// rather than to the browser in front of them. The split at the top of this
+// file sends theme and wide mode to localStorage because they are per-device
+// view choices; text size is not one. A reader who needs 24px needs it on the
+// phone that reaches this same server too, and localStorage — keyed by origin
+// — would hand them 15px there, and again the first time SERVER_PORT changes.
+type UIPrefs struct {
+	FontSize int `json:"fontSize,omitempty"` // article text, px; 0 = the default
+}
+
+// Article text-size bounds. The ceiling is deliberately past what the layout
+// was drawn for: a reader who needs 32px needs it more than the design needs
+// to stay pretty, and nothing in the article surface loses text when it grows
+// — it only gets taller.
+const (
+	FontSizeMin = 11
+	FontSizeMax = 32
+)
+
+// normalize repairs what a hand-edited file may carry. Clamping rather than
+// zeroing, because "40" is a legible statement of intent that deserves the
+// nearest size we offer, not a silent snap back to the default.
+func (u *UIPrefs) normalize() {
+	if u == nil || u.FontSize == 0 {
+		return
+	}
+	if u.FontSize < FontSizeMin {
+		u.FontSize = FontSizeMin
+	}
+	if u.FontSize > FontSizeMax {
+		u.FontSize = FontSizeMax
+	}
+}
+
 type prefsFile struct {
 	Version int        `json:"version"`
+	UI      *UIPrefs   `json:"ui,omitempty"`
 	Dicts   []DictPref `json:"dicts"` // array ORDER is the user's order
 }
 
@@ -60,6 +95,7 @@ type Prefs struct {
 	mu     sync.RWMutex
 	exists bool // a file was there when we started: no state to adopt otherwise
 	dicts  []DictPref
+	ui     *UIPrefs // nil until the user has set something; every field optional
 }
 
 // LoadPrefs reads the state file. It never fails: a missing file is the normal
@@ -84,8 +120,21 @@ func LoadPrefs(path string) *Prefs {
 		logx.Warn("ignoring malformed %s: %v", path, err)
 		return p
 	}
-	p.exists, p.dicts = true, f.Dicts
+	f.UI.normalize()
+	p.exists, p.dicts, p.ui = true, f.Dicts, f.UI
 	return p
+}
+
+// UI returns a copy of the UI record, or nil when nothing has been set. A copy
+// because the caller marshals it while other requests may be writing.
+func (p *Prefs) UI() *UIPrefs {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.ui == nil {
+		return nil
+	}
+	u := *p.ui
+	return &u
 }
 
 // Off reports whether this dictionary is excluded from "All dictionaries".
@@ -112,11 +161,23 @@ func (p *Prefs) Snapshot() (dicts []DictPref, exists bool) {
 // Replace stores a new list and writes it. The write is temp-file + rename, so
 // a crash mid-save leaves the previous state intact rather than a truncated
 // file that reads as "nothing was ever configured".
-func (p *Prefs) Replace(dicts []DictPref) error {
+func (p *Prefs) Replace(dicts []DictPref) error { return p.update(dicts, nil) }
+
+// update is Replace plus an optional UI record. A nil ui means "not mentioned"
+// and leaves the stored one untouched: the client that reorders dictionaries
+// and the client that changes text size are the same client, but they need not
+// send both, and a request that omits a field must never be read as clearing
+// it. One write, not two, so the two settings can never disagree on disk.
+func (p *Prefs) update(dicts []DictPref, ui *UIPrefs) error {
 	p.mu.Lock()
 	p.dicts, p.exists = append([]DictPref(nil), dicts...), true
+	if ui != nil {
+		u := *ui
+		u.normalize()
+		p.ui = &u
+	}
 	path := p.path
-	data, err := json.MarshalIndent(prefsFile{Version: prefsVersion, Dicts: p.dicts}, "", "  ")
+	data, err := json.MarshalIndent(prefsFile{Version: prefsVersion, UI: p.ui, Dicts: p.dicts}, "", "  ")
 	p.mu.Unlock()
 	if err != nil || path == "" {
 		return err
@@ -274,22 +335,23 @@ func cleanAbs(p string) string {
 func (s *Server) handlePrefs(w http.ResponseWriter, r *http.Request) {
 	dicts := s.reg.prefs.heal(s.reg)
 	_, exists := s.reg.prefs.Snapshot()
-	writeJSON(w, map[string]any{"exists": exists, "dicts": dicts})
+	writeJSON(w, map[string]any{"exists": exists, "dicts": dicts, "ui": s.reg.prefs.UI()})
 }
 
 // PUT /api/prefs - replace the order and enabled set.
 func (s *Server) handleSavePrefs(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Dicts []DictPref `json:"dicts"`
+		UI    *UIPrefs   `json:"ui"` // pointer: absent and empty are different
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	merged := s.reg.prefs.merge(s.reg, req.Dicts)
-	if err := s.reg.prefs.Replace(merged); err != nil {
+	if err := s.reg.prefs.update(merged, req.UI); err != nil {
 		http.Error(w, "could not save: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, map[string]any{"exists": true, "dicts": merged})
+	writeJSON(w, map[string]any{"exists": true, "dicts": merged, "ui": s.reg.prefs.UI()})
 }

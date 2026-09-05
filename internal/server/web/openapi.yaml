@@ -719,7 +719,7 @@ paths:
       tags: [internal]
       operationId: getPrefs
       x-internal: true
-      summary: Dictionary order and on/off switches
+      summary: Dictionary order, on/off switches and article text size
       description: >
         Healed against the dictionaries that exist right now. `exists` is false
         on a first run, which is the client's cue to adopt what an older build
@@ -755,6 +755,13 @@ paths:
                 dicts:
                   type: array
                   items: { $ref: '#/components/schemas/DictPref' }
+                ui:
+                  allOf: [{ $ref: '#/components/schemas/UIPrefs' }]
+                  description: >
+                    Omit to leave the stored UI record untouched. Absent and
+                    empty are different: a client that only reorders
+                    dictionaries must not clear the reader's text size.
+
       x-codeSamples:
         - lang: Shell
           label: curl
@@ -1277,6 +1284,22 @@ components:
         name: { type: string }
         off: { type: boolean, description: Excluded from "All dictionaries". }
 
+    UIPrefs:
+      type: object
+      description: >
+        Reading settings that belong to the person rather than the browser, so
+        they live here and not in localStorage - which is keyed by origin, and
+        would hand the same user a different setting on their phone or after a
+        port change.
+      properties:
+        fontSize:
+          type: integer
+          minimum: 11
+          maximum: 32
+          description: >
+            Article text size in px. Absent or 0 means the default (15).
+            Out-of-range values are clamped, not rejected.
+
     Prefs:
       type: object
       properties:
@@ -1287,6 +1310,9 @@ components:
           type: array
           description: Array order is the user's order.
           items: { $ref: '#/components/schemas/DictPref' }
+        ui:
+          allOf: [{ $ref: '#/components/schemas/UIPrefs' }]
+          description: Null until the user has changed something.
 
     SetupResult:
       type: object

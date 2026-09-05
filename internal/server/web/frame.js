@@ -259,8 +259,21 @@
 		HOST.postMessage({ t: "h", fid: fid, h: Math.ceil(h) }, "*");
 	}
 	addEventListener("message", function (e) {
-		if (e.data && e.data.t === "theme") {
+		if (!e.data) return;
+		if (e.data.t === "theme") {
 			document.documentElement.classList.toggle("dark", !!e.data.dark);
+		} else if (e.data.t === "fs") {
+			// The parent bakes the size into our srcdoc at creation; this is
+			// how every change AFTER that arrives, because a CSS custom
+			// property cannot cross a document boundary. The bound is a
+			// sanity check on an unauthenticated channel, not the app's
+			// range — applyFS in index.html owns that.
+			document.documentElement.style.fontSize =
+				Math.min(64, Math.max(6, +e.data.px || 15)) + "px";
+			// The ResizeObserver on <body> catches this too, but only after
+			// layout settles; posting on the next frame lets the parent grow
+			// the iframe in the same beat as the text reflows inside it.
+			requestAnimationFrame(post);
 		}
 	});
 	addEventListener("load", function () {
