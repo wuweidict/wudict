@@ -445,3 +445,74 @@ func TestConfigLocation(t *testing.T) {
 		}
 	})
 }
+
+// A key whose value says "off" must not turn the feature on. NO_COMPRESS used
+// to test "0"/"false" inline and so read "off" as "set, therefore on" (D101).
+func TestNoCompressNegatives(t *testing.T) {
+	for _, tc := range []struct {
+		v    string
+		want bool
+	}{
+		{"", false}, {"0", false}, {"false", false}, {"FALSE", false},
+		{"off", false}, {"no", false}, {"n", false},
+		{"1", true}, {"true", true}, {"yes", true},
+	} {
+		t.Run("v="+tc.v, func(t *testing.T) {
+			t.Setenv("NO_COMPRESS", tc.v)
+			toml := filepath.Join(t.TempDir(), Name)
+			os.WriteFile(toml, nil, 0o644)
+			cfg, err := Load(toml, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.NoCompress != tc.want {
+				t.Errorf("NO_COMPRESS=%q -> NoCompress %v, want %v", tc.v, cfg.NoCompress, tc.want)
+			}
+		})
+	}
+}
+
+func TestEffective(t *testing.T) {
+	dir := t.TempDir()
+	toml := filepath.Join(dir, Name)
+	os.WriteFile(toml, []byte("INDEX_WORKERS = \"1\"\nPREVIEW_MEMORY = \"2GB\"\n"), 0o644)
+	t.Setenv("NO_COMPRESS", "1")
+	cfg, err := Load(toml, map[string]string{"SERVER_PORT": "7000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eff := cfg.Effective()
+	if len(eff) != len(Tunables) {
+		t.Fatalf("Effective() has %d keys, want %d", len(eff), len(Tunables))
+	}
+	for _, tc := range []struct{ key, value, origin string }{
+		{"NO_COMPRESS", "1", OriginEnv},
+		{"PREVIEW_MEMORY", "2GB", OriginFile},
+		{"INDEX_WORKERS", "1", OriginFile},
+		{"SERVER_PORT", "7000", OriginFlag},
+		{"SERVER_IP", cfg.IP, OriginDefault},
+	} {
+		got := eff[tc.key]
+		if got.Value != tc.value || got.Origin != tc.origin {
+			t.Errorf("Effective()[%q] = %+v, want {%q %q}", tc.key, got, tc.value, tc.origin)
+		}
+	}
+	// The values must read back the way the config would accept them.
+	if v := eff["SEARCH_MEMORY"].Value; ParseSize(v) != cfg.SearchMemory {
+		t.Errorf("SEARCH_MEMORY %q reparses to %d, want %d", v, ParseSize(v), cfg.SearchMemory)
+	}
+}
+
+func TestFormatSize(t *testing.T) {
+	for _, tc := range []struct {
+		n    int64
+		want string
+	}{
+		{0, "0"}, {-1, "0"}, {1 << 30, "1GB"}, {3 << 30, "3GB"},
+		{64 << 20, "64MB"}, {1536 << 20, "1536MB"}, {1 << 10, "1KB"}, {1000, "1000"},
+	} {
+		if got := FormatSize(tc.n); got != tc.want {
+			t.Errorf("FormatSize(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}

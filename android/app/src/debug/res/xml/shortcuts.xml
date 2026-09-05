@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- The debug build type's copy of src/main/res/xml/shortcuts.xml, differing in
+     one literal: applicationIdSuffix ".debug" (app/build.gradle) moves the
+     package, and the framework parses a shortcut's <intent> against the system
+     context's resources, so the id cannot be an @string reference. See the main
+     file for what this is and why it exists (D100); keep the two in step. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_settings"
+        android:shortcutId="settings"
+        android:shortcutLongLabel="@string/settings_title"
+        android:shortcutShortLabel="@string/settings_short_label">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="com.legbehindneck.wudict.SettingsActivity"
+            android:targetPackage="com.legbehindneck.wudict.debug" />
+    </shortcut>
+</shortcuts>

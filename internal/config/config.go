@@ -219,8 +219,11 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 		// rather than the opposite.
 		cfg.AllowRemoteDelete = !isOff(v)
 	}
-	if v := get("NO_COMPRESS"); v != "" && v != "0" && !strings.EqualFold(v, "false") {
-		cfg.NoCompress = true
+	if v := get("NO_COMPRESS"); v != "" {
+		// Same rule as ALLOW_REMOTE_DELETE above, and for the same reason: a
+		// config that says "off" must not mean on. This used to test "0" and
+		// "false" inline, so NO_COMPRESS = "off" turned compression off.
+		cfg.NoCompress = !isOff(v)
 	}
 	if v := get("INDEX_WORKERS"); v != "" {
 		cfg.IndexWorkers = ParseWorkers(v)
@@ -866,6 +869,80 @@ func ParseSize(v string) int64 {
 		return 0
 	}
 	return int64(f * float64(mult))
+}
+
+// Setting is one resolved config key: the value that is actually in effect,
+// and which layer supplied it.
+type Setting struct {
+	Value  string `json:"value"`
+	Origin string `json:"origin"`
+}
+
+// Tunables are the keys a platform shell may override for the device it is
+// running on (D101): storage headroom, RAM, cores, and where the server
+// listens. They are reported by /api/config so a shell can show what is
+// actually in effect - including the defaults this package computes from the
+// device itself (tuning.go), which nothing outside Go should ever recompute.
+var Tunables = []string{
+	"NO_COMPRESS",
+	"SEARCH_MEMORY",
+	"PREVIEW_MEMORY",
+	"MEMORY_LIMIT",
+	"INDEX_WORKERS",
+	"SERVER_IP",
+	"SERVER_PORT",
+}
+
+// Effective reports the resolved value and origin of every key in Tunables.
+// The values are the parsed ones, re-rendered in the spelling the config
+// accepts back, so what a caller reads is what it would have to write to get
+// the same result.
+func (c Config) Effective() map[string]Setting {
+	out := make(map[string]Setting, len(Tunables))
+	val := func(key string) string {
+		switch key {
+		case "NO_COMPRESS":
+			if c.NoCompress {
+				return "1"
+			}
+			return "0"
+		case "SEARCH_MEMORY":
+			return FormatSize(c.SearchMemory)
+		case "PREVIEW_MEMORY":
+			return FormatSize(c.PreviewMemory)
+		case "MEMORY_LIMIT":
+			return FormatSize(c.MemoryLimit)
+		case "INDEX_WORKERS":
+			return strconv.Itoa(c.IndexWorkers)
+		case "SERVER_IP":
+			return c.IP
+		case "SERVER_PORT":
+			return c.Port
+		}
+		return ""
+	}
+	for _, key := range Tunables {
+		out[key] = Setting{Value: val(key), Origin: c.Origin(key)}
+	}
+	return out
+}
+
+// FormatSize renders a byte count the way ParseSize reads one, using the
+// largest unit that divides it exactly so a value set as "1GB" comes back as
+// "1GB" and not "1024MB". Zero is "0", which both keys define as "no limit".
+func FormatSize(n int64) string {
+	if n <= 0 {
+		return "0"
+	}
+	for _, u := range []struct {
+		mult int64
+		name string
+	}{{1 << 30, "GB"}, {1 << 20, "MB"}, {1 << 10, "KB"}} {
+		if n%u.mult == 0 {
+			return strconv.FormatInt(n/u.mult, 10) + u.name
+		}
+	}
+	return strconv.FormatInt(n, 10)
 }
 
 // Origin reports which layer supplied key ("default" when nothing did).

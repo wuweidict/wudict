@@ -23,4 +23,61 @@
      <string name="index_channel">Preparing dictionaries</string>
      <string name="index_title">Preparing a dictionary</string>
      <string name="index_text">Building the search index. This can take a few minutes.</string>
+
+     <!-- The shell's own settings (D100). The wording never names the Android
+          mechanism behind a row: the user is choosing where a lookup lands,
+          not which intent filter it arrived through. -->
+     <string name="settings_short_label">Settings</string>
+     <string name="settings_title">wuDict settings</string>
+     <string name="settings_lookup_head">Look up in the full app</string>
+     <string name="settings_lookup_hint">Otherwise a lookup floats over the app you were reading.</string>
+     <string name="settings_lookup_toolbar">From the text selection menu</string>
+     <string name="settings_lookup_share">From the share menu</string>
+     <string name="settings_lookup_link">From links and automation</string>
+
+     <!-- PLATFORM OVERRIDES (D101). Each row names a resource trade the DEVICE
+          forces - space, memory, cores, an address - never a dictionary fact,
+          which is the test for whether a row may exist here at all. The copy
+          says what the value costs, because a number with no consequence
+          attached is a number nobody can set responsibly. -->
+     <string name="settings_advanced_head">Advanced</string>
+     <string name="settings_advanced_hint">These change how the dictionary server itself runs. Leave them alone unless you know what they do. Anything left empty follows the settings file.</string>
+
+     <string name="settings_no_compress">Store dictionaries uncompressed</string>
+     <string name="settings_no_compress_hint">Databases become roughly 3× larger — a 100 MB dictionary lands at about 300 MB. Reading gets slightly faster with no decompression step: expect a few percent, not a transformation. Applies to dictionaries prepared from now on. Default: off.</string>
+
+     <string name="settings_search_memory">Memory one search may use</string>
+     <string name="settings_search_memory_hint">A search that has to open dictionaries which are not prepared yet stops at this much; the rest are reported as not searched rather than opened. Prepared dictionaries are never capped. 0 removes the cap — one search across a large unprepared library has been measured at 6.3 GB, which on a phone means the app is killed.</string>
+
+     <string name="settings_preview_memory">Memory unprepared dictionaries may hold</string>
+     <string name="settings_preview_memory_hint">What stays open between searches: roughly 350 bytes per headword, so 64 MB holds about 180 000 of them. Past the cap the least recently used are closed and reopened on demand. Higher means fewer reopens and more memory the system will judge this app on.</string>
+
+     <string name="settings_index_workers">Dictionaries prepared at once</string>
+     <string name="settings_index_workers_hint">Each one saturates a core and holds a few hundred bytes per headword while it runs. More is faster and hotter; the phone stays comfortable at 1.</string>
+
+     <string name="settings_server_ip">Reachable from other devices (testing only)</string>
+     <string name="settings_server_ip_hint">For a quick test on your own network, not a way to run a server. Other devices can reach the library only while wuDict is open on screen — closing it, or letting the screen turn off, ends it within moments. The address also changes whenever the phone rejoins the network. While it is on, anything on the same Wi-Fi can read your library, with no password. Default: off.</string>
+
+     <string name="settings_server_port">Server port</string>
+     <string name="settings_server_port_hint">Change only if something else on this device already uses 6888. Page preferences such as theme and panel state are saved per address, so a different port starts them fresh. Default: 6888.</string>
+
+     <string name="settings_range">Between %1$d and %2$d.</string>
+     <string name="settings_in_effect">In effect now: %1$s.</string>
+     <string name="settings_lan_at">While it is on, other devices on this network would use %1$s.</string>
+     <string name="settings_lan_none">This phone is not on a network right now.</string>
+     <string name="settings_out_of_range">“%1$s” must be a whole number between %2$d and %3$d.</string>
+
+     <!-- The running server was started with different values. Never claims a
+          restart that did not happen: the button appears only when stopping it
+          is actually safe. -->
+     <string name="settings_stale">The dictionary server is still running with the previous settings.</string>
+     <string name="settings_stale_later">It will pick them up the next time the app is opened.</string>
+     <string name="settings_apply_now">Restart server now</string>
+     <string name="settings_applied">Stopped. The new settings apply on the next lookup.</string>
+
+     <string name="settings_close">Close</string>
+     <string name="settings_restore">Restore defaults</string>
+     <string name="settings_restore_confirm">Clear every advanced setting and go back to what the settings file says?</string>
+     <string name="settings_restore_done">Advanced settings cleared.</string>
+     <string name="settings_cancel">Cancel</string>
 </resources>

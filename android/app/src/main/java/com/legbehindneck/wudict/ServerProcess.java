@@ -20,6 +20,8 @@ package com.legbehindneck.wudict;
 import android.content.Context;
 import android.util.Log;
 
+import org.json.JSONObject;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -32,15 +34,46 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 class ServerProcess {
 
-    static final String HOST = "127.0.0.1";
-    // Fixed port (D52): UI prefs live in localStorage, which is keyed by
-    // origin - a random port would forget them on every launch.
-    static final int PORT = 6888;
+    /**
+     * The address everything in this shell CONNECTS to. Always loopback, and
+     * deliberately not the address the child BINDS to: a platform override can
+     * open the server to the local network (ShellPrefs.bindIp), and you connect
+     * to 127.0.0.1 either way. Keeping the two apart is what stops that
+     * override from moving the WebView's origin and orphaning the page prefs
+     * saved against it.
+     */
+    static final String HOST = ShellPrefs.DEFAULT_IP;
+
+    // The port is fixed per install rather than per launch (D52: UI prefs live
+    // in localStorage, which is keyed by origin, so a random port would forget
+    // them every time), but it is no longer a constant: a device where
+    // something else already holds 6888 can override it (D101).
+    //
+    // portCache exists for PowerSignal, which is entirely static and has no
+    // Context to ask. Every path that can reach the server primes it first -
+    // ensure() does, and nothing talks to a server it never asked for - so the
+    // worst case is a POST to the default port that nobody answers, which
+    // PowerSignal already treats as an ordinary miss.
+    private static volatile int portCache = ShellPrefs.DEFAULT_PORT;
+
+    /** The port this install's server listens on, and primes {@link #port()}. */
+    static int port(Context c) {
+        int p = ShellPrefs.port(c);
+        portCache = p;
+        return p;
+    }
+
+    /** The last port {@link #port(Context)} resolved. For callers with no Context. */
+    static int port() {
+        return portCache;
+    }
 
     interface Listener {
         void onReady();
@@ -81,6 +114,7 @@ class ServerProcess {
      * adopt path, which answers inline.
      */
     static synchronized void ensure(Context ctx, Listener l) {
+        port(ctx); // prime portCache for the Context-less callers
         if (state == READY) {
             l.onReady();
             return;
@@ -111,6 +145,11 @@ class ServerProcess {
             if (newState == READY) l.onReady();
             else l.onFailed(message);
         }
+    }
+
+    /** How many windows are currently holding the server open. */
+    static synchronized int holders() {
+        return holders;
     }
 
     /** A window that needs the server is alive. Paired with {@link #release}. */
@@ -158,9 +197,11 @@ class ServerProcess {
         // a clean finish reaches onDestroy and stop(). Spawning a second
         // server then means a bind failure and a misleading wait, when a
         // perfectly good one is already there, so adopt it instead.
-        if (adoptRunningServer()) {
-            Log.i(TAG, "adopted a wudict server already listening on " + PORT);
+        int port = port(app);
+        if (adoptRunningServer(port)) {
+            Log.i(TAG, "adopted a wudict server already listening on " + port);
             listener.onReady();
+            cacheEffective(app, port); // after onReady: nothing waits on this
             return;
         }
 
@@ -180,8 +221,10 @@ class ServerProcess {
 
         ProcessBuilder pb = new ProcessBuilder(bin, "serve",
                 "--no-browser",                  // a WebView, not a browser tab
-                "--ip", HOST,
-                "--port", String.valueOf(PORT),
+                // The BIND address, which an override may widen to the local
+                // network; HOST above stays the connect address regardless.
+                "--ip", ShellPrefs.bindIp(app),
+                "--port", String.valueOf(port),
                 "--db-dir", dbDir.getAbsolutePath(),
                 // deliberately NO --dict-dir: see seedConfig
                 "--use-cached");                 // list what dbDir already holds
@@ -205,6 +248,14 @@ class ServerProcess {
         // process rather than a config setting: the markers are a private
         // protocol between these two processes and are noise anywhere else.
         env.put("WUDICT_BUSY_LINES", "1");
+        // Platform overrides (D101), delivered on the environment because that
+        // layer outranks wudict.toml and is truthfully reported as origin
+        // "env". The keys are disjoint from the four above by construction -
+        // they are wudict config keys, these are process environment - and an
+        // override that is not set contributes nothing at all, so an install
+        // that has never opened the Advanced section spawns a byte-for-byte
+        // identical child.
+        env.putAll(ShellPrefs.env(app));
         pb.directory(home);
         pb.redirectErrorStream(true);
         try {
@@ -215,10 +266,11 @@ class ServerProcess {
         }
         logOutput(process.getInputStream());
 
-        if (awaitPort(process)) {
+        if (awaitPort(process, port)) {
             listener.onReady();
+            cacheEffective(app, port); // after onReady: nothing waits on this
         } else if (process.isAlive()) {
-            listener.onFailed("port " + PORT + " never opened");
+            listener.onFailed("port " + port + " never opened");
         } else {
             // The child is gone, so its last line of output is the diagnosis -
             // a bad --db-dir, a port already held, a permission refusal. Saying
@@ -279,11 +331,11 @@ class ServerProcess {
     // an open socket is not proof: it is only adopted if /api/config answers
     // like ours. process stays null, so stop() will not kill something this
     // instance never started.
-    private static boolean adoptRunningServer() {
+    private static boolean adoptRunningServer(int port) {
         HttpURLConnection c = null;
         try {
             c = (HttpURLConnection) new URL(
-                    "http://" + HOST + ":" + PORT + "/api/config").openConnection();
+                    "http://" + HOST + ":" + port + "/api/config").openConnection();
             c.setConnectTimeout(700);
             c.setReadTimeout(700);
             if (c.getResponseCode() != 200) return false;
@@ -296,6 +348,58 @@ class ServerProcess {
             return body.indexOf("\"libDir\"") >= 0 && body.indexOf("\"revealLabel\"") >= 0;
         } catch (IOException | RuntimeException e) {
             return false; // nothing listening, or not us
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
+    // ── what the running server resolved the tunable keys to (D101) ──────────
+    //
+    // The settings screen is reached by long-pressing the launcher icon, so the
+    // normal case is that it opens with NO server to ask - while the values it
+    // must show as inherited are the ones Go computes from the device itself
+    // (internal/config/tuning.go), which Java must never recompute. So the
+    // shell records them whenever it DOES have a server: every start and every
+    // adoption refreshes the cache, and the screen falls back to it when
+    // nobody answers. One local request, issued after the caller has already
+    // been told the server is ready, so nothing waits on it.
+
+    static void cacheEffective(Context c, int port) {
+        Map<String, String> values = new LinkedHashMap<>();
+        Map<String, String> origins = new HashMap<>();
+        if (fetchEffective(port, values, origins)) ShellPrefs.cacheEffective(c, values);
+    }
+
+    /**
+     * Fills {@code values} and {@code origins} from /api/config's "effective"
+     * map; false when nothing answered, or answered without one - an older
+     * server, which is a silence rather than an error.
+     */
+    static boolean fetchEffective(int port, Map<String, String> values,
+                                  Map<String, String> origins) {
+        HttpURLConnection c = null;
+        try {
+            c = (HttpURLConnection) new URL(
+                    "http://" + HOST + ":" + port + "/api/config").openConnection();
+            c.setConnectTimeout(700);
+            c.setReadTimeout(700);
+            if (c.getResponseCode() != 200) return false;
+            StringBuilder body = new StringBuilder();
+            try (BufferedReader r = new BufferedReader(
+                    new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
+                for (String line; (line = r.readLine()) != null; ) body.append(line);
+            }
+            JSONObject eff = new JSONObject(body.toString()).optJSONObject("effective");
+            if (eff == null) return false;
+            for (ShellPrefs.Override o : ShellPrefs.OVERRIDES) {
+                JSONObject e = eff.optJSONObject(o.key);
+                if (e == null) continue;
+                values.put(o.key, e.optString("value"));
+                origins.put(o.key, e.optString("origin"));
+            }
+            return true;
+        } catch (IOException | org.json.JSONException | RuntimeException e) {
+            return false; // nothing listening, or not answering like us
         } finally {
             if (c != null) c.disconnect();
         }
@@ -333,11 +437,11 @@ class ServerProcess {
     // since it is the run that creates the config and the library folders -
     // would otherwise hold the "Starting…" screen for the full minute before
     // reporting the wrong thing.
-    private static boolean awaitPort(Process child) {
+    private static boolean awaitPort(Process child, int port) {
         long deadline = System.nanoTime() + 60_000_000_000L; // 60 s: first run writes its config
         while (System.nanoTime() < deadline) {
             try (Socket s = new Socket()) {
-                s.connect(new InetSocketAddress(HOST, PORT), 500);
+                s.connect(new InetSocketAddress(HOST, port), 500);
                 return true;
             } catch (IOException refused) {
                 if (!child.isAlive()) return false; // it will never open now
@@ -365,5 +469,64 @@ class ServerProcess {
             // cannot be corrupted by it.
             p.destroy();
         }
+    }
+
+    /**
+     * Stops the server whoever started it, and reports whether anything was
+     * there to stop. This is the one operation the ordinary lifecycle cannot
+     * do: a child reparented to init and later ADOPTED has {@code process ==
+     * null}, so {@link #stop()} would find nothing to kill and the settings
+     * screen could only ever say "next time".
+     *
+     * <p>The caller is responsible for the guard - no live windows, no ingest
+     * in flight; see SettingsActivity. A hard kill is safe for the same reason
+     * it is in {@link #stop()}: SQLite commits are transactional.
+     */
+    static synchronized boolean stopAny(Context ctx) {
+        generation++;   // any callback still in flight from this child is stale
+        boolean owned = shared != null;
+        if (owned) shared.stop();
+        shared = null;
+        state = IDLE;
+        waiting.clear();
+        if (owned) return true;
+        IndexService.busy(ctx, false);
+        return killAdopted(ctx);
+    }
+
+    /**
+     * Kills a server this app process never started, by finding it in /proc.
+     * It is our own uid, so a {@code hidepid} mount hides nothing of ours, and
+     * matching the full cmdline - not just the pid - makes pid reuse harmless:
+     * the only process that can match is one exec'd from our own APK.
+     */
+    private static boolean killAdopted(Context ctx) {
+        String bin = ctx.getApplicationInfo().nativeLibraryDir + "/" + BINARY;
+        File[] entries = new File("/proc").listFiles();
+        if (entries == null) return false;
+        boolean killed = false;
+        for (File e : entries) {
+            int pid;
+            try {
+                pid = Integer.parseInt(e.getName());
+            } catch (NumberFormatException notAPid) {
+                continue;
+            }
+            if (pid == android.os.Process.myPid()) continue;
+            byte[] raw;
+            try {
+                raw = Files.readAllBytes(new File(e, "cmdline").toPath());
+            } catch (IOException | RuntimeException gone) {
+                continue; // the process ended, or is not ours to read
+            }
+            // cmdline is NUL-separated; the first field is argv[0].
+            String all = new String(raw, StandardCharsets.UTF_8);
+            int nul = all.indexOf('\0');
+            String argv0 = nul < 0 ? all : all.substring(0, nul);
+            if (!argv0.equals(bin)) continue;
+            android.os.Process.killProcess(pid);
+            killed = true;
+        }
+        return killed;
     }
 }

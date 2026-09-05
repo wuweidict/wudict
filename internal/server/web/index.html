@@ -1668,7 +1668,7 @@ $("panelList").addEventListener("toggle",async e=>{
     /* Inserted as markup on purpose: the server normalised it (escaped if it
        was plain text, reduced to prose elements if it was markup), so this is
        the one client that does NOT need a sanitiser of its own. */
-    body.innerHTML=(j.html||`<p>✨ Emptiness Found! ✨ 🤷 ✨</p>`)+aboutLangs(j);
+    body.innerHTML=(j.html||`<p>✨ Found True Emptiness! ✨ 🤷 ✨</p>`)+aboutLangs(j);
   }catch(err){
     body.textContent="Not available.";
     det.dataset.loaded=""; // a failed fetch is worth retrying on the next open

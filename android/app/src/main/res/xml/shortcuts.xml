@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Long-press the launcher icon (D100). This is SettingsActivity's only entry
+     point, and deliberately so: the screen exists mainly so a setting that
+     hides the lookup popup can still be undone, and every other route would
+     cost either a second surface or an injection into a page the shell does
+     not own. Static shortcuts are API 25+; minSdk is 26.
+
+     Everything inside <intent> must be a LITERAL. The framework parses the
+     shortcut's intent against the SYSTEM context's resources, not the app's, so
+     an @string reference there resolves to nothing and the launcher answers the
+     tap with "App isn't installed" - while the labels above, which are parsed
+     with the app's own resources, render correctly and hide the fault. The
+     debug build type moves the package (applicationIdSuffix ".debug",
+     app/build.gradle) and an attribute cannot be overridden per source set, so
+     src/debug/res/xml/shortcuts.xml carries a copy with the suffixed id. Keep
+     the two in step. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_settings"
+        android:shortcutId="settings"
+        android:shortcutLongLabel="@string/settings_title"
+        android:shortcutShortLabel="@string/settings_short_label">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="com.legbehindneck.wudict.SettingsActivity"
+            android:targetPackage="com.legbehindneck.wudict" />
+    </shortcut>
+</shortcuts>

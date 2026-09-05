@@ -53,8 +53,21 @@ public final class IndexService extends Service {
     private static final String CHANNEL = "wudict.index";
     private static final int NOTIFICATION = 1;
 
+    // Whether an ingest a person is waiting on is in flight. Tracked here
+    // rather than asked of the system because a start can legally fail (see
+    // the class comment) while the work goes on regardless: this field answers
+    // "is the server busy", not "is the service running", and the settings
+    // screen needs the former before it offers to kill the server.
+    private static volatile boolean inFlight;
+
+    /** Whether the server is preparing a dictionary right now. */
+    static boolean isBusy() {
+        return inFlight;
+    }
+
     /** Starts or stops the service. Never throws. */
     static void busy(Context ctx, boolean busy) {
+        inFlight = busy;
         Context app = ctx.getApplicationContext();
         Intent i = new Intent(app, IndexService.class);
         try {

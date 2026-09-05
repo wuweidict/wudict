@@ -701,3 +701,19 @@ The compression-ratio half of the problem statement is **not** addressed here
 and stays with ZIM's property-based exemption: an entry count is a cheap,
 already-populated number, while a ratio is not knowable before the ingest that
 the gate exists to avoid.
+
+---
+
+## O10 — Sharing the library over Wi-Fi — **WON'T DO (2026-09-05)**
+
+A "Share link" button next to the D101 *Reachable from* switch. Costed in full in
+`docs/ANDROID-LAN-SHARING.md`: the button is 40 lines, the promise it makes is a
+foreground service, a wake lock, a Wi-Fi lock, a fourth power state, two permissions,
+a Play declaration — and, underneath all of it, an HTTP surface with no
+authentication (`PUT /api/prefs`, `POST /api/demand` and the whole library are open
+to any LAN peer). Verdict there: reject the button; if anything ships now, show the
+address as text under the switch and offer nothing.
+
+The switch is for *TESTING ONLY* with its limits stated in the hint; nothing was built to
+prolong a session or to advertise the address. Reopen only together with §3 of that
+document — server-side authentication — since every larger version of this depends on it.

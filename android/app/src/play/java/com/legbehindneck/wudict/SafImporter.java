@@ -216,7 +216,7 @@ final class SafImporter {
             }
         }
 
-        rescan();
+        rescan(a);
         a.runOnUiThread(() -> {
             if (!a.isFinishing() && !a.isDestroyed() && a instanceof MainActivity) {
                 ((MainActivity) a).reloadPage(); // the panel is showing a stale library
@@ -460,11 +460,11 @@ final class SafImporter {
 
     // The server already exposes a rescan (internal/server/server.go:116);
     // nothing new is added to its API for the port's sake.
-    private static void rescan() {
+    private static void rescan(Context ctx) {
         HttpURLConnection c = null;
         try {
             c = (HttpURLConnection) new URL("http://" + ServerProcess.HOST + ":"
-                    + ServerProcess.PORT + "/api/rescan").openConnection();
+                    + ServerProcess.port(ctx) + "/api/rescan").openConnection();
             c.setConnectTimeout(2000);
             c.setReadTimeout(120_000); // a rescan of a fresh import indexes headwords
             c.getResponseCode();

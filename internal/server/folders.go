@@ -40,6 +40,14 @@ type configInfo struct {
 	DictDirOrigin   string `json:"dictDirOrigin"`
 	DictDirEditable bool   `json:"dictDirEditable"`
 
+	// Effective is what every tunable config key currently resolves to, and
+	// which layer supplied it (config.Tunables). A platform shell overrides
+	// these for the device it runs on by writing the flag or environment layer
+	// (D101); it reads them back here because several of the defaults are
+	// computed from the device itself and Go is the only place that knows the
+	// formula (internal/config/tuning.go).
+	Effective map[string]config.Setting `json:"effective,omitempty"`
+
 	// RevealLabel is the platform's own name for "show this in the file
 	// manager" - the phrase a user of that OS already recognises.
 	RevealLabel string `json:"revealLabel"`
@@ -197,6 +205,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		Total:           s.reg.Count(),
 		DictDirOrigin:   s.DictDirOrigin,
 		DictDirEditable: s.DictDirEditable,
+		Effective:       s.Effective,
 		RevealLabel:     revealLabel(),
 		// revealing opens a window on the machine running the server, which is
 		// only useful when that is also the machine at the keyboard - and only

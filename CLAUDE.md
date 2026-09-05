@@ -32,4 +32,8 @@ The reference projects this was built from (`mdict-go-web`, `draego`, `pyglossar
 
 ## Conventions
 - Go, modules. `make build` uses cgo (`-tags sqlite_fts5` → mattn sqlite + built-in speex); a **tag-less** `go build`/`go install` gets the pure-Go driver and must keep working, because FTS5 is mandatory (D29). `-tags purego` must keep building and passing (D4, D18). Table-driven tests.
+- **Need-to-know (D102).** Internal mechanics and the UI are separate layers; some
+  internals map 1:1 to a control, most must not surface at all. A mechanism reaches
+  the UI only when the user must *decide* or *act* on it — never as an explanation of
+  how the app works. Applies to every label, hint and message.
 - Each format package implements both `Lookuper` (direct runtime lookup) and `Reader` (sequential ingest scan) — parsing logic written once, shared by both. Ingesters are one-shot batch paths.

@@ -1123,6 +1123,9 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	srv.Version = Version
 	srv.DictDirOrigin = cfg.Origin("DICT_DIR")
 	srv.DictDirEditable = cfg.EditableInFile("DICT_DIR")
+	// What the tunable keys actually resolved to, for a shell that overrides
+	// them per device and needs to show what is in effect (D101).
+	srv.Effective = cfg.Effective()
 	useExternalSpeex := cfg.SpeexBackend == "external"
 	srv.UseExternalSpeex = useExternalSpeex
 	// Only look for the external speexdec binary when it will actually be used:

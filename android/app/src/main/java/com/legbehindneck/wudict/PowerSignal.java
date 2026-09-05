@@ -111,8 +111,10 @@ final class PowerSignal {
     private static boolean post(String state) {
         HttpURLConnection c = null;
         try {
+            // No Context here by design - this class is all statics - so the
+            // port comes from the cache every ServerProcess.ensure() primes.
             c = (HttpURLConnection) new URL("http://" + ServerProcess.HOST + ":"
-                    + ServerProcess.PORT + "/api/power?state=" + state).openConnection();
+                    + ServerProcess.port() + "/api/power?state=" + state).openConnection();
             c.setRequestMethod("POST");
             c.setFixedLengthStreamingMode(0);
             c.setConnectTimeout(900);

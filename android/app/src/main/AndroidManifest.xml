@@ -50,6 +50,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Long-press the launcher icon → Settings (D100). The meta-data
+                 must sit on the MAIN/LAUNCHER activity: that is the one the
+                 launcher reads shortcuts from. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <!-- Look up a selection made in another app (D67). One activity behind
@@ -100,6 +107,26 @@
                 <data android:host="lookup" android:scheme="wudict" />
             </intent-filter>
         </activity>
+
+        <!-- The shell's own settings (D100): Android-shell facts only - windows,
+             intents, tasks - never a dictionary fact, which belongs to the page
+             and the server (D54). Reached from the launcher shortcut, hence
+             exported; it accepts no input, reads no extra and touches only its
+             own preference file, so there is nothing for a caller to abuse.
+
+             It reuses the popup's floating theme rather than declaring its own.
+             That is not thrift: a normal window on targetSdk 36 inherits forced
+             edge-to-edge, which Android 16 no longer lets an app opt out of, and
+             would drag MainActivity's inset handling into a second file.
+             Floating windows are exempt. taskAffinity="" plus excludeFromRecents
+             keep it out of the app's task, exactly as the popup is kept out. -->
+        <activity
+            android:name=".SettingsActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.WuWeiDict.Lookup" />
 
         <!-- Holds the process up while a demanded ingest runs (IndexService).
              Not exported: it is started by this app's own shell, off the

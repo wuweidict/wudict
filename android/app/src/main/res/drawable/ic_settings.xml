@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- The shortcut's icon (D100). Adaptive, exactly like ic_launcher: a shortcut
+     icon is drawn on whatever the launcher's own background is, and a bare
+     glyph would have to pick a colour that survives both light and dark. The
+     tile carries its own, so it cannot vanish into either. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_settings_foreground" />
+    <monochrome android:drawable="@drawable/ic_settings_foreground" />
+</adaptive-icon>

@@ -28,8 +28,14 @@ import android.window.OnBackInvokedDispatcher;
 
 public class MainActivity extends Activity {
 
-    /** Optional query to run on load - set by the lookup popup's handoff (D67). */
+    // An optional search to run on load, handed over by LookupActivity - either
+    // by the popup's handoff row (D67) or because the entry point is set to open
+    // the app outright (D100). All three parts travel together: the wudict://
+    // entry point can carry a mode and a dictionary, and forwarding the word
+    // alone would quietly answer a different question than the caller asked.
     static final String EXTRA_QUERY = "com.legbehindneck.wudict.QUERY";
+    static final String EXTRA_MODE = "com.legbehindneck.wudict.MODE";
+    static final String EXTRA_DICT = "com.legbehindneck.wudict.DICT";
 
     private FrameLayout root;
     private TextView status;
@@ -38,7 +44,9 @@ public class MainActivity extends Activity {
     private volatile boolean gone;   // onDestroy ran: late server callbacks must not touch the views
     private Object backCallback;     // OnBackInvokedCallback (API 33+), registered only while canGoBack()
     private boolean openPanelOnLoad; // arrived from "Manage space" (D63): show the panel when the page is up
-    private String pendingQuery;     // arrived from the lookup popup's handoff (D67)
+    private String pendingQuery;     // arrived from LookupActivity (D67, D100)
+    private String pendingMode;
+    private String pendingDict;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,7 +80,7 @@ public class MainActivity extends Activity {
         Storage.onNewIntent(this, getIntent()); // launched by a share, possibly
         openPanelOnLoad = getIntent() != null
                 && getIntent().getBooleanExtra(ManageSpaceActivity.EXTRA_MANAGE, false);
-        pendingQuery = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_QUERY);
+        takeQuery(getIntent());
 
         ServerProcess.retain();
         ServerProcess.ensure(this, new ServerProcess.Listener() {
@@ -296,9 +304,25 @@ public class MainActivity extends Activity {
                         FrameLayout.LayoutParams.MATCH_PARENT));
             }
             String q = pendingQuery;
-            pendingQuery = null;
-            web.loadUrl(q == null ? Shell.PAGE_URL : Shell.searchUrl(q, null, null));
+            String m = pendingMode, d = pendingDict;
+            pendingQuery = pendingMode = pendingDict = null;
+            web.loadUrl(q == null ? Shell.pageUrl(this) : Shell.searchUrl(this, q, m, d));
         });
+    }
+
+    /**
+     * Reads a forwarded search off an intent. Kept as one call because the
+     * three extras are one fact: a query with the mode dropped is a different
+     * search, not a slightly poorer one.
+     */
+    private boolean takeQuery(Intent intent) {
+        if (intent == null) return false;
+        String q = intent.getStringExtra(EXTRA_QUERY);
+        if (q == null) return false;
+        pendingQuery = q;
+        pendingMode = intent.getStringExtra(EXTRA_MODE);
+        pendingDict = intent.getStringExtra(EXTRA_DICT);
+        return true;
     }
 
     private void showFailure(String message) {
@@ -320,12 +344,15 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         Storage.onNewIntent(this, intent);
-        String q = intent == null ? null : intent.getStringExtra(EXTRA_QUERY);
-        if (q != null) {
-            // Handed over by the popup, so the app is very likely already up
-            // and showing something else; if it is not, showPage takes it.
-            if (!gone && web.getParent() != null) web.loadUrl(Shell.searchUrl(q, null, null));
-            else pendingQuery = q;
+        // Only what THIS intent brought: an unrelated intent must not fire a
+        // query left pending by an earlier one - showPage owns that.
+        if (takeQuery(intent) && !gone && web.getParent() != null) {
+            // Handed over by LookupActivity, so the app is very likely already
+            // up and showing something else; if it is not, showPage takes it.
+            String q = pendingQuery;
+            String m = pendingMode, d = pendingDict;
+            pendingQuery = pendingMode = pendingDict = null;
+            web.loadUrl(Shell.searchUrl(this, q, m, d));
         }
         if (intent != null && intent.getBooleanExtra(ManageSpaceActivity.EXTRA_MANAGE, false)) {
             // The page is already loaded in the common case (the app was in the

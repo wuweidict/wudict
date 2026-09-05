@@ -16,6 +16,14 @@
 // The window floats over the app the user was reading (dialog theme), so a
 // definition costs them no place in the text: Back or a tap outside returns
 // them to their selection.
+//
+// That is the default, not the only outcome. Per entry point, the user can ask
+// for the lookup to land in the app proper instead (D100, SettingsActivity), and
+// a wudict:// caller can say so per call with `&full=1`. Both are answered here
+// by forwarding to MainActivity and finishing before this window is built - the
+// same handoff the popup offers as a tap, taken automatically. The feature adds
+// no third kind of window: every screen it can produce is one the app already
+// produced.
 package com.legbehindneck.wudict;
 
 import android.app.Activity;
@@ -79,6 +87,15 @@ public class LookupActivity extends Activity {
         Uri data = i == null ? null : i.getData();
         mode = mode(param(data, "mode"));
         dict = clean(param(data, "dict"));
+
+        // Before any window work, and before ServerProcess.retain(): the
+        // forward leaves `retained` false, so the refcount is untouched and
+        // MainActivity does its own. Nothing below this line has run, so there
+        // is no WebView to tear down and no server call to cancel.
+        if (opensApp(i, data)) {
+            forward();
+            return;
+        }
 
         sizeWindow();
         setFinishOnTouchOutside(true);
@@ -187,6 +204,49 @@ public class LookupActivity extends Activity {
         }
     }
 
+    // ── where the lookup lands ───────────────────────────────────────────
+
+    /**
+     * Whether this lookup skips the popup and opens the app. The stored answer
+     * is per entry point (D100); a wudict:// caller may override it for this one
+     * call, which is the only entry point that can carry a parameter at all -
+     * PROCESS_TEXT and SEND bring no URI.
+     */
+    private boolean opensApp(Intent i, Uri data) {
+        Boolean once = full(param(data, "full"));
+        return once != null ? once : ShellPrefs.opensApp(this, ShellPrefs.sourceKey(i));
+    }
+
+    /** `&full=0|1`, whitelisted like mode(): anything else is the caller's typo. */
+    private static Boolean full(String v) {
+        if ("1".equals(v)) return Boolean.TRUE;
+        if ("0".equals(v)) return Boolean.FALSE;
+        return null; // fall back to the stored answer
+    }
+
+    /**
+     * Hand the query to the app proper and get out of the way - the same route
+     * the handoff row takes when tapped. MainActivity is singleTask, so this
+     * reaches the existing instance if there is one. The transition is
+     * suppressed: this window is never shown, and animating it in and out would
+     * advertise a screen the user did not ask for.
+     */
+    @SuppressWarnings("deprecation") // overridePendingTransition, pre-API-34 only
+    private void forward() {
+        startActivity(new Intent(this, MainActivity.class)
+                .putExtra(MainActivity.EXTRA_QUERY, query)
+                .putExtra(MainActivity.EXTRA_MODE, mode)
+                .putExtra(MainActivity.EXTRA_DICT, dict)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0);
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0);
+        } else {
+            overridePendingTransition(0, 0);
+        }
+        finish();
+    }
+
     // ── the window ───────────────────────────────────────────────────────
 
     // A floating window is sized to its CONTENT - the decor measures the
@@ -258,7 +318,7 @@ public class LookupActivity extends Activity {
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT));
             }
-            web.loadUrl(Shell.searchUrl(query, mode, dict));
+            web.loadUrl(Shell.searchUrl(this, query, mode, dict));
         });
     }
 
@@ -276,12 +336,7 @@ public class LookupActivity extends Activity {
         int pad = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 12,
                 getResources().getDisplayMetrics());
         t.setPadding(pad, pad, pad, pad);
-        t.setOnClickListener(v -> {
-            startActivity(new Intent(this, MainActivity.class)
-                    .putExtra(MainActivity.EXTRA_QUERY, query)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
-            finish();
-        });
+        t.setOnClickListener(v -> forward());
         return t;
     }
 
@@ -304,8 +359,15 @@ public class LookupActivity extends Activity {
         Uri data = intent.getData();
         mode = mode(param(data, "mode"));
         dict = clean(param(data, "dict"));
+        // The setting is about this lookup, not about the window that happens
+        // to be open: a second selection from an entry point that says "in app"
+        // forwards, even though the first one floated.
+        if (opensApp(intent, data)) {
+            forward();
+            return;
+        }
         if (!gone && web != null && web.getParent() != null) {
-            web.loadUrl(Shell.searchUrl(query, mode, dict));
+            web.loadUrl(Shell.searchUrl(this, query, mode, dict));
         }
     }
 

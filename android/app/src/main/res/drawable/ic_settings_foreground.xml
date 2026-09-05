@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- The cog for the launcher shortcut (D100), drawn in the same white-on-tile
+     language as ic_launcher_foreground and on the same 108dp adaptive canvas:
+     a 24-unit glyph scaled ×2.5 = 60dp of ink, centred by (108−60)/2 = 24, so
+     it sits well inside the 66dp safe zone every launcher mask respects. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2.5"
+        android:scaleY="2.5"
+        android:translateX="24"
+        android:translateY="24">
+        <!-- Eight teeth, as eight radial strokes on a 12,12 centre: a stroked
+             ring at r=6.5 plus spokes from r=6.5 to r=9.2 every 45°. Drawn
+             rather than filled so the weight matches the launcher mark. -->
+        <path
+            android:pathData="M18.5,12 A6.5,6.5 0 1 1 5.5,12 A6.5,6.5 0 1 1 18.5,12"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="2"
+            android:fillColor="#00000000" />
+        <path
+            android:pathData="M12,5.5 L12,2.8 M12,18.5 L12,21.2 M5.5,12 L2.8,12 M18.5,12 L21.2,12 M7.4,7.4 L5.5,5.5 M16.6,16.6 L18.5,18.5 M16.6,7.4 L18.5,5.5 M7.4,16.6 L5.5,18.5"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000" />
+        <!-- The hub, filled: at shortcut size a stroked inner ring closes up
+             into a blob, so it is drawn as the dot it would become anyway. -->
+        <path
+            android:pathData="M14.4,12 A2.4,2.4 0 1 1 9.6,12 A2.4,2.4 0 1 1 14.4,12"
+            android:fillColor="#FFFFFF" />
+    </group>
+</vector>

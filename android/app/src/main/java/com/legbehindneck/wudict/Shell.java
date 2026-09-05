@@ -14,6 +14,7 @@ package com.legbehindneck.wudict;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Message;
@@ -30,9 +31,20 @@ final class Shell {
 
     private static final String TAG = "wudict";
 
-    /** The one origin that belongs to us; everything else is somebody's website. */
-    static final String ORIGIN = "http://" + ServerProcess.HOST + ":" + ServerProcess.PORT;
-    static final String PAGE_URL = ORIGIN + "/";
+    /**
+     * The one origin that belongs to us; everything else is somebody's website.
+     *
+     * <p>A method rather than a constant since D101, because the port is an
+     * install-level setting a device may override. The host never varies: it is
+     * the address we connect to, not the one the server binds to.
+     */
+    static String origin(Context c) {
+        return "http://" + ServerProcess.HOST + ":" + ServerProcess.port(c);
+    }
+
+    static String pageUrl(Context c) {
+        return origin(c) + "/";
+    }
 
     private Shell() {
     }
@@ -45,8 +57,8 @@ final class Shell {
      * <p>Every component is encoded here, so a caller's text - a selection from
      * another app, a URI from an intent - can carry anything at all.
      */
-    static String searchUrl(String q, String mode, String dict) {
-        StringBuilder b = new StringBuilder(PAGE_URL).append("?q=").append(enc(q));
+    static String searchUrl(Context c, String q, String mode, String dict) {
+        StringBuilder b = new StringBuilder(pageUrl(c)).append("?q=").append(enc(q));
         if (mode != null && !mode.isEmpty()) b.append("&mode=").append(enc(mode));
         if (dict != null && !dict.isEmpty()) b.append("&dict=").append(enc(dict));
         return b.toString();
@@ -91,7 +103,8 @@ final class Shell {
             return false;
         }
         String url = uri.toString();
-        if (url.equals(ORIGIN) || url.startsWith(ORIGIN + "/")) return false;
+        String origin = origin(a);
+        if (url.equals(origin) || url.startsWith(origin + "/")) return false;
         // Shell-private URLs (wudict://…) are a channel from the page to the
         // Java side that costs no JavascriptInterface and no server API: this
         // method already inspects every navigation, so the branch is free.
