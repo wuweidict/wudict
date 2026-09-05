@@ -57,7 +57,7 @@ func TestRevealAuthorization(t *testing.T) {
 	}
 
 	// a request from another machine is refused outright
-	req := httptest.NewRequest("GET", "/api/reveal?path="+dicts, nil)
+	req := newRequest("GET", "/api/reveal?path="+dicts, nil)
 	req.RemoteAddr = "192.168.1.50:5555"
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
@@ -65,7 +65,7 @@ func TestRevealAuthorization(t *testing.T) {
 		t.Errorf("remote reveal: got %d, want 403", rec.Code)
 	}
 	// and an unknown path from localhost is refused too (no shell-out)
-	req = httptest.NewRequest("GET", "/api/reveal?path=/etc/passwd", nil)
+	req = newRequest("GET", "/api/reveal?path=/etc/passwd", nil)
 	req.RemoteAddr = "127.0.0.1:5555"
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
@@ -165,7 +165,7 @@ func TestConfigEndpointAndSetupPage(t *testing.T) {
 	restore := revealPossible
 	revealPossible = func() bool { return true }
 	defer func() { revealPossible = restore }()
-	req := httptest.NewRequest("GET", "/api/config", nil)
+	req := newRequest("GET", "/api/config", nil)
 	req.RemoteAddr = "127.0.0.1:4444"
 	rec0 := httptest.NewRecorder()
 	s.ServeHTTP(rec0, req)
@@ -175,7 +175,7 @@ func TestConfigEndpointAndSetupPage(t *testing.T) {
 
 	// the setup page is served on demand, not only while the registry is empty
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/setup", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/setup", nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Point wuDict at your dictionaries") {
 		t.Fatalf("/setup not served: %d", rec.Code)
 	}
@@ -184,7 +184,7 @@ func TestConfigEndpointAndSetupPage(t *testing.T) {
 	}
 	// "/" still serves the app, not setup, while dictionaries are in use
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/", nil))
 	if strings.Contains(rec.Body.String(), "Point wuDict at your dictionaries") {
 		t.Error("/ should serve the app once dictionaries are in use")
 	}
@@ -298,13 +298,13 @@ func TestServerIdentityHeader(t *testing.T) {
 	s := New(reg)
 	s.Version = "v9.9"
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/api/config", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/api/config", nil))
 	if got := rec.Header().Get("Server"); got != "wudict/v9.9" {
 		t.Errorf("Server header = %q, want wudict/v9.9", got)
 	}
 	// and it is present even on a 404, so any endpoint identifies the app
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/nope", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/nope", nil))
 	if got := rec.Header().Get("Server"); got != "wudict/v9.9" {
 		t.Errorf("404 Server header = %q", got)
 	}

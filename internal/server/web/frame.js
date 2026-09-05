@@ -111,7 +111,13 @@
 		// the frame/app protocol stays open to the dictionary's own scripts
 		postMessage: function () { return HOST.postMessage.apply(HOST, arguments); },
 		// blank and detached: `parent.document.querySelector("#k_iframe")` is
-		// null by contract instead of by luck, and the app's DOM is gone.
+		// null by contract instead of by luck. This is a COMPATIBILITY shim,
+		// not a sandbox - the frame is same-origin by necessity (the article
+		// has to be styled and measured), so a script that goes looking can
+		// still reach the app through another route. A dictionary whose own
+		// scripts are hostile is trusted code the user installed; what this
+		// prevents is the far commoner accident, an article's script written
+		// for a full page walking into the app and breaking it.
 		document: document.implementation.createHTMLDocument(""),
 		location: inertLocation(HOST.location),
 		frames: [], length: 0, closed: false, name: ""
@@ -165,8 +171,9 @@
 		try { window.parent = facade; } catch (e) { }
 		// no [LegacyUnforgeable], and [Global] makes it a configurable own
 		// property. null is what a top-level or cross-origin frame reports, so
-		// it is the answer least likely to surprise - and it closes the last
-		// handle on the app's DOM.
+		// it is the answer least likely to surprise - and it removes the most
+		// obvious handle on the app's DOM. Not the last one: see hostAPI above
+		// for why that is a shim and not a boundary.
 		try {
 			Object.defineProperty(window, "frameElement", {
 				get: function () { return null; }, configurable: true

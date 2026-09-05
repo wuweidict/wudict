@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -32,6 +33,13 @@ type runningInstance struct {
 	UseCached  bool   `json:"useCached"`
 	Total      int    `json:"total"`
 	ConfigPath string `json:"configPath"`
+
+	// Restricted means the instance answered, and answered that we may not
+	// ask further: it requires an access key this launch did not present.
+	// Identity is still established - the Server header is not behind the
+	// key - but nothing below it is, so every field above is zero and must
+	// not be read as fact.
+	Restricted bool `json:"-"`
 }
 
 // probeRunning asks whatever holds addr whether it is a wudict, and if so
@@ -45,8 +53,17 @@ type runningInstance struct {
 func probeRunning(addr string) (*runningInstance, bool) {
 	client := &http.Client{Timeout: 700 * time.Millisecond}
 	host := addr
-	if strings.HasPrefix(host, "0.0.0.0:") { // bound to every interface: ask loopback
-		host = "127.0.0.1:" + strings.TrimPrefix(host, "0.0.0.0:")
+	// A wildcard bind answers on loopback too, and loopback is the one
+	// interface guaranteed to be up - so ask there. Both spellings of
+	// "wildcard" have to be recognised: the string test this replaces knew
+	// "0.0.0.0" and missed "::" and "[::]", and on those a second launch got
+	// a bind error it could not explain instead of the running instance. A
+	// CONCRETE non-loopback bind is left alone on purpose: nothing is
+	// listening on loopback then.
+	if h, port, err := net.SplitHostPort(addr); err == nil {
+		if ip := net.ParseIP(h); ip != nil && ip.IsUnspecified() {
+			host = net.JoinHostPort("127.0.0.1", port)
+		}
 	}
 	resp, err := client.Get("http://" + host + "/api/config")
 	if err != nil {
@@ -58,6 +75,10 @@ func probeRunning(addr string) (*runningInstance, bool) {
 		return nil, false
 	}
 	inst := &runningInstance{Version: strings.TrimPrefix(strings.TrimPrefix(id, server.ServerHeader), "/")}
+	if resp.StatusCode == http.StatusUnauthorized {
+		inst.Restricted = true
+		return inst, true
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err == nil {
 		_ = json.Unmarshal(body, inst) // details are a bonus; identity already established
@@ -70,6 +91,12 @@ func probeRunning(addr string) (*runningInstance, bool) {
 // merely ignored - they name a different library, which is what the user
 // actually needs to be told.
 func sameFolders(want []string, inst *runningInstance) bool {
+	// Nothing was disclosed, so nothing is known to differ. Claiming a
+	// mismatch here would print a loud warning about folders on the strength
+	// of an empty struct.
+	if inst.Restricted {
+		return true
+	}
 	if len(want) != len(inst.Roots) {
 		return false
 	}
@@ -103,6 +130,13 @@ func announceRunning(inst *runningInstance, url string, wantDirs []string, willO
 		fmt.Fprintf(out, "  running version   %s   (you launched %s)\n", inst.Version, Version)
 	}
 	fmt.Fprintf(out, "  already serving   %s\n", url)
+	if inst.Restricted {
+		// Everything below this line is unknown, not absent: the running
+		// instance is asking for its access key, and this launch did not
+		// present one. Saying so is the difference between "it is running"
+		// and "it is running and something is wrong with your key".
+		fmt.Fprintf(out, "                    (it asks for an access key this launch did not have)\n")
+	}
 	if inst.Total > 0 {
 		fmt.Fprintf(out, "  dictionaries      %s\n", plural(inst.Total, "dictionary", "dictionaries"))
 	}

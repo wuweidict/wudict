@@ -77,6 +77,9 @@ func lemmaServer(t *testing.T, url string, cacheSize int) (*Server, string) {
 		t.Fatal(err)
 	}
 	s := New(reg)
+	// Installs outlive their request by design; they must not outlive the
+	// temp folders they are writing into.
+	t.Cleanup(func() { s.lemmas.wg.Wait() })
 	dir := t.TempDir()
 	s.LemmaDir, s.LemmaURL = dir, url
 	s.Morph = morph.New(cacheSize, dir)
@@ -86,7 +89,7 @@ func lemmaServer(t *testing.T, url string, cacheSize int) (*Server, string) {
 func do(t *testing.T, s *Server, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+	s.ServeHTTP(rec, newRequest(method, path, nil))
 	return rec
 }
 
@@ -357,7 +360,7 @@ func TestLemmasIsNotCORSEnabled(t *testing.T) {
 	s, _ := lemmaServer(t, site.url, 2)
 	for _, m := range []string{"GET", "POST", "DELETE"} {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(m, "/api/lemmas?code=pl", nil)
+		req := newRequest(m, "/api/lemmas?code=pl", nil)
 		req.Header.Set("Origin", chromeOrigin)
 		s.ServeHTTP(rec, req)
 		if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {

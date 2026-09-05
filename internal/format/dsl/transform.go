@@ -450,9 +450,15 @@ func (tr *transformer) processTag(tag string, attrs map[string]string) error {
 }
 
 func (tr *transformer) closeTag(tag string) {
-	switch tag {
-	case "m":
+	// [/m2] is as common in the wild as [/m], and both close the same <p>: the
+	// digit belongs to the margin, not to the element. Matching only "m" left
+	// the paragraph open, so every following line inherited the indent to the
+	// end of the article.
+	if isMarginTag(tag) {
 		tr.addHTML("</p>")
+		return
+	}
+	switch tag {
 	case "b":
 		tr.addHTML("</b>")
 	case "u", "'":

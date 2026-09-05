@@ -117,6 +117,7 @@ final class PowerSignal {
                     + ServerProcess.port() + "/api/power?state=" + state).openConnection();
             c.setRequestMethod("POST");
             c.setFixedLengthStreamingMode(0);
+            ShellPrefs.authorize(c); // the cache ServerProcess primes, as with the port
             c.setConnectTimeout(900);
             c.setReadTimeout(900);
             int code = c.getResponseCode();

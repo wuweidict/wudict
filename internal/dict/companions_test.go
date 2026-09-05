@@ -83,6 +83,42 @@ func TestSourceFilesStarDict(t *testing.T) {
 	eqPaths(t, got, want)
 }
 
+// A res/ folder shared by several StarDict dictionaries belongs to none of
+// them. SourceFiles feeds removal, so listing it here would delete the images
+// of every sibling in the folder along with the one dictionary the user asked
+// to remove.
+func TestSourceFilesStarDictSharedRes(t *testing.T) {
+	dir := t.TempDir()
+	ifo := touch(t, filepath.Join(dir, "star.ifo"))
+	touch(t, filepath.Join(dir, "star.idx"))
+	touch(t, filepath.Join(dir, "other.ifo")) // a second dictionary, same folder
+	touch(t, filepath.Join(dir, "other.idx"))
+	touch(t, filepath.Join(dir, "res", "img.png"))
+	touch(t, filepath.Join(dir, "res.zip"))
+
+	got := SourceFiles(ifo)
+	want := []string{
+		filepath.Join(dir, "star.ifo"),
+		filepath.Join(dir, "star.idx"),
+	}
+	eqPaths(t, got, want)
+}
+
+// The sole dictionary in a folder does own the res/ beside it - including the
+// zip form, and including a mixed-case .IFO on a case-insensitive filesystem.
+func TestSourceFilesStarDictSoleResZip(t *testing.T) {
+	dir := t.TempDir()
+	ifo := touch(t, filepath.Join(dir, "star.IFO"))
+	touch(t, filepath.Join(dir, "res.zip"))
+
+	got := SourceFiles(ifo)
+	want := []string{
+		filepath.Join(dir, "star.IFO"),
+		filepath.Join(dir, "res.zip"),
+	}
+	eqPaths(t, got, want)
+}
+
 func TestSourceFilesDSLCompressed(t *testing.T) {
 	dir := t.TempDir()
 	dsl := touch(t, filepath.Join(dir, "ru-en.dsl.dz"))

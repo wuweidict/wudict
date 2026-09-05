@@ -3,7 +3,12 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <resources>
     <string name="storage_title">Dictionary storage</string>
-    <string name="storage_message">WuWeiDict reads dictionaries from the shared “Dictionaries” folder (Internal storage ▸ Dictionaries). Choose “Grant access” and allow All files access on the next screen, then copy your .mdx/.mdd, .ifo, .slob, .dsl and .bgl files into that folder.</string>
+    <string name="storage_message">wuDict reads dictionaries from the shared “Dictionaries” folder (Internal storage ▸ Dictionaries). Choose “Grant access” and allow All files access on the next screen, then copy your .mdx/.mdd, .ifo, .slob, .dsl and .bgl files into that folder.</string>
     <string name="storage_grant">Grant access</string>
     <string name="storage_later">Later</string>
+    <!-- The listen-address switch exists only in this flavour (Net, D62), so
+         its label and its warning live here: the Play APK cannot name them,
+         which is what tools/verify-apk.sh asserts. -->
+    <string name="settings_server_ip">Reachable from other devices (testing only)</string>
+    <string name="settings_server_ip_hint">For a quick test on your own network, not a way to run a server. Other devices can reach the library only while wuDict is open on screen — closing it, or letting the screen turn off, ends it within moments. Sharing is tied to the network the app started on: join a different one and it stops until you reopen the app. While it is on, anything on that network can read your library, with no password. Default: off.</string>
 </resources>

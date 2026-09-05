@@ -51,6 +51,11 @@ type lemmaJob struct {
 type lemmaState struct {
 	mu   sync.Mutex
 	jobs map[string]*lemmaJob
+	// wg counts the install goroutines. Nothing in the server waits on it -
+	// an install is meant to outlive its request - but a TEST must, because a
+	// download still writing when the test returns writes into a t.TempDir()
+	// that cleanup is already removing.
+	wg sync.WaitGroup
 	// hashes memoizes lemmas.Hash keyed by path, size and mtime. Without it a
 	// polling page would re-read every installed file - up to 21 MB - once per
 	// second to decide whether to draw one "differs from the catalogue" mark.
@@ -316,7 +321,11 @@ func (s *Server) handleLemmaInstall(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"code": code, "state": "downloading"})
 		return
 	}
-	go s.install(cat, e)
+	s.lemmas.wg.Add(1)
+	go func() {
+		defer s.lemmas.wg.Done()
+		s.install(cat, e)
+	}()
 
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, map[string]string{"code": code, "state": "downloading"})

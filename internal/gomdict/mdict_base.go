@@ -590,6 +590,15 @@ func (mdict *MdictBase) decodeKeyEntries(keyBlockDataCompressBuffer []byte) erro
 		start = end
 	}
 
+	// splitKeyBlock backfills each entry's end offset from its successor, but
+	// only WITHIN the block it was handed: the last entry of every key block
+	// kept the 0 sentinel, which locateByKeywordEntry reads as "to the end of
+	// the record block" - so one entry per key block used to hand back its own
+	// record plus everything filed after it in that block. Chaining across the
+	// seams is what fixes that; 0 stays the sentinel for the one entry that is
+	// genuinely open-ended, the last of the dictionary.
+	chainRecordEnds(keyBlockData.keyEntries, 0)
+
 	if keyBlockData.keyEntriesSize != mdict.keyBlockMeta.entriesNum {
 		return errors.New("the key list items not equals to entries num")
 	}
@@ -599,6 +608,20 @@ func (mdict *MdictBase) decodeKeyEntries(keyBlockDataCompressBuffer []byte) erro
 	mdict.keyBlockData = keyBlockData
 
 	return nil
+}
+
+// chainRecordEnds gives every entry the end offset of its successor's start:
+// nothing in either layout stores a record's length, so an entry's extent is
+// only knowable from the next one. lastEnd is the "unknown, read to the end of
+// the containing block" sentinel, which the two layouts spell differently (0
+// for v1/v2, negative for v3 - see LocateAt).
+func chainRecordEnds(entries []*MDictKeywordEntry, lastEnd int64) {
+	for i := 0; i+1 < len(entries); i++ {
+		entries[i].RecordEndOffset = entries[i+1].RecordStartOffset
+	}
+	if n := len(entries); n > 0 {
+		entries[n-1].RecordEndOffset = lastEnd
+	}
 }
 
 func (mdict *MdictBase) splitKeyBlock(keyBlock []byte) []*MDictKeywordEntry {
@@ -847,142 +870,6 @@ func (mdict *MdictBase) buildRecordRangeTree() {
 	BuildRangeTree(mdict.recordBlockInfo.recordInfoList, mdict.rangeTreeRoot)
 }
 
-func (mdict *MdictBase) keywordEntryToIndex(item *MDictKeywordEntry) (*MDictKeywordIndex, error) {
-	recordBlockInfo := QueryRangeData(mdict.rangeTreeRoot, item.RecordStartOffset)
-
-	if recordBlockInfo == nil {
-		return nil, errors.New("key-item record info not found")
-	}
-
-	recordBlockStartOffset := recordBlockInfo.compressAccumulatorOffset + mdict.recordBlockInfo.recordBlockDataStartOffset
-	recordBlockLen := recordBlockInfo.compressSize
-
-	start := item.RecordStartOffset - recordBlockInfo.deCompressAccumulatorOffset
-	var end int64
-	if item.RecordEndOffset == 0 {
-		end = recordBlockLen
-	} else {
-		end = item.RecordEndOffset - recordBlockInfo.deCompressAccumulatorOffset
-	}
-
-	return &MDictKeywordIndex{
-		KeywordEntry: *item,
-		RecordBlock: MDictKeywordIndexRecordBlock{
-			DataStartOffset:          recordBlockStartOffset,
-			CompressSize:             recordBlockInfo.compressSize,
-			DeCompressSize:           recordBlockInfo.deCompressSize,
-			KeyWordPartStartOffset:   start,
-			KeyWordPartDataEndOffset: end,
-		},
-	}, nil
-
-}
-
-func (mdict *MdictBase) locateByKeywordIndex(index *MDictKeywordIndex) ([]byte, error) {
-	return locateDefByKWIndex(index,
-		mdict.filePath,
-		mdict.meta.encryptType == EncryptRecordEnc,
-		mdict.fileType == MdictTypeMdd,
-		mdict.meta.encoding == EncodingUtf16)
-}
-
-func locateDefByKWIndex(index *MDictKeywordIndex, filePath string, isRecordEncrypted, isMdd, isUtf16 bool) ([]byte, error) {
-	log.Infof("locateDefByKWIndex invoked %+v, filepath %s, isRecordEncrypted %v, isMdd %v, isUTF16 %v", index, filePath, isRecordEncrypted, isMdd, isUtf16)
-	file, err := os.Open(filePath)
-	if err != nil {
-		log.Errorf("open file err %s", err.Error())
-		return nil, err
-	}
-	defer file.Close()
-	recordBlockDataCompBuff, err := readFileFromPos(file, index.RecordBlock.DataStartOffset, index.RecordBlock.CompressSize)
-	if err != nil {
-
-		log.Errorf("readFileFromPos %s", err.Error())
-		return nil, err
-	}
-
-	if recordBlockDataCompBuff == nil {
-		log.Errorf("record block data buffer is null, index: %v", index)
-		return nil, errors.New("record block data buffer is null")
-	}
-
-	// 4 bytes: compression type
-	var rbCompType = recordBlockDataCompBuff[0:4]
-
-	// record_block stores the final record data
-	var recordBlock []byte
-
-	// TODO: ignore adler32 offset
-	// Note: here ignore the checksum part
-	// bytes: adler32 checksum of decompressed record block
-	// adler32 = unpack('>I', record_block_compressed[4:8])[0]
-	if rbCompType[0] == 0 {
-		recordBlock = recordBlockDataCompBuff[8:index.RecordBlock.CompressSize]
-	} else {
-		// decrypt
-		var blockBufDecrypted []byte
-		// if encrypt type == 1, the record block was encrypted
-		if isRecordEncrypted {
-			// const passkey = new Uint8Array(8);
-			// record_block_compressed.copy(passkey, 0, 4, 8);
-			// passkey.set([0x95, 0x36, 0x00, 0x00], 4); // key part 2: fixed data
-			blockBufDecrypted = mdxDecrypt(recordBlockDataCompBuff, index.RecordBlock.CompressSize)
-		} else {
-			blockBufDecrypted = recordBlockDataCompBuff[8:index.RecordBlock.CompressSize]
-		}
-
-		// decompress
-		if rbCompType[0] == 1 {
-			// LZO1X: go-lzo expects raw LZO1X data (no MDict \xf0 prefix),
-			// with the decompressed size passed as an outLen hint.
-			out, err1 := lzo.Decompress1X(bytes.NewReader(blockBufDecrypted), len(blockBufDecrypted), int(index.RecordBlock.DeCompressSize))
-			if err1 != nil {
-				log.Errorf("stopped by Decompress1X %s", err1.Error())
-				return nil, err1
-			}
-
-			recordBlock = out
-
-		} else if rbCompType[0] == 2 {
-			var err2 error
-			recordBlock, err2 = zlibDecompress(blockBufDecrypted, 0, int64(len(blockBufDecrypted)))
-			if err2 != nil {
-				log.Errorf("stopped by zlibDecompress %s", err2.Error())
-				return nil, err2
-			}
-		}
-	}
-
-	// TODO: ignore the checksum
-	// notice that adler32 return signed value
-	// assert(adler32 == zlib.adler32(record_block) & 0xffffffff)
-
-	if int64(len(recordBlock)) != index.RecordBlock.DeCompressSize {
-		log.Errorf("stopped by len(recordBlock) != index.RecordBlock.DeCompressSize")
-		return nil, errors.New("recordBlock length not equals decompress Size")
-	}
-
-	start := index.RecordBlock.KeyWordPartStartOffset
-	end := index.RecordBlock.KeyWordPartDataEndOffset
-
-	data := recordBlock[start:end]
-
-	if isMdd {
-		log.Debugf("return mdd data")
-		return data, nil
-	}
-
-	if isUtf16 {
-		log.Infof("keyword %s, data len %d", index.KeywordEntry.KeyWord, len(data))
-		datastr, err1 := decodeLittleEndianUtf16(data)
-		if err1 != nil {
-			return nil, err
-		}
-		return []byte(datastr), nil
-	}
-	return data, nil
-}
-
 // recordBlockAt returns the record block holding a decompressed offset.
 //
 // recordInfoList is built by readRecordBlockInfo in file order, so
@@ -1020,11 +907,17 @@ func (mdict *MdictBase) locateByKeywordEntry(item *MDictKeywordEntry) ([]byte, e
 	}
 
 	start := item.RecordStartOffset - recordBlockInfo.deCompressAccumulatorOffset
-	var end int64
-	if item.RecordEndOffset == 0 {
-		end = int64(len(recordBlock))
-	} else {
-		end = item.RecordEndOffset - recordBlockInfo.deCompressAccumulatorOffset
+	// End offsets are chained from the NEXT entry, which may be filed in a
+	// later record block, and a corrupt file can name anything at all: clamp
+	// to this block instead of slicing past it. 0 still means "to the end".
+	end := int64(len(recordBlock))
+	if item.RecordEndOffset != 0 {
+		if e := item.RecordEndOffset - recordBlockInfo.deCompressAccumulatorOffset; e < end {
+			end = e
+		}
+	}
+	if start < 0 || start > end {
+		return nil, fmt.Errorf("record offsets out of range (start=%d end=%d block=%d)", start, end, len(recordBlock))
 	}
 
 	data := recordBlock[start:end]

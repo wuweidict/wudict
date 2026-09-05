@@ -83,7 +83,10 @@ type bufReader struct {
 }
 
 func (b *bufReader) read(n int) ([]byte, error) {
-	if b.pos+n > len(b.data) {
+	// pos is assigned from file-declared positions (parseRefs), so it can
+	// arrive negative from a value that overflows int - and a negative pos
+	// passes an upper-bound-only check and panics on the slice.
+	if b.pos < 0 || n < 0 || b.pos+n > len(b.data) {
 		return nil, io.ErrUnexpectedEOF
 	}
 	out := b.data[b.pos : b.pos+n]

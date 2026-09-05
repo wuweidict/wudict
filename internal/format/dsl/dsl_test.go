@@ -29,6 +29,10 @@ func TestTransformBody(t *testing.T) {
 		{`[c]green[/c]`, `<font color="green">green</font>`},
 		{`[c darkred]x[/c]`, `<font color="darkred">x</font>`},
 		{`[m2]indent[/m]`, `<p style="padding-left:2em;margin:0">indent</p>`},
+		// [/m2] is as common as [/m] and closes the same paragraph; matching
+		// only "m" left it open and the indent ran to the end of the article.
+		{`[m2]indent[/m2]`, `<p style="padding-left:2em;margin:0">indent</p>`},
+		{`[m]bare[/m0]`, `<p style="padding-left:0.3em;margin:0">bare</p>`},
 		{`[ex]sample[/ex]`, `<span class="ex"><font color="steelblue">sample</font></span>`},
 		{`a [ref]target[/ref]`, `a <a href="bword://target">target</a>`},
 		{`<<other>>`, `<a href="bword://other">other</a>`},

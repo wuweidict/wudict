@@ -78,9 +78,9 @@ func IngestLevelReport(r dict.Reader, dbPath string, level Level, progress Progr
 	return IngestPlan(r, dbPath, PlanOf(level), progress)
 }
 
-// IngestLevelReport scans r into a new text database at dbPath (atomically:
-// written to a temp file, renamed on success). The FTS index is built
-// inside the same transaction as the data (FTS-audit #3).
+// IngestPlan scans r into a new text database at dbPath (atomically: written
+// to a temp file, renamed on success). The FTS index is built inside the same
+// transaction as the data (FTS-audit #3).
 func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep Report, err error) {
 	level := LevelHeadwords
 	if plan.FullText {

@@ -35,7 +35,7 @@ type prefsResp struct {
 
 func putPrefs(t *testing.T, s *Server, body string) prefsResp {
 	t.Helper()
-	req := httptest.NewRequest("PUT", "/api/prefs", strings.NewReader(body))
+	req := newRequest("PUT", "/api/prefs", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != 200 {

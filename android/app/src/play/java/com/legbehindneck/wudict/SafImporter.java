@@ -467,6 +467,7 @@ final class SafImporter {
                     + ServerProcess.port(ctx) + "/api/rescan").openConnection();
             c.setConnectTimeout(2000);
             c.setReadTimeout(120_000); // a rescan of a fresh import indexes headwords
+            ShellPrefs.authorize(c);   // /api/rescan writes to the library, so it is gated
             c.getResponseCode();
         } catch (Exception e) {
             Log.w(TAG, "rescan after import failed", e); // the next launch picks it up

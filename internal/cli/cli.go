@@ -134,6 +134,11 @@ COMMANDS
                                           is a file in LEMMA_DIR. "list" marks the installed
                                           ones; "download pl ru" or "download polish russian"
                                           installs them from LEMMA_URL; "remove pl" deletes.
+  token [-rotate]                         Print the link that carries this server's access key
+                                          - the one a browser on another machine needs when
+                                          wudict listens on the network. -rotate replaces the
+                                          key, and every browser and script holding the old
+                                          one stops working until it is opened again.
   clean  [-f]                             List removable items in the library: incomplete or
                                           unreadable folders, interrupted ingests, leftovers
                                           from the old flat layout. A cached dictionary is
@@ -283,6 +288,41 @@ SERVE FLAGS
                           program - are not affected by any of this.)
                           env: WEB_ORIGINS    toml: WEB_ORIGINS
                           default: no web page
+
+  TRUSTED_HOSTS           Which host NAMES this server answers to, besides
+                          "localhost". Any IP address is always accepted, so
+                          this is needed only when something reaches wudict
+                          through a name - a reverse proxy, or a hostname you
+                          gave the machine:
+                            TRUSTED_HOSTS = ["wudict.lan"]
+                          A request naming anything else is refused. That is
+                          what stops a page you visit from pointing its own
+                          domain at your machine and reading the server
+                          through it, which no same-origin or CORS rule can.
+                          "*" turns the check off.
+                          env: TRUSTED_HOSTS  toml: TRUSTED_HOSTS
+                          default: addresses and localhost only
+
+  AUTH                    Must a request carry the access key? "auto" - the
+                          default - asks for it whenever this server listens
+                          on the network, and never when it listens on
+                          127.0.0.1, where nothing but this machine can
+                          reach it. "on" always, "off" never. "off" on a
+                          network address serves your library, your settings
+                          and your folder names to anyone who can reach the
+                          port, so it is a choice, not a shortcut.
+                          The key is a random string kept in ~/.wudict/token,
+                          readable only by you; "wudict token" prints the
+                          link that carries it.
+                          env: AUTH           toml: AUTH
+                          default: auto
+
+  AUTH_TOKEN              The key itself, when it should come from somewhere
+                          other than the key file - a password manager, a
+                          container secret, an app that generated its own.
+                          Overrides the file; never written back to it.
+                          env: AUTH_TOKEN     toml: AUTH_TOKEN
+                          default: the contents of ~/.wudict/token
 
   --allow-remote-delete <0|1>
                           May a browser on ANOTHER machine delete a
@@ -449,6 +489,8 @@ func Main() {
 		err = cmdDump(args)
 	case "lemmas", "lemma":
 		err = cmdLemmas(args)
+	case "token":
+		err = cmdToken(args)
 	case "clean":
 		err = cmdClean(args)
 	case "rm", "remove":
@@ -920,6 +962,8 @@ func cmdServe(args []string) (err error) {
 	// "1" with its own false on every run.
 	remoteDelete := fs.String("allow-remote-delete", "", "may another machine delete a dictionary: 0 (default) or 1 (env/toml: ALLOW_REMOTE_DELETE)")
 	ip := fs.String("ip", "", "listen IP (env/toml: SERVER_IP)")
+	auth := fs.String("auth", "", "require the access key: auto (default), on, off (env/toml: AUTH)")
+	authToken := fs.String("auth-token", "", "the access key itself, instead of ~/.wudict/token (env/toml: AUTH_TOKEN)")
 	port := fs.String("port", "", "listen port (env/toml: SERVER_PORT)")
 	configPath := fs.String("config", "", "path to wudict.toml (env: CONFIG_PATH)")
 	noBrowser := fs.Bool("no-browser", false, "do not open a browser tab (env/toml: NO_BROWSER)")
@@ -936,6 +980,7 @@ func cmdServe(args []string) (err error) {
 		"DICT_DIR": dictDirs.String(), "DB_DIR": *dbDir,
 		"SERVER_IP": *ip, "SERVER_PORT": *port,
 		"SPEEXDEC": *speexdec, "ALLOW_REMOTE_DELETE": *remoteDelete,
+		"AUTH": *auth, "AUTH_TOKEN": *authToken,
 	}
 	if *noBrowser {
 		flagVals["NO_BROWSER"] = "1"
@@ -967,6 +1012,19 @@ func cmdServe(args []string) (err error) {
 	}
 	if cfg.Verbose {
 		logx.Enabled = true
+	}
+
+	// Resolved before anything is served, and a failure here stops the
+	// launch: the alternative - warn, then serve the library to the network
+	// with no key because the token file could not be written - is the exact
+	// outcome the setting exists to prevent.
+	var token string
+	if config.AuthRequired(cfg.Auth, cfg.IP) {
+		if token = cfg.AuthToken; token == "" {
+			if token, err = config.LoadToken(false); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Machine C (D74). A terminal launch keeps today's behaviour byte for
@@ -1044,7 +1102,10 @@ func cmdServe(args []string) (err error) {
 		if inst, ok := probeRunning(cfg.Addr()); ok {
 			announceRunning(inst, url, cfg.DictDirs, !cfg.NoBrowser)
 			if !cfg.NoBrowser {
-				browserCmd(url)
+				// With the key, when this launch has one: the instance
+				// already running was started from the same configuration,
+				// so the key that would have been ours is the key it wants.
+				browserCmd(keyURL(url, token))
 			}
 			return nil
 		}
@@ -1154,6 +1215,8 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	srv.AllowRemoteDelete = cfg.AllowRemoteDelete
 	srv.BrowserExtensions = cfg.BrowserExtensions
 	srv.WebOrigins = cfg.WebOrigins
+	srv.TrustedHosts = cfg.TrustedHosts
+	srv.AuthToken = token
 
 	lib, _ := store.Library()
 	inFolder, fromLib := reg.Counts()
@@ -1161,10 +1224,11 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		roots:    reg.Roots(),
 		inFolder: inFolder, fromLibrary: fromLib, prepared: len(lib),
 		total: reg.Count(), libDir: libDir, url: url,
-		speex: speexSummary(useExternalSpeex, sxPath, sxSource),
+		speex:  speexSummary(useExternalSpeex, sxPath, sxSource),
+		keyURL: keyURL(url, token),
 	})
 	if !cfg.NoBrowser {
-		go openBrowser(url)
+		go openBrowser(keyURL(url, token))
 	}
 
 	// No WriteTimeout: /api/search (NDJSON) and /api/ingest (SSE) stream for
@@ -1413,6 +1477,7 @@ type startupInfo struct {
 	libDir      string
 	url         string
 	speex       string
+	keyURL      string // url carrying the access key, "" when none is required
 }
 
 // statePath places state.json next to the wudict.toml that is in effect. When
@@ -1485,6 +1550,29 @@ func printStartup(cfg config.Config, in startupInfo) {
 		fmt.Fprintf(out, "                %s  (ignored - lower priority)\n", p)
 	}
 	fmt.Fprintf(out, "  address       %s\n", in.url)
+	// A wildcard bind is not "the LAN", and the banner is the only place that
+	// says so. Go turns 0.0.0.0 into a DUAL-STACK [::] listen, so on a mobile
+	// connection - where the IPv6 address is globally routable and has no NAT
+	// in front of it - this is a server on the public internet, with no
+	// password on it. Printed at every start, because the setting is invisible
+	// from inside the app.
+	if ip := net.ParseIP(cfg.IP); ip != nil && ip.IsUnspecified() {
+		fmt.Fprintf(out, "                open to every network this machine is on, including\n")
+		if in.keyURL == "" {
+			fmt.Fprintf(out, "                any public IPv6 address, and it asks for no password\n")
+		} else {
+			fmt.Fprintf(out, "                any public IPv6 address; the access key below is all\n")
+			fmt.Fprintf(out, "                that stands in front of it\n")
+		}
+	}
+	// The link, not the key: a key printed on its own is something the user
+	// has to paste somewhere, and there is nowhere to paste it. Opened once,
+	// the browser holds it in a cookie and the address bar goes back to being
+	// the plain URL.
+	if in.keyURL != "" {
+		fmt.Fprintf(out, "  access key    needed from any browser but the one opened here:\n")
+		fmt.Fprintf(out, "                %s\n", in.keyURL)
+	}
 	// Printed only when set, and always when set: opening the dictionary API
 	// to a web page is the one setting here whose effect is invisible from
 	// inside the app, so the banner is where it becomes visible again.
@@ -1534,6 +1622,21 @@ func (m *multiFlag) String() string { return strings.Join(*m, string(os.PathList
 func (m *multiFlag) Set(v string) error {
 	*m = append(*m, v)
 	return nil
+}
+
+// keyURL appends the access key to the server's own URL, producing the one
+// string a user can act on: a link that works. Empty in, empty out - no key
+// required means there is nothing to show, and a banner line that says
+// "access key: (none)" is an invitation to go looking for one.
+func keyURL(url, token string) string {
+	if token == "" {
+		return ""
+	}
+	sep := "?"
+	if strings.Contains(url, "?") {
+		sep = "&"
+	}
+	return url + sep + "k=" + token
 }
 
 // webOriginsNote renders WEB_ORIGINS for the startup block. A wildcard is
@@ -1973,4 +2076,46 @@ func writeFileAtomic(path string, src io.Reader) (int64, error) {
 func isTerminal(f *os.File) bool {
 	fi, err := f.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// cmdToken prints the access key as a link, and rotates it on request.
+//
+// A link rather than the bare key, for the same reason the startup banner
+// prints one: the key is not something a person can use, and the only thing
+// they can do with it is open it. Printed for the address the server is
+// CONFIGURED to listen on, resolved through the same layering the server
+// itself uses, so the link is the one that will actually reach it.
+func cmdToken(args []string) error {
+	fs := flag.NewFlagSet("token", flag.ExitOnError)
+	rotate := fs.Bool("rotate", false, "replace the key: every browser and script holding the old one loses access")
+	configPath := fs.String("config", "", "path to wudict.toml (env: CONFIG_PATH)")
+	fs.Parse(args)
+	if *configPath == "" {
+		*configPath = os.Getenv("CONFIG_PATH")
+	}
+	cfg, err := config.Load(*configPath, nil)
+	if err != nil {
+		return err
+	}
+	// A key supplied through the environment or the file is not ours to
+	// rotate: the file is where the user put it, and rewriting ~/.wudict/token
+	// would silently do nothing to the value actually in force.
+	if cfg.AuthToken != "" {
+		if *rotate {
+			return fmt.Errorf("AUTH_TOKEN is set (%s), so the key comes from there, not from %s:\n"+
+				"  change it where it is set, or unset it to use the key file", cfg.Source, config.TokenPath())
+		}
+		fmt.Println(keyURL("http://"+cfg.Addr()+"/", cfg.AuthToken))
+		return nil
+	}
+	tok, err := config.LoadToken(*rotate)
+	if err != nil {
+		return err
+	}
+	fmt.Println(keyURL("http://"+cfg.Addr()+"/", tok))
+	if !config.AuthRequired(cfg.Auth, cfg.IP) {
+		fmt.Fprintf(os.Stderr, "note: this server does not ask for the key (AUTH is off, or it listens on %s only).\n"+
+			"      The link still works; set AUTH = \"on\" to require it.\n", cfg.IP)
+	}
+	return nil
 }

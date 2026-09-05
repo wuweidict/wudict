@@ -87,6 +87,10 @@ func writeBGL(t *testing.T, dir string) string {
 	stream = append(stream, info3(0x01, []byte("Test BGL"))...) // title
 	stream = append(stream, info3(0x07, []byte{0, 0, 0, 0})...) // sourceLang English
 	stream = append(stream, info3(0x08, []byte{0, 0, 0, 0})...) // targetLang English
+	// The header's own entry count, which every real file carries and which
+	// arrives before the entries. Counting it AND the entries doubled
+	// EntryCount, so the fixture states it deliberately.
+	stream = append(stream, info3(0x0C, []byte{0, 0, 0, 2})...)
 	stream = append(stream, block(0, []byte{8, 0x42})...)       // default charset cp1252
 	stream = append(stream, stdEntry("apple", "<b>a fruit</b>", "apples")...)
 	stream = append(stream, type11Entry("banana", "<i>yellow</i>")...)
@@ -118,6 +122,9 @@ func TestReaderParsesEntriesAndResources(t *testing.T) {
 
 	if m := r.Meta(); m.Name != "Test BGL" || m.Format != "bgl" {
 		t.Fatalf("meta: %+v", m)
+	}
+	if m := r.Meta(); m.EntryCount != 2 {
+		t.Errorf("EntryCount = %d, want 2 (declared count must not be added to the counted one)", m.EntryCount)
 	}
 	if r.sourceEncoding != "cp1252" || r.targetEncoding != "cp1252" {
 		t.Errorf("encoding: src=%q tgt=%q", r.sourceEncoding, r.targetEncoding)

@@ -19,12 +19,24 @@ func StripHTML(s string) string {
 	b.Grow(len(s) / 2)
 	inTag := false
 	skipUntil := "" // closing tag we are skipping contents to
+	// opening reports that the tag currently being consumed is the one that
+	// STARTED the skip, so that a self-closing "<script/>" - which has no
+	// contents and no "</script>" anywhere after it - does not swallow the
+	// rest of the article. Scoped to that one tag: a "/>" inside script text
+	// must not end the skip.
+	opening := false
 	i := 0
 	for i < len(s) {
 		c := s[i]
 		if inTag {
 			if c == '>' {
 				inTag = false
+				if opening {
+					opening = false
+					if i > 0 && s[i-1] == '/' {
+						skipUntil = ""
+					}
+				}
 			}
 			i++
 			continue
@@ -45,9 +57,9 @@ func StripHTML(s string) string {
 			}
 			lower = strings.ToLower(lower)
 			if strings.HasPrefix(lower, "<script") {
-				skipUntil = "</script"
+				skipUntil, opening = "</script", true
 			} else if strings.HasPrefix(lower, "<style") {
-				skipUntil = "</style"
+				skipUntil, opening = "</style", true
 			}
 			inTag = true
 			b.WriteByte(' ')

@@ -40,7 +40,7 @@ func TestAssetCacheHeaders(t *testing.T) {
 	s := newTestServer(t)
 	get := func(path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
-		s.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		s.ServeHTTP(rec, newRequest("GET", path, nil))
 		return rec
 	}
 	if got := get("/").Header().Get("Cache-Control"); got != "no-cache" {
@@ -67,7 +67,7 @@ func TestIndexRevalidatesWithoutResending(t *testing.T) {
 	s.Version = "1.2.3"
 
 	get := func(inm string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest("GET", "/", nil)
+		req := newRequest("GET", "/", nil)
 		if inm != "" {
 			req.Header.Set("If-None-Match", inm)
 		}

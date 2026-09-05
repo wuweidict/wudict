@@ -84,14 +84,19 @@ func CompanionMedia(src string) []string {
 			}
 		}
 	case ".ifo":
-		// StarDict's media is a FOLDER shared by convention with whatever else
-		// sits in that folder. It is listed, because it is where this
-		// dictionary's resources are; it is not assumed to be exclusive.
-		if d := filepath.Join(dir, "res"); dirExists(d) {
-			out = append(out, d)
-		}
-		if z := filepath.Join(dir, "res.zip"); fileExists(z) {
-			out = append(out, z)
+		// StarDict's media is a FOLDER, not a file named for the dictionary,
+		// and a folder holding several .ifo files shares one res/ between all
+		// of them. The list is consumed by removal (AllSources), so listing a
+		// shared res/ would delete every sibling's images along with this
+		// dictionary. Claim it only when this is the sole dictionary there;
+		// otherwise it is not ours to hand over.
+		if soleIfoInDir(dir) {
+			if d := filepath.Join(dir, "res"); dirExists(d) {
+				out = append(out, d)
+			}
+			if z := filepath.Join(dir, "res.zip"); fileExists(z) {
+				out = append(out, z)
+			}
 		}
 	}
 	return out
@@ -207,6 +212,25 @@ func SourceFiles(src string) []string {
 		add(p)
 	}
 	return out
+}
+
+// soleIfoInDir reports whether dir holds exactly one StarDict .ifo. An
+// unreadable directory answers false: the safe side of this question is the
+// one that leaves the user's files alone.
+func soleIfoInDir(dir string) bool {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	n := 0
+	for _, e := range ents {
+		if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), ".ifo") {
+			if n++; n > 1 {
+				return false
+			}
+		}
+	}
+	return n == 1
 }
 
 func fileExists(p string) bool {

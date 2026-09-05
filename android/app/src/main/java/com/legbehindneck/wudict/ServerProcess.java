@@ -198,6 +198,10 @@ class ServerProcess {
         // server then means a bind failure and a misleading wait, when a
         // perfectly good one is already there, so adopt it instead.
         int port = port(app);
+        // Primed here, before anything can talk to a server: adoptRunningServer
+        // and PowerSignal are static and have no Context of their own, exactly
+        // as with the port above.
+        ShellPrefs.token(app);
         if (adoptRunningServer(port)) {
             Log.i(TAG, "adopted a wudict server already listening on " + port);
             listener.onReady();
@@ -256,6 +260,10 @@ class ServerProcess {
         // that has never opened the Advanced section spawns a byte-for-byte
         // identical child.
         env.putAll(ShellPrefs.env(app));
+        // The access key, on the environment rather than in argv: every
+        // process on the device can read /proc/<pid>/cmdline, and none but
+        // this uid can read /proc/<pid>/environ.
+        env.putAll(ShellPrefs.authEnv(app));
         pb.directory(home);
         pb.redirectErrorStream(true);
         try {
@@ -270,6 +278,14 @@ class ServerProcess {
             listener.onReady();
             cacheEffective(app, port); // after onReady: nothing waits on this
         } else if (process.isAlive()) {
+            // It bound nothing, but it is still running and still holds
+            // whatever it did open. Left alive it outlives this app process -
+            // reparented to init, invisible to stop(), and a later adopt would
+            // take it for a healthy server of the current generation - and it
+            // denies the retry the very port the retry is about to ask for.
+            // A hard kill is safe for the same reason it is in stop():
+            // SQLite commits are transactional.
+            process.destroy();
             listener.onFailed("port " + port + " never opened");
         } else {
             // The child is gone, so its last line of output is the diagnosis -
@@ -338,6 +354,12 @@ class ServerProcess {
                     "http://" + HOST + ":" + port + "/api/config").openConnection();
             c.setConnectTimeout(700);
             c.setReadTimeout(700);
+            // A 401 here means a wudict IS there and holds a different key -
+            // this install's switch was toggled while it ran, or another app
+            // shipped one. Not ours to adopt and not ours to kill: it is
+            // reported as "not us", which leaves the bind failure below to say
+            // the port is taken.
+            ShellPrefs.authorize(c);
             if (c.getResponseCode() != 200) return false;
             StringBuilder body = new StringBuilder();
             try (BufferedReader r = new BufferedReader(
@@ -383,6 +405,7 @@ class ServerProcess {
                     "http://" + HOST + ":" + port + "/api/config").openConnection();
             c.setConnectTimeout(700);
             c.setReadTimeout(700);
+            ShellPrefs.authorize(c);
             if (c.getResponseCode() != 200) return false;
             StringBuilder body = new StringBuilder();
             try (BufferedReader r = new BufferedReader(

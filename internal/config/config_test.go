@@ -516,3 +516,77 @@ func TestFormatSize(t *testing.T) {
 		}
 	}
 }
+
+// An IPv6 literal has to be bracketed in an address. Plain concatenation
+// produced ":::6888" for "::1", which net.Listen rejects, so SERVER_IP=::1
+// could not be bound at all.
+func TestAddrBracketsIPv6(t *testing.T) {
+	cases := []struct{ ip, port, want string }{
+		{"::1", "6888", "[::1]:6888"},
+		{"fe80::1%en0", "80", "[fe80::1%en0]:80"},
+		{"127.0.0.1", "6888", "127.0.0.1:6888"},
+		{"0.0.0.0", "6888", "0.0.0.0:6888"},
+		{"", "6888", ":6888"},
+	}
+	for _, c := range cases {
+		cfg := Config{IP: c.ip, Port: c.port}
+		if got := cfg.Addr(); got != c.want {
+			t.Errorf("Addr(%q, %q) = %q, want %q", c.ip, c.port, got, c.want)
+		}
+	}
+}
+
+// Six boolean keys used to be parsed six different ways, and four of them read
+// "no"/"off" as YES. They all read through isOff now; this asserts every key
+// against every spelling a person actually writes, so a future key added with
+// an inline `v != "0"` fails here rather than in a bug report.
+func TestBooleanKeysAgree(t *testing.T) {
+	keys := map[string]func(Config) bool{
+		"NO_BROWSER":          func(c Config) bool { return c.NoBrowser },
+		"VERBOSE":             func(c Config) bool { return c.Verbose },
+		"USE_CACHED":          func(c Config) bool { return c.UseCached },
+		"ALLOW_REMOTE_DELETE": func(c Config) bool { return c.AllowRemoteDelete },
+		"NO_COMPRESS":         func(c Config) bool { return c.NoCompress },
+		"TRAY":                func(c Config) bool { return c.Tray != nil && *c.Tray },
+	}
+	values := map[string]bool{
+		"0": false, "false": false, "FALSE": false, "off": false,
+		"no": false, "n": false, " no ": false,
+		"1": true, "true": true, "yes": true, "on": true,
+	}
+	for key, read := range keys {
+		for v, want := range values {
+			t.Run(key+"="+v, func(t *testing.T) {
+				isolate(t)
+				t.Setenv(key, v)
+				cfg, err := Load("", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := read(cfg); got != want {
+					t.Errorf("%s=%q gave %v, want %v", key, v, got, want)
+				}
+			})
+		}
+	}
+}
+
+// The unset case is separate because it is a different question: nothing was
+// said, so the built-in default stands. TRAY's default is the tri-state nil
+// ("decide from how the app was launched", D74), not false.
+func TestBooleanKeysUnset(t *testing.T) {
+	isolate(t)
+	for _, k := range []string{"NO_BROWSER", "VERBOSE", "USE_CACHED", "ALLOW_REMOTE_DELETE", "NO_COMPRESS", "TRAY"} {
+		t.Setenv(k, "")
+	}
+	cfg, err := Load("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NoBrowser || cfg.Verbose || cfg.UseCached || cfg.AllowRemoteDelete || cfg.NoCompress {
+		t.Errorf("an unset boolean turned something on: %+v", cfg)
+	}
+	if cfg.Tray != nil {
+		t.Errorf("TRAY unset must stay tri-state nil, got %v", *cfg.Tray)
+	}
+}

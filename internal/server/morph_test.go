@@ -50,7 +50,7 @@ func morphServer(t *testing.T, files map[string]string) *Server {
 func stream(t *testing.T, s *Server, path string) []streamMsg {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+	s.ServeHTTP(rec, newRequest("GET", path, nil))
 	if rec.Code != 200 {
 		t.Fatalf("GET %s: status %d: %s", path, rec.Code, rec.Body.String())
 	}

@@ -1850,7 +1850,17 @@ function runIngest(id,opts,label){
       if(!opts.quiet){await loadDicts();if(lastQuery)doSearch()}
       resolve(true);
     });
-    es.addEventListener("error",()=>{es.close();show("failed");label.classList.add("err");resolve(false)});
+    /* Two unrelated events share the name "error": EventSource's own
+       transport error, which carries no data, and the server's `event: error`
+       (server.go emit("error", …)), which carries {"error":"…"} and is the
+       only thing that can say WHY - a full disk nine minutes into a prepare
+       reads as a bare "failed" otherwise. The chip stays short either way;
+       the reason goes to the status line, which has the room. */
+    es.addEventListener("error",ev=>{es.close();
+      let why="";
+      try{if(ev&&ev.data){const d=JSON.parse(ev.data);if(d&&d.error)why=String(d.error)}}catch(_){}
+      show("failed",why?"failed — "+why:"failed");
+      label.classList.add("err");resolve(false)});
   });
 }
 

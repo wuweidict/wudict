@@ -29,9 +29,32 @@ info:
     cross-origin: `/api/dicts`, `/api/search` and `/res/`. Everything else is
     same-origin, is marked `internal` below, and may change between releases.
 
-    **No authentication**, because there is normally no exposure: the server
-    binds to `127.0.0.1`. Setting `SERVER_IP` to `0.0.0.0` publishes an
-    unauthenticated API to your network. Do that only on a network you trust.
+    **An access key, when the server is reachable.** On the default
+    `127.0.0.1` bind there is nothing to authenticate and no key is asked for.
+    On any other address - and Go's wildcard listen is dual-stack, so `0.0.0.0`
+    includes every globally routable IPv6 address the machine holds - `AUTH`
+    defaults to requiring one on every endpoint EXCEPT the three read-only ones
+    above, which stay open to the extensions already granted them. Send it as
+    `Authorization: Bearer <key>`, or open the link `wudict token` prints once
+    and let the browser keep the cookie it sets. Without it: `401`, with
+    `{"auth":"required"}`. `AUTH=off` serves everything to anyone who can reach
+    the port.
+
+    **Address it by address.** Every request must carry a `Host` of an IP
+    literal or `localhost`; any other name is answered `421 Misdirected
+    Request` unless `TRUSTED_HOSTS` lists it. This is what stops a web page
+    from re-pointing its own domain at your machine (DNS rebinding) and
+    reading the API as same-origin, which no CORS rule can prevent.
+
+    **And from this origin.** A browser states who started a request in
+    `Sec-Fetch-Site`. Anything it marks `cross-site` is answered `403` unless
+    it addresses one of the three read-only endpoints above (or their
+    preflight), or is a top-level navigation to a page rather than to `/api/`.
+    This closes the state-changing GET: `GET /api/rescan` and
+    `GET /api/setup?save=1` are otherwise reachable from an `<img>` tag on any
+    origin, carrying the cookie, and CORS never blocks a request - only the
+    reading of its response. Clients that send no fetch metadata (curl, the
+    Android shell, anything that is not a browser) are unaffected.
   license:
     name: GPL-3.0-or-later
     identifier: GPL-3.0-or-later

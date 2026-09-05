@@ -19,6 +19,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Message;
 import android.util.Log;
+import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
@@ -43,7 +44,26 @@ final class Shell {
     }
 
     static String pageUrl(Context c) {
-        return origin(c) + "/";
+        String k = key(c);
+        return origin(c) + "/" + (k.isEmpty() ? "" : "?" + k);
+    }
+
+    /**
+     * The access key as a query fragment, or "" when this install does not use
+     * one (ShellPrefs.REQUIRE_KEY).
+     *
+     * <p>Carried on the URL rather than installed with CookieManager, which
+     * would be the obvious way and is the fragile one: setCookie's write is
+     * not ordered against a loadUrl issued in the next statement, so the first
+     * page of a cold start would race it. The server takes the key off the
+     * URL, sets the cookie itself and redirects to the address without it -
+     * one loopback round trip, no timing to reason about, and the key never
+     * stays in the page's own location. Every subsequent request in that
+     * WebView - articles, media, the search stream - rides the cookie.
+     */
+    private static String key(Context c) {
+        String t = ShellPrefs.token(c);
+        return t.isEmpty() ? "" : "k=" + t;
     }
 
     private Shell() {
@@ -58,9 +78,11 @@ final class Shell {
      * another app, a URI from an intent - can carry anything at all.
      */
     static String searchUrl(Context c, String q, String mode, String dict) {
-        StringBuilder b = new StringBuilder(pageUrl(c)).append("?q=").append(enc(q));
+        StringBuilder b = new StringBuilder(origin(c)).append("/?q=").append(enc(q));
         if (mode != null && !mode.isEmpty()) b.append("&mode=").append(enc(mode));
         if (dict != null && !dict.isEmpty()) b.append("&dict=").append(enc(dict));
+        String k = key(c);
+        if (!k.isEmpty()) b.append("&").append(k);
         return b.toString();
     }
 
@@ -76,6 +98,11 @@ final class Shell {
 
     /** The settings the SPA needs. Identical in every window, by construction. */
     static void configure(WebView web) {
+        // The access key arrives as a cookie the server sets (see key()), so a
+        // WebView that refuses cookies would authenticate once and then fail
+        // every request the page makes. It is the platform default; stated
+        // here because it is now load-bearing.
+        CookieManager.getInstance().setAcceptCookie(true);
         web.getSettings().setJavaScriptEnabled(true);                 // the UI is one SPA
         web.getSettings().setDomStorageEnabled(true);                 // prefs live in localStorage
         web.getSettings().setMediaPlaybackRequiresUserGesture(false); // dictionary audio

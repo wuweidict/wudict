@@ -105,7 +105,7 @@ func TestCORSRoutes(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req := newRequest(tc.method, tc.path, nil)
 			if tc.origin != "" {
 				req.Header.Set("Origin", tc.origin)
 			}
@@ -134,7 +134,7 @@ func TestCORSAlwaysVaries(t *testing.T) {
 	s := newTestServer(t)
 	for _, origin := range []string{chromeOrigin, "https://evil.example", ""} {
 		for _, path := range []string{"/api/dicts", "/api/search?q=casa&mode=exact", "/res/nope/x.png"} {
-			req := httptest.NewRequest("GET", path, nil)
+			req := newRequest("GET", path, nil)
 			if origin != "" {
 				req.Header.Set("Origin", origin)
 			}
@@ -150,7 +150,7 @@ func TestCORSAlwaysVaries(t *testing.T) {
 
 func TestCORSPreflight(t *testing.T) {
 	s := newTestServer(t)
-	req := httptest.NewRequest("OPTIONS", "/api/search", nil)
+	req := newRequest("OPTIONS", "/api/search", nil)
 	req.Header.Set("Origin", chromeOrigin)
 	req.Header.Set("Access-Control-Request-Method", "GET")
 	rec := httptest.NewRecorder()
@@ -169,7 +169,7 @@ func TestCORSPreflight(t *testing.T) {
 	}
 
 	// A denied origin still gets a 204, and still no grant.
-	req = httptest.NewRequest("OPTIONS", "/api/search", nil)
+	req = newRequest("OPTIONS", "/api/search", nil)
 	req.Header.Set("Origin", "https://evil.example")
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
@@ -189,7 +189,7 @@ func TestCORSPinnedServer(t *testing.T) {
 	s := newTestServer(t)
 	s.BrowserExtensions = []string{fxOrigin}
 	for origin, want := range map[string]string{fxOrigin: fxOrigin, chromeOrigin: ""} {
-		req := httptest.NewRequest("GET", "/api/dicts", nil)
+		req := newRequest("GET", "/api/dicts", nil)
 		req.Header.Set("Origin", origin)
 		rec := httptest.NewRecorder()
 		s.ServeHTTP(rec, req)
@@ -319,7 +319,7 @@ func TestWebOriginsRoutes(t *testing.T) {
 	s.WebOrigins = []string{"*"}
 	const origin = "https://notes.example.com"
 	for _, path := range []string{"/api/dicts", "/api/search?q=casa&mode=exact", "/res/nope/x.png"} {
-		req := httptest.NewRequest("GET", path, nil)
+		req := newRequest("GET", path, nil)
 		req.Header.Set("Origin", origin)
 		rec := httptest.NewRecorder()
 		s.ServeHTTP(rec, req)
@@ -328,7 +328,7 @@ func TestWebOriginsRoutes(t *testing.T) {
 		}
 	}
 	for _, path := range []string{"/api/prefs", "/api/config", "/api/library", "/api/rescan", "/"} {
-		req := httptest.NewRequest("GET", path, nil)
+		req := newRequest("GET", path, nil)
 		req.Header.Set("Origin", origin)
 		rec := httptest.NewRecorder()
 		s.ServeHTTP(rec, req)
@@ -344,7 +344,7 @@ func TestWebOriginsRoutes(t *testing.T) {
 func TestPreflightPrivateNetwork(t *testing.T) {
 	s := newTestServer(t)
 	s.WebOrigins = []string{"https://notes.example.com"}
-	req := httptest.NewRequest("OPTIONS", "/api/search", nil)
+	req := newRequest("OPTIONS", "/api/search", nil)
 	req.Header.Set("Origin", "https://notes.example.com")
 	req.Header.Set("Access-Control-Request-Method", "GET")
 	req.Header.Set("Access-Control-Request-Private-Network", "true")
@@ -355,7 +355,7 @@ func TestPreflightPrivateNetwork(t *testing.T) {
 	}
 
 	// Not offered to an origin that was refused…
-	req = httptest.NewRequest("OPTIONS", "/api/search", nil)
+	req = newRequest("OPTIONS", "/api/search", nil)
 	req.Header.Set("Origin", "https://evil.example")
 	req.Header.Set("Access-Control-Request-Private-Network", "true")
 	rec = httptest.NewRecorder()
@@ -365,7 +365,7 @@ func TestPreflightPrivateNetwork(t *testing.T) {
 	}
 
 	// …nor volunteered to one that did not ask.
-	req = httptest.NewRequest("OPTIONS", "/api/search", nil)
+	req = newRequest("OPTIONS", "/api/search", nil)
 	req.Header.Set("Origin", "https://notes.example.com")
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, req)

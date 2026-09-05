@@ -485,7 +485,16 @@ func TestStripHTML(t *testing.T) {
 		`<style>.a{color:red}</style>word`:           "word",
 		`a &amp; b &lt;c&gt;`:                        "a & b <c>",
 		`<div class="k1 k2" style="x:y">inner</div>`: "inner",
-		``: "",
+		// A self-closing script has no contents and no closing tag: the skip
+		// it opens has to end with the tag itself, or everything after it in
+		// the article is silently missing from the full-text index.
+		`<script src="x.js"/>after`:         "after",
+		`<style/>after`:                     "after",
+		`<script/>a<script>bad()</script>b`: "a b",
+		// ...but a "/>" INSIDE script contents is script text, not the end of
+		// the skip.
+		`<script>f(a<b/>c)</script>tail`: "tail",
+		``:                               "",
 	}
 	for in, want := range cases {
 		if got := StripHTML(in); got != want {
@@ -1262,5 +1271,64 @@ func TestIngestProgressCoversRedirects(t *testing.T) {
 	}
 	if last != total {
 		t.Errorf("final progress = %d, want %d", last, total)
+	}
+}
+
+// Exact is the hottest query in the app: it runs on every lookup, including
+// every miss. The `entry` table stores article bodies inline, so a scan of it
+// reads the whole dictionary; the only indexes on these columns are NOCASE
+// (ingest.go), which a case-SENSITIVE comparison cannot use. This asserts the
+// plan, not the rows - the rows are covered by the tests above and would stay
+// green through the regression this guards.
+func TestExactUsesTheHeadwordIndexes(t *testing.T) {
+	s := testStore(t)
+	const q = `
+		SELECT e.w, e.m FROM entry e WHERE e.w = ?1 COLLATE NOCASE AND e.w = ?1
+		UNION ALL
+		SELECT e.w, e.m FROM alias a JOIN entry e ON e.id = a.entry_id WHERE a.w = ?1 COLLATE NOCASE AND a.w = ?1
+		LIMIT ?2`
+	rows, err := s.db.Query("EXPLAIN QUERY PLAN "+q, "corazón", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan.WriteString(detail)
+		plan.WriteByte('\n')
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	got := plan.String()
+	// The entry side is the one that matters and the one this asserts: its
+	// rows carry the article bodies, so scanning it reads the dictionary. The
+	// alias side is (w, entry_id) and this fixture holds two rows of it, which
+	// ANALYZE (ingest.go) correctly tells the planner to scan - asserting an
+	// index there would be asserting the fixture's size, not the query.
+	if !strings.Contains(got, "idx_entry_w") {
+		t.Errorf("Exact does not use idx_entry_w; plan:\n%s", got)
+	}
+	if strings.Contains(got, "SCAN e\n") || strings.Contains(got, "SCAN entry") {
+		t.Errorf("Exact full-scans entry; plan:\n%s", got)
+	}
+}
+
+// The case-sensitive pass must still be case-SENSITIVE after being rewritten
+// to reach the NOCASE index: the index only narrows, the second comparison
+// decides.
+func TestExactStillPrefersTheExactCase(t *testing.T) {
+	s := testStore(t)
+	res, err := s.Exact("Corazón", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Headword != "corazón" {
+		t.Fatalf("case-folded lookup = %+v, want the one lowercase entry", res)
 	}
 }

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+
+<!-- Cleartext HTTP is permitted to loopback and nowhere else.
+
+     This replaces android:usesCleartextTraffic="true", which was a blanket
+     grant: it let the WebView load http:// from anywhere, so a dictionary
+     whose articles reference an external resource would fetch it in the clear,
+     over whatever network the phone is on. The server this app actually talks
+     to is on 127.0.0.1 (ServerProcess.HOST), which is the only exemption
+     needed, and Play's automated review reads a blanket grant as a finding in
+     its own right.
+
+     What this does NOT do, and must not be mistaken for: it governs OUTBOUND
+     connections made by this app's own network stack. It does not reach the
+     exec'd Go server (a separate process, with its own sockets), and it has no
+     effect on what may CONNECT TO that server. The listen address is the only
+     thing that decides that - see Net (D62).
+
+     127.0.0.1 and "localhost" only. "::1" is deliberately absent: nothing in
+     this shell connects to it (every URL is built from ShellPrefs.DEFAULT_IP),
+     and an entry the platform's parser might reject is a crash on first
+     request bought for symmetry. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

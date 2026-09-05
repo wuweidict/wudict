@@ -251,14 +251,6 @@ func (mdict *Mdict) LocateAt(off, size int64) ([]byte, error) {
 	return mdict.LocateByKeywordEntry(entry)
 }
 
-func (mdict *Mdict) LocateByKeywordIndex(index *MDictKeywordIndex) ([]byte, error) {
-	if index == nil {
-		return nil, errors.New("invalid mdict keyword index")
-	}
-	return mdict.MdictBase.locateByKeywordIndex(index)
-
-}
-
 func (mdict *Mdict) GetKeyWordEntries() ([]*MDictKeywordEntry, error) {
 	return mdict.getKeyWordEntries()
 }
@@ -278,8 +270,4 @@ func (mdict *Mdict) EntryCount() int64 {
 		return int64(len(mdict.keyBlockData.keyEntries))
 	}
 	return 0
-}
-
-func (mdict *Mdict) KeywordEntryToIndex(item *MDictKeywordEntry) (*MDictKeywordIndex, error) {
-	return mdict.MdictBase.keywordEntryToIndex(item)
 }

@@ -56,7 +56,10 @@ import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.util.Base64;
 
+import java.net.HttpURLConnection;
+import java.security.SecureRandom;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -72,6 +75,27 @@ final class ShellPrefs {
     static final String SHARE = "lookup_share_in_app";
     static final String LINK = "lookup_link_in_app";
 
+    // ── the access key ───────────────────────────────────────────────────────
+    //
+    // Android has no per-app loopback: 127.0.0.1:6888 is reachable by every
+    // other app on the device that holds INTERNET, which is nearly all of
+    // them. Nothing about the server's own defaults can fix that - it is a
+    // property of the platform's network stack - so the shell generates a
+    // secret and gives it only to its own WebView. That is why this defaults
+    // to ON here and to OFF on the desktop, where a loopback socket really is
+    // private to the account that owns it.
+    //
+    // The switch is a shell fact rather than a platform override (D101): both
+    // its states have to be emitted. An override's off-state emits NOTHING, so
+    // that wudict.toml keeps the last word - but here "nothing" would let AUTH
+    // default to "auto", and on a FOSS build serving the LAN, auto means ON.
+    // A user who turned the key off would be given one anyway. So AUTH joins
+    // SERVER_IP and SERVER_PORT in the small set of keys the shell owns
+    // outright and always emits, and the D101 rule stands for every key a user
+    // might reasonably write in the file themselves.
+    static final String REQUIRE_KEY = "require_access_key";
+    private static final String KEY_TOKEN = "access_key";
+
     private ShellPrefs() {
     }
 
@@ -86,6 +110,69 @@ final class ShellPrefs {
 
     static void set(Context c, String key, boolean on) {
         of(c).edit().putBoolean(key, on).apply();
+    }
+
+    /** Whether this install asks its server for an access key. Default: yes. */
+    static boolean requireKey(Context c) {
+        return of(c).getBoolean(REQUIRE_KEY, true);
+    }
+
+    // tokenCache exists for the same reason portCache does (ServerProcess):
+    // PowerSignal is all statics and has no Context to ask. Primed by
+    // token(Context), which every path that starts or adopts a server calls
+    // first, so a request made without one is a request to a server this app
+    // never asked for.
+    private static volatile String tokenCache = "";
+
+    /**
+     * This install's access key, generated on first use and kept in the app's
+     * private preferences - which is exactly the boundary the key is meant to
+     * draw, since no other app can read them. Empty when the key is off.
+     */
+    static String token(Context c) {
+        if (!requireKey(c)) {
+            tokenCache = "";
+            return "";
+        }
+        SharedPreferences p = of(c);
+        String t = p.getString(KEY_TOKEN, null);
+        if (t == null || t.isEmpty()) {
+            byte[] b = new byte[32];
+            new SecureRandom().nextBytes(b);
+            // URL_SAFE | NO_PADDING: it travels as a query parameter, a cookie
+            // value and an environment variable, and must survive all three
+            // without escaping. NO_WRAP because Base64 otherwise emits a
+            // newline every 76 characters.
+            t = Base64.encodeToString(b, Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
+            p.edit().putString(KEY_TOKEN, t).apply();
+        }
+        tokenCache = t;
+        return t;
+    }
+
+    /** The last key {@link #token(Context)} resolved. For callers with no Context. */
+    static String token() {
+        return tokenCache;
+    }
+
+    /** Adds the key to a request this shell makes to its own server. */
+    static void authorize(HttpURLConnection c) {
+        String t = token();
+        if (!t.isEmpty()) c.setRequestProperty("Authorization", "Bearer " + t);
+    }
+
+    /**
+     * AUTH and AUTH_TOKEN for a spawn. Always both, never neither: see
+     * REQUIRE_KEY. Kept out of {@link #env} because the key is not an
+     * override - it has no settings row of that shape, no inherited value to
+     * display, and must never appear in the effective-values cache.
+     */
+    static Map<String, String> authEnv(Context c) {
+        Map<String, String> out = new LinkedHashMap<>();
+        String t = token(c);
+        out.put("AUTH", t.isEmpty() ? "off" : "on");
+        if (!t.isEmpty()) out.put("AUTH_TOKEN", t);
+        return out;
     }
 
     /**
@@ -129,7 +216,9 @@ final class ShellPrefs {
         final int min, max;    // COUNT/MEGABYTES, inclusive; negative = ask the device
         final int label, hint;
 
-        private Override(String key, String flag, int kind, String onValue, String offValue,
+        // Package-private, not private: the per-flavour Net (D62) builds the
+        // listen-address rows, and only the flavour that HAS one compiles it.
+        Override(String key, String flag, int kind, String onValue, String offValue,
                          int min, int max, int label, int hint) {
             this.key = key;
             this.flag = flag;
@@ -165,20 +254,33 @@ final class ShellPrefs {
     // environment, which also means no override here can leave the app unable
     // to find its own server. Everything else goes through the environment,
     // where it is ranked above wudict.toml and reported as origin "env".
-    static final Override[] OVERRIDES = {
-            new Override("NO_COMPRESS", null, BOOL, "1", "0", 0, 0,
-                    R.string.settings_no_compress, R.string.settings_no_compress_hint),
-            new Override("SEARCH_MEMORY", null, MEGABYTES, null, null, 0, MAX_RAM_MB,
-                    R.string.settings_search_memory, R.string.settings_search_memory_hint),
-            new Override("PREVIEW_MEMORY", null, MEGABYTES, null, null, 0, MAX_RAM_MB,
-                    R.string.settings_preview_memory, R.string.settings_preview_memory_hint),
-            new Override("INDEX_WORKERS", null, COUNT, null, null, 1, MAX_CORES,
-                    R.string.settings_index_workers, R.string.settings_index_workers_hint),
-            new Override("SERVER_IP", "--ip", BOOL, "0.0.0.0", DEFAULT_IP, 0, 0,
-                    R.string.settings_server_ip, R.string.settings_server_ip_hint),
-            new Override("SERVER_PORT", "--port", COUNT, null, null, MIN_PORT, MAX_PORT,
-                    R.string.settings_server_port, R.string.settings_server_port_hint),
-    };
+    // Assembled rather than written out, because ONE row is flavour-specific:
+    // the listen address exists in the FOSS build and does not exist in the
+    // Play build (Net, D62). Order is the screen's order, and the Net rows
+    // keep the position SERVER_IP has always had - above the port.
+    static final Override[] OVERRIDES = table();
+
+    private static Override[] table() {
+        Override[] head = {
+                new Override("NO_COMPRESS", null, BOOL, "1", "0", 0, 0,
+                        R.string.settings_no_compress, R.string.settings_no_compress_hint),
+                new Override("SEARCH_MEMORY", null, MEGABYTES, null, null, 0, MAX_RAM_MB,
+                        R.string.settings_search_memory, R.string.settings_search_memory_hint),
+                new Override("PREVIEW_MEMORY", null, MEGABYTES, null, null, 0, MAX_RAM_MB,
+                        R.string.settings_preview_memory, R.string.settings_preview_memory_hint),
+                new Override("INDEX_WORKERS", null, COUNT, null, null, 1, MAX_CORES,
+                        R.string.settings_index_workers, R.string.settings_index_workers_hint),
+        };
+        Override[] net = Net.overrides();
+        Override port = new Override("SERVER_PORT", "--port", COUNT, null, null, MIN_PORT, MAX_PORT,
+                R.string.settings_server_port, R.string.settings_server_port_hint);
+
+        Override[] out = new Override[head.length + net.length + 1];
+        System.arraycopy(head, 0, out, 0, head.length);
+        System.arraycopy(net, 0, out, head.length, net.length);
+        out[out.length - 1] = port;
+        return out;
+    }
 
     /** The stored override, or null when the key is left to the config. */
     static String override(Context c, Override o) {
@@ -216,9 +318,14 @@ final class ShellPrefs {
      * flag keys always have an answer, because the shell always passes them.
      */
     static String emitted(Context c, Override o) {
+        // SERVER_IP is resolved, not echoed: what the switch stores is a
+        // marker, what the child is passed is an address the device holds
+        // right now (Net.bindIp). The settings screen compares this against
+        // what the RUNNING server reports, so resolving here is also what
+        // makes a roam show up as "restart to apply" instead of as silence.
+        if ("SERVER_IP".equals(o.key)) return bindIp(c);
         String v = override(c, o);
         if (v == null) {
-            if ("SERVER_IP".equals(o.key)) return DEFAULT_IP;
             if ("SERVER_PORT".equals(o.key)) return String.valueOf(DEFAULT_PORT);
             return null;
         }
@@ -244,10 +351,13 @@ final class ShellPrefs {
         throw new IllegalArgumentException(key);
     }
 
-    /** The bind address for --ip. Never used to connect - see DEFAULT_IP. */
+    /**
+     * The bind address for --ip. Never used to connect - see DEFAULT_IP. The
+     * answer is the flavour's (Net): the Play build has no listen-address row
+     * at all, so there is no key here to look up.
+     */
     static String bindIp(Context c) {
-        String v = override(c, byKey("SERVER_IP"));
-        return v == null ? DEFAULT_IP : v;
+        return Net.bindIp(c);
     }
 
     /** The port the server listens on and every URL in this shell connects to. */

@@ -314,7 +314,20 @@ func TestOldNamespaces(t *testing.T) {
 	}
 	// The image namespace is only reachable on old-scheme files.
 	if _, _, err := d.Resource("p.png"); err != nil {
-		t.Errorf("Resource(I/p.png): %v", err)
+		t.Errorf("Resource(p.png): %v", err)
+	}
+	// And this is the spelling the article above actually carries, so it is
+	// the one the server asks for: the namespace segment survives the
+	// relative trim, while the dirent stores the path without it.
+	for _, name := range []string{"I/p.png", "../I/p.png", "./I/p.png"} {
+		if _, _, err := d.Resource(name); err != nil {
+			t.Errorf("Resource(%q): %v", name, err)
+		}
+	}
+	// A prefix that names no namespace we search is part of the path, not a
+	// namespace, and must not be eaten.
+	if _, _, err := d.Resource("Z/p.png"); err == nil {
+		t.Errorf("Resource(Z/p.png) resolved")
 	}
 	if list := d.Resources(); strings.Join(list, "|") != "p.png" {
 		t.Errorf("Resources = %v", list)

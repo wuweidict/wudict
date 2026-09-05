@@ -242,6 +242,15 @@ func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
 	nss := []byte{d.c.contentNS()}
 	if !d.c.newNamespaces() {
 		nss = append(nss, 'I', '-', 'J')
+		// A pre-6.1 article points at its picture as "../I/pic.png", and that
+		// spelling is what reaches us: the namespace is a segment of the
+		// reference but NOT part of the stored path, so searching for
+		// "I/pic.png" finds nothing and every image in every old ZIM 404s.
+		// A leading single-letter segment naming a namespace we would search
+		// anyway is that prefix, and it says which namespace to search.
+		if len(name) > 2 && name[1] == '/' && bytes.IndexByte(nss, name[0]) >= 0 {
+			nss, name = []byte{name[0]}, name[2:]
+		}
 	}
 	for _, ns := range nss {
 		i, de, ok := d.c.find(ns, name)

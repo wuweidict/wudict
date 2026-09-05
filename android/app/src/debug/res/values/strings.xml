@@ -2,5 +2,5 @@
 <!-- Copyright (C) 2026 glowinthedark -->
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <resources>
-    <string name="app_name">WuDictDebug</string>
+    <string name="app_name">wuDictDebug</string>
 </resources>

@@ -10,7 +10,10 @@
 #      never-prompted ones it is entitled to, and NO storage permission (that
 #      is the whole point); the FOSS APK still declares All-files access (the
 #      split did not leak);
-#   2. both still ship libwudict.so with extractNativeLibs=true, because the
+#   2. the Play APK carries no listen-address control at all: the string the
+#      switch needs lives in src/foss/res, so its absence here is proof the
+#      flavour split (Net, D62) held and the switch cannot be drawn;
+#   3. both still ship libwudict.so with extractNativeLibs=true, because the
 #      server is EXEC'd from nativeLibraryDir and a compressed lib is not a
 #      file (D52) — a packaging change is exactly what would break this
 #      silently.
@@ -67,6 +70,15 @@ if [ -n "$PLAY" ]; then
             fail "$apk declares permissions outside the allowed set: $extra"
         fi
         echo "ok: $apk declares only the allowed permissions"
+        # The LAN switch is FOSS-only. Its label is a foss-flavour resource,
+        # so a Play APK that contains the name has had the control put back -
+        # by a string moved into src/main, or by a Net.java that grew a row.
+        # Asserted on the resource table rather than on the source tree,
+        # because the source tree is not what gets uploaded.
+        if "$AAPT2" dump resources "$apk" | grep -q 'settings_server_ip'; then
+            fail "$apk carries the LAN switch resources: the flavour split leaked"
+        fi
+        echo "ok: $apk has no listen-address control"
     done
 else
     echo "skip: no play APK built (make apk-play)"
@@ -77,7 +89,14 @@ if [ -n "$FOSS" ]; then
         if ! "$AAPT2" dump permissions "$apk" | grep -q 'MANAGE_EXTERNAL_STORAGE'; then
             fail "$apk LOST MANAGE_EXTERNAL_STORAGE"
         fi
-        echo "ok: $apk keeps All-files access"
+        # The mirror of the Play assertion above: the switch must still BE
+        # here. A row lost by an edit to the wrong flavour's Net.java takes
+        # nothing with it - the build succeeds, the setting simply stops
+        # existing - so absence has to be an error, not a silence.
+        if ! "$AAPT2" dump resources "$apk" | grep -q 'settings_server_ip'; then
+            fail "$apk LOST the listen-address control"
+        fi
+        echo "ok: $apk keeps All-files access and the LAN switch"
     done
 else
     echo "skip: no foss APK built (make apk)"
@@ -102,4 +121,12 @@ for apk in $FOSS $PLAY; do
         | grep -q 'android.intent.action.PROCESS_TEXT' \
         || fail "$apk declares no PROCESS_TEXT filter: no selection lookup"
     echo "ok: $apk offers selection lookup"
+
+    # Cleartext HTTP is scoped to loopback by a network security config
+    # (src/main/res/xml). Reverting to android:usesCleartextTraffic="true"
+    # builds and runs identically on the device, so nothing but this notices.
+    "$AAPT2" dump xmltree --file AndroidManifest.xml "$apk" \
+        | grep -q 'networkSecurityConfig' \
+        || fail "$apk declares no networkSecurityConfig: cleartext is open to every host"
+    echo "ok: $apk scopes cleartext to loopback"
 done

@@ -66,11 +66,6 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.net.Inet4Address;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -128,6 +123,10 @@ public class SettingsActivity extends Activity {
         col.addView(row(ShellPrefs.TOOLBAR, R.string.settings_lookup_toolbar));
         col.addView(row(ShellPrefs.SHARE, R.string.settings_lookup_share));
         col.addView(row(ShellPrefs.LINK, R.string.settings_lookup_link));
+
+        col.addView(head(R.string.settings_access_head, SP_6));
+        col.addView(keyRow());
+        col.addView(caption(getString(R.string.settings_access_key_hint), SP_2, SP_3));
 
         col.addView(head(R.string.settings_advanced_head, SP_6));
         col.addView(caption(getString(R.string.settings_advanced_hint), SP_2, SP_3));
@@ -205,6 +204,24 @@ public class SettingsActivity extends Activity {
         // as the user having chosen anything.
         c.setChecked(ShellPrefs.opensApp(this, key));
         c.setOnCheckedChangeListener((v, on) -> ShellPrefs.set(this, key, on));
+        return c;
+    }
+
+    /**
+     * The access key switch. Not a {@link ShellPrefs.Override} row: it has no
+     * inherited value to display and no server-reported effective value to
+     * compare against, and its off-state is emitted rather than withheld
+     * (ShellPrefs.REQUIRE_KEY). On by default, which is why it cannot reuse
+     * {@link #row}.
+     */
+    private CheckBox keyRow() {
+        CheckBox c = new CheckBox(this);
+        c.setText(R.string.settings_access_key);
+        c.setTextSize(TypedValue.COMPLEX_UNIT_SP, TEXT_LABEL);
+        c.setMinHeight(dp(ROW_MIN));
+        c.setChecked(ShellPrefs.requireKey(this));
+        c.setOnCheckedChangeListener((v, on) ->
+                ShellPrefs.set(this, ShellPrefs.REQUIRE_KEY, on));
         return c;
     }
 
@@ -349,34 +366,11 @@ public class SettingsActivity extends Activity {
         // it is on, say where this phone would be reached. Only while it is on
         // - an address printed under an unticked switch reads as an offer.
         if (boxes[i] != null && boxes[i].isChecked() && o.flag != null) {
-            String ip = lanAddress();
+            String ip = Net.lanAddress();
             b.append(' ').append(ip == null ? getString(R.string.settings_lan_none)
                     : getString(R.string.settings_lan_at, ip + ":" + ServerProcess.port(this)));
         }
         hints[i].setText(b.toString());
-    }
-
-    /**
-     * The address another device on this network would use, or null when there
-     * is no such network. {@link NetworkInterface} and not
-     * {@code ConnectivityManager}: the latter needs ACCESS_NETWORK_STATE, and
-     * this is a label, not a reason to hold a permission. Reads the kernel's
-     * own interface list - no network I/O, so no thread of its own.
-     */
-    private static String lanAddress() {
-        try {
-            for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                if (ni.isLoopback() || !ni.isUp()) continue;
-                for (InetAddress a : Collections.list(ni.getInetAddresses())) {
-                    if (a instanceof Inet4Address && a.isSiteLocalAddress()) {
-                        return a.getHostAddress();
-                    }
-                }
-            }
-        } catch (SocketException | RuntimeException e) {
-            // no interface list to read; the same answer as no network
-        }
-        return null;
     }
 
     /** Stores a field's value, or puts the field back if it cannot be stored. */

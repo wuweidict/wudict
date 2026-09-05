@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -147,7 +148,7 @@ func newTestServer(t *testing.T) *Server {
 
 func getJSON(t *testing.T, s *Server, path string, into any) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest("GET", path, nil)
+	req := newRequest("GET", path, nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if into != nil {
@@ -164,7 +165,7 @@ func getJSON(t *testing.T, s *Server, path string, into any) *httptest.ResponseR
 func getDicts(t *testing.T, s *Server, path string) []dictInfo {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+	s.ServeHTTP(rec, newRequest("GET", path, nil))
 	if rec.Code != 200 {
 		t.Fatalf("GET %s: status %d: %s", path, rec.Code, rec.Body.String())
 	}
@@ -209,7 +210,7 @@ func getDicts(t *testing.T, s *Server, path string) []dictInfo {
 func sse(t *testing.T, s *Server, path string) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+	s.ServeHTTP(rec, newRequest("GET", path, nil))
 	if rec.Code != 200 {
 		t.Fatalf("%s: status %d", path, rec.Code)
 	}
@@ -220,7 +221,7 @@ func sse(t *testing.T, s *Server, path string) {
 
 func searchStream(t *testing.T, s *Server, path string) []streamMsg {
 	t.Helper()
-	req := httptest.NewRequest("GET", path, nil)
+	req := newRequest("GET", path, nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	var out []streamMsg
@@ -249,7 +250,7 @@ func searchStream(t *testing.T, s *Server, path string) []streamMsg {
 func TestDictsStreamShape(t *testing.T) {
 	s := newTestServer(t)
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/api/dicts", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/api/dicts", nil))
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/x-ndjson") {
 		t.Fatalf("content-type = %q, want application/x-ndjson", ct)
 	}
@@ -455,7 +456,7 @@ func TestResourceAndIndex(t *testing.T) {
 	id := dicts[0].ID
 
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/beat.mp3", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/res/"+id+"/beat.mp3", nil))
 	if rec.Code != 200 || rec.Body.String() != "MP3DATA" {
 		t.Fatalf("res: %d %q", rec.Code, rec.Body.String())
 	}
@@ -463,13 +464,13 @@ func TestResourceAndIndex(t *testing.T) {
 		t.Errorf("mime: %q", ct)
 	}
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/nope.png", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/res/"+id+"/nope.png", nil))
 	if rec.Code != 404 {
 		t.Errorf("missing res: %d", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/", nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "wudict") {
 		t.Errorf("index: %d", rec.Code)
 	}
@@ -481,7 +482,7 @@ func TestIngestSSEAndMedia(t *testing.T) {
 	id := dicts[0].ID
 
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/api/ingest?dict="+id+"&full=1", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/api/ingest?dict="+id+"&full=1", nil))
 	if ct := rec.Header().Get("Content-Type"); ct != "text/event-stream" {
 		t.Fatalf("not SSE: %q body=%s", ct, rec.Body.String())
 	}
@@ -526,7 +527,7 @@ func TestSetupFlow(t *testing.T) {
 
 	// missing folder → setup page, not the app
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/", nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Point wuDict at your dictionaries") {
 		t.Fatalf("expected setup page, got %d", rec.Code)
 	}
@@ -566,7 +567,7 @@ func TestSetupFlow(t *testing.T) {
 	}
 	// "/" now serves the app
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/", nil))
 	if !strings.Contains(rec.Body.String(), "design tokens") {
 		t.Errorf("app page not served after setup")
 	}
@@ -680,7 +681,7 @@ func TestSetupConsentFlow(t *testing.T) {
 	s.ConfigPath = cfgPath
 
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/", nil))
 	if !strings.Contains(rec.Body.String(), "Point wuDict at your dictionaries") {
 		t.Fatal("prepared dictionaries must not suppress the setup page")
 	}
@@ -713,7 +714,7 @@ func TestSetupConsentFlow(t *testing.T) {
 	}
 	// and the app page is served now that dictionaries are in use
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/", nil))
 	if strings.Contains(rec.Body.String(), "Point wuDict at your dictionaries") {
 		t.Error("setup page still shown after dictionaries were enrolled")
 	}
@@ -882,7 +883,7 @@ func TestDamagedTextResourceIsReportedButServedVerbatim(t *testing.T) {
 	id := getDicts(t, s, "/api/dicts")[0].ID
 
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/broken.js", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/res/"+id+"/broken.js", nil))
 	if rec.Code != 200 {
 		t.Fatalf("broken.js: %d", rec.Code)
 	}
@@ -897,19 +898,19 @@ func TestDamagedTextResourceIsReportedButServedVerbatim(t *testing.T) {
 	// every article referencing it would otherwise repeat the warning.
 	before := 0
 	s.nulSeen.Range(func(any, any) bool { before++; return true })
-	s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/res/"+id+"/broken.js", nil))
+	s.ServeHTTP(httptest.NewRecorder(), newRequest("GET", "/res/"+id+"/broken.js", nil))
 	after := 0
 	s.nulSeen.Range(func(any, any) bool { after++; return true })
 	if before != after {
 		t.Errorf("re-reported the same damaged resource: %d -> %d", before, after)
 	}
 
-	s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/res/"+id+"/clean.js", nil))
+	s.ServeHTTP(httptest.NewRecorder(), newRequest("GET", "/res/"+id+"/clean.js", nil))
 	if _, ok := s.nulSeen.Load(id + "\x00" + "clean.js"); ok {
 		t.Error("a clean .js must not be reported")
 	}
 	// A NUL is ordinary in a binary: only source-text formats are evidence.
-	s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/res/"+id+"/blob.bin", nil))
+	s.ServeHTTP(httptest.NewRecorder(), newRequest("GET", "/res/"+id+"/blob.bin", nil))
 	if _, ok := s.nulSeen.Load(id + "\x00" + "blob.bin"); ok {
 		t.Error("a NUL in a binary resource is not damage")
 	}
@@ -928,7 +929,7 @@ func TestResourceOverrideFromLibraryFolder(t *testing.T) {
 
 	// no library folder yet: the bundled blob is all there is
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/beat.mp3", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/res/"+id+"/beat.mp3", nil))
 	if rec.Body.String() != "BUNDLED" {
 		t.Fatalf("before preparing: %q", rec.Body.String())
 	}
@@ -953,7 +954,7 @@ func TestResourceOverrideFromLibraryFolder(t *testing.T) {
 
 	// shadows a resource the dictionary does have …
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/beat.mp3", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/res/"+id+"/beat.mp3", nil))
 	if rec.Code != 200 || rec.Body.String() != "OVERRIDE" {
 		t.Errorf("override not served: %d %q", rec.Code, rec.Body.String())
 	}
@@ -964,7 +965,7 @@ func TestResourceOverrideFromLibraryFolder(t *testing.T) {
 	// … and supplies one it does not: the override is consulted BEFORE the
 	// dictionary, so it fills a gap as readily as it shadows a bad file.
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/extra.js", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/res/"+id+"/extra.js", nil))
 	if rec.Code != 200 || rec.Body.String() != "var added=1;" {
 		t.Errorf("new override resource: %d %q", rec.Code, rec.Body.String())
 	}
@@ -979,14 +980,14 @@ func TestResourceOverrideFromLibraryFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/js/entry.js", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/res/"+id+"/js/entry.js", nil))
 	if rec.Code != 200 || rec.Body.String() != "var nested=1;" {
 		t.Errorf("nested override: %d %q", rec.Code, rec.Body.String())
 	}
 
 	// A resource with no override still comes from the dictionary.
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", "/res/"+id+"/nope.png", nil))
+	s.ServeHTTP(rec, newRequest("GET", "/res/"+id+"/nope.png", nil))
 	if rec.Code != 404 {
 		t.Errorf("missing resource: %d", rec.Code)
 	}
@@ -1022,7 +1023,7 @@ func TestResourceOverrideRejectsEscapes(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()
-	if !s.serveOverride(rec, httptest.NewRequest("GET", "/res/"+id+"/ok.txt", nil), e, "ok.txt") ||
+	if !s.serveOverride(rec, newRequest("GET", "/res/"+id+"/ok.txt", nil), e, "ok.txt") ||
 		rec.Body.String() != "INSIDE" {
 		t.Fatalf("control: a real override must be served, got %q", rec.Body.String())
 	}
@@ -1039,7 +1040,7 @@ func TestResourceOverrideRejectsEscapes(t *testing.T) {
 		"../res/../info.txt",
 	} {
 		rec := httptest.NewRecorder()
-		s.serveOverride(rec, httptest.NewRequest("GET", "/res/"+id+"/x", nil), e, name)
+		s.serveOverride(rec, newRequest("GET", "/res/"+id+"/x", nil), e, name)
 		if strings.Contains(rec.Body.String(), "SECRET") {
 			t.Errorf("%q reached outside the override directory: %q", name, rec.Body.String())
 		}
@@ -1050,7 +1051,7 @@ func TestResourceOverrideRejectsEscapes(t *testing.T) {
 func searchBody(t *testing.T, s *Server, path string) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+	s.ServeHTTP(rec, newRequest("GET", path, nil))
 	if rec.Code != 200 {
 		t.Fatalf("%s: HTTP %d", path, rec.Code)
 	}
@@ -1090,7 +1091,7 @@ func TestSearchFormats(t *testing.T) {
 	// clean: root-absolute refs become absolute, so the payload means the same
 	// thing embedded in a page served from somewhere else entirely.
 	clean := searchBody(t, s, q+"&format=clean")
-	if !strings.Contains(clean, "http://example.com/res/") {
+	if !strings.Contains(clean, "http://127.0.0.1:6888/res/") {
 		t.Errorf("clean did not absolutise the resource ref: %q", clean)
 	}
 	if !strings.Contains(clean, "órgano muscular") {
@@ -1098,7 +1099,7 @@ func TestSearchFormats(t *testing.T) {
 	}
 	// DSL pronunciation is an ordinary link (D81), so `clean` has nothing to
 	// rescue: it keeps the anchor and absolutises it like any other resource.
-	if !strings.Contains(clean, `<a href="http://example.com/res/`) {
+	if !strings.Contains(clean, `<a href="http://127.0.0.1:6888/res/`) {
 		t.Errorf("clean dropped the pronunciation instead of rewriting it: %q", clean)
 	}
 	if strings.Contains(clean, "<object") {
@@ -1116,7 +1117,7 @@ func TestSearchFormats(t *testing.T) {
 
 	// an unknown format is a client bug worth reporting, not a silent fallback
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest("GET", q+"&format=json", nil))
+	s.ServeHTTP(rec, newRequest("GET", q+"&format=json", nil))
 	if rec.Code != 400 {
 		t.Errorf("unknown format: HTTP %d, want 400", rec.Code)
 	}
@@ -1151,4 +1152,14 @@ func TestCleanFormatStripsChromeAndScripts(t *testing.T) {
 	if len(got) >= len(body) {
 		t.Errorf("clean did not reduce: %d -> %d", len(body), len(got))
 	}
+}
+
+// newRequest is httptest.NewRequest with a Host this server answers to.
+// httptest defaults it to "example.com" - a NAME, which the Host guard
+// refuses on purpose (host.go), so every test that speaks through ServeHTTP
+// must address the server the way a real client does: by address.
+func newRequest(method, target string, body io.Reader) *http.Request {
+	r := httptest.NewRequest(method, target, body)
+	r.Host = "127.0.0.1:6888"
+	return r
 }

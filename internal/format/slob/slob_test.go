@@ -246,3 +246,44 @@ func TestIntegrationRealSlob(t *testing.T) {
 		t.Logf("key %q yielded no article (resource?), acceptable", keys[0])
 	}
 }
+
+// parseRefs seeks by a position the file declares, so pos can arrive negative
+// from a uint64 that overflows int. An upper-bound-only check waves that
+// through and the slice panics; the whole point of bufReader is that a
+// malformed container returns an error instead.
+func TestBufReaderRejectsOutOfRangePos(t *testing.T) {
+	// Not a constant: the conversion has to happen at run time to wrap.
+	huge := uint64(1) << 63
+
+	cases := []struct {
+		name   string
+		pos, n int
+		wantOK bool
+	}{
+		{name: "in range", pos: 2, n: 4, wantOK: true},
+		{name: "exactly to the end", pos: 6, n: 2, wantOK: true},
+		{name: "past the end", pos: 6, n: 4},
+		{name: "negative position", pos: -1, n: 2},
+		{name: "position wrapped from a huge uint64", pos: int(huge), n: 1},
+		{name: "negative length", pos: 0, n: -1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			br := &bufReader{data: []byte("01234567"), pos: tc.pos}
+			got, err := br.read(tc.n)
+			if tc.wantOK {
+				if err != nil {
+					t.Fatalf("read: %v", err)
+				}
+				if len(got) != tc.n {
+					t.Fatalf("read %d bytes, want %d", len(got), tc.n)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("read returned %q, want an error", got)
+			}
+		})
+	}
+}

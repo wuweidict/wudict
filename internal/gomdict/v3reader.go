@@ -57,6 +57,12 @@ func (mdict *MdictBase) scanV3Blocks() error {
 	}
 	defer f.Close()
 
+	fi, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("v3 scan: stat: %w", err)
+	}
+	fileSize := fi.Size()
+
 	off := mdict.meta.keyBlockMetaStartOffset
 	if _, err := f.Seek(off, io.SeekStart); err != nil {
 		return fmt.Errorf("v3 scan: seek: %w", err)
@@ -92,6 +98,14 @@ func (mdict *MdictBase) scanV3Blocks() error {
 			offsets.keyIndex = dataOffset
 		default:
 			return fmt.Errorf("v3 scan: unknown block type 0x%08x at offset %d", blockType, dataOffset)
+		}
+
+		// A declared size is the file's word against itself: one that wraps
+		// int64 negative seeks BACKWARDS, landing on this same directory entry
+		// and reading it again forever - a hang no recover() can catch, unlike
+		// every other malformed-header failure in this package.
+		if blockSize > uint64(fileSize) || dataOffset+int64(blockSize) > fileSize {
+			return fmt.Errorf("v3 scan: block size %d at offset %d exceeds file (%d bytes)", blockSize, dataOffset, fileSize)
 		}
 
 		// Seek past this block's data to the next directory entry.
@@ -176,19 +190,10 @@ func (mdict *MdictBase) readKeyEntriesV3() error {
 		keyBlockData.keyEntriesSize += int64(len(splitKeys))
 	}
 
-	// Set record end offsets: for v3, each key's record extends from its
-	// RecordStartOffset to the next key's RecordStartOffset (or end of the
-	// record data). We can't know the total record size here without reading
-	// the record blocks, so we compute end offsets lazily during lookup.
-	n := len(keyBlockData.keyEntries)
-	for i := 0; i < n-1; i++ {
-		keyBlockData.keyEntries[i].RecordEndOffset = keyBlockData.keyEntries[i+1].RecordStartOffset
-	}
-	if n > 0 {
-		// The last entry's end offset is unknown until we read the record
-		// blocks; set it to -1 as a sentinel meaning "to end of block".
-		keyBlockData.keyEntries[n-1].RecordEndOffset = -1
-	}
+	// Each key's record runs to the next key's start. The last one's end is
+	// unknown until the record blocks are read, so it gets v3's "to end of
+	// block" sentinel and locateByKeywordEntryV3 resolves it lazily.
+	chainRecordEnds(keyBlockData.keyEntries, -1)
 
 	mdict.keyBlockData = keyBlockData
 	return nil

@@ -277,22 +277,33 @@ func (s *Store) Exact(word string, limit int) ([]dict.Result, error) {
 		return nil, nil
 	}
 	n := clamp(limit)
+	// Both passes compare COLLATE NOCASE because that is the collation the
+	// only indexes on these columns are built with (ingest.go): a bare
+	// case-sensitive `w = ?1` matches no index and full-scans a table whose
+	// rows carry the article bodies inline. The case-sensitive pass gets its
+	// exactness from the second, uncollated comparison, applied to the handful
+	// of rows the index already narrowed to.
 	const q = `
-		SELECT e.w, e.m FROM entry e WHERE e.w = ?1 %[1]s
+		SELECT e.w, e.m FROM entry e WHERE e.w = ?1 COLLATE NOCASE %[1]s
 		UNION ALL
-		SELECT e.w, e.m FROM alias a JOIN entry e ON e.id = a.entry_id WHERE a.w = ?1 %[1]s
+		SELECT e.w, e.m FROM alias a JOIN entry e ON e.id = a.entry_id WHERE a.w = ?1 COLLATE NOCASE %[2]s
 		LIMIT ?2`
-	res, err := s.collect(s.db.Query(fmt.Sprintf(q, ""), word, n))
+	res, err := s.collect(s.db.Query(fmt.Sprintf(q, "AND e.w = ?1", "AND a.w = ?1"), word, n))
 	if err != nil || len(res) > 0 {
 		return res, err
 	}
-	res, err = s.collect(s.db.Query(fmt.Sprintf(q, "COLLATE NOCASE"), word, n))
+	res, err = s.collect(s.db.Query(fmt.Sprintf(q, "", ""), word, n))
 	if err != nil || len(res) > 0 {
 		return res, err
 	}
-	// accent-fold fallback (parity with the direct backends): exact
-	// phrase over the diacritic-stripping tokenizer, then keep only
-	// whole-headword folded matches.
+	// accent-fold fallback, APPROXIMATING the direct backends: exact phrase
+	// over the diacritic-stripping tokenizer, then keep only whole-headword
+	// folded matches. Not parity - FTS5's remove_diacritics strips combining
+	// marks, while dict.Fold also maps the letters that carry their stroke or
+	// slash INSIDE the codepoint (o/, d-, l/, h-), which no amount of
+	// decomposition reaches. A folded query for "dansk" will not find "đansk"
+	// here even though the direct backend finds it. Closing that would mean a
+	// second folded column in the schema; it is not worth a re-ingest.
 	match := buildExactMatch(word, "w")
 	if match == "" {
 		return nil, nil
@@ -365,9 +376,10 @@ func (s *Store) Prefix(word string, limit int) ([]dict.Result, error) {
 	if err != nil || len(res) > 0 {
 		return res, err
 	}
-	// accent/case-fold parity with the direct backends: when the raw
-	// prefix finds nothing, retry as a diacritic-insensitive prefix over
-	// the FTS `w` column (so `corazon` still prefix-matches `corazón…`).
+	// accent/case-fold fallback, with the same approximation as Exact above:
+	// when the raw prefix finds nothing, retry as a diacritic-insensitive
+	// prefix over the FTS `w` column (so `corazon` still prefix-matches
+	// `corazón…`).
 	// entry_fts always indexes `w`, even at headwords level.
 	return s.Fuzzy(word, n)
 }

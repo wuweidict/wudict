@@ -208,9 +208,13 @@ func LookupDir(srcPath string) (string, bool) {
 // ClaimDir returns the library folder for a source file, creating and
 // claiming it when needed. Ingest calls this; everything else calls LookupDir.
 //
-// The claim is the os.Mkdir itself - atomic, so two concurrent first-time
-// ingests of same-named sources cannot both take the same folder: the loser
-// sees IsExist, reads the recorded owner, and moves to the next candidate.
+// The claim is the os.Mkdir - atomic in the kernel, so of two concurrent
+// first-time ingests of same-named sources exactly one creates the folder and
+// the loser sees IsExist. That is not the whole claim, though: the receipt
+// naming the owner is a SEPARATE write, and between the two the folder looks
+// exactly like the empty leftover of an interrupted claim, which the loser
+// would otherwise adopt - putting both ingests in one folder. claimFrom closes
+// that window with claimGrace below.
 func ClaimDir(srcPath string) (string, error) {
 	return claimFrom(candidateDirs(srcPath), srcPath)
 }
@@ -237,8 +241,13 @@ func claimFrom(candidates []string, claim string) (string, error) {
 			if sameSource(owner, claim) {
 				return cand, nil
 			}
-			if owner == "" && !hasDB {
+			if owner == "" && !hasDB && olderThan(cand, claimGrace) {
 				// an empty leftover from an interrupted claim: adopt it.
+				// Only once it has gone quiet - a folder created moments ago
+				// is far more likely to be a winner that has not written its
+				// receipt yet than a casualty of a crash in that same
+				// microsecond, and adopting one of those is how two ingests
+				// end up writing the same text.db.
 				if werr := writeClaim(cand, claim); werr != nil {
 					return "", werr
 				}
@@ -249,6 +258,23 @@ func claimFrom(candidates []string, claim string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("library: no free folder name for %q", claim)
+}
+
+// claimGrace is how long a folder with no receipt is assumed to belong to a
+// claim still in flight rather than to one that died. The gap it covers is one
+// os.WriteFile of ~80 bytes; seconds are orders of magnitude more than that
+// needs, and the only cost of being generous is that a genuinely abandoned
+// folder keeps its name for that long and the next dictionary takes "name-2".
+const claimGrace = 10 * time.Second
+
+// olderThan reports whether dir has been untouched for at least d. An
+// unreadable folder answers false: not adopting is always the safe answer.
+func olderThan(dir string, d time.Duration) bool {
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+	return time.Since(fi.ModTime()) >= d
 }
 
 // writeClaim stamps a minimal receipt so the folder's owner is knowable before

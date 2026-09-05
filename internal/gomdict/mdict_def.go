@@ -172,18 +172,3 @@ type MDictKeywordEntry struct {
 	KeyWord           string
 	KeyBlockIdx       int64
 }
-
-type MDictKeywordIndex struct {
-	//encoding                            int
-	//encryptType                         int
-	KeywordEntry MDictKeywordEntry
-	RecordBlock  MDictKeywordIndexRecordBlock
-}
-
-type MDictKeywordIndexRecordBlock struct {
-	DataStartOffset          int64
-	CompressSize             int64
-	DeCompressSize           int64
-	KeyWordPartStartOffset   int64
-	KeyWordPartDataEndOffset int64
-}

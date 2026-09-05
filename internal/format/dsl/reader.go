@@ -186,7 +186,7 @@ func (r *Reader) init(path string) error {
 	return nil
 }
 
-// detectEncoding sniffs the BOM, falling back to UTF-8 validity checks.
+// detectEncoding sniffs the BOM, then the NUL pattern, then UTF-8 validity.
 func detectEncoding(br *bufio.Reader) (encoding.Encoding, error) {
 	head, _ := br.Peek(4)
 	switch {
@@ -201,13 +201,73 @@ func detectEncoding(br *bufio.Reader) (encoding.Encoding, error) {
 	case len(head) >= 3 && bytes.Equal(head[:3], []byte{0xEF, 0xBB, 0xBF}):
 		return unicode.UTF8BOM, nil
 	}
-	// no BOM: accept UTF-8 when a sample validates, else assume UTF-16LE
-	// (the common BOM-less Lingvo export)
+	// No BOM. Two probes, and the order is deliberate: UTF-16 is asked FIRST.
+	// Cyrillic in UTF-16LE is byte-for-byte valid UTF-8 - every U+04xx pair is a
+	// byte below 0x80 followed by the constant 0x04, both legal single-byte
+	// UTF-8 - so a UTF-8-first sniff accepts a BOM-less Russian export, which is
+	// most of them, and ingests the whole dictionary as mojibake with no error.
+	// No refinement of the UTF-8 test can see that; only a more specific
+	// question asked earlier can.
 	sample, _ := br.Peek(1 << 12)
+	if enc := utf16ByNULs(sample); enc != nil {
+		return enc, nil
+	}
+	// Peek cuts on a byte boundary, which lands mid-rune roughly half the time
+	// on non-Latin text. Validating that raw would reject perfectly good UTF-8
+	// and fall through to the UTF-16LE assumption below, ingesting the entire
+	// dictionary as mojibake. Drop the trailing partial rune first.
+	for i := 0; i < utf8.UTFMax-1 && len(sample) > 0; i++ {
+		if r, size := utf8.DecodeLastRune(sample); r != utf8.RuneError || size != 1 {
+			break
+		}
+		sample = sample[:len(sample)-1]
+	}
 	if utf8.Valid(sample) {
 		return unicode.UTF8, nil
 	}
 	return unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM), nil
+}
+
+// utf16ByNULs answers "is this UTF-16, and which way round" from the NUL bytes,
+// the one signal UTF-8 cannot produce: a NUL is legal UTF-8 but no text file
+// contains one, while UTF-16 text in any script that stays under U+0100 - Latin,
+// Cyrillic, Greek - is roughly half NUL, always at the same parity. That makes
+// it safe to ask before utf8.Valid: it cannot misclassify real UTF-8, because
+// real UTF-8 has no NULs to count.
+//
+// nil means "no verdict", and the caller falls through to the UTF-8 test and
+// then to the UTF-16LE assumption. A UTF-16 file in a script that uses almost no
+// ASCII (dense CJK: U+65E5 encodes as e5 65, no NUL) lands here and is still
+// caught, because such bytes are not valid UTF-8 either.
+func utf16ByNULs(sample []byte) encoding.Encoding {
+	var even, odd int
+	for i, b := range sample {
+		if b != 0 {
+			continue
+		}
+		if i%2 == 0 {
+			even++
+		} else {
+			odd++
+		}
+	}
+	// An eighth of the sample is far below the ~half that Latin or Cyrillic
+	// UTF-16 yields and far above the zero any 8-bit text yields, and the
+	// absolute floor keeps a short header from deciding on two bytes. The parity
+	// must also be lopsided: NULs spread evenly over both are not character
+	// padding, they are binary, and guessing UTF-16 there would be worse than
+	// letting the UTF-8 test speak.
+	const minNULs = 8
+	if n := even + odd; n < minNULs || n < len(sample)/8 {
+		return nil
+	}
+	switch {
+	case odd > even*4:
+		return unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM)
+	case even > odd*4:
+		return unicode.UTF16(unicode.BigEndian, unicode.IgnoreBOM)
+	}
+	return nil
 }
 
 func (r *Reader) Meta() dict.Meta { return r.meta }

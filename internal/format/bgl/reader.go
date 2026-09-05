@@ -192,6 +192,11 @@ func NewReader(path string) (*Reader, error) {
 		case typ == 3:
 			r.readType3(data)
 		case isEntryType(typ):
+			// The scan is the only source of the count. The header also
+			// declares one (block type 0, code 0x0C), but it arrives BEFORE
+			// the entries in every real file, so reading both made
+			// EntryCount declared + counted - roughly double. The counted
+			// value is the one that matches what ingest will actually emit.
 			r.numEntries++
 			r.probeIDKey(typ, data)
 		}
@@ -324,8 +329,6 @@ func (r *Reader) readType3(blk []byte) {
 		if i := uintBE(val); i >= 0 && i < len(languageByCode) {
 			r.targetLang = &languageByCode[i]
 		}
-	case 0x0C:
-		r.numEntries = uintBE(val)
 	case 0x11:
 		r.utf8Encoding = uintBE(val)&0x8000 != 0
 	case 0x1A:

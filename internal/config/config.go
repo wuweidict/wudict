@@ -9,6 +9,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -66,6 +67,25 @@ type Config struct {
 	// deliberately not: an extension is something the user installed, a web
 	// page is whatever they happened to open. "*" allows any origin. See D69.
 	WebOrigins []string
+
+	// TrustedHosts (TRUSTED_HOSTS) lists DNS names, beyond "localhost", that
+	// may appear in a request's Host header. Empty - the default - means
+	// none, and nothing legitimate notices: browsers, the Android shell and
+	// extensions all address the server by IP. A name is only needed in front
+	// of a reverse proxy, and is otherwise the ingredient DNS rebinding
+	// requires. "*" disables the check. See internal/server/host.go.
+	TrustedHosts []string
+
+	// Auth (AUTH) decides whether a request must carry the capability token:
+	// "auto" (the default) requires it whenever the listen address is not
+	// loopback, "on" always, "off" never. See token.go and AuthRequired.
+	Auth string
+
+	// AuthToken (AUTH_TOKEN) is the token itself, when it is supplied rather
+	// than read from the token file - which is how the Android shell, which
+	// has no home directory to keep one in, passes the secret it generated.
+	// It is never published in /api/config and never a Tunable.
+	AuthToken string
 
 	// Portable reports that Source sits next to the executable: the user put
 	// it there, so that is where saves go too (D32).
@@ -191,15 +211,19 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	if v := get("SERVER_PORT"); v != "" {
 		cfg.Port = v
 	}
-	if v := get("NO_BROWSER"); v != "" && v != "0" {
-		cfg.NoBrowser = true
+	// Every boolean below reads through isOff, and none of them spells the
+	// negatives inline. Set-at-all means on, EXCEPT for the negatives a person
+	// actually writes in a config file - so TRAY = "no", VERBOSE = "off" and
+	// NO_BROWSER = "false" mean what they say instead of the opposite.
+	if v := get("NO_BROWSER"); v != "" {
+		cfg.NoBrowser = !isOff(v)
 	}
 	if v := get("TRAY"); v != "" {
-		on := v != "0"
+		on := !isOff(v)
 		cfg.Tray = &on
 	}
-	if v := get("VERBOSE"); v != "" && v != "0" {
-		cfg.Verbose = true
+	if v := get("VERBOSE"); v != "" {
+		cfg.Verbose = !isOff(v)
 	}
 	if v := get("SPEEXDEC"); v != "" {
 		cfg.Speexdec = ExpandHome(v)
@@ -210,19 +234,13 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	if v := get("AUTO_INDEX"); v != "" {
 		cfg.AutoIndex = normalizeAutoIndex(v)
 	}
-	if v := get("USE_CACHED"); v != "" && v != "0" && !strings.EqualFold(v, "false") {
-		cfg.UseCached = true
+	if v := get("USE_CACHED"); v != "" {
+		cfg.UseCached = !isOff(v)
 	}
 	if v := get("ALLOW_REMOTE_DELETE"); v != "" {
-		// Set at all means on, except for the explicit negatives - so a user
-		// who writes "0"/"false"/"off"/"no" to be sure gets what they meant
-		// rather than the opposite.
 		cfg.AllowRemoteDelete = !isOff(v)
 	}
 	if v := get("NO_COMPRESS"); v != "" {
-		// Same rule as ALLOW_REMOTE_DELETE above, and for the same reason: a
-		// config that says "off" must not mean on. This used to test "0" and
-		// "false" inline, so NO_COMPRESS = "off" turned compression off.
 		cfg.NoCompress = !isOff(v)
 	}
 	if v := get("INDEX_WORKERS"); v != "" {
@@ -251,6 +269,15 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	}
 	if v := get("WEB_ORIGINS"); v != "" {
 		cfg.WebOrigins = ParseOrigins(v)
+	}
+	if v := get("TRUSTED_HOSTS"); v != "" {
+		cfg.TrustedHosts = ParseOrigins(v)
+	}
+	if v := get("AUTH"); v != "" {
+		cfg.Auth = v
+	}
+	if v := get("AUTH_TOKEN"); v != "" {
+		cfg.AuthToken = v
 	}
 	return cfg, nil
 }
@@ -437,6 +464,20 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 #                                     # extension does - never your settings or library.
 #                                     # "*" allows every site you visit; convenient while
 #                                     # developing, a standing invitation otherwise.
+# TRUSTED_HOSTS = []                  # which HOST NAMES this server answers to, on top of
+#                                     # "localhost". An address always works, so you need this
+#                                     # only when something reaches wudict through a name -
+#                                     # a reverse proxy, a hostname you gave the machine:
+#                                     # ["wudict.lan"]
+#                                     # A request naming anything else is refused, which is what
+#                                     # stops a web page from re-pointing its own domain at your
+#                                     # machine and reading the server through it. "*" turns the
+#                                     # check off.
+# AUTH        = "auto"                # must a request carry the access key?  "auto" = only when this
+#                                     # server listens on the network (SERVER_IP is not 127.0.0.1),
+#                                     # "on" = always, "off" = never. The key is a random string in
+#                                     # ~/.wudict/token: "wudict token" prints the link that carries
+#                                     # it, "wudict token --rotate" replaces it.
 `
 
 // EnsureConfigFile makes sure a config file exists, generating the fully
@@ -960,8 +1001,10 @@ func (c Config) EditableInFile(key string) bool {
 	return o != OriginFlag && o != OriginEnv
 }
 
-// Addr returns the listen address.
-func (c Config) Addr() string { return c.IP + ":" + c.Port }
+// Addr returns the listen address. JoinHostPort, not concatenation: an IPv6
+// literal has to be bracketed, and "::1" + ":" + "6888" is ":::6888", which no
+// listener parses.
+func (c Config) Addr() string { return net.JoinHostPort(c.IP, c.Port) }
 
 // DefaultLemmaURL is the catalogue `wudict lemmas` installs languages from
 // (LEMMA_URL). It is a static file, deliberately: enumerating a repository
@@ -979,9 +1022,13 @@ func (c Config) Addr() string { return c.IP + ":" + c.Port }
 const DefaultLemmaURL = "https://raw.githubusercontent.com/wuweidict/lemmas/main/manifest.json"
 
 // isOff reads a boolean written the way a person writes one in a config file.
-// Only needed for keys whose default is TRUE: for those the empty string means
-// "unset, keep the default", so the parse has to recognise the negatives
-// rather than the positives.
+// Every boolean key goes through it, so there is exactly one answer to "does
+// this value mean no" in the whole configuration.
+//
+// It recognises the NEGATIVES rather than the positives because the question
+// is only ever asked about a value that was actually set: an unset key keeps
+// its default and never reaches here, so "set at all" already means yes and
+// the only thing left to detect is a user saying no.
 func isOff(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "0", "false", "off", "no", "n":

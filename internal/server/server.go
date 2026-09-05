@@ -144,6 +144,19 @@ type Server struct {
 	// cors.go (D69).
 	WebOrigins []string
 
+	// TrustedHosts lists DNS names, beyond "localhost", that may appear in a
+	// request's Host header (config TRUSTED_HOSTS). Empty - the default -
+	// means none: every legitimate client addresses this server by IP, so the
+	// only thing a name buys is DNS rebinding. See host.go. A single "*"
+	// disables the check, for a reverse proxy whose name we cannot know.
+	TrustedHosts []string
+
+	// AuthToken, when set, is the capability token every route outside
+	// authFree must present (auth.go). Empty means the server is open, which
+	// is the right default for a loopback bind and the wrong one for any
+	// other; the CLI resolves which case this is (config.AuthRequired).
+	AuthToken string
+
 	// LemmaDir is where /api/lemmas installs lemma files (config LEMMA_DIR) -
 	// the same folder Morph indexes, which is what makes an install visible to
 	// the next search without a restart.
@@ -170,6 +183,9 @@ func New(reg *Registry) *Server {
 		if rt.CORS {
 			h = s.withCORS(h)
 		}
+		if !authFree[rt.Method+" "+rt.Pattern] {
+			h = s.withAuth(h)
+		}
 		s.mux.HandleFunc(rt.Method+" "+rt.Pattern, h)
 	}
 	return s
@@ -188,13 +204,39 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Server", id)
 	defer func() {
 		if rec := recover(); rec != nil {
-			logx.V("PANIC %s %s: %v", r.Method, r.URL.RequestURI(), rec)
-			logx.Warn("panic serving %s: %v", r.URL.RequestURI(), rec)
+			// Path, never RequestURI: the query string carries ?k=<token>,
+			// and a log file is exactly where it must not end up (auth.go
+			// scrubs it from the address bar for the same reason).
+			logx.V("PANIC %s %s: %v", r.Method, r.URL.Path, rec)
+			logx.Warn("panic serving %s: %v", r.URL.Path, rec)
 			httpErr(w, 500, "internal error: %v", rec)
 		}
 	}()
+	// Before routing, not per handler: the point of the check is that no
+	// route can be reached with a forged authority, and a per-route opt-in
+	// is a list somebody eventually forgets to extend (host.go).
+	if !s.requireHost(w, r) {
+		logx.V("%s %s: refused Host %q", r.Method, r.URL.Path, r.Host)
+		return
+	}
+	// Same reasoning, same place: the initiator matters for every route, so
+	// the check cannot be a per-handler opt-in (host.go).
+	if !s.requireSameSite(w, r) {
+		logx.V("%s %s: refused cross-site request", r.Method, r.URL.Path)
+		return
+	}
+	// Nothing this server serves has any business naming its own URLs to a
+	// third party, and one of those URLs may carry ?k=. Set for every
+	// response, including the ones an article's outbound requests inherit.
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	// Also before routing: a tokenised link must work on whatever route the
+	// user was sent to, and the redirect that scrubs the token from the
+	// address bar has to happen before a handler writes a body (auth.go).
+	if s.grantCookie(w, r) {
+		return
+	}
 	s.mux.ServeHTTP(w, r)
-	logx.V("%s %s (%s)", r.Method, r.URL.RequestURI(), time.Since(start).Round(time.Microsecond))
+	logx.V("%s %s (%s)", r.Method, r.URL.Path, time.Since(start).Round(time.Microsecond))
 }
 
 // writeJSON emits v as plain UTF-8. SetEscapeHTML(false) matters: the default
@@ -1587,8 +1629,12 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if base {
-		// setFeatures takes this itself; ensureBaseIndex does not, because its
-		// other caller (demandIndex) chooses its own lane.
+		// setFeatures takes both of these itself; ensureBaseIndex takes
+		// neither, because its other caller (demandIndex) chooses its own
+		// lane. The power hold matters as much as the lane: this chip is the
+		// phone-facing ingest, so it is exactly the work that must not be
+		// mistaken for idleness and throttled while the user waits on it.
+		defer HoldActiveProcs()()
 		acquire(frontLimit)
 		err = e.ensureBaseIndex(progress)
 		release(frontLimit)

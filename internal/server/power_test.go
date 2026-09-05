@@ -62,7 +62,7 @@ func previewRegistry(t *testing.T) (*Server, *Registry) {
 // loopbackReq is a POST that came from this machine, which every control that
 // acts on the process rather than the library requires.
 func loopbackReq(target string) *http.Request {
-	req := httptest.NewRequest("POST", target, nil)
+	req := newRequest("POST", target, nil)
 	req.RemoteAddr = "127.0.0.1:5555"
 	return req
 }
@@ -387,7 +387,7 @@ func TestPowerEndpoint(t *testing.T) {
 		t.Errorf("a rejected state changed the power state to %v", CurrentPower())
 	}
 
-	req := httptest.NewRequest("POST", "/api/power?state=active", nil)
+	req := newRequest("POST", "/api/power?state=active", nil)
 	req.RemoteAddr = "192.0.2.7:5000" // TEST-NET-1: not this machine
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, req)

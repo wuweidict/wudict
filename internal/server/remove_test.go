@@ -17,7 +17,7 @@ import (
 // may always delete, whatever ALLOW_REMOTE_DELETE says.
 func localReq(t *testing.T, s *Server, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(method, path, nil)
+	req := newRequest(method, path, nil)
 	req.RemoteAddr = "127.0.0.1:5555"
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
@@ -37,7 +37,7 @@ func deleteReq(t *testing.T, s *Server, path string) *httptest.ResponseRecorder 
 func remoteReq(t *testing.T, s *Server, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+	s.ServeHTTP(rec, newRequest(method, path, nil))
 	return rec
 }
 
