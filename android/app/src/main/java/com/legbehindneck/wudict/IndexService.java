@@ -39,6 +39,13 @@ import android.util.Log;
  * level this app supports, and it costs a notification the user can see and
  * dismiss the work from. That is the whole intervention.
  *
+ * <p>From API 33 that notification is posted only if the user has allowed
+ * notifications, and an app that never asks has the appop pinned to
+ * {@code ignore}: the service came up, enqueued, and the system dropped every
+ * one of them. The protection was never affected - it comes from the service
+ * record, not the shade - but the receipt was invisible, so the ask now happens
+ * at the one moment it is meaningful ({@link Notif}).
+ *
  * <p>Started and stopped from {@link ServerProcess}, off the server's own
  * "@wudict busy" markers: the server is an exec'd child (D52) and the only part
  * of this app that knows whether a person is waiting on an ingest right now.
@@ -90,11 +97,22 @@ public final class IndexService extends Service {
     private static final Object LOCK = new Object();
     private static final Handler HANDLER = new Handler(Looper.getMainLooper());
 
-    // Whether an ingest a person is waiting on is in flight. Tracked here
-    // rather than asked of the system because a start can legally fail (see
-    // the class comment) while the work goes on regardless: this field answers
-    // "is the server busy", not "is the service running", and the settings
-    // screen needs the former before it offers to kill the server.
+    // Whether work a person is waiting on is in flight, from either of the two
+    // sources that have any. Tracked here rather than asked of the system
+    // because a start can legally fail (see the class comment) while the work
+    // goes on regardless.
+    //
+    // The two are kept apart because they are cleared differently and answer
+    // different questions. `serverBusy` is a STATE the server publishes and the
+    // shell resets outright when the child dies (ServerProcess), so it can
+    // never be a counter. `holds` is balanced acquire/release taken by work
+    // inside this process - an import copying gigabytes through the
+    // ContentResolver before the server has ever seen the files. The service
+    // arms on either; isBusy() reports only the first, because its caller is
+    // asking whether the SERVER is busy before offering to kill it, and a file
+    // copy is not an answer to that question.
+    private static volatile boolean serverBusy;
+    private static int holds;
     private static volatile boolean inFlight;
 
     // The service's own state, all of it under LOCK. `pendingStart` is a
@@ -109,14 +127,56 @@ public final class IndexService extends Service {
 
     /** Whether the server is preparing a dictionary right now. */
     static boolean isBusy() {
+        return serverBusy;
+    }
+
+    /** The server's marker: a state, set and cleared, never counted. Never throws. */
+    static void busy(Context ctx, boolean busy) {
+        Context app = ctx.getApplicationContext();
+        boolean up;
+        synchronized (LOCK) {
+            serverBusy = busy;
+            up = recompute();
+        }
+        apply(app, up);
+    }
+
+    /**
+     * Claims the service for long work running inside this process, which the
+     * server's markers cannot cover because the server is not doing it: an
+     * import copies its gigabytes here, before the files exist anywhere the
+     * server can see them, and that copy is the phase most likely to be killed.
+     * Balanced by {@link #release}, and safe to nest with a concurrent ingest.
+     */
+    static void hold(Context ctx) {
+        Context app = ctx.getApplicationContext();
+        boolean up;
+        synchronized (LOCK) {
+            holds++;
+            up = recompute();
+        }
+        apply(app, up);
+    }
+
+    /** Releases a {@link #hold}. Must be reached on every path, including throws. */
+    static void release(Context ctx) {
+        Context app = ctx.getApplicationContext();
+        boolean up;
+        synchronized (LOCK) {
+            if (holds > 0) holds--;
+            up = recompute();
+        }
+        apply(app, up);
+    }
+
+    /** LOCK held. Republishes the combined state and returns it. */
+    private static boolean recompute() {
+        inFlight = serverBusy || holds > 0;
         return inFlight;
     }
 
-    /** Starts or stops the service. Never throws. */
-    static void busy(Context ctx, boolean busy) {
-        inFlight = busy;
-        Context app = ctx.getApplicationContext();
-        if (busy) {
+    private static void apply(Context app, boolean up) {
+        if (up) {
             arm(app);
         } else {
             disarm(app);
@@ -134,12 +194,14 @@ public final class IndexService extends Service {
             // late - it re-checks its own identity under the lock.
             final Runnable[] self = new Runnable[1];
             task = self[0] = () -> {
+                boolean asking = false;
                 synchronized (LOCK) {
                     if (pendingStart != self[0]) return; // superseded or cancelled
                     pendingStart = null;
                     try {
                         app.startForegroundService(new Intent(app, IndexService.class));
                         started = true;
+                        asking = true;
                     } catch (RuntimeException e) {
                         // API 31+ ForegroundServiceStartNotAllowedException, and
                         // anything a vendor build throws in its place. Nothing
@@ -148,6 +210,13 @@ public final class IndexService extends Service {
                         Log.d(TAG, "index service start: " + e);
                     }
                 }
+                // Outside the lock, and only for work that outlived the
+                // debounce: from API 33 the notification this service is about
+                // to post is dropped unless the user has allowed notifications,
+                // and this is the moment where asking means something (Notif).
+                // It reaches into an activity and the system, neither of which
+                // has any business running under this class's lock.
+                if (asking) Notif.ask(app);
             };
             pendingStart = task;
         }

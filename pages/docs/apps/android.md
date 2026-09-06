@@ -122,12 +122,11 @@ confirmation names what each choice takes. There is no undo — see
 [Removing a dictionary](../dictionaries/library.md#removing-a-dictionary) for
 what the three choices mean.
 
-*Settings ▸ Apps ▸ wuDict ▸ Manage space* opens the same panel.
-
-On Android this is the **only** way to free one dictionary's space: nothing
-else on the phone may open `Android/data`, so the alternatives the platform
-offers are uninstalling the app and clearing its storage, which take the whole
-library with them.
+On Android this is the **only** way to free *one* dictionary's space: nothing
+else on the phone may open `Android/data`. To reclaim everything at once, use
+the platform's own control — *Settings ▸ Apps ▸ wuDict ▸ Storage ▸ Clear
+storage* — or uninstall the app; both take the whole library, the imported
+dictionaries and the settings with them.
 
 ## Battery and memory
 

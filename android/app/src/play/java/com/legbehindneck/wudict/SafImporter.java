@@ -140,8 +140,18 @@ final class SafImporter {
                 .create();
         dialog.show();
 
+        // The copy is the longest and most kill-prone phase of an import - a
+        // multi-GB read through a ContentResolver into app storage - and the
+        // one phase the server's own busy markers cannot cover, because the
+        // server is not doing it and cannot see the files until it ends. Held
+        // for the same reason an ingest is: a process the platform reads as
+        // idle is a candidate for the freezer and the low-memory killer, and a
+        // kill here strands a half-written <name>.part instead of a library.
+        // Refcounted in IndexService, so overlapping with an ingest is safe.
+        Context app = a.getApplicationContext();
         Thread t = new Thread(() -> {
             String summary;
+            IndexService.hold(app);
             try {
                 summary = copy(a, plan.build(), dialog);
             } catch (Exception e) {
@@ -149,6 +159,7 @@ final class SafImporter {
                 summary = a.getString(R.string.import_failed, String.valueOf(e.getMessage()));
             } finally {
                 running = false;
+                IndexService.release(app); // every path, including a throw
             }
             final String msg = summary;
             a.runOnUiThread(() -> {

@@ -238,7 +238,7 @@ apk-play-release: android-go ## Build the Play-flavour release APK (SAF import)
 
 .PHONY: apk-play-release-install
 apk-play-release-install: apk-play-release ## build FOSS release and install via adb
-	adb install "android/app/build/outputs/apk/foss/release/$(BINARY)-foss-release.apk"
+	adb install "android/app/build/outputs/apk/play/release/$(BINARY)-play-release.apk"
 
 .PHONY: aab-play
 aab-play: android-go ## Build the Play release bundle (unsigned: Play App Signing owns the key)

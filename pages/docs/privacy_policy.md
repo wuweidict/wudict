@@ -40,15 +40,24 @@ Nothing is encrypted or uploaded, because nothing leaves the device.
 
 The app declares `allowBackup="false"`, so none of it is copied into Google's
 Auto Backup either. **Uninstalling the app deletes all of it.** You can also
-clear it at any time from Android's *Storage → Manage space* screen, which the
-app implements itself.
+clear it at any time from Android's *Settings ▸ Apps ▸ wuDict ▸ Storage ▸ Clear
+storage*, which removes the whole library, the imported dictionaries and the
+settings in one step.
 
 ## Permissions
 
-This build declares exactly one permission:
+This build declares four permissions, none of which grants access to anything
+about you:
 
 - **`INTERNET`** — used solely to connect to the wuDict server running inside
   the app on `127.0.0.1`.
+- **`FOREGROUND_SERVICE`** and **`FOREGROUND_SERVICE_DATA_SYNC`** — granted at
+  install time, with no prompt. They let preparing a dictionary keep running
+  while you are in another app, instead of being killed halfway through.
+- **`POST_NOTIFICATIONS`** — the only one you are ever asked about, and only the
+  first time a dictionary is prepared. It shows the progress notification for
+  that work. Decline it and everything still works; you simply will not see the
+  progress.
 
 It declares **no storage permission at all**. Dictionaries are imported through
 Android's system file picker (the Storage Access Framework), which gives the app

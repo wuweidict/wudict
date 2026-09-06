@@ -6,10 +6,10 @@
 # Asserts the two properties that make the flavour split worth having (D62),
 # on APKs that already exist — build them first with `make apk` / `make apk-play`.
 #
-#   1. the Play APK declares no permission beyond the three install-time,
-#      never-prompted ones it is entitled to, and NO storage permission (that
-#      is the whole point); the FOSS APK still declares All-files access (the
-#      split did not leak);
+#   1. the Play APK declares no permission beyond the four it is entitled to
+#      (three install-time, plus POST_NOTIFICATIONS, the single runtime one),
+#      and NO storage permission (that is the whole point); the FOSS APK still
+#      declares All-files access (the split did not leak);
 #   2. the Play APK carries no listen-address control at all: the string the
 #      switch needs lives in src/foss/res, so its absence here is proof the
 #      flavour split (Net, D62) held and the switch cannot be drawn;
@@ -54,18 +54,23 @@ if [ -n "$PLAY" ]; then
         # An explicit allow-set, not a list of things to be absent: the next
         # permission to creep in is by definition one nobody thought to forbid
         # — a feature added to the shell is exactly how it would arrive. Adding
-        # a name here is a deliberate act; the three below are install-time and
-        # never prompted, so none of them costs the user a dialog.
+        # a name here is a deliberate act.
         #
         #   INTERNET                     the WebView reaches the loopback server
         #   FOREGROUND_SERVICE           IndexService survives the freezer and
         #   FOREGROUND_SERVICE_DATA_SYNC the LMK while preparing (API 34+ needs
         #                                the typed grant as well)
+        #   POST_NOTIFICATIONS           without it the service's notification is
+        #                                enqueued and dropped from API 33 (D62)
+        #
+        # The first three are install-time and cost the user nothing. The fourth
+        # is the app's ONLY runtime permission and its only dialog, asked once,
+        # from the debounce of work already running (Notif) — never at launch.
         #
         # Anchored alternation: an unanchored 'FOREGROUND_SERVICE' would also
         # wave through FOREGROUND_SERVICE_LOCATION and every other subtype.
         extra=$(echo "$perms" | sed -n "s/^uses-permission: name='\([^']*\)'.*/\1/p" \
-            | grep -vE '^android\.permission\.(INTERNET|FOREGROUND_SERVICE|FOREGROUND_SERVICE_DATA_SYNC)$' || true)
+            | grep -vE '^android\.permission\.(INTERNET|FOREGROUND_SERVICE|FOREGROUND_SERVICE_DATA_SYNC|POST_NOTIFICATIONS)$' || true)
         if [ -n "$extra" ]; then
             fail "$apk declares permissions outside the allowed set: $extra"
         fi

@@ -380,12 +380,14 @@ public class LookupActivity extends Activity {
     protected void onStart() {
         super.onStart();
         Power.enter(this);
+        Notif.top(this); // a window the one permission ask can be made from
     }
 
     @Override
     protected void onStop() {
         super.onStop();
         Power.exit(this);
+        Notif.gone(this);
     }
 
     @Override
