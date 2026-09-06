@@ -1,0 +1,10 @@
+v3.7.0
+
+- android: add Settings screen via long tap on app icon in launcher
+- adjust font size  via +/− from ☰ → ⚙️
+- add/edit custom CSS styles via ☰ → ⚙️ → ✏️ [Custom Styles] with presets and live editor; try the 'Compact' preset
+- open in popup or full app when triggered via Share or text selection menu
+- dictionary panel: add About, Remove, Progress
+- DSL abbreviations support, and formatting
+- option to remove indexes/original dictionaries from the dictionary panel
+- fix pronunciation audio echo
