@@ -280,6 +280,10 @@ vet: ## go vet
 fmt: ## gofmt all sources in place
 	gofmt -w $$(find . -name '*.go' -not -path './dist/*')
 
+.PHONY: notices
+notices: ## Regenerate THIRD-PARTY-NOTICES.md from the module licences (run after changing deps)
+	sh tools/notices.sh
+
 .PHONY: lint
 lint: vet ## golangci-lint if installed, else vet only
 	@if command -v golangci-lint >/dev/null; then \

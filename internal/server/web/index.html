@@ -44,6 +44,13 @@
      it must aim at --barh, never at a --stick that is momentarily 0. */
   --barh:3.1em;
   --stick:var(--barh);
+  /* The article surface, as two values rather than two literals in four
+     places. Custom properties are the only thing that crosses `all:initial`
+     into a shadow root, so overriding these once in the user's own app.css
+     recolours every article as well as the page. Iframes cannot inherit
+     them; frameCSS() carries the resolved pair across that boundary. */
+  --wd-article-bg:#fff;
+  --wd-article-fg:#1a1a1a;
 }
 html[data-theme="dark"]{
   --bg:#191a1c; --bg-card:#212327; --bg-bar:rgba(25,26,28,.92);
@@ -267,12 +274,13 @@ dd{margin:var(--sp-1) 0 0 0}
 /* article sandbox host: dictionary CSS lives inside the shadow root and
    cannot touch the chrome; in dark mode the whole article is inverted
    Dark-Reader style (media flipped back inside the shadow root) */
-.article{display:block;border-radius:8px;background:#fff;color:#1a1a1a;
+.article{display:block;border-radius:8px;
+  background:var(--wd-article-bg,#fff);color:var(--wd-article-fg,#1a1a1a);
   padding:var(--sp-1) var(--sp-2);overflow-x:auto;overflow-y:hidden}
 html[data-theme="dark"] .article:not(iframe),
 html:not([data-theme]) .article.autodark:not(iframe){
   filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.92)}
-iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8px;
+iframe.article{width:100%;border:0;display:block;background:var(--wd-article-bg,#fff);border-radius:8px;
   padding:0;overflow:hidden}
 
 /* Under the results, not in the status line: the scope describes what is on
@@ -289,6 +297,60 @@ iframe.article{width:100%;border:0;display:block;background:#fff;border-radius:8
 .empty svg path{fill:var(--line)}
 /* the search bar is inert until at least one dictionary is usable */
 input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
+
+/* ── custom styles editor ────────────────────────────────────────────
+   A docked sheet, not a modal, and with no backdrop: the whole point is to
+   watch an article reflow while you type. The panel that would otherwise
+   host this is min(420px,92vw) — on a phone it covers precisely the thing
+   being tuned. The page below stays live and keeps its scroll position; the
+   matching padding on <body> keeps the last result reachable above it. */
+html{--styler-h:min(45vh,420px)}
+#styler{position:fixed;left:0;right:0;bottom:0;z-index:210;display:none;
+  height:var(--styler-h);flex-direction:column;
+  background:var(--bg);border-top:1px solid var(--line);box-shadow:var(--shadow);
+  padding:var(--sp-2) var(--sp-3)}
+#styler.show{display:flex}
+body.styling{padding-bottom:var(--styler-h)}
+/* One row, at every width. nowrap is load-bearing and not a preference:
+   flex decides WRAPPING from an item's hypothetical size and only then
+   shrinks what is on the line, so a <select> sized by its longest option
+   jumps to a second row before it is ever asked to give width back - which
+   is how ✕ ended up alone under Save. With nowrap the menu is asked first,
+   and it is the only item that can answer: basis 0 means it takes free space
+   rather than claiming its content width, and the cap keeps it from sprawling
+   on a desktop. */
+#styler .row{display:flex;align-items:center;gap:.4em;flex-wrap:nowrap}
+#styler .grow{flex:1 1 auto;min-width:0}
+#styler .tab,#styler .btn{flex:0 0 auto}
+#stylerPreset{flex:1 1 0;min-width:3.5em;max-width:14em}
+/* Two tabs over one textarea: the split is the whole teaching device, so the
+   selected one is stated in colour AND in aria-selected, not by position. */
+#styler .tab{font:inherit;font-size:12px;line-height:1.2;padding:.34em .7em;
+  color:var(--fg-soft);background:var(--bg-card);border:1px solid var(--line);
+  border-radius:8px;cursor:pointer}
+#styler .tab:hover{color:var(--fg);border-color:var(--fg-faint)}
+#styler .tab[aria-selected="true"]{color:var(--fg);border-color:var(--accent);
+  background:var(--accent-soft)}
+/* Which box actually holds something, readable while looking at the other
+   one. Without it "do I have custom styles?" is a question you can only
+   answer by clicking both tabs. */
+#styler .tab[data-has="1"]::after{content:"•";margin-left:.35em;color:var(--accent)}
+#styler .tab:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+#styler .btn{font-size:13px}
+#stylerCSS{flex:1 1 auto;min-height:0;width:100%;margin-top:.5em;resize:none;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:12.5px;line-height:1.5;tab-size:2;padding:.5em .6em;
+  color:var(--fg);background:var(--bg-card);
+  border:1px solid var(--line);border-radius:8px}
+#stylerCSS:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+/* One line, never two: it is a location and a footnote, and it must not
+   steal height from the editor on a phone. */
+/* Two lines at most, and it may wrap: it carries the way back out of a bad
+   rule, and an instruction truncated to an ellipsis is not an instruction. */
+#stylerNote{margin-top:.4em;font-size:11px;line-height:1.4;color:var(--fg-faint);
+  max-height:2.8em;overflow:hidden}
+#stylerNote .p{cursor:pointer}
+#stylerNote .p:hover{color:var(--fg-soft)}
 
 /* ── dictionaries panel ────────────────────────────────────────────── */
 #panel{position:fixed;inset:0;z-index:200;display:none;background:color-mix(in srgb,var(--fg) 24%,transparent)}
@@ -328,7 +390,12 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 .pd .grip{cursor:grab;color:var(--fg-faint);user-select:none;font-size:14px;
   line-height:1;letter-spacing:-.15em;padding-right:.15em}
 .pd .grip:active{cursor:grabbing}
-.pd b{color:var(--fg);font-size:14px;word-break:break-word;flex:1}
+/* The title is a control (see the panel's click handler), so it has to look
+   like one on the way to being pressed rather than only after. flex:1 was
+   already there for the layout and doubles as a generous target. */
+.pd b{color:var(--fg);font-size:14px;word-break:break-word;flex:1;cursor:pointer}
+.pd b:hover{color:var(--link);text-decoration:underline;text-underline-offset:2px}
+.pd b:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:3px}
 .pd .ord{display:flex;gap:.1em;margin-left:auto}
 .pd .ord button{background:none;border:0;color:var(--fg-faint);cursor:pointer;
   font-size:12px;line-height:1;padding:.15em .2em;border-radius:4px}
@@ -684,6 +751,12 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
   .scopenote{padding-left:.4rem;padding-right:.4rem}
 }
 </style>
+<!-- The user's own stylesheet for the app itself, injected by the server as a
+     <link> only when the file exists. Last in <head> on purpose: it wins every
+     tie against the sheet above, and being render-blocking it is already in
+     force at first paint, so a reader who chose sepia never sees a white
+     flash. /?style=off omits it. -->
+{{USERCSS}}
 </head>
 <body>
 <header class="bar" id="bar">
@@ -793,6 +866,11 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
          borrowing the book from the top bar would make that glyph mean two
          things, which is to say neither. -->
     <a class="act" id="lemmaLink" href="/lemmas" title="Install the word-form data that lets an inflected word find its dictionary entry"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.2 8h2.6"/><path d="M4.8 8V5a1.4 1.4 0 0 1 1.4-1.4h4.4"/><path d="M4.8 8v3a1.4 1.4 0 0 0 1.4 1.4h4.4"/></svg>Lemmatization…</a>
+    <!-- Reading appearance lives in this row, beside the size stepper in the
+         summary above it. A brush, not a cog: the cog on the summary already
+         means "folders and configuration", and one glyph cannot mean two
+         things without meaning neither. -->
+    <button type="button" class="act" id="stylerLink" title="Your own CSS for the app and for dictionary articles"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11.6 1.9l2.5 2.5-7 7-3.2.7.7-3.2z"/><path d="M9.9 3.6l2.5 2.5"/></svg>Custom styles…</button>
   </div>
   <!-- Quiet, and NOT shaped like the three above: verb, object, scope,
        ellipsis, on a line of its own beside the box it opens.
@@ -825,6 +903,24 @@ input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 </details>
 <div id="panelList"></div>
 </div>
+</div>
+
+<!-- Hidden until asked for, and outside #panel deliberately: opening it
+     CLOSES the panel, because the article it restyles is behind both. -->
+<div id="styler" role="dialog" aria-label="Custom styles" aria-modal="false">
+  <div class="row">
+    <button type="button" class="tab" id="tabApp" role="tab" aria-selected="true" aria-controls="stylerCSS">App</button>
+    <button type="button" class="tab" id="tabArticle" role="tab" aria-selected="false" aria-controls="stylerCSS">Article</button>
+    <span class="grow"></span>
+    <select id="stylerPreset" aria-label="Insert an example"></select>
+    <!-- Hidden while the box is empty: an action that would do nothing is a
+         control you have to read and dismiss on every visit. -->
+    <button type="button" class="btn" id="stylerClear" hidden title="Empty this box — Save then removes the file">Clear</button>
+    <button type="button" class="btn" id="stylerSave">Save</button>
+    <button type="button" class="btn" id="stylerClose" aria-label="Close">✕</button>
+  </div>
+  <textarea id="stylerCSS" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Custom CSS"></textarea>
+  <div id="stylerNote"></div>
 </div>
 
 <script>
@@ -934,6 +1030,12 @@ function themeIsDark(){
 /* hosts get .autodark so the invert rule also applies in auto mode */
 function syncAutoDark(){
   const dark=themeIsDark();
+  /* The resolved answer, under one name. The page spells "dark" three ways
+     internally (an explicit [data-theme], the OS preference through a media
+     query, and .dark inside a frame); a stylesheet the user writes should not
+     have to know any of them. [data-dark] means the same thing here, on a
+     shadow host and inside a frame, and it is the only spelling documented. */
+  document.documentElement.toggleAttribute("data-dark",dark);
   document.querySelectorAll(".article").forEach(el=>{
     if(el.tagName==="IFRAME"){
       el.contentWindow&&el.contentWindow.postMessage({t:"theme",dark},"*");
@@ -942,6 +1044,8 @@ function syncAutoDark(){
     el.classList.toggle("autodark",dark&&!document.documentElement.hasAttribute("data-theme"));
     if(el.shadowRoot)el.shadowRoot.host.toggleAttribute("data-dark",dark);
   });
+  // The article tokens are theme-dependent, and a frame cannot inherit them.
+  pushFrameCSS();
 }
 /* wide layout toggle, persisted */
 function applyWide(on){document.body.classList.toggle("wide",on);$("wideBtn").style.color=on?"var(--accent)":""}
@@ -999,6 +1103,65 @@ $("fsCtl").addEventListener("click",e=>{e.preventDefault();e.stopPropagation()})
 for(const [id,step] of [["fsDown",-1],["fsUp",1],["fsVal",0]])
   $(id).addEventListener("click",()=>applyFS(step?articleFS+step:FS_DEF,true));
 applyFS(FS_DEF,false);   // paints --wd-fs and the .lim state before any load
+
+/* ── the user's global stylesheets ───────────────────────────────────
+   Two files the user owns, beside the wudict.toml in effect: app.css for the
+   page, article.css for what dictionaries render. The page gets a server
+   injected <link> (see {{USERCSS}} in <head>); this half is the article one,
+   which has to reach two surfaces that ordinary document CSS cannot touch.
+
+   Shadow roots: one constructed sheet, adopted by every article. Adopted
+   sheets order AFTER a shadow root's own <style>/<link>, so the user wins
+   ties against the dictionary; and one replaceSync restyles every article
+   already on the page, not just the next one.
+
+   Iframes are separate documents. They get the text baked into their srcdoc
+   at creation and a {t:"css"} message for every change after it — the same
+   two-step the font size uses, for the same reason.
+
+   frameCSS() prepends the resolved --wd-article-* pair, because those come
+   from the APP sheet and custom properties do not cross a document boundary.
+   That is why a token override written once is enough for all three surfaces.
+
+   ?style=off drops both halves: a stylesheet is free to hide the very editor
+   that would undo it, and the way back must not itself depend on CSS. */
+const STYLE_OFF=new URLSearchParams(location.search).get("style")==="off";
+let userArticleCSS="";
+// Constructable stylesheets are the mechanism; on a browser too old for them
+// articles simply keep the dictionary's own styling rather than the page
+// failing to script at all.
+const userSheet=(()=>{try{return new CSSStyleSheet()}catch(e){return null}})();
+/* A bare </style> is not valid CSS anywhere except inside a comment or a
+   string, and inside those \/ is a legal escape for /. So this can only ever
+   neutralise a sequence that would have ended the frame's <style> early. */
+const styleSafe=css=>String(css||"").replace(/<\/(?=style)/gi,"<\\/");
+function articleTokens(){
+  const cs=getComputedStyle(document.documentElement);
+  const v=(n,d)=>(cs.getPropertyValue(n)||"").trim()||d;
+  return ":root{--wd-article-bg:"+v("--wd-article-bg","#fff")+
+         ";--wd-article-fg:"+v("--wd-article-fg","#1a1a1a")+"}\n";
+}
+function frameCSS(){return articleTokens()+userArticleCSS}
+function pushFrameCSS(){
+  const css=frameCSS();
+  for(const f of document.querySelectorAll("iframe.article"))
+    f.contentWindow&&f.contentWindow.postMessage({t:"css",css},"*");
+}
+function applyArticleCSS(css){
+  userArticleCSS=STYLE_OFF?"":String(css||"");
+  // replaceSync drops rules it cannot parse rather than throwing; it throws
+  // only on @import, which is exactly the one thing worth reporting.
+  if(userSheet)try{userSheet.replaceSync(userArticleCSS)}
+  catch(e){console.warn("custom article CSS:",e)}
+  pushFrameCSS();
+}
+async function loadUserCSS(){
+  if(STYLE_OFF)return;
+  try{
+    const r=await fetch("/style/article.css");
+    if(r.ok)applyArticleCSS(await r.text());
+  }catch(e){console.warn("could not load custom article CSS:",e)}
+}
 
 /* Expand all results — a view toggle that is deliberately NOT remembered.
    It lives for the page and nothing else: no localStorage, no state.json.
@@ -1461,7 +1624,7 @@ function renderPanel(){
     if(d.error)acts=`<span class="err">${esc(d.error)}</span>`;
     div.innerHTML=`<div class="hd">
         <span class="grip" draggable="true" title="Drag to reorder">⠿</span>
-        <b>${esc(dictLabel(d))}</b>
+        <b tabindex="0" role="button" title="Search only this dictionary">${esc(dictLabel(d))}</b>
         <span class="ord">
           <button data-mv="top" title="Move to top">⏫</button>
           <button data-mv="up" title="Move up">▲</button>
@@ -1759,7 +1922,7 @@ $("panelList").addEventListener("toggle",async e=>{
     /* Inserted as markup on purpose: the server normalised it (escaped if it
        was plain text, reduced to prose elements if it was markup), so this is
        the one client that does NOT need a sanitiser of its own. */
-    body.innerHTML=(j.html||`<p>✨ Found True Emptiness! ✨ 🤷 ✨</p>`)+aboutLangs(j);
+    body.innerHTML=(j.html||`<p>✨ Found Emptiness! ✨ 🤷 ✨</p>`)+aboutLangs(j);
   }catch(err){
     body.textContent="Not available.";
     det.dataset.loaded=""; // a failed fetch is worth retrying on the next open
@@ -1804,8 +1967,40 @@ $("panelList").addEventListener("click",e=>{
     runRemove(go.closest(".pd").dataset.id,go.dataset.rm,go);
     return;
   }
+  /* The card's title IS the dictionary, so pressing it scopes the search to
+     that dictionary and gets out of the way. Until now the card was a page of
+     switches with no meaning attached to its own name, and the selector in the
+     bar was the only way to narrow a search - findable if you find it, and
+     nothing here says it exists. An accidental press costs one tap back: the
+     selector's first option is "All dictionaries", and nothing was written.
+     Title only, deliberately. A whole-card or double-click target would lie
+     over the grip, four move buttons, a checkbox, the switches and Remove... -
+     misfires beside a destructive control - and it would teach nobody
+     anything, since no one double-clicks white space on the chance that it
+     does something. On a phone that gesture does not exist at all. */
+  const pick=e.target.closest(".hd>b");
+  if(pick){
+    const sel=$("dict"),id=pick.closest(".pd").dataset.id;
+    // Through the <select> and its change event, so this is the same selection
+    // every other caller makes - persisted, chipped, re-run, index demanded.
+    if([...sel.options].some(o=>o.value===id)){
+      sel.value=id;sel.dispatchEvent(new Event("change"));
+    }
+    hidePanel();
+    // Only where a focus cannot summon a keyboard over the answer: with no
+    // query yet, typing one is the next thing a mouse user does.
+    if(!$("q").value.trim()&&matchMedia("(hover:hover)").matches)$("q").focus();
+    return;
+  }
   const act=e.target.closest(".act");if(!act)return;
   runIngest(act.closest(".pd").dataset.id,{fts:1},act);
+});
+/* It is a button, so it answers to Enter and Space like one. */
+$("panelList").addEventListener("keydown",e=>{
+  if(e.key!=="Enter"&&e.key!==" ")return;
+  const b=e.target.closest(".hd>b");
+  if(!b)return;
+  e.preventDefault();b.click();
 });
 
 /* ── removing a dictionary (D63, amended) ────────────────────────────────
@@ -1975,7 +2170,7 @@ function resURL(dictID,ref){
    back when the host carries data-dark (Dark-Reader approach) */
 const shadowBase=`<style>
 :host{all:initial;display:block;font-family:${"-apple-system,Helvetica,Arial,sans-serif"};
-  font-size:var(--wd-fs,15px);line-height:1.618;color:#1a1a1a;word-break:break-word}
+  font-size:var(--wd-fs,15px);line-height:1.618;color:var(--wd-article-fg,#1a1a1a);word-break:break-word}
 img,video,svg{max-width:100%;height:auto}
 a{color:#5b7a99;cursor:pointer}
 table{max-width:100%;border-collapse:collapse}
@@ -2072,6 +2267,9 @@ function renderArticle(dd,body,dictID,frag){
   host.className="article";host.dataset.dict=dictID;
   const root=host.attachShadow({mode:"open"});
   root.innerHTML=shadowBase+body;
+  // After innerHTML, and last in the cascade: adopted sheets order after the
+  // root's own, so the user's rules win ties against the dictionary's.
+  if(userSheet)root.adoptedStyleSheets=[userSheet];
   if(themeIsDark()){
     host.toggleAttribute("data-dark",true);
     if(!document.documentElement.hasAttribute("data-theme"))host.classList.add("autodark");
@@ -2094,10 +2292,10 @@ function renderFrame(dd,body,dictID,frag){
   return null; // no shadow root: nothing for the caller to anchor into
 }
 function frameDoc(content,fid,dark,dictID,frag){
-  return '<!DOCTYPE html><html class="'+(dark?'dark':'')+'"><head><meta charset="utf-8">'+
+  return '<!DOCTYPE html><html class="'+(dark?'dark':'')+'"'+(dark?' data-dark':'')+'><head><meta charset="utf-8">'+
     /* Baked in, because a custom property cannot cross into another
        document; changes AFTER creation arrive by postMessage instead. */
-    '<style>html{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:'+articleFS+'px;line-height:1.618;color:#1a1a1a;background:#fff;overflow-y:hidden}'+
+    '<style>html{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:'+articleFS+'px;line-height:1.618;color:var(--wd-article-fg,#1a1a1a);background:var(--wd-article-bg,#fff);overflow-y:hidden}'+
     'body{margin:8px}img,video,svg{max-width:100%;height:auto}'+
     'html.dark{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.92)}'+
     'html.dark :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){filter:invert(1) hue-rotate(180deg)}'+
@@ -2119,6 +2317,12 @@ function frameDoc(content,fid,dark,dictID,frag){
        container or paint it; only self-referential SIZING is refused.
        frame.js carries the matching backstop (D72). */
     '<style>:root,:root>body{height:auto!important;min-height:0!important;max-height:none!important}</style>'+
+    /* The user's own article stylesheet, last of all: after the backstop, and
+       after the dictionary's <link>s, which live in the body. The element is
+       always emitted even when empty — frame.js addresses it by id to carry
+       every later edit, and an element that sometimes does not exist is a
+       branch on both sides of the bridge for no gain. */
+    '<style id="wd-user">'+styleSafe(frameCSS())+'</style>'+
     '</body></html>';
 }
 /* bridge messages from article iframes */
@@ -2936,12 +3140,442 @@ window.addEventListener("popstate",()=>{
 $("frm").removeEventListener("submit",_doSearch);
 $("frm").addEventListener("submit",e=>doSearch(e));
 
+/* ── the custom-styles editor ────────────────────────────────────────
+   Two boxes over one textarea. The split is not bureaucracy: `body{}`,
+   `p{}`, `a{}` and `table{}` are exactly the selectors someone writes with
+   an article in mind, and every one of them also hits the app. Two boxes
+   make that leak structurally impossible, and the rule fits on one line —
+   App is the page, Article is what dictionaries render.
+
+   Presets INSERT TEXT rather than being switches. A switch would be a second
+   place the answer lives, needing reconciliation with whatever was typed by
+   hand; inserted text is just text, and it teaches the vocabulary at the one
+   moment the user is looking for it.
+
+   Preview is live and debounced; saving is explicit. A half-typed rule is
+   not a state anyone wants written to disk — which is the opposite of the
+   font stepper, where every value along the way is a value. */
+/* Presets are text, not switches: picking one inserts CSS you can then edit,
+   so there is no hidden state to reconcile with what was typed by hand. Each
+   preset also knows which box it belongs in, which is why ONE menu serves
+   both tabs — deciding App vs Article is our job, not the reader's, and a
+   menu that changed under the tab hid half the examples from whoever needed
+   them. The placement rule, stated once:
+     · a --token goes in App. Custom properties are the only thing that
+       crosses into a shadow root, so one declaration recolours the page and
+       every article together.
+     · a selector naming the app's own furniture (.col, details.dict) goes in
+       App and nowhere else.
+     · a selector naming dictionary markup (body, p, table) goes in Article,
+       where it structurally cannot reach the chrome.
+     · a look that needs both — a colour a dictionary paints over, a width a
+       dictionary caps — is ONE preset with two halves, not two entries the
+       reader has to know belong together. */
+
+/* Shared, byte-for-byte, by every colour preset: inserting a second one that
+   needs it is then a no-op rather than a duplicate. */
+const ART_THROUGH=
+`/* Let the app's colours through: some dictionaries paint their own white
+   background over them. Two levels deep only, so a coloured box inside an
+   entry keeps its colour — widen to ":host *" if one still shows white. */
+:host, :root > body,
+:host > *, :root > body > * { background:none !important }`;
+
+const BOXNAME={app:"App",article:"Article"};
+
+const STYLER_PRESETS=[
+  {n:"Sepia",g:"Colour",article:ART_THROUGH,app:
+`/* Light mode only. The last two tokens are the article surface, so the page
+   and the definitions turn together — that is the whole reason this is an
+   App preset and not an Article one. */
+html:not([data-dark]){
+  --bg:#f4ecd8; --bg-card:#faf3e3; --bg-bar:rgba(244,236,216,.92);
+  --fg:#3b3229; --fg-soft:#6b5f4e; --line:#e0d5bd; --line-soft:#ebe2cf;
+  --wd-article-bg:#faf3e3; --wd-article-fg:#3b3229;
+}`},
+  {n:"High contrast",g:"Colour",article:ART_THROUGH,app:
+`/* Contrast without the blinding white: near-black on a warm off-white, with
+   the hairlines darkened so the structure stays visible at any font size.
+   Push --fg to #000 and --bg to #fff if you want the maximum. */
+html:not([data-dark]){
+  --bg:#f1f0ed; --bg-card:#fbfaf8; --bg-bar:rgba(241,240,237,.94);
+  --fg:#0f0f0f; --fg-soft:#3a3a3a; --fg-faint:#5c5c5c;
+  --line:#b9b5ad; --line-soft:#d6d2ca; --link:#1c4f7c;
+  --wd-article-bg:#fbfaf8; --wd-article-fg:#0f0f0f;
+}`},
+  {n:"True black",g:"Colour",app:
+`/* Black chrome for OLED, white text in articles. The article pair looks
+   backwards and is not: dark articles are rendered LIGHT and then inverted,
+   so what you set here is the value BEFORE the flip — #fff becomes the near
+   black behind the text, #000 becomes the text. (A hair off pure black: the
+   flip carries a contrast pass with it.) */
+html[data-dark]{
+  --bg:#000; --bg-card:#0a0a0a; --bg-bar:rgba(0,0,0,.94);
+  --fg:#ededed; --fg-soft:#a8a8a8; --fg-faint:#7a7a7a;
+  --line:#242424; --line-soft:#161616;
+  --wd-article-bg:#fff; --wd-article-fg:#000;
+}`},
+  {n:"Warm dark",g:"Colour",app:
+`/* Dark mode only, warmer than the default grey. Hue survives the article
+   flip described above, so a warm off-white lands as a warm near-black. */
+html[data-dark]{
+  --bg:#1c1a17; --bg-card:#252220; --bg-bar:rgba(28,26,23,.92);
+  --wd-article-bg:#faf6ef; --wd-article-fg:#1a1a1a;
+}`},
+  {n:"Wider column",g:"Layout",app:
+`/* The reading column, permanently. The ⇔ button in the top bar does the same
+   for one session; this is how the app opens. */
+.col{max-width:1100px}
+body.wide .col{max-width:min(1600px,98vw)}`,article:
+`/* A dictionary that caps its own width would keep the text narrow inside the
+   wider column, which is why this half exists. */
+:host, :root > body { max-width:none !important; width:auto !important }`},
+  {n:"Compact",g:"Layout",app:
+`/* The app's own frame around an article, on a phone: the column gutter, the
+   list's gutter, the card's padding and the dictionary header's indent. Set
+   the 2px to 0 to put the text against the card border. */
+@media (max-width: 700px){
+  .col{padding-left:0;padding-right:0}
+  dl{padding-inline:0}
+  .article{padding-inline:2px}
+  details.dict>summary{padding-left:.3rem;padding-right:.3rem}
+}`,article:
+`/* Two jobs, in this order: give back the side space a dictionary reserved for
+   a desktop window, then make what is left FIT — a compact article that still
+   drags sideways is not compact.
+   Only the article's ROOT needs a prefix - :host for a plain article,
+   :root > body for one that came with scripts. Everything below it can be
+   named plainly: this box only ever reaches article markup, so a bare "div"
+   here cannot touch the app.
+   Two lines to know: drop div from the second rule if a coloured box in an
+   entry ends up cramped, and 1.1em on lists is what keeps the bullet inside
+   the article instead of clipped off its edge - use 0 together with
+   list-style-position:inside to go flush. Raise 700px to apply all of it on
+   wider screens too. */
+@media (max-width: 700px){
+  :host, :root > body { margin-inline:0 !important; padding-inline:0 !important }
+  div, section, article, main, header, footer, aside, nav,
+  p, h1, h2, h3, h4, h5, h6, figure, blockquote, pre, dl, dt, table
+    { margin-inline:0 !important; padding-inline:0 !important }
+  ul, ol, dd, menu
+    { margin-inline:0 !important; padding-inline-start:1.1em !important }
+  td, th { padding-inline:.25em !important }
+
+  /* The fit half. A stylesheet written for a desktop page states widths the
+     phone does not have - and states them in em as often as in px, which is
+     why the sideways drag GROWS as you raise the font size: 40em of column is
+     40em wide whatever the screen is. So: nothing may declare its own width,
+     nothing may exceed the space it is in, and text breaks rather than pushes.
+     box-sizing is what makes the two agree, since a padded 100% box is wider
+     than 100% under the content-box default a dictionary may have set. */
+  :host, :root > body { width:auto !important; max-width:100% !important;
+    overflow-x:hidden }
+  :host *, :root > body *
+    { max-width:100% !important; min-width:0 !important;
+      box-sizing:border-box !important; overflow-wrap:break-word }
+  div, section, article, main, header, footer, aside, nav,
+  p, h1, h2, h3, h4, h5, h6, figure, blockquote, dl, dt, dd, ul, ol
+    { width:auto !important; float:none !important }
+  /* The two things that must keep their own width, and so scroll inside
+     themselves instead: a table of forms, and a block of code. The table's
+     own box stays 100% - it is the window; the cells are let back out of the
+     clamp above, or a ten-column table would be ten slivers rather than a
+     table you can push sideways. */
+  table { display:block !important; overflow-x:auto !important;
+    border-collapse:collapse }
+  table * { max-width:none !important }
+  pre { overflow-x:auto !important; white-space:pre-wrap }
+  img, video, svg { height:auto !important }
+}`},
+  {n:"Quieter results",g:"Layout",app:
+`/* Less furniture around the definitions. Delete a line to keep that one. */
+details.dict{border:0;background:none}
+details.dict>summary .count{display:none}
+details.prov{display:none}`},
+  {n:"Roomier lines",g:"Text",article:
+`/* Definitions set closer to prose than to a table. The second rule is the
+   air between paragraphs, which most dictionaries set to zero. */
+:host, :root > body { line-height:1.75 !important }
+:host p, :root > body p { margin-block:.6em }`},
+  {n:"Serif font",g:"Text",app:
+`/* The app's own font. Name families you actually have; the last entry is the
+   fallback the system is guaranteed to resolve. */
+:root{--font:Georgia,"Iowan Old Style","Times New Roman",serif}`,article:
+`/* A dictionary's own font-family wins inside its own markup, so reaching it
+   takes a separate rule and !important. Caveat worth knowing: this also
+   overrides a phonetic face a dictionary ships for its IPA — if the
+   pronunciations turn to boxes, add that element's class to the second rule
+   alongside code and kbd. */
+:host, :root > body, :host *, :root > body * {
+  font-family:Georgia,"Iowan Old Style","Times New Roman",serif !important }
+:host :is(code,kbd,pre,samp), :root > body :is(code,kbd,pre,samp) {
+  font-family:ui-monospace,Menlo,Consolas,monospace !important }`},
+  {n:"Bolder text",g:"Text",app:
+`/* For screens where the type looks washed out. Synthetic weight rather than
+   a heavier face, so it works with whatever font is in use and keeps bold
+   distinguishable from regular. WebKit and Blink only. */
+body{-webkit-text-stroke:.2px currentColor}`,article:
+`:host, :root > body { -webkit-text-stroke:.2px currentColor }`},
+  {n:"Justified text",g:"Text",article:
+`/* Justification without hyphenation opens rivers of white space in a narrow
+   column. Hyphenation follows the lang the dictionary declares; where it
+   declares none, the browser will not hyphenate. */
+:host, :root > body {
+  text-align:justify; -webkit-hyphens:auto; hyphens:auto }`},
+  {n:"Wide tables",g:"Text",article:
+`/* Conjugation and declension tables are the usual cause of sideways scroll.
+   This lets a table scroll inside itself instead of widening the article. */
+:host table, :root > body table {
+  display:block; max-width:100%; overflow-x:auto; border-collapse:collapse }
+:host :is(td,th), :root > body :is(td,th) { padding:.2em .4em }`},
+];
+let stylerTab="app",
+    stylerText={app:"",article:""},
+    // What is actually on disk. Closing without saving must put the page back
+    // to this: a preview that outlives the editor is a change nobody made.
+    stylerSaved={app:"",article:""},
+    stylerDirty={app:false,article:false},
+    stylerDir="",
+    stylerLoaded=false,
+    stylerTimer=null;
+
+/* The app half of the preview, and it has to OWN the app layer, not merely
+   sit on top of it. Winning on order is enough to ADD a rule and nowhere near
+   enough to REMOVE one: the server-injected <link> is already parsed, so
+   deleting a line from the box — or clearing it outright — would leave the
+   old rules in force until a reload, which reads as "Save did nothing".
+   Disabling the <link> once and letting this element be the whole app layer
+   makes the preview exact in both directions. A reload picks the saved file
+   up from the <link> again. */
+function stylerAppLive(css){
+  const link=document.querySelector('link[href^="/style/app.css"]');
+  if(link)link.disabled=true;
+  let el=$("wdUserAppLive");
+  if(!el){
+    el=document.createElement("style");el.id="wdUserAppLive";
+    document.head.appendChild(el);
+  }
+  el.textContent=css;
+}
+/* Edits go through the document's own editing command, not through .value:
+   assigning to .value wipes the textarea's undo stack, and the undo stack is
+   how someone takes back a preset they did not want or a Clear they pressed
+   by mistake. Ctrl/⌘-Z is the undo here; there is no second one to learn.
+   The fallback is the direct assignment, which is worse only in that it
+   forgets — it is never wrong. */
+function stylerEdit(text){
+  const ta=$("stylerCSS");
+  ta.focus();
+  let ok=false;
+  try{ok=document.execCommand("insertText",false,text)}catch(e){ok=false}
+  if(!ok){
+    const a=ta.selectionStart,b=ta.selectionEnd;
+    ta.value=ta.value.slice(0,a)+text+ta.value.slice(b);
+    ta.selectionStart=ta.selectionEnd=a+text.length;
+  }
+  stylerCommit();stylerSync();stylerPreview();
+}
+/* Everything the toolbar says about the text, in one place, so the dot and
+   the Clear button can never disagree with the box. */
+function stylerSync(){
+  $("tabApp").dataset.has=stylerText.app.trim()?"1":"";
+  $("tabArticle").dataset.has=stylerText.article.trim()?"1":"";
+  $("stylerClear").hidden=!$("stylerCSS").value;
+}
+function stylerNote(msg){
+  const n=$("stylerNote");
+  n.textContent="";
+  if(msg){n.textContent=msg;return}
+  if(STYLE_OFF){
+    n.textContent="Preview is off (?style=off). You can still edit and save; reload without it to see the result.";
+    return;
+  }
+  if(!stylerDir){
+    n.textContent="No configuration folder, so there is nowhere to save. Start wudict with a config file.";
+    return;
+  }
+  n.appendChild(document.createTextNode("Saved in "));
+  const p=document.createElement("span");
+  p.className="p";p.textContent=stylerDir;p.title="Click to copy";
+  p.onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(stylerDir)
+    .then(()=>stylerNote("Path copied"),()=>{}).then(()=>setTimeout(stylerNote,1400))};
+  n.appendChild(p);
+  n.appendChild(document.createTextNode(
+    " · Clear then Save deletes a file · /?style=off loads the app with neither applied"));
+}
+/* The textarea is the single source of truth for the tab on screen; this is
+   the one point where it is folded back into the pair we hold. */
+function stylerCommit(){
+  const v=$("stylerCSS").value;
+  if(v===stylerText[stylerTab])return;
+  stylerText[stylerTab]=v;stylerDirty[stylerTab]=true;
+}
+function stylerPreview(){
+  if(STYLE_OFF)return;
+  if(stylerTab==="app")stylerAppLive(stylerText.app);
+  else applyArticleCSS(stylerText.article);
+}
+function stylerPreviewAll(src){
+  if(STYLE_OFF)return;
+  stylerAppLive(src.app);
+  applyArticleCSS(src.article);
+}
+function stylerShowTab(tab){
+  stylerCommit();
+  stylerTab=tab;
+  $("tabApp").setAttribute("aria-selected",String(tab==="app"));
+  $("tabArticle").setAttribute("aria-selected",String(tab==="article"));
+  $("stylerCSS").value=stylerText[tab];
+  stylerSync();
+  $("stylerCSS").placeholder=tab==="app"
+    ? "CSS for the app itself — its colours and its own layout.\nTokens set on :root reach articles too."
+    : "CSS for what dictionaries render, in every article.\nUse :host, :root > body to reach the article's own root.";
+}
+/* One menu for both tabs, built once. Grouped, because a reader arrives
+   wanting a RESULT — sepia, a wider column — and not knowing which of our two
+   files it is spelled in; that is the placement rule's job, above. */
+function stylerFillPresets(){
+  const sel=$("stylerPreset");
+  if(sel.options.length)return;
+  const head=document.createElement("option");
+  head.value="";head.textContent="Examples…";sel.appendChild(head);
+  const groups={};
+  for(const p of STYLER_PRESETS){
+    const g=groups[p.g]||(groups[p.g]=Object.assign(document.createElement("optgroup"),{label:p.g}));
+    const o=document.createElement("option");o.value=p.n;o.textContent=p.n;g.appendChild(o);
+  }
+  for(const k in groups)sel.appendChild(groups[k]);
+  sel.value="";
+}
+/* A preset lands in the box or boxes it was written for, and the view follows
+   it so that no half arrives unseen. Re-picking one is a no-op rather than a
+   second copy — the halves shared between presets are one exact string, so
+   "already there" is a substring test and not a guess.
+   Undo stays the textarea's own, and it belongs to the box on screen: for a
+   two-part preset, Ctrl/⌘-Z takes back the half you are looking at. The other
+   half is one tab away, its tab is dotted, and Clear empties it. */
+function stylerApplyPreset(p){
+  const put=[],had=[];
+  for(const box of ["app","article"]){
+    const css=p[box];
+    if(!css)continue;
+    if(stylerText[box].includes(css)){had.push(BOXNAME[box]);continue}
+    if(stylerTab!==box)stylerShowTab(box);
+    const ta=$("stylerCSS");
+    stylerEdit((ta.value&&!ta.value.endsWith("\n")?"\n\n":"")+css+"\n");
+    put.push(BOXNAME[box]);
+  }
+  stylerNote(p.n+" — "+[put.length?"inserted into "+put.join(" and "):"",
+    had.length?"already in "+had.join(" and "):""].filter(Boolean).join("; "));
+  setTimeout(stylerNote,2600);
+}
+async function stylerOpen(){
+  hidePanel();
+  $("styler").classList.add("show");
+  stylerFillPresets();
+  document.body.classList.add("styling");
+  if(!stylerLoaded){
+    stylerNote("Loading…");
+    try{
+      const r=await fetch("/api/style");
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      const j=await r.json();
+      stylerText={app:j.app||"",article:j.article||""};
+      stylerSaved={...stylerText};
+      stylerDir=j.writable?(j.dir||""):"";
+      stylerLoaded=true;
+    }catch(e){
+      console.warn("could not load custom styles:",e);
+      stylerNote("Could not read the stylesheets.");
+      return;
+    }
+  }
+  stylerShowTab(stylerTab);
+  // Hand the app layer to the live element straight away, so a later Clear or
+  // a deleted rule takes effect the moment it is typed rather than on reload.
+  // Reopening also restores a preview that closing put back.
+  stylerPreviewAll(stylerText);
+  stylerNote();
+  $("stylerCSS").focus();
+}
+function stylerCloseSheet(){
+  $("styler").classList.remove("show");
+  document.body.classList.remove("styling");
+  // Unsaved text is kept — it is still in the box when you come back — but it
+  // stops being shown. Preview is preview; the page a closed editor leaves
+  // behind is the page the files describe.
+  if(stylerDirty.app||stylerDirty.article)stylerPreviewAll(stylerSaved);
+}
+async function stylerSave(){
+  stylerCommit();
+  const body={};
+  if(stylerDirty.app)body.app=stylerText.app;
+  if(stylerDirty.article)body.article=stylerText.article;
+  if(!Object.keys(body).length){stylerNote("No changes");setTimeout(stylerNote,1400);return}
+  stylerNote("Saving…");
+  try{
+    const r=await fetch("/api/style",{method:"PUT",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok)throw new Error(r.status===409
+      ? "there is nowhere to save: no configuration folder"
+      : r.status===413 ? "that stylesheet is too large" : "HTTP "+r.status);
+    const j=await r.json();
+    stylerText={app:j.app||"",article:j.article||""};
+    stylerSaved={...stylerText};
+    stylerDirty={app:false,article:false};
+    $("stylerCSS").value=stylerText[stylerTab];
+    stylerSync();
+    stylerNote(Object.values(stylerText).some(Boolean)?"Saved":"Saved — nothing left, both files removed");
+    setTimeout(stylerNote,1800);
+  }catch(e){
+    stylerNote("Could not save: "+e.message);
+  }
+}
+$("stylerLink").onclick=stylerOpen;
+$("stylerClose").onclick=stylerCloseSheet;
+$("stylerSave").onclick=stylerSave;
+$("tabApp").onclick=()=>stylerShowTab("app");
+$("tabArticle").onclick=()=>stylerShowTab("article");
+$("stylerCSS").addEventListener("input",()=>{
+  stylerCommit();stylerSync();
+  clearTimeout(stylerTimer);
+  stylerTimer=setTimeout(stylerPreview,250);
+});
+/* Empties the box; SAVE is still what removes the file, so a mispress costs
+   nothing — and Ctrl/⌘-Z brings the text straight back either way. Selecting
+   first and deleting through the editing command is what keeps that true. */
+$("stylerClear").onclick=()=>{
+  const ta=$("stylerCSS");
+  if(!ta.value)return;
+  ta.focus();ta.select();
+  let ok=false;
+  try{ok=document.execCommand("delete")}catch(e){ok=false}
+  if(!ok)ta.value="";
+  stylerCommit();stylerSync();stylerPreview();
+  stylerNote("Cleared — press Save to remove the file, or ⌘Z / Ctrl-Z to undo");
+};
+/* Inserted at the caret, not appended: a preset is a starting point that
+   belongs where you are working, and appending would silently drop it inside
+   whatever block the caret happens to be in the middle of. */
+$("stylerPreset").onchange=e=>{
+  const name=e.target.value;
+  e.target.value="";
+  const p=STYLER_PRESETS.find(x=>x.n===name);
+  if(p)stylerApplyPreset(p);
+};
+$("styler").addEventListener("keydown",e=>{
+  if(e.key==="Escape"){e.stopPropagation();stylerCloseSheet();return}
+  // Save from the keyboard, because the editor is a text field and reaching
+  // for a button costs the caret position.
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="s"){e.preventDefault();stylerSave()}
+});
+
 // settings first: they decide the panel's order and the search set, and the
 // fetch is a local file read — a millisecond, not a stall worth splitting the
 // boot screen over. The config comes alongside rather than after, because the
 // cards need its home prefix to render paths as ~/… on the FIRST draw; run
 // concurrently it costs no extra latency, and it cannot reject.
-Promise.all([loadPrefs(),loadConfig()]).then(loadDicts).then(applyURL);
+Promise.all([loadPrefs(),loadConfig(),loadUserCSS()]).then(loadDicts).then(applyURL);
 </script>
 </body>
 </html>

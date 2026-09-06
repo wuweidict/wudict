@@ -1,5 +1,10 @@
 // Copyright (C) 2026 glowinthedark
 //
+// Ported from pyglossary's babylon_bgl plugin
+// (https://github.com/ilius/pyglossary), Copyright (C) 2008-2021 Saeed
+// Rasooli (ilius) and Copyright (C) 2011-2012 kubtek, which credits the
+// reverse engineering of the format to Raul Fernandes and Karl Grill.
+//
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package bgl is the direct backend for Babylon BGL dictionaries. A BGL file

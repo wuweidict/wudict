@@ -19,13 +19,14 @@ import (
 func TestScriptsAreContentAddressed(t *testing.T) {
 	s := newTestServer(t)
 	s.Version = "1.2.3"
-	page := string(s.page())
+	page, _ := s.pageFor("")
+	pageStr := string(page)
 
-	if want := "/assets/frame.js?v=" + assetTag(frameJS); !strings.Contains(page, want) {
+	if want := "/assets/frame.js?v=" + assetTag(frameJS); !strings.Contains(pageStr, want) {
 		t.Errorf("index.html does not request frame.js by content hash (%s)", want)
 	}
-	if i := strings.Index(page, "{{"); i >= 0 {
-		t.Errorf("unsubstituted placeholder in the served page: %q", page[i:min(i+24, len(page))])
+	if i := strings.Index(pageStr, "{{"); i >= 0 {
+		t.Errorf("unsubstituted placeholder in the served page: %q", pageStr[i:min(i+24, len(pageStr))])
 	}
 	// the hash must actually depend on the content
 	if assetTag(frameJS) == assetTag(append(append([]byte{}, frameJS...), '\n')) {
@@ -117,7 +118,7 @@ func TestIndexRevalidatesWithoutResending(t *testing.T) {
 	// holds: a rebuild that changes only the version must invalidate.
 	other := newTestServer(t)
 	other.Version = "9.9.9"
-	if other.pageETag() == etag {
+	if _, otherETag := other.pageFor(""); otherETag == etag {
 		t.Error("ETag ignores the version stamped into the page")
 	}
 	// No Last-Modified: these bytes are embedded and have no meaningful date,

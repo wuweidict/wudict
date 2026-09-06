@@ -71,17 +71,31 @@ type Server struct {
 	// worse than an error message.
 	Version string
 
-	// indexOnce caches the one substitution index.html needs ({{VERSION}} in
-	// the About box). Version is assigned after the Server is built, so this
-	// cannot be done at embed time; doing it per request would re-copy the
-	// whole page on every load.
+	// indexOnce caches the substitutions index.html needs that never change
+	// after startup ({{VERSION}} in the About box, {{FRAMEJS}}'s hash).
+	// Version is assigned after the Server is built, so this cannot be done at
+	// embed time; doing it per request would re-copy the whole page on every
+	// load. {{USERCSS}} is deliberately left standing here - see pageFor.
 	indexOnce sync.Once
-	indexPage []byte
-	// indexETag identifies indexPage by its content, computed with it. The
-	// page's Cache-Control is no-cache - revalidate every time - which without
-	// a validator to revalidate AGAINST meant re-sending 100 KB on every load,
-	// including a plain reload.
-	indexETag string
+	indexBase []byte
+
+	// The finished page, keyed by the user stylesheet it names. app.css is a
+	// file the user edits at any moment, and both the cached page AND its
+	// validator are derived from the substituted bytes, so neither may be
+	// computed once: a sync.Once over the whole substitution would ship the
+	// hash of a stylesheet that no longer exists, forever. One entry, because
+	// there is one current stylesheet; ?style=off keys on "" and shares the
+	// no-stylesheet page byte for byte.
+	styleMu    sync.Mutex
+	styledTag  string
+	styledPage []byte
+	styledETag string
+
+	// StyleDir is where the user's global stylesheets live (style.go) - beside
+	// the wudict.toml in effect, resolved by the CLI the same way state.json's
+	// directory is. Empty disables the feature rather than inventing a
+	// location, and the editor says so instead of failing to save.
+	StyleDir string
 
 	// DictDirOrigin / DictDirEditable describe where the dictionary folders
 	// came from (config layering), so the UI can warn that a flag or an
@@ -290,20 +304,21 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	// A zero modtime deliberately emits no Last-Modified: these bytes are
 	// embedded in the binary and have no meaningful date, and offering a
 	// second validator we cannot stand behind is worse than offering one.
-	w.Header().Set("ETag", s.pageETag())
-	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(s.page()))
+	// ?style=off is the way back in after app.css has hidden its own editor
+	// (style.go). It resolves to the same bytes as "no stylesheet at all", so
+	// it costs no second cache entry.
+	tag := ""
+	if !styleOff(r) {
+		tag = s.appStyleTag()
+	}
+	page, etag := s.pageFor(tag)
+	w.Header().Set("ETag", etag)
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(page))
 }
 
-// page returns index.html with the build version stamped into the About box.
-func (s *Server) page() []byte { s.buildPage(); return s.indexPage }
-
-// pageETag identifies that page by its content - the same content addressing
-// D45 applies to the scripts, turned around: there the URL carries the hash so
-// the answer can be cached forever, here the validator carries it so the
-// question is cheap to ask.
-func (s *Server) pageETag() string { s.buildPage(); return s.indexETag }
-
-func (s *Server) buildPage() {
+// basePage is index.html with everything that is fixed for this process
+// already substituted, and {{USERCSS}} still standing.
+func (s *Server) basePage() []byte {
 	s.indexOnce.Do(func() {
 		v := s.Version
 		if v == "" {
@@ -311,12 +326,34 @@ func (s *Server) buildPage() {
 		}
 		page := strings.ReplaceAll(string(indexHTML), "{{VERSION}}", v)
 		page = strings.ReplaceAll(page, "{{FRAMEJS}}", assetTag(frameJS))
-		s.indexPage = []byte(page)
-		// Hashed AFTER substitution: the version stamp and the asset hashes are
-		// part of what the browser is holding, so a rebuild that changes only
-		// those must still invalidate.
-		s.indexETag = `"` + assetTag(s.indexPage) + `"`
+		s.indexBase = []byte(page)
 	})
+	return s.indexBase
+}
+
+// pageFor finishes the page for one user stylesheet, identified by its content
+// hash ("" for none). The link is render-blocking and last in <head>, which is
+// two decisions in one element: last so the user's rules win ties against the
+// app's own <style>, and a <link> rather than an inlined <style> so a sepia
+// reader never sees a white flash on load - and so no CSS ever has to be
+// escaped into an HTML document.
+//
+// The ETag is computed from the finished bytes - the version stamp, the asset
+// hashes AND the stylesheet hash are all part of what the browser is holding,
+// so a change to any of them must invalidate.
+func (s *Server) pageFor(tag string) ([]byte, string) {
+	s.styleMu.Lock()
+	defer s.styleMu.Unlock()
+	if s.styledPage != nil && s.styledTag == tag {
+		return s.styledPage, s.styledETag
+	}
+	link := ""
+	if tag != "" {
+		link = `<link rel="stylesheet" href="/style/` + appCSSName + `?v=` + tag + `">`
+	}
+	page := []byte(strings.ReplaceAll(string(s.basePage()), "{{USERCSS}}", link))
+	s.styledTag, s.styledPage, s.styledETag = tag, page, `"`+assetTag(page)+`"`
+	return s.styledPage, s.styledETag
 }
 
 // handleSetupPage serves the folder editor on demand (the same page first run

@@ -53,6 +53,13 @@ import (
 // shim at the module root, is where the program is.
 var Version = "dev"
 
+// Notices is THIRD-PARTY-NOTICES.md, handed over by the root package - the
+// only one that can embed a file at the module root. A release is a bare
+// executable with nothing beside it, and several of the licences in that file
+// require their text to travel with a BINARY, so `wudict licenses` carries it.
+// Empty only in a build that skipped the shim (a test binary, say).
+var Notices string
+
 // Product identity, in one place. The binary is `wudict`; the name people
 // read is WuWeiDict. Anything user-facing - CLI banner, web UI
 // About box, setup page - sources its wording from here or mirrors it.
@@ -154,6 +161,8 @@ COMMANDS
                                           scanned folder); -keep-index deletes only the
                                           originals, and refuses while media is unpacked.
                                           Lists what it would delete; -f deletes it.
+  licenses                                This program's licence, and the notices for the
+                                          third-party code built into it.
 
 SERVE FLAGS
   --dict-dir     <path>   Folder with dictionary files (scanned recursively).
@@ -412,6 +421,41 @@ LIBRARY FOLDER
   broken - and names the res/ path that would override it. The bytes
   themselves are always served exactly as stored.
 
+CUSTOM STYLES
+  Two CSS files beside the wudict.toml in effect, both optional:
+
+    <config folder>/style/app.css      the app itself
+    <config folder>/style/article.css  what dictionaries render
+
+  app.css styles the page - its colours and its own layout. Custom
+  properties it sets on :root reach articles too, because they inherit
+  across the article sandbox, so one sepia block recolours everything:
+
+    html:not([data-dark]){ --bg:#f4ecd8; --wd-article-bg:#faf3e3 }
+
+  article.css styles dictionary content, in both article flavours. It is
+  ADDED after the dictionary's own CSS rather than replacing it (that is
+  what res/ above is for), and it is where a desktop dictionary's side
+  padding gets reclaimed on a phone.
+
+  The editor's examples know which of the two files they belong in; the
+  ones that need both - a colour a dictionary paints over, a width a
+  dictionary caps - insert a half into each.
+
+  [data-dark] is set on the app, on an article and inside a frame
+  whenever the theme resolves to dark, whether by choice or by the
+  system setting - it is the one spelling that works in all three.
+
+  Both files are served uncached, so an external edit lands on reload;
+  the panel's "Custom styles..." editor writes the same files and
+  previews as you type. There, Clear then Save deletes a file, and
+  closing the editor discards anything not saved. Deleting a file by
+  hand is equivalent. If a rule ever hides the app, open
+
+    http://<host>:<port>/?style=off
+
+  which serves the page with neither file applied.
+
 EXAMPLE wudict.toml
   DICT_DIR    = "/data/dicts"
   DB_DIR      = "~/.wudict/db"
@@ -500,6 +544,8 @@ func Main() {
 	case "-v", "--version", "version":
 		fmt.Println(ProductName, Version)
 		fmt.Println(RepoURL)
+	case "licenses", "license", "notices":
+		cmdLicenses()
 	default:
 		if strings.HasPrefix(cmd, "-") {
 			// bare flags (mdict-go-web style): treat as serve flags
@@ -517,6 +563,21 @@ func Main() {
 		os.Exit(2)
 	}
 	fail(err)
+}
+
+// cmdLicenses prints the program's own licence line and then the embedded
+// third-party notices. To stdout, in full: a notice a user has to go find on a
+// web page is not one that shipped with the binary.
+func cmdLicenses() {
+	fmt.Printf("%s %s\n%s\n\n", ProductName, Version, RepoURL)
+	fmt.Print("GPL-3.0-or-later. This program comes with ABSOLUTELY NO WARRANTY.\n" +
+		"You may redistribute it under the terms of the GNU General Public\n" +
+		"License, version 3 or later: <https://www.gnu.org/licenses/gpl-3.0.html>\n\n")
+	if Notices == "" {
+		fmt.Printf("Third-party notices: %s/blob/master/THIRD-PARTY-NOTICES.md\n", RepoURL)
+		return
+	}
+	fmt.Print(Notices)
 }
 
 // openFileArgs turns a lone dictionary path into serve flags, or returns nil
@@ -1170,6 +1231,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	}
 	srv := server.New(reg)
 	srv.ConfigPath = cfgFile
+	srv.StyleDir = stylePath(cfgFile)
 	store.SetCompressBodies(!cfg.NoCompress)
 	server.SetIndexWorkers(cfg.IndexWorkers)
 	if cfg.MemoryLimit > 0 {
@@ -1480,19 +1542,41 @@ type startupInfo struct {
 	keyURL      string // url carrying the access key, "" when none is required
 }
 
-// statePath places state.json next to the wudict.toml that is in effect. When
-// no config file exists at all it falls back to the home location - the same
-// directory EnsureConfigFile would have used - and when even the home
-// directory is unknown it returns "", which makes the state in-memory rather
+// userDir is the directory the wudict.toml in effect lives in - wudict's own
+// space for everything the user owns but did not put in the config file. When
+// no config file exists at all it falls back to the home location, the same
+// directory EnsureConfigFile would have used, and when even the home directory
+// is unknown it returns "": the caller then keeps its state in memory rather
 // than scattering a file somewhere nobody asked for.
-func statePath(cfgFile string) string {
+func userDir(cfgFile string) string {
 	if cfgFile != "" {
-		return filepath.Join(filepath.Dir(cfgFile), server.StateFile)
+		return filepath.Dir(cfgFile)
 	}
 	if p := config.HomeConfig(); p != "" {
-		return filepath.Join(filepath.Dir(p), server.StateFile)
+		return filepath.Dir(p)
 	}
 	return ""
+}
+
+// statePath places state.json next to the wudict.toml that is in effect, so a
+// portable install (D32) keeps its state on the same stick as its config and
+// --config points at both at once.
+func statePath(cfgFile string) string {
+	d := userDir(cfgFile)
+	if d == "" {
+		return ""
+	}
+	return filepath.Join(d, server.StateFile)
+}
+
+// stylePath places the user's global stylesheets beside that same file, for
+// the same reason (style.go).
+func stylePath(cfgFile string) string {
+	d := userDir(cfgFile)
+	if d == "" {
+		return ""
+	}
+	return filepath.Join(d, server.StyleDirName)
 }
 
 func printStartup(cfg config.Config, in startupInfo) {

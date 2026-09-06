@@ -503,7 +503,28 @@ func (e *entry) maybeAutoIndex() {
 // waiting on.
 const demandRetryAfter = 30 * time.Second
 
+// prepared reports that this dictionary already has a library folder, so a
+// demanded ingest would have nothing to do. It is the lock-free form of the
+// two early returns in ensureBaseIndex, and it is advisory: a race only means
+// the demand proceeds and ensureBaseIndex returns nil, as it always did.
+func (e *entry) prepared() bool {
+	if store.IsTextDB(e.Path) {
+		return true
+	}
+	textDB, ok := store.PreparedFor(e.Path)
+	return ok && fileExists(textDB)
+}
+
 func (e *entry) demandIndex() {
+	// Nothing to prepare: return before anything is spent. Not an
+	// optimisation of a few milliseconds - the goroutine, the front slot and
+	// the power hold are all observable. HoldActiveProcs announces "work the
+	// user is waiting on" to the host (power.go), and on Android that hoists a
+	// foreground service for an ingest that ends 36 ms later.
+	if e.prepared() {
+		e.demanded.Store(true) // ready, so the UI stops offering to prepare it
+		return
+	}
 	if f := e.demandFail.Load(); f != 0 && time.Since(time.Unix(0, f)) < demandRetryAfter {
 		return
 	}
@@ -1848,11 +1869,8 @@ func (e *entry) reabsorbAbbrev() error {
 func (e *entry) ensureBaseIndex(progress store.Progress) error {
 	e.ingestMu.Lock()
 	defer e.ingestMu.Unlock()
-	if store.IsTextDB(e.Path) {
-		return nil
-	}
-	if textDB, ok := store.PreparedFor(e.Path); ok && fileExists(textDB) {
-		return nil // already prepared, at whatever level the user chose
+	if e.prepared() {
+		return nil // a text.db of its own, or already prepared at whatever level the user chose
 	}
 	dir, err := store.ClaimDir(e.Path)
 	if err != nil {

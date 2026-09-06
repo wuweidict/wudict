@@ -13,6 +13,22 @@
 // program actually does lives in internal/cli.
 package main
 
-import "github.com/wuweidict/wudict/internal/cli"
+import (
+	_ "embed"
 
-func main() { cli.Main() }
+	"github.com/wuweidict/wudict/internal/cli"
+)
+
+// The notices travel INSIDE the binary (`wudict licenses`), because a release
+// is a bare executable and several third-party licences require their text to
+// accompany a binary distribution. Only this package can embed it: go:embed
+// cannot reach out of its own directory, and the file belongs at the root
+// where anyone browsing the repo will find it.
+//
+//go:embed THIRD-PARTY-NOTICES.md
+var notices string
+
+func main() {
+	cli.Notices = notices
+	cli.Main()
+}

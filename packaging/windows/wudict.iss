@@ -135,6 +135,9 @@ Name: "associate";    Description: "Offer {#AppName} in ""Open with"" for dictio
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "wudict.exe"; Flags: ignoreversion
 Source: "wudict.ico";   DestDir: "{app}"; Flags: ignoreversion
+; The third-party notices, beside the exe as well as inside it (`wudict
+; licenses`): several of them require their text to accompany a binary.
+Source: "..\..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}";       Filename: "{app}\wudict.exe"; IconFilename: "{app}\wudict.ico"; Comment: "Serve your dictionaries in the browser"

@@ -48,6 +48,7 @@ nav = [
     "dictionaries/formats.md",
     "dictionaries/library.md",
     "dictionaries/override.md",
+    "dictionaries/styles.md",
   ] },
   { "Browser extension" = [
     "extension.md",

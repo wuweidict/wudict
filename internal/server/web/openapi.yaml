@@ -784,6 +784,78 @@ paths:
         '500':
           description: The state file could not be written.
 
+  /api/style:
+    get:
+      tags: [internal]
+      operationId: getStyle
+      x-internal: true
+      summary: The user's global stylesheets
+      description: >
+        Two CSS files the user owns, applied to everything wuDict renders.
+        `app` styles the page itself - its colours, its own layout - and its
+        `:root` custom properties reach articles too, because they inherit
+        across the shadow boundary. `article` styles what dictionaries render,
+        in both article flavours (shadow root and sandboxed iframe).
+
+
+        The split is what keeps `body{}`, `p{}` and `a{}` - written with
+        articles in mind - from also restyling the chrome.
+
+
+        `dir` is where the two files live on disk, beside the `wudict.toml` in
+        effect, so they can be edited with an ordinary text editor as well;
+        `writable` is false when there is no config directory at all, and the
+        editor says so instead of failing to save.
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s 'http://127.0.0.1:6888/api/style' | jq -r .app
+      responses:
+        '200':
+          description: Both stylesheets.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Style' }
+    put:
+      tags: [internal]
+      operationId: saveStyle
+      x-internal: true
+      summary: Replace either stylesheet, or both
+      description: >
+        Omit a field to leave that file untouched: absent and empty are
+        different, and the App tab and the Article tab are one editor sending
+        different bodies. An empty string REMOVES the file, so "I cleared the
+        box" and "there is a file here containing nothing" do not become two
+        states that behave the same but read differently.
+
+
+        Each file is capped at 256 KiB. A stylesheet that hides the app can be
+        stepped around with `GET /?style=off`, which omits it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                app: { type: string, description: The chrome stylesheet. }
+                article: { type: string, description: The article stylesheet. }
+      responses:
+        '200':
+          description: Both stylesheets, as stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Style' }
+        '400':
+          description: The body is not valid JSON.
+        '409':
+          description: There is no config directory, so there is nowhere to save.
+        '413':
+          description: A stylesheet is larger than 256 KiB.
+        '500':
+          description: A file could not be written.
+
   /api/demand:
     post:
       tags: [internal]
@@ -1299,6 +1371,23 @@ components:
           description: >
             Article text size in px. Absent or 0 means the default (15).
             Out-of-range values are clamped, not rejected.
+
+    Style:
+      type: object
+      description: The user's two global stylesheets and where they are kept.
+      properties:
+        app:
+          type: string
+          description: CSS applied to the page itself; its :root tokens also reach articles.
+        article:
+          type: string
+          description: CSS applied inside every article, both shadow-root and iframe.
+        dir:
+          type: string
+          description: The folder holding the two files, or empty when there is none.
+        writable:
+          type: boolean
+          description: Whether PUT can store anything.
 
     Prefs:
       type: object

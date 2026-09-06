@@ -314,6 +314,63 @@ inside the dictionary itself — remove the file and you're back to the original
 One exception: a `.spx` audio file placed in `res/` is served as-is,
 **not** transcoded to WAV the way a `.spx` inside the dictionary is. Supply `.mp3` or `.wav` instead.
 
+## Custom styles
+
+`res/` patches one file of one dictionary. To restyle **everything** — wuDict
+itself and every article — write your own CSS in two optional files beside the
+`wudict.toml` in effect, usually `~/.wudict/style/`:
+
+```
+~/.wudict/style/
+  app.css       wuDict itself — its colours, its own layout
+  article.css   what dictionaries render, in every article
+```
+
+The ☰ panel's **Custom styles…** opens an editor for both, docked at the
+bottom of the page so the article you are adjusting stays visible and reflows
+as you type. It carries a dozen ready-made examples — sepia, high contrast in
+either polarity, a true-black OLED dark, a wider column, a compact mobile view,
+justified text, tables that stop scrolling the page sideways — which it
+*inserts as text* for you to edit. Each one knows which file it belongs in, and
+the ones that need both write both halves. The same two files can be edited in
+any text editor; they are served uncached, so an edit lands on the next
+reload.
+
+The split is what keeps `body`, `p` and `a` — the selectors you reach for when
+styling a definition — from also restyling the interface. Colours need no
+duplication, because custom properties set on `:root` in `app.css` are
+inherited by articles too:
+
+```css
+/* app.css — sepia in light mode, page and definitions together */
+html:not([data-dark]){
+  --bg:#f4ecd8; --bg-card:#faf3e3;
+  --fg:#3b3229; --line:#e0d5bd;
+  --wd-article-bg:#faf3e3; --wd-article-fg:#3b3229;
+}
+```
+
+```css
+/* article.css — reclaim the side space a desktop dictionary reserves */
+@media (max-width: 700px){
+  :host, :root > body         { margin-inline:0 !important; padding-inline:0 !important }
+  :host > *, :root > body > * { margin-inline:0 !important; padding-inline:0 !important }
+}
+```
+
+`[data-dark]` is set whenever wuDict resolves to dark — by your choice or by
+the system setting — on the page, on an article, and inside a script-bearing
+article's frame, so `html[data-dark]{…}` is the only spelling you need. In dark
+mode articles are inverted rather than recoloured, so write article colours for
+light and let dark be derived.
+
+Undoing is the same three moves everywhere else: <kbd>⌘Z</kbd> in the box takes
+back what you typed or inserted, closing the sheet discards everything since the
+last **Save** (the page reverts, your text stays in the box), and **Clear** then
+**Save** deletes the file outright. A dot on a tab means that box holds
+something. If a rule ever hides the app, open `/?style=off` and the page is
+served with neither file applied.
+
 ## Disk use
 
 A prepared dictionary is usually **smaller than the file it came from**:
@@ -375,12 +432,92 @@ for the cgo flavour with internal speex decoder and optimized sqlite3, and
 `.github/workflows/build-purego.yml` for purego builds.
 Supported OS's: macOS (arm64/amd64), Linux (amd64/arm64/armv7/armv6) and Windows
 (amd64/arm64).
+## Acknowledgements
+
+Almost nothing here was invented by this project. The formats it reads are
+closed, and they are readable at all because other people spent years working
+them out and then wrote down what they found.
+
+### Prior art and format knowledge
+
+- **[pyglossary](https://github.com/ilius/pyglossary)** — the reference this
+  project was built against. Its plugins are the clearest working description of
+  MDX/MDD, StarDict, Slob, DSL and BGL that exists anywhere, and the BGL parser
+  here is ported from its `babylon_bgl` plugin. Thanks to
+  **[@ilius](https://github.com/ilius)** and pyglossary's contributors for
+  sustained, meticulous work on formats nobody else kept maintaining.
+- **[GoldenDict](http://goldendict.org/)** and the actively developed fork
+  **[goldendict-ng](https://github.com/xiaoyifang/goldendict-ng)** — the program
+  that made these dictionaries worth owning, and the model for the BGL reader's
+  streaming decompression.
+- **[medict](https://github.com/terasum/medict)** by Quan Chen (formerly
+  `go-mdict`) — the MDX/MDD parser in `internal/gomdict` is derived from it.
+- **Raul Fernandes** and **Karl Grill** — the original reverse engineering of the
+  Babylon BGL format.
+- **[slob](https://github.com/itkach/slob)** and Aard 2 by Igor Tkach,
+  **[StarDict](https://github.com/huzheng001/stardict-3)**, ABBYY Lingvo's DSL,
+  and **[Kiwix](https://kiwix.org/)**'s ZIM.
+
+### Libraries and components
+
+- **[SQLite](https://sqlite.org/)** and its
+  **[FTS5](https://sqlite.org/fts5.html)** extension — the entire prepared
+  library: storage, headword index, and full-text search across a hundred
+  dictionaries at once. **FTS5** made this project possible. 
+- Public domain, and maintained at that standard for twenty-five years.
+- **[mattn/go-sqlite3](https://github.com/mattn/go-sqlite3)** — cgo SQLite
+  driver; the default optimized build.
+- **[modernc.org/sqlite](https://gitlab.com/cznic/sqlite)** — SQLite translated
+  to pure Go, so releases build for every platform without a C toolchain. Both
+  drivers are first-class.
+- **[Speex](https://www.speex.org/)** — Jean-Marc Valin and the
+  [Xiph.Org Foundation](https://xiph.org/). `internal/speex` vendors the
+  reference decoder so `.spx` pronunciations play without an external tool, and
+  it includes **[kiss_fft](https://github.com/mborgerding/kissfft)** by Mark
+  Borgerding.
+- **[anchore/go-lzo](https://github.com/anchore/go-lzo)** — LZO1X
+  decompression for MDX record blocks, written from the kernel's format
+  documentation and **[lzokay](https://github.com/AxioDL/lzokay)** by Jack
+  Andersen.
+- **[c0mm4nd/go-ripemd](https://github.com/c0mm4nd/go-ripemd)** — RIPEMD, for
+  MDX key-block decryption.
+- **[cespare/xxhash](https://github.com/cespare/xxhash)** — MDX v3 checksums.
+- **[klauspost/compress](https://github.com/klauspost/compress)** — zstd and
+  deflate, for ZIM clusters and Slob bins.
+- **[ulikunitz/xz](https://github.com/ulikunitz/xz)** — LZMA, for Slob and ZIM
+  content.
+- **[aaaton/golem](https://github.com/aaaton/golem)** — English lemmatiser, so
+  that *understood* finds *understand*.
+- **[golang.org/x/net](https://pkg.go.dev/golang.org/x/net)** — HTML tokeniser,
+  used to rewrite article markup and resolve dictionary resources.
+- **[gogpu/systray](https://github.com/gogpu/systray)** and
+  **[godbus/dbus](https://github.com/godbus/dbus)** — the tray icon, and its
+  Linux desktop integration.
+- **[Inno Setup](https://jrsoftware.org/isinfo.php)** by Jordan Russell — the
+  Windows installer: small, scriptable, and free for as long as Windows has had
+  installers.
+- **[Go](https://go.dev/)** — the stack that lets us cross-compiles a static binary for
+  eight platforms from one machine, including android.
+
+Not affiliated with, or endorsed by, any of the above.
 
 ## License
 
-GPL-3.0-or-later — see [LICENSE](LICENSE). Includes code derived from
-[go-mdict](https://github.com/terasum/go-mdict) (GPL-3) and format
-knowledge from [pyglossary](https://github.com/ilius/pyglossary) (the BGL
-parser is ported from its `babylon_bgl` plugin, with streaming modeled on
-[GoldenDict](https://github.com/xiaoyifang/goldendict-ng); both trace to
-the reverse engineering by Raul Fernandes and Karl Grill).
+GPL-3.0-or-later — see [LICENSE](LICENSE).
+
+`wudict licenses` prints the full third-party notices from inside the binary;
+the same text is in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+Third-party code included in this repository:
+
+| Component | Origin | License |
+|---|---|---|
+| `internal/gomdict` (MDX/MDD parser) | [medict](https://github.com/terasum/medict), © 2023 Quan Chen | GPL-3.0-or-later |
+| `internal/format/bgl` (BGL parser) | ported from [pyglossary](https://github.com/ilius/pyglossary)'s `babylon_bgl` | GPL-3.0-or-later |
+| `internal/speex/clib` (Speex decoder) | [Speex](https://www.speex.org/), © Jean-Marc Valin / Xiph.Org, Analog Devices | BSD-3-Clause |
+| `internal/speex/clib` (`kiss_fft`) | [kissfft](https://github.com/mborgerding/kissfft), © Mark Borgerding | BSD-3-Clause |
+
+Dependencies fetched at build time keep their own licenses; every one of them,
+with its license text, is listed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) (regenerate with
+`make notices`).

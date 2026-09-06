@@ -262,6 +262,20 @@
 		if (!e.data) return;
 		if (e.data.t === "theme") {
 			document.documentElement.classList.toggle("dark", !!e.data.dark);
+			// The same fact under the name the user's own stylesheet uses:
+			// .dark drives the invert filter the app bakes in, [data-dark] is
+			// the one spelling of "it is dark right now" that is identical
+			// here, on a shadow host and on the page itself.
+			document.documentElement.toggleAttribute("data-dark", !!e.data.dark);
+		} else if (e.data.t === "css") {
+			// The user's global article stylesheet. Baked into our srcdoc at
+			// creation, exactly like the font size; this carries every later
+			// edit, live, while they are typing it.
+			var el = document.getElementById("wd-user");
+			if (el) {
+				el.textContent = String(e.data.css || "");
+				requestAnimationFrame(post);
+			}
 		} else if (e.data.t === "fs") {
 			// The parent bakes the size into our srcdoc at creation; this is
 			// how every change AFTER that arrives, because a CSS custom

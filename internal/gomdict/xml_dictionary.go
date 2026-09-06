@@ -13,6 +13,14 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
+// Derived from medict (https://github.com/terasum/medict),
+// internal/libs/go-mdict.
+//
+// Modified in 2026 by glowinthedark for wudict: largely rewritten; only
+// the v3 XML header shape survives.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 package go_mdict
 

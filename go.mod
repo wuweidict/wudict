@@ -5,13 +5,13 @@ go 1.26.5
 require (
 	github.com/c0mm4nd/go-ripemd v0.0.0-20200326052756-bd1759ad7d10
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/rasky/go-lzo v0.0.0-20200203143853-96a758eda86e
 	golang.org/x/text v0.40.0
 )
 
 require (
 	github.com/aaaton/golem/v4 v4.0.2
 	github.com/aaaton/golem/v4/dicts/en v1.0.1
+	github.com/anchore/go-lzo v0.1.1
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gogpu/systray v0.2.8
 	github.com/klauspost/compress v1.19.0

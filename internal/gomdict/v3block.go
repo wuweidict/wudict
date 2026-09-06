@@ -1,18 +1,8 @@
+// Copyright (C) 2026 glowinthedark
 //
-// Copyright (C) 2023 Quan Chen <chenquan_act@163.com>
+// extends the medict-derived MDX parser in this package.
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 package go_mdict
 
@@ -23,7 +13,7 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/rasky/go-lzo"
+	lzo "github.com/anchore/go-lzo"
 )
 
 // decodeBlockV3 decodes a single v3 key/record block.
@@ -120,11 +110,29 @@ func (mdict *MdictBase) decodeBlockV3(block []byte, decompressedSize int) ([]byt
 	return decompressed, nil
 }
 
-// lzoDecompress1X wraps go-lzo's Decompress1X with raw LZO1X data (no MDict
-// \xf0 prefix) and the decompressed size as the outLen hint.
+// lzoDecompress1X decompresses raw LZO1X data (no MDict \xf0 prefix) into a
+// buffer of exactly the size the block header claims. LZO carries no length of
+// its own, so that claimed size is both the allocation and the check: a stream
+// that stops short or runs long is a corrupt block, not a short read.
 func lzoDecompress1X(data []byte, decompressedSize int) ([]byte, error) {
-	return lzo.Decompress1X(bytes.NewReader(data), len(data), decompressedSize)
+	if decompressedSize < 0 || decompressedSize > maxLZOBlock {
+		return nil, fmt.Errorf("lzo: implausible decompressed size %d", decompressedSize)
+	}
+	out := make([]byte, decompressedSize)
+	n, err := lzo.Decompress(data, out)
+	if err != nil {
+		return nil, fmt.Errorf("lzo: %w", err)
+	}
+	if n != decompressedSize {
+		return nil, fmt.Errorf("lzo: produced %d bytes, block claims %d", n, decompressedSize)
+	}
+	return out, nil
 }
+
+// maxLZOBlock caps what a header may ask us to allocate. MDX record and key
+// blocks are tens of KB; this is three orders of magnitude of headroom, and it
+// is the only thing between a corrupt size field and a 4 GB allocation.
+const maxLZOBlock = 256 << 20
 
 // adler32Of computes the Adler-32 checksum of data (matching zlib.adler32).
 func adler32Of(data []byte) uint32 {

@@ -1,4 +1,12 @@
-// Copyright (C) 2026 glowinthedark
+//
+// Copyright (C) 2023 Quan Chen <chenquan_act@163.com>
+// (upstream carries no per-file header; the medict project is GPL-3.0-or-later)
+//
+// Derived from medict (https://github.com/terasum/medict),
+// internal/libs/go-mdict.
+//
+// Modified in 2026 by glowinthedark for wudict: logging shim; otherwise
+// unchanged.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 

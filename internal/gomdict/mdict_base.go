@@ -13,11 +13,18 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
+// Derived from medict (https://github.com/terasum/medict),
+// internal/libs/go-mdict.
+//
+// Modified in 2026 by glowinthedark: MDX v3 block scanning,
+// indexed record access and a logging shim replacing the go-logging.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 package go_mdict
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -25,8 +32,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/rasky/go-lzo"
 )
 
 // readDictHeader reads the dictionary header.
@@ -552,10 +557,10 @@ func (mdict *MdictBase) decodeKeyEntries(keyBlockDataCompressBuffer []byte) erro
 			key_block = keyBlockDataCompressBuffer[start+8 : end]
 
 		} else if kbCompType[0] == 1 {
-			// LZO1X: go-lzo expects raw LZO1X data (no MDict \xf0 prefix),
-			// with the decompressed size passed as an outLen hint.
+			// LZO1X: raw LZO1X data (no MDict \xf0 prefix), sized by the
+			// block header.
 			raw := keyBlockDataCompressBuffer[start+8 : end]
-			out, err1 := lzo.Decompress1X(bytes.NewReader(raw), len(raw), int(decompressedSize))
+			out, err1 := lzoDecompress1X(raw, int(decompressedSize))
 			if err1 != nil {
 				return err1
 			}
@@ -1013,8 +1018,8 @@ func (mdict *MdictBase) decodeRecordBlock(startOffset, compLen int64, info *Mdic
 		}
 		switch comp[0] {
 		case 1:
-			// LZO1X: raw data + decompressed-size hint.
-			out, err1 := lzo.Decompress1X(bytes.NewReader(dec), len(dec), int(info.deCompressSize))
+			// LZO1X: raw data, sized by the block header.
+			out, err1 := lzoDecompress1X(dec, int(info.deCompressSize))
 			if err1 != nil {
 				return nil, err1
 			}

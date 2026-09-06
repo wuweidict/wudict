@@ -91,6 +91,10 @@ func (s *Server) routes() []route {
 		{"GET", "/api/prefs", s.handlePrefs, "/api/prefs", false},
 		{"PUT", "/api/prefs", s.handleSavePrefs, "/api/prefs", false},
 		{"GET", "/api/reveal", s.handleReveal, "/api/reveal", false},
+		// the user's own global stylesheets (style.go). Never CORS: the GET
+		// reports a path on the user's disk and the PUT writes to it.
+		{"GET", "/api/style", s.handleStyle, "/api/style", false},
+		{"PUT", "/api/style", s.handleSaveStyle, "/api/style", false},
 		// "I picked this one": prepare it now, before a query exists
 		// (demand.go). Never CORS - it starts work and writes to the library.
 		{"POST", "/api/demand", s.handleDemand, "/api/demand", false},
@@ -119,6 +123,11 @@ func (s *Server) routes() []route {
 		// the lemma installer, reached from setup and from the app's
 		// configuration disclosure
 		{"GET", "/lemmas", s.handleLemmasPage, "", false},
+		// The user's global stylesheets, served the way a res/ override is:
+		// no-cache, because this is a file they are actively editing. Not
+		// under /assets/ - nothing here is embedded in the binary, and the
+		// immutable week-long cache those get would hide every edit.
+		{"GET", "/style/", s.handleUserCSS, "", false},
 		{"GET", "/assets/frame.js", serveAsset("application/javascript; charset=utf-8", frameJS), "", false},
 		{"GET", "/assets/setup.css", serveAsset("text/css; charset=utf-8", setupCSS), "", false},
 		{"GET", "/assets/favicon.svg", serveFavicon, "", false},
