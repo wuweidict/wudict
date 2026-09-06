@@ -2970,10 +2970,6 @@ document.addEventListener("click",e=>{
     if(ref.kind==="sub"){toggleSub(a,ref.word,dictID);return}
     if(ref.kind==="lookup"){searchFor(ref.word,{scope:dictID,frag:ref.frag});return}
     jumpInArticle(a,dd,ref.frag); // "anchor"
-  }else if(/\.(mp3|ogg|wav|spx|m4a)(\?|#|$)/i.test(href)){
-    e.preventDefault();playAudio(href.startsWith("/res/")||/^https?:/i.test(href)?href:resURL(dictID,href));
-  }else if(a.querySelector("img")&&href.startsWith("/res/")){
-    e.preventDefault();playAudio(href);
   }else if(a.classList.contains("wudict-file")){
     // A dictionary's own attachment is opened in a new tab.
     e.preventDefault();window.open(href,"_blank","noopener,noreferrer");
@@ -3035,13 +3031,44 @@ document.addEventListener("dblclick",e=>{
   if(sel)lookupSelection(sel);
 });
 
-/* audio inside <object type="audio/…"> → click to play. DSL emits a link now
-   (D81); this is what dictionaries prepared before that change still store,
-   and how GoldenDict-era sources spell pronunciation. */
+/* Audio, in the CAPTURE phase and owned outright — the click never reaches the
+   article. Covers both spellings: an <a> pointing at a media file (a speaker
+   <img> wrapping a /res/ link included) and the GoldenDict-era
+   <object type="audio/…" data="…"> that DSL emitted before D81 and every
+   library folder prepared before it still stores.
+
+   Capture, and stopped, because the article commonly plays the same file
+   itself: LDOCE writes `<a onclick="new Audio(this.href).play(); return false;"
+   href="…mp3">`, and an event-handler CONTENT attribute runs even in a shadow
+   root, which executes no <script> at all — so "this article has no scripts" was
+   never the same as "nothing here plays audio". preventDefault cannot stop a
+   handler, only a default action, so both elements played the same URL and each
+   started when its own load finished: audibly doubled on the first click, and
+   apparently fine on the next one once both start from cache together. Only
+   stopping the event on the way down keeps the anchor's own handler from
+   running. Losing that handler costs nothing here: playback is all it did, and
+   the element that survives is the referenced one, which cannot be collected
+   mid-load the way the article's unreferenced `new Audio(…)` can. */
 document.addEventListener("click",e=>{
-  const o=e.composedPath().find(el=>el.tagName==="OBJECT"&&/^audio\//.test(el.getAttribute("type")||""));
-  if(o){e.preventDefault();playAudio(o.getAttribute("data"))}
-});
+  const path=e.composedPath();
+  const o=path.find(el=>el.tagName==="OBJECT"&&/^audio\//i.test(el.getAttribute("type")||""));
+  const a=o?null:path.find(el=>el.tagName==="A");
+  let url=null;
+  if(o)url=o.getAttribute("data")||"";
+  else if(a){
+    const href=a.getAttribute("href")||"";
+    // A dictionary reference outranks the extension, as it does in the chain
+    // below: `bword://…mp3` names a headword, not a file.
+    if(parseRef(href))return;
+    const dictID=path.find(el=>el.classList?.contains("article"))?.dataset.dict;
+    if(/\.(mp3|ogg|wav|spx|m4a)(\?|#|$)/i.test(href))
+      url=href.startsWith("/res/")||/^https?:/i.test(href)?href:resURL(dictID,href);
+    else if(a.querySelector("img")&&href.startsWith("/res/"))url=href;
+  }
+  if(!url)return;
+  e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();
+  playAudio(url);
+},true);
 
 /* auto-hide bar on scroll down */
 /* The bar's real height, published as --barh so sticky section headers rest

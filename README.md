@@ -5,6 +5,8 @@ browser at [http://localhost:6888](http://localhost:6888). One native binary, no
 dependencies; set the folders with your .mdx/.slob/.bgl/.zim/.ifo dictionaries, and search them all at
 once.
 
+Runs natively on android, mac, windows, linux and even raspberry pi.
+
 **Supported formats**
 
 | Format | Files                               | Notes |
@@ -19,30 +21,28 @@ once.
 
 ## Quick start
 
-1. Download the binary for your platform from
+1. Download the binary for your OS from
    [releases](https://github.com/wuweidict/wudict/releases), rename to `wudict`, 
    `chmod +x wudict` (macOS/Linux) and move to a folder in `$PATH`, e.g. `/usr/local/bin`.
 2. Run `wudict` or `./wudict` if the file is in the current folder. On windows use the installer [`wudict-windows-x64-setup-<x.y.z>.exe`](https://github.com/wuweidict/wudict/releases/latest) or download the standalone executable `wudict-windows-amd64-cgo.exe` and then double-click to run. For macOS an app bundle is provided too (it is not signed with a commercial Apple Developer Certificate, will be flagged by the system as unverified by Apple and requires additional steps to de-quarantine the app as described in the [manual](https://wuweidict.github.io/wudict/apps/macos/)).
 3. By default `wudict` searches for dictionaries under `~/Dictionaries` (including subfolders); 
    if the dictionary folder is missing or
-   empty, a setup page opens where you can set custom folders with dictionaries.
+   empty, a setup page opens where you can configure your dictionary folders.
 
 ## Adding dictionaries 
-Dictionary folders can be configured in the browser via the [browser setup page http://localhost:6888/setup](http://localhost:6888/setup) when `wudict` is running. The browser setup page is a convenience 
-for writing `DICT_DIR` in the configuration file at `~/.wudict/wudict.toml`.
+With wuDict running dictionary folders can be configured from [http://localhost:6888/setup](http://localhost:6888/setup). The browser setup page is a convenience 
+for writing `DICT_DIR` in the configuration file at `~/.wudict/wudict.toml` and other actions.
 
 ### Multiple dictionary folders
 
-`DICT_DIR` accepts more than one folder:
-
-As an alternative to the [setup page](http://localhost:6888/setup) you can configure the dictionary folders from
+You can configure the dictionary folders from
 the console via cli args, env vars or by directly editing the config file at `~/.wudict/wudict.toml` (recommended):
 ```sh
 # as one or more CLI args:
 wudict --dict-dir ~/Dictionaries --dict-dir /Volumes/Data/Dicts   # repeat the flag
 
 # or via an env var:
-DICT_DIR="~/Dictionaries:/Volumes/Data/Dicts" wudict              # separate with ":" for linux/mac and ";" on Windows
+DICT_DIR="~/Dictionaries:/Volumes/Data/Dicts" wudict              # separate multiple folders with ":" on linux/mac and ";" on Windows
 ```
 
 in `wudict.toml` (the recommended way):
@@ -67,23 +67,20 @@ lookups (*corazon* → *corazón*) work seamlessly (disable with `AUTO_INDEX=off
 ***Full-text*** (searching inside article text) and ***contains*** 
  (substring search) are not enabled by default as they consume more disk space. 
 Click the ☰ button and enable them as needed.
-Each shows its actual size; *⚡ index all* adds full-text for all dictionaries
+For each dictionary the index size is displayed; *⚡ index all* adds full-text for all dictionaries
 at once, and `wudict ingest [-contains] <file-or-folder>` does the
 same from the command line.
 
-Results stream lazily as each dictionary responds — the top one opens
+Results stream live as each dictionary responds — the top one opens
 automatically. In the ☰ panel you can **reorder** dictionaries (drag the
 ⠿ handle or use the ▲▼⏫⏬ buttons) to set your preferred result order, and
 **enable/disable** each one (the switch) to include or exclude it from
-*All dictionaries* searches; both are remembered. Searching *All* shows a
-few hits per dictionary with a **more…** link to expand any one. 
+*All dictionaries* searches; both are remembered.
 A dictionary that was disabled for *All dictionaries* searches can still 
 be searched by selecting it in the dictionary dropdown.
 
 Tips: `/` focuses the search box; double-click any word in an article to
-look it up; click links inside articles to follow cross-references —
-these stay inside the dictionary you are reading, and widen to all of them
-only if that dictionary has no such entry;
+look it up; click links inside articles to follow cross-references;
 audio plays on click; ⊞ expands all results (⊟ closes
 them again — for the current page only, never remembered);
 ⇔ toggles a wide layout; ◐ cycles auto/light/dark
@@ -91,7 +88,13 @@ theme. Search URLs are bookmarkable.
 
 ## Run as an app (macOS)
 
-`make mac-app-install` builds **wuDict.app** and installs it into
+For macOS you can either run the `wudict` binary from a terminal, or as an 
+alternative use the wudict-macos-app.zip from [releases](https://github.com/wuweidict/wudict/releases) 
+which wraps `wudict` into an macOS app bundle.
+
+### Building the macOS bundle from source
+
+Run `make mac-app-install` from project root to build **wuDict.app** and install it to
 `~/Applications` (no sudo, no admin prompt):
 
 ```sh
@@ -99,32 +102,18 @@ make mac-app            # dist/wuDict.app — universal-ready, ad-hoc signed
 make mac-app-install    # copy it to ~/Applications (APP_DEST= to relocate)
 ```
 
-The bundle is the same binary; what it changes is the launch. `LSUIElement`
-keeps it out of the Dock and it puts a **menu-bar icon** up instead — running
-state, open in browser, rescan, open the dictionary folder, quit. That icon is
-the only interface, so its log goes to `~/Library/Logs/wudict.log`. Overrides:
-`APP_ID=` (bundle identifier), `CODESIGN_ID=` (a Developer ID instead of the
-ad-hoc signature), `MACOS_MIN=`. See more about [running on macOS](https://wuweidict.github.io/wudict/apps/macos/).
+The bundle is the same binary as console `wudict` which which spawns no terminal window, and 
+additionally puts  a **menu-bar icon** up for common actions. See more about [running on macOS](https://wuweidict.github.io/wudict/apps/macos/).
 
 ## Run as an app (Windows)
 
-There is **one** `wudict.exe`. From `cmd` or PowerShell it is an ordinary
-command-line program — it prints, pipes and returns an exit code. Double-clicked,
-started from a shortcut, or used to open a dictionary file, it releases the
-console window, and shows a **tray icon** instead, logging to
+In windows `wudict` runs from `cmd` or PowerShell as an ordinary
+command-line program. When double-clicked, started from a shortcut, or by double-clicking 
+a dictionary file, it hides the  console window, and shows a **tray icon** instead, logging to
 `%LOCALAPPDATA%\wudict\wudict.log`. See also [running on windows](https://wuweidict.github.io/wudict/apps/windows/).
 
-`make win-installer` compiles the installer (needs
-[Inno Setup 6.3+](https://jrsoftware.org/isinfo.php); github's CI builds it for every
-release). The wudict setup wizard has options to add a desktop shortcut,
-*start at sign-in*, add to `PATH`, and **Open with → wuDict** for `.mdx`,
-`.dsl`, `.slob`, `.bgl` and `.zim`.
 
-Opening a dictionary file — from the installer's association or by hand as
-`wudict path\to\some.mdx` — serves the **parent folder** and opens
-the browser there.
-
-## Run as a service (macOS)
+## Run wudict as a service (macOS)
 
 `wudict` can be installed as a `launchctl` LaunchAgent using Makefile targets:
 
@@ -187,11 +176,11 @@ config file path is printed on startup.
 
 
 
-**`BROWSER_EXTENSIONS`** decides which browser extensions may look words up in
-your server from the pages they run in. Blank (the default) lets any installed
-extension reach the read-only dictionary API — `/api/dicts`, `/api/search`,
-`/res/` — and nothing else: never your preferences, your config or your library.
-Set it to allow only the extensions you name:
+**`BROWSER_EXTENSIONS`** sets which browser extensions may use the `wudict` server. 
+Blank (the default) lets any installed  extension reach the read-only dictionary API — `/api/dicts`, `/api/search`,
+`/res/`.
+
+Set it to allow only specific extensions:
 
 ```toml
 BROWSER_EXTENSIONS = ["chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
@@ -221,7 +210,8 @@ wudict                                   # start the server (default command)
 wudict --dict-dir ~/Dicts --port 9090    
 wudict --dict-dir ~/Dicts --dict-dir /Volumes/Ext/Dicts   # several folders
 
-# search for a word in a specific dictionary; plain text to stdout
+# search for a word in a specific dictionary; plain text to stdout 
+# optional, request specific format with: "-format=raw|clean|text"
 wudict lookup ~/Dicts/Oxford.mdx water
 
 # search ALL dictionaries in folder; plain text to stdout
@@ -267,25 +257,18 @@ A dictionary is one folder, so it moves as one thing: **copy, move or zip
 it and share**. On the other machine, drop it into a dictionary
 folder and it works — no original source files needed. a `text.db`
 without its `media.db` still works (with no media). 
-To include the media into the bundle the corresponding <kbd>media</kbd> button must be clicked in the dictionary panel.
-
-When present, on first run, when the dictionary folder is empty, 
-the setup page lists previously indexed
-dictionaries under *Previously imported dictionaries* with a **Use these
-dictionaries** button; that choice is remembered (`USE_CACHED = "1"`, or
-`--use-cached`). Your dictionary folder must not be the db folder —
-wudict refuses to start if they are the same.
+To generate the media pack click the <kbd>media</kbd> 
+in the dictionary panel.
 
 The ☰ panel shows each dictionary's provenance: the source file it came
 from, and — expanded — the library folder holding its SQLite database files.
-Click any path to copy.
+Click a path to copy it to clipboard.
 
 At the foot of the panel, **Folders & configuration** shows which folders
 are being scanned (with per-folder counts), where indexed dictionaries
 are located, and which `wudict.toml` is in effect — with *Reveal in Finder* /
 *Show in File Explorer* / *Open Containing Folder*, depending on your
 system. **Edit folders…** opens the dictionary folders editor.
-If DICT_DIR was set via `--dict-dir` cli flag or `DICT_DIR` env var then the editor cannot override those paths and will show a warning.
 
 ## Patching dictionary's files
 
@@ -326,20 +309,11 @@ itself and every article — write your own CSS in two optional files beside the
   article.css   what dictionaries render, in every article
 ```
 
-The ☰ panel's **Custom styles…** opens an editor for both, docked at the
-bottom of the page so the article you are adjusting stays visible and reflows
-as you type. It carries a dozen ready-made examples — sepia, high contrast in
-either polarity, a true-black OLED dark, a wider column, a compact mobile view,
-justified text, tables that stop scrolling the page sideways — which it
-*inserts as text* for you to edit. Each one knows which file it belongs in, and
-the ones that need both write both halves. The same two files can be edited in
-any text editor; they are served uncached, so an edit lands on the next
-reload.
+The ☰ panel's **Custom styles…** opens an editor for app and article styles, docked at the
+bottom of the page so you get live preview of your CSS changes as you type. 
+Several presets are provided — a compact mobile view, sepia, high contrast, true-black OLED, 
+a wider column, justified text, normalize tables.
 
-The split is what keeps `body`, `p` and `a` — the selectors you reach for when
-styling a definition — from also restyling the interface. Colours need no
-duplication, because custom properties set on `:root` in `app.css` are
-inherited by articles too:
 
 ```css
 /* app.css — sepia in light mode, page and definitions together */
@@ -358,18 +332,10 @@ html:not([data-dark]){
 }
 ```
 
-`[data-dark]` is set whenever wuDict resolves to dark — by your choice or by
-the system setting — on the page, on an article, and inside a script-bearing
-article's frame, so `html[data-dark]{…}` is the only spelling you need. In dark
-mode articles are inverted rather than recoloured, so write article colours for
-light and let dark be derived.
-
-Undoing is the same three moves everywhere else: <kbd>⌘Z</kbd> in the box takes
-back what you typed or inserted, closing the sheet discards everything since the
-last **Save** (the page reverts, your text stays in the box), and **Clear** then
-**Save** deletes the file outright. A dot on a tab means that box holds
-something. If a rule ever hides the app, open `/?style=off` and the page is
-served with neither file applied.
+Undoing is the same three moves everywhere else: <kbd>⌘</kbd> + <kbd>Z</kbd> 
+(on windows <kbd>Ctrl</kbd> + <kbd>Z</kbd>) lets you undo changes.
+A dot on a tab means that box has unsaved changes. If a rule ever hides the app, apend `/?style=off` in the URL
+and the page is served with default styles.
 
 ## Disk use
 

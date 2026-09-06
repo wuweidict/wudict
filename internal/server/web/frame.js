@@ -354,6 +354,25 @@
 		if (p && p.catch) p.catch(function (err) { console.warn("audio play failed:", url, err); });
 	}
 
+	// Playing audio means TAKING the click, not merely cancelling the browser's
+	// default. The article usually plays it too: LDOCE spells pronunciation as
+	// `<a onclick="new Audio(this.href).play(); return false;" href="…mp3">`, an
+	// event-handler CONTENT attribute, which runs whether or not the article's
+	// <script> files loaded. preventDefault does not touch it — it is a handler,
+	// not a default action — so both elements played the same URL, each starting
+	// when its own fetch resolved: an echo on the first click and, once both
+	// come from cache and start together, a clean sound on the next one. That is
+	// why it looked intermittent. Stopping propagation here, on the way down,
+	// is what keeps the anchor's own handler from ever running, exactly as the
+	// cross-reference branch does; the article never plays audio twice, and the
+	// one element that does play is the referenced one that cannot be collected
+	// mid-load.
+	function ownAudio(e, url) {
+		e.stopPropagation();
+		if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+		playURL(url);
+	}
+
 	// CAPTURE phase, deliberately. Dictionary scripts attach their own click
 	// handlers inside the article — LDOCE6's entry.js calls stopPropagation()
 	// on the speaker <img> so a play click does not also toggle the accordion
@@ -370,7 +389,7 @@
 			var o = e.target && e.target.closest ? e.target.closest("object") : null;
 			if (o && /^audio\//i.test(o.getAttribute("type") || "")) {
 				e.preventDefault();
-				playURL(o.getAttribute("data") || "");
+				ownAudio(e, o.getAttribute("data") || "");
 			}
 			return;
 		}
@@ -405,7 +424,7 @@
 			jumpToFragment(ref.frag); // "anchor": a place in this same article
 		} else if (/\.(mp3|ogg|wav|spx|m4a)([?#]|$)/i.test(href)) {
 			e.preventDefault();
-			playURL(href);
+			ownAudio(e, href);
 		} else if (a.classList && a.classList.contains("wudict-file")) {
 			// A dictionary attachment this page cannot display (PDF, document,
 			// a DSL video format no browser decodes). Following it in place
