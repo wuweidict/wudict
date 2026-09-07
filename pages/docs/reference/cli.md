@@ -304,7 +304,7 @@ to pick up one installed this way.
 
 !!! tip "The same thing without a terminal"
 
-    **🔤 Lemmatization**, in the ⚙ box of the ☰ dictionary panel and on the
+    **🔤 Lemmatization**, in the ⚙ box of the <kbd>☰</kbd> dictionary panel and on the
     settings page, lists the same catalogue with a checkbox per language. It
     installs into the same folder from the same catalogue, and the running
     server picks a language up immediately — it re-reads the folder itself,

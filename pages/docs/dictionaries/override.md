@@ -25,7 +25,7 @@ would replace it.
 
 ## How to patch dictionary files
 
-1. Find the dictionary's library folder. The ☰ panel shows the path.
+1. Find the dictionary's library folder. The <kbd>☰</kbd> panel shows the path.
 2. Create a `res/` folder inside it.
 3. Put your file there, under **the same path the article asks for**.
 

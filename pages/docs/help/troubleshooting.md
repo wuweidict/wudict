@@ -16,8 +16,8 @@ Check these four in order.
 2. **The file is not recognised as a dictionary.** A StarDict `.dict.dz` needs
    its `.ifo` file beside it. `.dsl.dz` counts as one whole extension.
    Subfolders are scanned, so depth is not the problem.
-3. **You copied files in while WuWeiDict was running.** Open the ☰ panel and click
-   **Rescan folders**. No restart is needed.
+3. **You copied files in while WuWeiDict was running.** Open the <kbd>☰</kbd> panel and click
+   <kbd>**Rescan folders**</kbd>. No restart needed.
 4. **Windows separators.** In the environment, `DICT_DIR` folders are separated
    by `;` on Windows, not `:`.
 
@@ -119,13 +119,13 @@ Two possible causes.
 
 - **The word is not a literal piece of the headword.** Contains matches your
   text exactly, ignoring case and accents. It does not correct spelling.
-- **The index is old.** When the ☰ panel marks a dictionary's substring index
+- **The index is old.** When the <kbd>☰</kbd> panel marks a dictionary's substring index
   as out of date, rebuild it there. It was built with older text folding and
   may miss words whose folded form changed.
 
 ## The library uses too much disk
 
-The ☰ panel shows how much space each index takes, per dictionary, and every switch turns
+The <kbd>☰</kbd> panel shows how much space each index takes, per dictionary, and every switch turns
 off again.
 
 ``` sh title="find leftovers"
@@ -139,12 +139,12 @@ lock.
 
 ## The Android app shows no dictionaries { #android-no-dictionaries }
 
-1. **Storage access was refused.** *Settings ▸ Apps ▸ wuDict ▸ Permissions*,
+1. **Storage access was refused.** <kbd>Settings</kbd> ▸ <kbd>Apps</kbd> ▸ <kbd>wuDict</kbd>▸ <kbd>Permissions</kbd>,
    or Android's *All files access* list. Turn it on, then reopen the app.
 2. **The folder name is wrong.** It must be *Internal storage ▸ Dictionaries*,
    at the top level, not inside *Documents* or *Download*.
-3. **The files arrived while the app ran.** Open ☰ and tap
-   **♻️ Rescan folders**.
+3. **The files arrived while the app ran.** Open <kbd>☰</kbd> and tap
+   **<kbd>♻️ Rescan folders</kbd>**.
 
 An SD card is not scanned. Copy the files to internal storage.
 

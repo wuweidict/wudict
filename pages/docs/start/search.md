@@ -22,9 +22,9 @@ Exact and prefix work immediately, through the dictionary's own index.
 
 Contains and full-text index are not generated automatically. 
 You can enable them for specific dictionaries via
-the ☰ panel, or generate full-text-search indexes for all dictionaries by clicking 
-the cogwheel ⚙️ in the dictionary panel and then in the expanded box clicking 
-**⚡️ Enable full-text search for every dictionary…**.
+the <kbd>☰</kbd> panel, or generate full-text-search indexes for all dictionaries by clicking 
+the cogwheel <kbd>⚙️</kbd> in the dictionary panel and then in the expanded box clicking 
+<kbd>**⚡️ Enable full-text search for every dictionary…**</kbd>.
 
 !!! info "Accents and case are ignored, spelling mistakes are not"
 
@@ -42,7 +42,7 @@ the cogwheel ⚙️ in the dictionary panel and then in the expanded box clickin
     | Full-text | about 12 MB | search inside article text |
 
     The headword index is built automatically. `Contain` and `Full-text` are optional,
-    per dictionary. The ☰ panel shows the real numbers for your own files, not
+    per dictionary. The <kbd>☰</kbd> panel shows the real numbers for your own files, not
     these examples.
 
     An indexed wuDict dictionary is usually **smaller** than the file it came from,
@@ -72,7 +72,7 @@ dictionary.
 **Only English is built in.** Every other language is a small data file you
 install, and there are two ways to do it:
 
--   Click **🔤 Lemmatization** — in the ⚙ box of the ☰ dictionary panel, or on
+-   Click <kbd>**🔤 Lemmatization**</kbd> — in the ⚙ box of the <kbd>☰</kbd> dictionary panel, or on
     the settings page — tick a language, and it downloads. It works in the next
     search; nothing needs restarting. This is the only route on Android.
 -   From a terminal, [`wudict lemmas download ru`](../reference/cli.md#lemmas).
@@ -109,22 +109,22 @@ are reading first, and widens the search to all dictionaries only when that
 dictionary has no such entry.
 
 
-## Keys and clicks
+## Shortcuts
 
-| Key or click | What it does                                    |
-| --- |-------------------------------------------------|
+| Key or click | Action                                        |
+| --- |-----------------------------------------------|
 | <kbd>/</kbd> | focus the search box, from anywhere on the page |
-| <kbd>Esc</kbd> | close the ☰ panel                               |
-| double-click a word in an article | look it up                                      |
-| ⊞ | expand / collapse results    |
-| ⇔ | switch to a wide reading layout                 |
-| ◐ | cycle light, dark and automatic theme           |
+| <kbd>Esc</kbd> | close the <kbd>☰</kbd> panel                              |
+| double-click a word in an article | look up selected word                         |
+| <kbd>⊞</kbd> | expand / collapse results                     |
+| <kbd>⇔</kbd> | switch to a wide layout                 |
+| <kbd>◐</kbd> | cycle light, dark and automatic theme         |
 
-## The ☰ dictionary panel
+## The <kbd>☰</kbd> dictionary panel
 
 This is where you configure your dictionaries.
 
-- **Sort** your dictionaries by dragging the ⠿ handle, or with the ▲ ▼ ⏫ ⏬
+- **Sort** your dictionaries by dragging the <kbd>⠿</kbd> handle, or with the ▲ ▼ ⏫ ⏬
   buttons. Results stream in that order, and the order is remembered.
 - **Enable or disable** a dictionary to be included in the 'All dictionaries' search. 
 If you disable a dictionary you can still use it by selecting it from the dropdown. 
@@ -155,22 +155,22 @@ as `wudict://lookup?q=serendipity` — see [the Android app](../apps/android.md)
 
 
 ``` sh title="search in ALL dictionaries"
-wudict searchall flight
+wudict searchall phubbing
 
 # search in a custom folder
-wudict searchall -dict-dir=/another/dir/Babylon flight
+wudict searchall -dict-dir=/another/dir/Babylon phubbing
 
 # return full raw HTML
-wudict searchall -format=raw flight
+wudict searchall -format=raw phubbing
 
 # return cleaned-up HTML
-wudict searchall -format=clean flight
+wudict searchall -format=clean phubbing
 ```
 
 ``` sh title="search in a single dictionary in the terminal"
-wudict lookup   ~/Dicts/Oxford.mdx flight
-wudict prefix   ~/Dicts/Oxford.mdx fli
-wudict contains ~/Dicts/Oxford.mdx light
+wudict lookup   ~/Dicts/Oxford.mdx phubbing
+wudict prefix   ~/Dicts/Oxford.mdx phubb
+wudict contains ~/Dicts/Oxford.mdx phub
 wudict fts      ~/Dicts/Oxford.mdx "sudden fear"
 ```
 

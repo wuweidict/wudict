@@ -18,7 +18,7 @@ Its default folder is `~/.wudict/db`.
 
 Preview starts the moment wuDict finds the file. Preparation starts on the
 first search and runs in the background. Full-text and `contains` search indexes can be enabled on-demand 
-only for the dictionaries where you need them, via the ☰ dictionary panel.
+only for the dictionaries where you need them, via the <kbd>☰</kbd> dictionary panel.
 
 Headword indexing is automatic by default. Set
 [`AUTO_INDEX`](../reference/configuration.md#auto_index) to `off` if you want to disable auto-indexing 
@@ -65,19 +65,18 @@ only, `-contains` for the substring index, and `-full` to pack media as well.
 
 ## Removing a dictionary
 
-Open the ☰ panel and find the dictionary. Click the **file row** — the small
-line naming its files, just above *About this dictionary* — to expand it. It
-lists every path that belongs to this dictionary, and **🗑 Remove…** sits at
-the foot of that list, because the list is exactly what removal deletes.
+Open the <kbd>☰</kbd> panel and find the dictionary. Click the **file row** (e.g. `oald10.mdx`), 
+just above <kbd>*About this dictionary*</kbd> — to expand it. It
+lists every path that belongs to this dictionary, and the <kbd>**🗑 Remove…**</kbd> button.
 
 Clicking it turns the row into a confirmation that names what each choice
 takes:
 
-| Choice | What goes |
-| --- | --- |
-| **💥 delete everything** | the prepared index *and* the dictionary files |
-| **index only** | the library folder; the dictionary files stay and can be prepared again |
-| **dictionary files only** | the source files, once the prepared copy can stand alone (media packed) |
+| Choice                               | What goes |
+|--------------------------------------| --- |
+| <kbd>**💥 delete everything**</kbd>  | the prepared index *and* the dictionary files |
+| <kbd>**index only**</kbd>            | the library folder; the dictionary files stay and can be prepared again |
+| <kbd>**dictionary files only**</kbd> | the source files, once the prepared copy can stand alone (media packed) |
 
 Deleting everything is the default on purpose. With
 [`AUTO_INDEX`](../reference/configuration.md#auto_index) on, deleting only the
@@ -98,7 +97,7 @@ OFF by default.
 
 ## Removing FTS and contains indexes
 
-Turn an index off with the same ☰ panel switch that turned it on.
+Turn an index off with the same <kbd>☰</kbd> panel switch that turned it on.
 
 ``` sh title="two commands that delete"
 wudict clean            # list broken or leftover library items

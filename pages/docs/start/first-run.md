@@ -35,7 +35,7 @@ counts displays the number of total dictionaries found.
 
 The setup page writes your choice to `~/.wudict/wudict.toml`. No restart is
 needed. To open the setup page from the browser click the hamburger icon and then 
-under the cogwheel icon ⚙️ pick  **✏️ Edit folders...**.
+under the cogwheel icon <kbd>⚙️</kbd> pick <kdb>**✏️ Edit folders...**</kdb>.
 
 To set the folder yourself, pick one of these three ways.
 

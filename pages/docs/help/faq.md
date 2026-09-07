@@ -61,7 +61,7 @@ Questions, not symptoms. For a symptom, see
 
 ??? question "Can I take back the disk space an index uses?"
 
-    Yes. Every switch in the ☰ panel turns off again, and shows the size in
+    Yes. Every switch in the <kbd>☰</kbd> panel turns off again, and shows the size in
     megabytes before you click.
 
     Removal is offered while the original dictionary file is still on disk,
@@ -117,7 +117,7 @@ Questions, not symptoms. For a symptom, see
     only English is built into the program; every other language is a small
     file you install.
 
-    Click **🔤 Lemmatization** in the ⚙ box of the ☰ panel (or on the settings
+    Click <kbd>**🔤 Lemmatization**</kbd> in the ⚙ box of the <kbd>☰</kbd> panel (or on the settings
     page), tick Spanish, and search again — it works immediately, with no
     restart. On a desktop,
     [`wudict lemmas download es`](../reference/cli.md#lemmas) does the same.

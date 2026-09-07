@@ -154,9 +154,9 @@ Whether a browser on **another machine** may delete a dictionary.
 | Default | off                            |
 
 Deleting from the machine running wuDict is always allowed — it is your
-library and your disk, and **🗑 Remove…** in the ☰ panel is how you do it.
+library and your disk, and <kbd>**🗑 Remove…**</kbd> in the <kbd>☰</kbd> panel is how you do it.
 This setting is only about the other case: a browser somewhere else on the
-network, which has proved nothing about who is holding it.
+network.
 
 With [`SERVER_IP`](#server_ip-and-server_port) set to `0.0.0.0` anyone who can
 reach the port can use the page. Set `ALLOW_REMOTE_DELETE = "1"` if you

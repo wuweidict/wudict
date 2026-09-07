@@ -176,7 +176,7 @@ on which modes to offer: `Contains` and `FTS` stay false until that dictionary
 is prepared with those indexes.
 
 Each row also carries where the dictionary's data lives - the source file, the
-prepared databases, their sizes. The ☰ panel is built from those fields; the
+prepared databases, their sizes. The <kbd>☰</kbd> panel is built from those fields; the
 [document](https://github.com/wuweidict/wudict/blob/master/internal/server/web/openapi.yaml)
 lists them.
 

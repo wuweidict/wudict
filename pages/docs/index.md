@@ -1,20 +1,18 @@
 ---
 title: Home
-description: wuDict searches every dictionary you own from your browser. One file to download, no account, no cloud, nothing leaves your machine.
+description: wuDict — instant search in MDict (.mdx/.mdd), AARD2 (.slob), Stardict (.ifo), Babylon (.bgl), ZIM (.zim) dictionaries in your browser.
 ---
 
 # All your dictionaries, in your browser
 
-**WuWeiDict** (the program is called `wudict`) searches every dictionary file you
-own. It runs on your own computer and answers in your browser at
-[localhost:6888](http://localhost:6888).
+**WuWeiDict** (the program is called `wudict`) searches all your local dictionaries using your browser. 
+It runs on at [localhost:6888](http://localhost:6888).
 
-One file. No runtime, no database server, no account. Your dictionaries stay
-on your disk.
+`wudict` is a single standalone executable file. Native, no dependencies. 
 
 [Install](start/install.md){ .md-button .md-button--primary }
-[First run](start/first-run.md){ .md-button }
-[Browser extension](extension.md){ .md-button }
+[Quick Start](start/first-run.md){ .md-button }
+[Chrome/Firefox Extension](extension.md){ .md-button }
 
 ---
 
@@ -26,8 +24,7 @@ on your disk.
 
     ---
 
-    `.mdx` plus `.mdd`. The most common format. Articles are HTML, media
-    travels in companion files.
+    `.mdx` plus `.mdd`. A widely used format, with articles in HTML, and resources (audio, .css, .js) in .mdd packs.
 
 -   :fontawesome-solid-book-bookmark:{ .lg .middle } **StarDict**
 
@@ -46,7 +43,7 @@ on your disk.
 
     ---
 
-    `.dsl` and `.dsl.dz`. Legacy, still used in Eastern Europe.
+    `.dsl` and `.dsl.dz`. Legacy, still common in Eastern Europe.
 
 -   :fontawesome-solid-earth-americas:{ .lg .middle } **Babylon**
 
@@ -65,8 +62,7 @@ on your disk.
 
     ---
 
-    `text.db`. wuDict's own SQLite-based format: one folder per dictionary, which you can
-    copy across machines.
+    `text.db`. wuDict's own SQLite-based format: one folder per dictionary with optional media.db, portable across machines.
 
 </div>
 
@@ -76,7 +72,7 @@ on your disk.
 
 ## How you search
 
-wuDict searches all your dictionaries at once. Results are streamed as soon as they are available, so you get the first hit
+`wuDict` searches all your dictionaries at once. Results are streamed as soon as they are available, so you get the first hit
 while the other dictionaries are still being searched.
 
 | Mode | Results | Available |
@@ -86,31 +82,29 @@ while the other dictionaries are still being searched.
 | **Contains** | your text anywhere inside a headword | on-demand per dictionary |
 | **Full-text** | words inside the article text, ranked by relevance | on-demand per dictionary |
 
-Exact and prefix work instantly. Contains and full-text need an extra index which can be 
-enabled on a per dictionary basis. 
-The ☰ panel offers each one as a switch and shows what it costs in megabytes first.
+`exact` and `prefix` modes work instantly. Contains and full-text need an extra index which can be 
+enabled on a per-dictionary basis. 
+The <kbd>☰</kbd> panel offers each one as a switch and shows the estimated index size, e.g. `42MB`.
 
-A search that finds nothing is retried with the word's dictionary form — *knew*
-finds **know**, *estuviera* finds **estar**. English is built in; other
-languages are a small file you install with one click.
+Lemmatization (morphology) allows `wudict` to find *understand*
+when you search for **understood**, searching for *estuviera* will land on **estar**. English is built in; other
+languages can be installed via <kbd>☰</kbd> → <kbd>⚙️</kbd>  → <kbd>Lemmatization…</kbd> (see also [Lemmas](reference/configuration/#lemmatization))
 
 [How search works](start/search.md){ .md-button }
 
 ---
 
-## Where it runs
+## Supported Platforms
 
-| | |
-| --- | --- |
-| **macOS** | a command, or [wuDict.app](apps/macos.md) with a menu-bar icon |
-| **Windows** | a command, or [an installer](apps/windows.md) with a tray icon |
-| **Linux** | a command, and a systemd user unit for [startup](running.md) |
-| **Android** | [an app](apps/android.md) that looks a word up from inside any other app |
+| |                                                                                                     |
+| --- |-----------------------------------------------------------------------------------------------------|
+| **macOS** | CLI and macOS app bundle [wuDict.app](apps/macos.md) with a menu-bar icon                           |
+| **Windows** | CLI and [GUI Inno Installer](apps/windows.md) with a tray icon                                      |
+| **Linux** | CLI with optional systemd unit for [startup](running.md)                                            |
+| **Android** | [Android APK](apps/android.md) with extra intents for Share, text selection context menus, and more |
 
 ---
 
-## What it does not do
+## Privacy
 
-- It does not send anything anywhere. The server listens on the loopback
-  address only.
-- It has no account, no telemetry, no analytics and no crash reporting.
+- No data is sent anywhere, no account, no cookies, no profiling, no telemetry, no analytics and no crash reporting.

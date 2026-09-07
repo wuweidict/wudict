@@ -21,7 +21,7 @@ They live in a `style/` folder beside the `wudict.toml` in effect, usually
 
 ## The editor
 
-Open the ☰ panel, then **Custom styles…** under the folder summary. It is a
+Open the <kbd>☰</kbd> panel, then <kbd>**Custom styles…</kbd>** under the folder summary. It is a
 sheet docked at the bottom rather than a window over the page, so the article
 you are adjusting stays visible and reflows as you type.
 
