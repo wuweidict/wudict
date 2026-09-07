@@ -277,7 +277,19 @@ class ServerProcess {
         if (awaitPort(process, port)) {
             listener.onReady();
             cacheEffective(app, port); // after onReady: nothing waits on this
-        } else if (process.isAlive()) {
+            return;
+        }
+
+        // The start failed, and anything the child had announced died with it.
+        // The stdout reader cannot do this and neither can stop(), which is not
+        // on this path: a child that is killed, or that exits, closes the stream
+        // without ever emitting the closing marker, so an ingest that had opened
+        // one would leave the foreground service and its notification up for the
+        // life of the app - and SettingsActivity's "no ingest in flight" guard
+        // false forever with it.
+        IndexService.busy(app, false);
+
+        if (process.isAlive()) {
             // It bound nothing, but it is still running and still holds
             // whatever it did open. Left alive it outlives this app process -
             // reparented to init, invisible to stop(), and a later adopt would

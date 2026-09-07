@@ -1178,6 +1178,38 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	}
 	defer ln.Close()
 
+	// The loopback companion. A bind to one concrete address is a socket on
+	// that address and nowhere else, which has two consequences the wildcard
+	// default hides. Every client that lives on this machine reaches the
+	// server through 127.0.0.1 by construction - the Android shell's WebView
+	// origin and its readiness probe, a browser extension, an old bookmark -
+	// and none of them can know what the LAN address is today. And a listener
+	// bound to a LAN address is destroyed by the kernel when that address
+	// leaves the interface: roaming out of range, or a DHCP lease coming back
+	// different, makes accept() fail with EINVAL, which Go does not classify
+	// as temporary, so Serve returns it and the program ends.
+	//
+	// So loopback is opened alongside - the one address that cannot be taken
+	// away - and it, rather than the address the user asked for, is the one
+	// whose loss ends the program. Nothing is added when the main listener
+	// already accepts there, which is every default install.
+	lns := []net.Listener{ln}
+	var alsoURL string
+	if lb := loopbackAddr(cfg.IP, cfg.Port); lb != "" {
+		if lbLn, lbErr := net.Listen("tcp", lb); lbErr != nil {
+			// Not fatal: the server the user asked for is up, and only the
+			// clients that would have come in through loopback are affected.
+			// Another wudict already holding that port is the likely reason.
+			logx.Warn("could not also listen on %s: %v", lb, lbErr)
+		} else {
+			defer lbLn.Close()
+			alsoURL = "http://" + lb + "/"
+			// First: from here on this is the essential listener, and the
+			// address that can vanish is the expendable one.
+			lns = []net.Listener{lbLn, ln}
+		}
+	}
+
 	// migrate old cached dictionaries
 	if moved, err := store.AdoptLoose(); err != nil {
 		logx.Warn("could not tidy the library: %v", err)
@@ -1285,7 +1317,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	printStartup(cfg, startupInfo{
 		roots:    reg.Roots(),
 		inFolder: inFolder, fromLibrary: fromLib, prepared: len(lib),
-		total: reg.Count(), libDir: libDir, url: url,
+		total: reg.Count(), libDir: libDir, url: url, alsoURL: alsoURL,
 		speex:  speexSummary(useExternalSpeex, sxPath, sxSource),
 		keyURL: keyURL(url, token),
 	})
@@ -1326,7 +1358,22 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	}()
 
 	serve := func() error {
-		err := httpSrv.Serve(ln)
+		// One http.Server across every listener: Serve registers each one, so
+		// the single Shutdown above closes them all and every call returns
+		// ErrServerClosed. Only lns[0] decides the program's fate. The rest
+		// are the addresses a network change can take away, and losing the
+		// LAN is not a reason to stop serving the machine itself.
+		for _, l := range lns[1:] {
+			go func(l net.Listener) {
+				err := httpSrv.Serve(l)
+				if err == nil || errors.Is(err, http.ErrServerClosed) {
+					return
+				}
+				logx.Warn("stopped listening on %s: %v\n"+
+					"  the address is no longer on this machine; restart to share again", l.Addr(), err)
+			}(l)
+		}
+		err := httpSrv.Serve(lns[0])
 		if errors.Is(err, http.ErrServerClosed) {
 			<-idle
 			return nil
@@ -1527,6 +1574,25 @@ func speexSummary(useExternal bool, path, source string) string {
 
 // printStartup shows the *resolved* configuration that is in effect. All values
 // are listed with the origin, i.e. flag, env, wudict.toml, default.
+// loopbackAddr returns the address a loopback companion listener should bind,
+// or "" when the main listener already accepts there.
+//
+// A wildcard covers loopback - Go opens 0.0.0.0 as a dual-stack [::] listen,
+// and an empty host likewise - and a loopback bind obviously does. Anything
+// ParseIP cannot read is left alone: "localhost" IS loopback, and resolving
+// any other name here to decide would repeat a lookup net.Listen has already
+// done, with no way to know which of several answers it took.
+func loopbackAddr(ip, port string) string {
+	p := net.ParseIP(ip)
+	if p == nil || p.IsUnspecified() || p.IsLoopback() {
+		return ""
+	}
+	if p.To4() != nil {
+		return net.JoinHostPort("127.0.0.1", port)
+	}
+	return net.JoinHostPort("::1", port)
+}
+
 // startupInfo is what the startup summary describes: each folder counted by
 // what IT contributed (a blended total next to the dictionary folder made an
 // empty folder look full when the library was in use).
@@ -1538,6 +1604,7 @@ type startupInfo struct {
 	total       int           // what is being served
 	libDir      string
 	url         string
+	alsoURL     string // the loopback companion, "" when the main bind covers it
 	speex       string
 	keyURL      string // url carrying the access key, "" when none is required
 }
@@ -1634,6 +1701,11 @@ func printStartup(cfg config.Config, in startupInfo) {
 		fmt.Fprintf(out, "                %s  (ignored - lower priority)\n", p)
 	}
 	fmt.Fprintf(out, "  address       %s\n", in.url)
+	// The second address is not a detail: it is the one that keeps working
+	// when the machine changes networks, and the only one a bookmark can name.
+	if in.alsoURL != "" {
+		fmt.Fprintf(out, "                %s  (from this machine, whatever the network does)\n", in.alsoURL)
+	}
 	// A wildcard bind is not "the LAN", and the banner is the only place that
 	// says so. Go turns 0.0.0.0 into a DUAL-STACK [::] listen, so on a mobile
 	// connection - where the IPv6 address is globally routable and has no NAT

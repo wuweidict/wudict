@@ -72,8 +72,10 @@ import android.util.Log;
  * <p><b>Nothing brings the record down before it is foreground.</b> The same
  * applies to the service's own escape hatch: if {@code startForeground} throws,
  * {@code stopSelf} is not a retreat, it is the fatal call again from the other
- * side. So a failure retries inside the platform's window and gives up quietly
- * rather than tearing itself down.
+ * side. Nor is giving up: a record that still owes the call is killed with
+ * {@code RemoteServiceException} when the platform's window closes, which is
+ * exactly the crash this app was seeing. So a failure retries for as long as
+ * the record exists, and the only ways out are succeeding and being destroyed.
  *
  * <p>Every call is fail-open. From API 31 a foreground service may not be
  * started while the app is in the background, which is a state this can legally
@@ -90,9 +92,11 @@ public final class IndexService extends Service {
     /** How long work must last before it is worth a foreground service. */
     private static final long DEBOUNCE_MS = 400;
 
-    /** Retries of a refused startForeground, and the gap between them. */
-    private static final int RETRIES = 4;
+    /** The gap between retries of a refused startForeground. */
     private static final long RETRY_MS = 700;
+
+    /** How often a refusal is recorded, in attempts: the first, then rarely. */
+    private static final int LOG_EVERY = 16;
 
     private static final Object LOCK = new Object();
     private static final Handler HANDLER = new Handler(Looper.getMainLooper());
@@ -275,38 +279,41 @@ public final class IndexService extends Service {
      * start has been accepted, an untyped notification is a better answer than
      * none, and a retry is a better answer than {@code stopSelf} - which is not
      * a retreat but the fatal bring-down again, this time self-inflicted.
-     * Eligibility failures here are transient by nature (a background start
-     * racing the app going to foreground), so the retries stay well inside the
-     * platform's window and then stop making noise.
+     *
+     * <p>It is also a better answer than stopping. This used to try four times
+     * over 2.1 s and then return, having spent a fifth of the platform's window
+     * and discharged nothing: the record still owed {@code startForeground},
+     * and the platform's reply to that is to kill the process. Eligibility
+     * failures here are transient by nature - a background start racing the app
+     * coming to the foreground - so retrying is the one exit that can succeed,
+     * and it costs a timer tick. It stops when the record is destroyed, which
+     * is the only other way the debt can end; only the logging is rationed.
      */
     private void attempt(int n) {
         boolean up = false;
+        boolean loud = n % LOG_EVERY == 0; // the first refusal, then rarely
         try {
             startInForeground(true);
             up = true;
         } catch (RuntimeException e) {
-            Log.d(TAG, "index service foreground: " + e);
+            if (loud) Log.d(TAG, "index service foreground: " + e);
             try {
                 startInForeground(false);
                 up = true;
             } catch (RuntimeException e2) {
-                Log.d(TAG, "index service foreground (untyped): " + e2);
+                if (loud) Log.d(TAG, "index service foreground (untyped): " + e2);
             }
         }
         if (!up) {
-            if (n + 1 < RETRIES) {
-                HANDLER.postDelayed(() -> {
-                    // Not if the record is gone: the contract died with it,
-                    // and a startForeground from a destroyed service is only
-                    // another throw.
-                    synchronized (LOCK) {
-                        if (!started) return;
-                    }
-                    attempt(n + 1);
-                }, RETRY_MS);
-            } else {
-                Log.d(TAG, "index service foreground: giving up after " + RETRIES);
-            }
+            HANDLER.postDelayed(() -> {
+                // Not if the record is gone: the contract died with it,
+                // and a startForeground from a destroyed service is only
+                // another throw.
+                synchronized (LOCK) {
+                    if (!started) return;
+                }
+                attempt(n + 1);
+            }, RETRY_MS);
             return; // the record still owes startForeground: do not bring it down
         }
         boolean stop;
