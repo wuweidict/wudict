@@ -62,7 +62,7 @@ It runs on at [localhost:6888](http://localhost:6888).
 
     ---
 
-    `text.db`. wuDict's own SQLite-based format: one folder per dictionary with optional media.db, portable across machines.
+    `text.db`. wuDict's own SQLite-based format: one folder per dictionary with optional `media.db`, portable across machines.
 
 </div>
 

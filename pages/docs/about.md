@@ -1,11 +1,11 @@
 ---
 title: About
-description: What is WuWeiDict, the functions, design, and capabilities.
+description: What is WuWeiDict, wudict, the functions, design, and capabilities.
 ---
 
 # About WuWeiDict
 
-WuWeiDict is a modern dictionary frontend optimized for speed that runs in your browser. It lets you quickly find definitions 
+WuWeiDict (or `wudict` for brevity) is a modern dictionary frontend optimized for speed that runs in your browser. It lets you quickly search
 in all your dictionaries at once.
 
 

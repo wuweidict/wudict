@@ -1,14 +1,15 @@
 ---
 title: Install
-description: Download and run WuWeiDict on macOS, Linux, Windows or Android. One executable, no dependencies.
+description: Download and run wudict on macOS, Linux, Windows or Android. One executable, no dependencies.
 ---
 
 # Install
 
-WuWeiDict is one executable per platform. It needs no runtime, no database
-server and (almost) zero configuration. Download the file, make it executable, start it.
+`wudict` is one executable per platform. Needs no runtime, no database
+server, just some minimal configuration. Download the file, make it executable, start it, 
+set your dictionary folders and your are done.
 
-Optionally, for macOS you can download the macOS bundle, for Windows an install wizard is available.
+For macOS you can also download a macOS bundle, for Windows a traditional setup wizard is available.
 
 [Download page](https://github.com/wuweidict/wudict/releases/latest){ .md-button .md-button--primary }
 
