@@ -1099,7 +1099,9 @@ func TestSearchFormats(t *testing.T) {
 	}
 	// DSL pronunciation is an ordinary link (D81), so `clean` has nothing to
 	// rescue: it keeps the anchor and absolutises it like any other resource.
-	if !strings.Contains(clean, `<a href="http://127.0.0.1:6888/res/`) {
+	// The role class rides along - it is wudict's own, and it is the only
+	// thing in a synthesized article that says what this link is.
+	if !strings.Contains(clean, `<a class="wu-audio" href="http://127.0.0.1:6888/res/`) {
 		t.Errorf("clean dropped the pronunciation instead of rewriting it: %q", clean)
 	}
 	if strings.Contains(clean, "<object") {

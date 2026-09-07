@@ -26,42 +26,42 @@ func TestTransformBody(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{`[b]bold[/b]`, `<b>bold</b>`},
 		{`[i]it[/i] [u]un[/u] [sup]s[/sup]`, `<i>it</i> <u>un</u> <sup>s</sup>`},
-		{`[c]green[/c]`, `<font color="green">green</font>`},
-		{`[c darkred]x[/c]`, `<font color="darkred">x</font>`},
-		{`[m2]indent[/m]`, `<p style="padding-left:2em;margin:0">indent</p>`},
+		{`[c]green[/c]`, `<span class="wu-c">green</span>`},
+		{`[c darkred]x[/c]`, `<span class="wu-c" style="--wd-c:darkred">x</span>`},
+		{`[m2]indent[/m]`, `<p class="wu-m" style="--wd-m:2">indent</p>`},
 		// [/m2] is as common as [/m] and closes the same paragraph; matching
 		// only "m" left it open and the indent ran to the end of the article.
-		{`[m2]indent[/m2]`, `<p style="padding-left:2em;margin:0">indent</p>`},
-		{`[m]bare[/m0]`, `<p style="padding-left:0.3em;margin:0">bare</p>`},
-		{`[ex]sample[/ex]`, `<span class="ex"><font color="steelblue">sample</font></span>`},
+		{`[m2]indent[/m2]`, `<p class="wu-m" style="--wd-m:2">indent</p>`},
+		{`[m]bare[/m0]`, `<p class="wu-m">bare</p>`},
+		{`[ex]sample[/ex]`, `<span class="wu-ex">sample</span>`},
 		{`a [ref]target[/ref]`, `a <a href="bword://target">target</a>`},
 		{`<<other>>`, `<a href="bword://other">other</a>`},
 		{`[url]example.com[/url]`, `<a href="http://example.com">example.com</a>`},
-		{`[p]adj.[/p]`, `<i class="p"><font color="green">adj.</font></i>`},
+		{`[p]adj.[/p]`, `<span class="wu-p">adj.</span>`},
 		{`x {{comment}} y`, `x  y`},
-		{`[trn]kept[/trn]`, `kept`},
+		{`[trn]kept[/trn]`, `<span class="wu-trn">kept</span>`},
 		{`5 &lt; 6? a<b`, `5 &amp;lt; 6? a&lt;b`},
 		{`literal ([ ]) brackets`, `literal ([ ]) brackets`}, // corchete case
 		{`[unknowntag]inner[/unknowntag]`, `inner`},
 		// [m0] means margin 0, not the default indent.
-		{`[m0]flush[/m]`, `<p style="padding-left:0em;margin:0">flush</p>`},
-		{`[m]bare[/m]`, `<p style="padding-left:0.3em;margin:0">bare</p>`},
+		{`[m0]flush[/m]`, `<p class="wu-m">flush</p>`},
+		{`[m]bare[/m]`, `<p class="wu-m">bare</p>`},
 		// Not a margin tag: no digits after the 'm'.
 		{`[mx]plain[/mx]`, `plain`},
 		// A comment may contain a single closing brace.
 		{`x {{note with } inside}} y`, `x  y`},
 		// Hostile attribute content cannot break out of the quotes.
-		{`[c re"d]x[/c]`, `<font color="re&quot;d">x</font>`},
+		{`[c re"d]x[/c]`, `<span class="wu-c">x</span>`},
 		// A comment alone on its line takes the line with it: keeping the
 		// line would put a blank line in front of the next one whenever
 		// that line does not open with [m].
-		{"[m1]a\n\t{{note}}\n\tb", `<p style="padding-left:1em;margin:0">a<br/>b`},
-		{"[m1]a\n\t{{note}}\n\t[m2]b", `<p style="padding-left:1em;margin:0">a<p style="padding-left:2em;margin:0">b`},
+		{"[m1]a\n\t{{note}}\n\tb", `<p class="wu-m" style="--wd-m:1">a<br/>b`},
+		{"[m1]a\n\t{{note}}\n\t[m2]b", `<p class="wu-m" style="--wd-m:1">a<p class="wu-m" style="--wd-m:2">b`},
 		// ... including on the last line, where the newline it takes is the
 		// one that ended the line before it.
-		{"[m1]a\n\t{{note}}", `<p style="padding-left:1em;margin:0">a`},
+		{"[m1]a\n\t{{note}}", `<p class="wu-m" style="--wd-m:1">a`},
 		// A line that keeps content keeps its line break too.
-		{"[m1]a {{note}}\n\tb", `<p style="padding-left:1em;margin:0">a <br/>b`},
+		{"[m1]a {{note}}\n\tb", `<p class="wu-m" style="--wd-m:1">a <br/>b`},
 	}
 	for _, c := range cases {
 		got, _, err := transformBody(c.in, "KEY")
@@ -88,7 +88,7 @@ func TestTransformBodyUTF8(t *testing.T) {
 
 func TestTransformMedia(t *testing.T) {
 	got, res, _ := transformBody(`[s]audio/x.mp3[/s][s]img.png[/s]`, "")
-	if !strings.Contains(got, `<a class="wudict-audio" href="audio/x.mp3">`) || !strings.Contains(got, `<img align="top" src="img.png"`) {
+	if !strings.Contains(got, `<a class="wu-audio" href="audio/x.mp3">`) || !strings.Contains(got, `<img align="top" src="img.png"`) {
 		t.Errorf("media html: %q", got)
 	}
 	if len(res) != 2 || res[0] != "audio/x.mp3" || res[1] != "img.png" {
@@ -107,42 +107,42 @@ func TestTransformMediaKinds(t *testing.T) {
 	}{
 		// video a browser plays, inline and unfetched until pressed
 		{`[s]video.mp4[/s]`,
-			`<video class="wudict-video" controls preload="none" src="video.mp4"></video>`,
+			`<video class="wu-video" controls preload="none" src="video.mp4"></video>`,
 			[]string{"video.mp4"}},
 		// [video] is the x5 synonym of [s] - identical output, not a variant
 		{`[video]clip.webm[/video]`,
-			`<video class="wudict-video" controls preload="none" src="clip.webm"></video>`,
+			`<video class="wu-video" controls preload="none" src="clip.webm"></video>`,
 			[]string{"clip.webm"}},
 		// a document: file link, name as text, file:// so the article rewriter
 		// maps it to /res/ regardless of extension
 		{`[s]español.pdf[/s]`,
-			`<a class="wudict-file" href="file://español.pdf">&#128196; español.pdf</a>`,
+			`<a class="wu-file" href="file://español.pdf">&#128196; español.pdf</a>`,
 			[]string{"español.pdf"}},
 		// Lingvo's own video container, which no browser decodes: a link, not
 		// an inline player that could never play
 		{`[s]clip.avi[/s]`,
-			`<a class="wudict-file" href="file://clip.avi">&#128196; clip.avi</a>`,
+			`<a class="wu-file" href="file://clip.avi">&#128196; clip.avi</a>`,
 			[]string{"clip.avi"}},
 		// nor are Lingvo's Microsoft image formats <img>
 		{`[s]plate.wmf[/s]`,
-			`<a class="wudict-file" href="file://plate.wmf">&#128196; plate.wmf</a>`,
+			`<a class="wu-file" href="file://plate.wmf">&#128196; plate.wmf</a>`,
 			[]string{"plate.wmf"}},
 		// an extension-less payload is a file too - never dropped
 		{`[s]README[/s]`,
-			`<a class="wudict-file" href="file://README">&#128196; README</a>`,
+			`<a class="wu-file" href="file://README">&#128196; README</a>`,
 			[]string{"README"}},
 		// a hostile name: quotes and ampersands escape in both the attribute
 		// and the text, and the class attribute cannot be broken out of
 		{`[s]a"b&c.pdf[/s]`,
-			`<a class="wudict-file" href="file://a&quot;b&amp;c.pdf">&#128196; a"b&amp;c.pdf</a>`,
+			`<a class="wu-file" href="file://a&quot;b&amp;c.pdf">&#128196; a"b&amp;c.pdf</a>`,
 			[]string{`a"b&c.pdf`}},
 		// [preview] is accepted inside the zone and has no effect; it must not
 		// become part of the file name
 		{`[s][preview]video.mp4[/preview][/s]`,
-			`<video class="wudict-video" controls preload="none" src="video.mp4"></video>`,
+			`<video class="wu-video" controls preload="none" src="video.mp4"></video>`,
 			[]string{"video.mp4"}},
 		// audio and images are unchanged, byte for byte
-		{`[s]x.mp3[/s]`, `<a class="wudict-audio" href="x.mp3">&#128266;</a>`, []string{"x.mp3"}},
+		{`[s]x.mp3[/s]`, `<a class="wu-audio" href="x.mp3">&#128266;</a>`, []string{"x.mp3"}},
 		{`[s]X.PNG[/s]`, `<img align="top" src="X.PNG" alt="X.PNG" />`, []string{"X.PNG"}},
 		// an empty zone names no file and must not be recorded as one
 		{`[s][/s]`, ``, nil},
@@ -202,10 +202,10 @@ func TestTransformTitle(t *testing.T) {
 	if tr.Alt != "ударение в заголовке" {
 		t.Errorf("accent in parens, Alt: %q", tr.Alt)
 	}
-	if strings.Contains(tr.Display, "{") || strings.Count(tr.Display, `<u class="accent">`) != 4 {
+	if strings.Contains(tr.Display, "{") || strings.Count(tr.Display, `<span class="wu-acc">`) != 4 {
 		t.Errorf("accent in parens, Display: %q", tr.Display)
 	}
-	if !strings.HasSuffix(tr.Display, `стать<u class="accent">и</u>)`) ||
+	if !strings.HasSuffix(tr.Display, `стать<span class="wu-acc">и</span>)`) ||
 		!strings.Contains(tr.Display, `вке (слов`) {
 		t.Errorf("accent in parens, brackets lost: %q", tr.Display)
 	}
@@ -558,7 +558,7 @@ func TestReaderHeaderTabsAndSubEntries(t *testing.T) {
 	if len(main.Headwords) != 2 || main.Headwords[0] != wantMain[0] || main.Headwords[1] != wantMain[1] {
 		t.Errorf("main headwords: %q want %q", main.Headwords, wantMain)
 	}
-	if strings.Contains(main.Body, "{") || !strings.Contains(main.Body, `<u class="accent">`) {
+	if strings.Contains(main.Body, "{") || !strings.Contains(main.Body, `<span class="wu-acc">`) {
 		t.Errorf("main body: %q", main.Body)
 	}
 	if !strings.Contains(main.Body, `href="bword://подстатьями"`) {

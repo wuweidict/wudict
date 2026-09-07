@@ -12,6 +12,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/wuweidict/wudict/internal/artmark"
 	"github.com/wuweidict/wudict/internal/store"
 )
 
@@ -79,8 +80,6 @@ func stripComments(text string) string {
 	}
 	return string(out)
 }
-
-const exampleColor = "steelblue"
 
 // transformer converts one entry body from DSL markup to HTML.
 // State-machine port of pyglossary's Transformer/lexRoot family.
@@ -193,19 +192,17 @@ func quoteAttr(s string) string { return `"` + attrEscaper.Replace(s) + `"` }
 // closeLabel flushes a [p] label. When the dictionary's abbreviation companion
 // knows this label, the whole coloured run is wrapped in an <abbr> carrying the
 // expansion: the browser draws its own tooltip, no client code is involved, and
-// both the element and the title= survive `-format clean`. The class is for
-// styling only and is dropped there, which is why it carries nothing the reader
-// needs. With no expansion the bytes are exactly what they always were.
+// both the element and the title= survive `-format clean`. The label itself is
+// a role (wu-p, internal/artmark) and carries no colour of its own.
 func (tr *transformer) closeLabel() {
 	label := tr.label.String()
-	tr.out.WriteString(`<i class="p">`)
+	tr.out.WriteString(`<span class="wu-p">`)
 	if exp, ok := tr.abbrev.lookup(collapseSpace(store.StripHTML(label))); ok {
-		tr.out.WriteString(`<abbr class="wudict-abbr" title=` + quoteAttr(exp) + `>`)
-		tr.out.WriteString(`<font color="green">` + label + "</font></abbr>")
+		tr.out.WriteString(`<abbr class="wu-abbr" title=` + quoteAttr(exp) + `>` + label + `</abbr>`)
 	} else {
-		tr.out.WriteString(`<font color="green">` + label + "</font>")
+		tr.out.WriteString(label)
 	}
-	tr.out.WriteString("</i>")
+	tr.out.WriteString("</span>")
 	tr.label.Reset()
 	tr.labelOpen = false
 }
@@ -400,31 +397,47 @@ func (tr *transformer) processTag(tag string, attrs map[string]string) error {
 		// effect, so the same lexer - not a second one that could drift.
 		tr.lexTagS()
 	case tag == "c":
-		color := "green"
+		// The author's colour is a PARAMETER, not a decision: it rides as
+		// --wd-c and internal/artmark's rule turns it into a colour, so a
+		// reader who sets .wu-c{color:...} beats it without !important.
+		// A bare [c] is green (lingvo-ref), which is the rule's fallback and
+		// so costs no attribute at all.
+		color := ""
 		for k, v := range attrs {
 			if v == "" {
 				color = k
 				break
 			}
 		}
-		tr.addHTML(`<font color=` + quoteAttr(color) + `>`)
-	case isMarginTag(tag):
-		// [m0]..[m9] set the left margin to N spaces; [m0] means 0, and a
-		// bare [m] means the default indent. Only digits reach the CSS -
-		// anything else would emit a length like "padding-left:arkem".
-		padding := "0.3"
-		if len(tag) > 1 {
-			padding = tag[1:]
+		if !artmark.IsColor(color) {
+			// A name or a #hex, or nothing. Dictionary content reaching a
+			// style attribute is an injection site, and a value like
+			// `red;position:fixed` would be exactly that.
+			color = ""
 		}
-		tr.addHTML(`<p style="padding-left:` + padding + `em;margin:0">`)
+		if color == "" {
+			tr.addHTML(`<span class="wu-c">`)
+		} else {
+			tr.addHTML(`<span class="wu-c" style=` + quoteAttr("--wd-c:"+color) + `>`)
+		}
+	case isMarginTag(tag):
+		// [mN] shifts the left margin by N; a bare [m] is a shift of zero
+		// (lingvo-ref "Тэг [m]···[/m]") - the 0.3em it used to emit was a
+		// pyglossary artifact. isMarginTag has already guaranteed the tail is
+		// digits, so nothing but a number can reach the custom property.
+		if n := tag[1:]; n != "" && n != "0" {
+			tr.addHTML(`<p class="wu-m" style=` + quoteAttr("--wd-m:"+n) + `>`)
+		} else {
+			tr.addHTML(`<p class="wu-m">`)
+		}
 	case tag == "p":
 		tr.labelOpen = true
 	case tag == "*":
-		tr.addHTML(`<span class="sec">`)
+		tr.addHTML(`<span class="wu-sec">`)
 	case tag == "ex":
-		tr.addHTML(`<span class="ex"><font color="` + exampleColor + `">`)
+		tr.addHTML(`<span class="wu-ex">`)
 	case tag == "t":
-		tr.addHTML(`<font face="Helvetica" class="dsl_t">`)
+		tr.addHTML(`<span class="wu-ipa">`)
 	case tag == "i":
 		tr.addHTML("<i>")
 	case tag == "b":
@@ -432,17 +445,28 @@ func (tr *transformer) processTag(tag string, attrs map[string]string) error {
 	case tag == "u":
 		tr.addHTML("<u>")
 	case tag == "'":
-		tr.addHTML(`<u class="accent">`)
+		tr.addHTML(`<span class="wu-acc">`)
 	case tag == "sup":
 		tr.addHTML("<sup>")
 	case tag == "sub":
 		tr.addHTML("<sub>")
-	case tag == "trn", tag == "!trn", tag == "trs", tag == "!trs",
-		tag == "lang", tag == "com", tag == "preview":
-		// stripped wrappers. [preview] is legal only INSIDE [s]/[video], where
-		// lexTagS consumes it; the compiler accepts it and it has no effect
-		// (lingvo-ref "Тэг [preview]···[/preview]"), so a stray one outside a
-		// media zone is dropped rather than printed.
+	case tag == "trn":
+		tr.addHTML(`<span class="wu-trn">`)
+	case tag == "!trn":
+		tr.addHTML(`<span class="wu-trn-not">`)
+	case tag == "trs":
+		tr.addHTML(`<span class="wu-trs">`)
+	case tag == "!trs":
+		tr.addHTML(`<span class="wu-trs-not">`)
+	case tag == "com":
+		tr.addHTML(`<span class="wu-com">`)
+	case tag == "lang":
+		tr.addHTML(`<span class="wu-lang"` + langAttrs(attrs) + `>`)
+	case tag == "preview":
+		// [preview] is legal only INSIDE [s]/[video], where lexTagS consumes
+		// it; the compiler accepts it and it has no effect (lingvo-ref "Тэг
+		// [preview]···[/preview]"), so a stray one outside a media zone is
+		// dropped rather than printed.
 	default:
 		// unknown tag: dropped, content kept (pyglossary logs a warning)
 	}
@@ -461,7 +485,7 @@ func (tr *transformer) closeTag(tag string) {
 	switch tag {
 	case "b":
 		tr.addHTML("</b>")
-	case "u", "'":
+	case "u":
 		tr.addHTML("</u>")
 	case "i":
 		tr.addHTML("</i>")
@@ -469,14 +493,11 @@ func (tr *transformer) closeTag(tag string) {
 		tr.addHTML("</sup>")
 	case "sub":
 		tr.addHTML("</sub>")
-	case "c", "t":
-		tr.addHTML("</font>")
 	case "p":
 		tr.closeLabel()
-	case "*":
+	case "'", "c", "t", "*", "ex", "trn", "!trn", "trs", "!trs", "com", "lang":
+		// Every role is one <span>, whatever its opener had to decide.
 		tr.addHTML("</span>")
-	case "ex":
-		tr.addHTML("</font></span>")
 	}
 }
 
@@ -590,7 +611,7 @@ func (tr *transformer) lexTagS() {
 		// sanitiser strips every on* attribute, by design).
 		//
 		// [s] carries no link text of its own, so the glyph is the affordance.
-		tr.addHTML(`<a class="wudict-audio" href=` + quoteAttr(fname) + `>&#128266;</a>`)
+		tr.addHTML(`<a class="wu-audio" href=` + quoteAttr(fname) + `>&#128266;</a>`)
 	case mediaImage:
 		tr.addHTML(`<img align="top" src=` + quoteAttr(fname) + ` alt=` + quoteAttr(fname) + ` />`)
 	case mediaVideo:
@@ -599,7 +620,7 @@ func (tr *transformer) lexTagS() {
 		// until the reader presses play. src is a fetch site, so the article
 		// rewriter points it at /res/{dict}/ with no special case, and `clean`
 		// already keeps <video src|controls> (server/articleformat.go).
-		tr.addHTML(`<video class="wudict-video" controls preload="none" src=` + quoteAttr(fname) + `></video>`)
+		tr.addHTML(`<video class="wu-video" controls preload="none" src=` + quoteAttr(fname) + `></video>`)
 	default:
 		// Anything else - a PDF, a document, one of Lingvo's own formats no
 		// browser handles. The `file://` pseudo-scheme is the author saying
@@ -611,7 +632,7 @@ func (tr *transformer) lexTagS() {
 		//
 		// The file name is the link text because it is all there is: [s] has no
 		// text of its own, and a bare glyph would not say what it opens.
-		tr.addHTML(`<a class="wudict-file" href=` + quoteAttr("file://"+fname) +
+		tr.addHTML(`<a class="wu-file" href=` + quoteAttr("file://"+fname) +
 			`>&#128196; ` + escape(fname) + `</a>`)
 	}
 	tr.resFiles = append(tr.resFiles, fname)

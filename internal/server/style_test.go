@@ -199,6 +199,12 @@ func TestIndexTracksTheUserStylesheet(t *testing.T) {
 	if strings.Contains(bare.Body.String(), "{{USERCSS}}") {
 		t.Error("the placeholder survived into the served page")
 	}
+	if strings.Contains(bare.Body.String(), "{{ARTCSS}}") {
+		t.Error("the role stylesheet placeholder survived into the served page")
+	}
+	if !strings.Contains(bare.Body.String(), ".wu-ex") {
+		t.Error("the role stylesheet did not reach the page")
+	}
 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)

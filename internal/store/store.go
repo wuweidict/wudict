@@ -16,6 +16,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"github.com/wuweidict/wudict/internal/artmark"
 	"io"
 	"strconv"
 	"strings"
@@ -91,6 +92,40 @@ func foldVersionOf(m map[string]string) int {
 // the strength of it.
 func FoldStale(m map[string]string) bool {
 	return m["has_trigram"] == "1" && foldVersionOf(m) != dict.FoldVersion
+}
+
+// markupVersionOf reads the article-markup version a database records. Absent
+// means zero: it was built before internal/artmark existed, so its articles
+// carry the presentation the transformer used to inline (<font color>, a
+// hard-coded padding-left) and no role a reader could restyle.
+func markupVersionOf(m map[string]string) int {
+	if s := m["markup_version"]; s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+// MarkupStale reports that the articles in a prepared database were written
+// with a different role vocabulary than the stylesheet now serving them
+// (internal/artmark). Only formats whose HTML wudict SYNTHESIZES can be stale:
+// an mdx or a slob carries its own markup and its own stylesheet, and wudict
+// changing its mind about class names cannot reach it.
+//
+// The articles are frozen bytes, so - exactly as with an abbreviation glossary
+// (server/registry.go abbrevStale) - the only repair is to build them again.
+// This is a fact about the data, not a fault: a stale article still renders,
+// it simply does not answer to Custom styles. Callers rebuild on a dictionary
+// the user is already changing and leave the rest alone; there is deliberately
+// no library-wide sweep, because a re-index of everything is the one cost that
+// must never be paid on somebody's behalf (docs.local/PERF.md).
+func MarkupStale(m map[string]string) bool {
+	switch m["format"] {
+	case "dsl", "stardict": // dsl: always synthesized. stardict: XDXF articles.
+		return markupVersionOf(m) != artmark.Version
+	}
+	return false
 }
 
 // Open opens and validates a wudict text database.

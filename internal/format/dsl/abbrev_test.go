@@ -55,15 +55,15 @@ func TestCloseLabelAbbrev(t *testing.T) {
 		count: 3,
 	}
 	cases := []struct{ in, want string }{
-		{`[p]pl[/p]`, `<i class="p"><abbr class="wudict-abbr" title="plural"><font color="green">pl</font></abbr></i>`},
+		{`[p]pl[/p]`, `<span class="wu-p"><abbr class="wu-abbr" title="plural">pl</abbr></span>`},
 		// case-folded: the glossary is keyed "Adj.", the article says "adj."
-		{`[p]adj.[/p]`, `<i class="p"><abbr class="wudict-abbr" title="adjective"><font color="green">adj.</font></abbr></i>`},
+		{`[p]adj.[/p]`, `<span class="wu-p"><abbr class="wu-abbr" title="adjective">adj.</abbr></span>`},
 		// a quote in the expansion may never break out of the attribute
-		{`[p]ok[/p]`, `<i class="p"><abbr class="wudict-abbr" title="says &quot;fine&quot;"><font color="green">ok</font></abbr></i>`},
+		{`[p]ok[/p]`, `<span class="wu-p"><abbr class="wu-abbr" title="says &quot;fine&quot;">ok</abbr></span>`},
 		// miss: exactly the pre-abbreviation bytes
-		{`[p]zzz[/p]`, `<i class="p"><font color="green">zzz</font></i>`},
+		{`[p]zzz[/p]`, `<span class="wu-p">zzz</span>`},
 		// nested markup inside the label still resolves on its plain text
-		{`[p][i]pl[/i][/p]`, `<i class="p"><abbr class="wudict-abbr" title="plural"><font color="green"><i>pl</i></font></abbr></i>`},
+		{`[p][i]pl[/i][/p]`, `<span class="wu-p"><abbr class="wu-abbr" title="plural"><i>pl</i></abbr></span>`},
 	}
 	for _, c := range cases {
 		got, _, err := transformBodyAbbrev(c.in, "", ab)
@@ -76,7 +76,7 @@ func TestCloseLabelAbbrev(t *testing.T) {
 	}
 	// a nil map is how "no companion" is spelled, and must change nothing
 	got, _, err := transformBodyAbbrev(`[p]pl[/p]`, "", nil)
-	if err != nil || got != `<i class="p"><font color="green">pl</font></i>` {
+	if err != nil || got != `<span class="wu-p">pl</span>` {
 		t.Errorf("nil map: %q, %v", got, err)
 	}
 }

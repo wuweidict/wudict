@@ -495,11 +495,6 @@ body.styling{padding-bottom:var(--styler-h)}
 .pd .pfx{color:var(--fg-soft)}
 .pd .path{color:var(--fg-faint);cursor:pointer}
 .pd .err{color:#c0564f}
-/* an article's own section, pulled in beside the link that asked for it */
-.wudict-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid var(--accent);
-  background:color-mix(in srgb,var(--accent) 6%,transparent);border-radius:0 6px 6px 0}
-.wudict-sub-close{float:right;cursor:pointer;color:var(--fg-faint);font-size:12px;padding:0 .3em}
-.wudict-sub-close:hover{color:var(--accent)}
 /* Folders & configuration: a quiet disclosure under the dictionary cards.
    It answers "where is it looking?", "where did my prepared data go?" and
    "which config file is in effect?" — otherwise only visible on the terminal
@@ -2168,6 +2163,13 @@ function resURL(dictID,ref){
 
 /* shadow-root base style: sane defaults inside the sandbox; media flip
    back when the host carries data-dark (Dark-Reader approach) */
+/* The role stylesheet for articles wudict writes itself (Go: internal/artmark).
+   Substituted once by the server and used by BOTH article surfaces below —
+   a shadow root and a sandboxed iframe cannot share a sheet object, but they
+   can share these bytes, and a role that renders differently in the two would
+   be a bug nobody would think to look for. */
+const ARTCSS=`{{ARTCSS}}`;
+
 const shadowBase=`<style>
 :host{all:initial;display:block;font-family:${"-apple-system,Helvetica,Arial,sans-serif"};
   font-size:var(--wd-fs,15px);line-height:1.618;color:var(--wd-article-fg,#1a1a1a);word-break:break-word}
@@ -2176,6 +2178,7 @@ a{color:#5b7a99;cursor:pointer}
 table{max-width:100%;border-collapse:collapse}
 :host([data-dark]) :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){
   filter:invert(1) hue-rotate(180deg)}
+${ARTCSS}
 </style>`;
 
 /* ── @font-face hoisting ─────────────────────────────────────────────────
@@ -2299,9 +2302,7 @@ function frameDoc(content,fid,dark,dictID,frag){
     'body{margin:8px}img,video,svg{max-width:100%;height:auto}'+
     'html.dark{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.92)}'+
     'html.dark :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){filter:invert(1) hue-rotate(180deg)}'+
-    '.wudict-sub{margin:.4em 0;padding:.4em .6em;border-left:3px solid #e08600;background:rgba(224,134,0,.06);border-radius:0 6px 6px 0}'+
-    '.wudict-sub-close{float:right;cursor:pointer;color:#999;font-size:12px;padding:0 .3em}'+
-    '.wudict-sub-close:hover{color:#e08600}'+
+    ARTCSS+
     '</style><script src="/assets/frame.js?v={{FRAMEJS}}" data-fid="'+fid+'" data-dict="'+(dictID||"")+
     '" data-frag="'+esc(frag||"").replace(/"/g,"&quot;")+'"><\/script></head><body>'+content+
     /* A stylesheet written for a full page sizes html and body from the
@@ -2970,7 +2971,7 @@ document.addEventListener("click",e=>{
     if(ref.kind==="sub"){toggleSub(a,ref.word,dictID);return}
     if(ref.kind==="lookup"){searchFor(ref.word,{scope:dictID,frag:ref.frag});return}
     jumpInArticle(a,dd,ref.frag); // "anchor"
-  }else if(a.classList.contains("wudict-file")){
+  }else if(a.classList.contains("wu-file")){
     // A dictionary's own attachment is opened in a new tab.
     e.preventDefault();window.open(href,"_blank","noopener,noreferrer");
   }else if(/^https?:\/\//i.test(href)&&dd){
@@ -3004,7 +3005,7 @@ function jumpInArticle(a,dd,frag){
 async function toggleSub(link,word,dictID){
   if(link._sub){link._sub.remove();link._sub=null;return}
   const box=document.createElement("div");
-  box.className="wudict-sub";box.textContent="…";
+  box.className="wu-sub";box.textContent="…";
   link.parentNode.insertBefore(box,link.nextSibling);
   link._sub=box;
   try{
@@ -3017,8 +3018,8 @@ async function toggleSub(link,word,dictID){
       if(m.t==="hit"&&m.results?.length)html=m.results[0].Body;
     }
     if(html===null){box.textContent="(not in this dictionary)";return}
-    box.innerHTML=`<span class="wudict-sub-close" title="Close">✕</span>`+html.replace(/<link\b[^>]*>/gi,"");
-    box.querySelector(".wudict-sub-close").addEventListener("click",()=>toggleSub(link,word,dictID));
+    box.innerHTML=`<span class="wu-sub-close" title="Close">✕</span>`+html.replace(/<link\b[^>]*>/gi,"");
+    box.querySelector(".wu-sub-close").addEventListener("click",()=>toggleSub(link,word,dictID));
   }catch(_){box.textContent="(could not load)"}
 }
 
@@ -3355,6 +3356,38 @@ body{-webkit-text-stroke:.2px currentColor}`,article:
 :host table, :root > body table {
   display:block; max-width:100%; overflow-x:auto; border-collapse:collapse }
 :host :is(td,th), :root > body :is(td,th) { padding:.2em .4em }`},
+  {n:"Dictionary roles",g:"Roles",article:
+`/* Lingvo DSL and XDXF articles are built by wudict itself, so every part of
+   one is labelled with what it IS. Restyle a label here and every dictionary
+   of that kind follows. Delete the lines you do not want.
+   The parts with no rule of their own are listed at the bottom. */
+.wu-p   { color:#2e7d32; font-style:italic }   /* label, part of speech */
+.wu-ex  { color:#4682b4 }                      /* example */
+.wu-ipa { font-family:"Charis SIL","Doulos SIL",serif }  /* transcription */
+.wu-sec { opacity:.85 }                        /* secondary, optional */
+.wu-com { opacity:.8 }                         /* editorial comment */
+.wu-gr  { font-style:italic; opacity:.75 }     /* grammar note */
+.wu-acc { text-decoration:underline }          /* stress mark */
+.wu-k   { font-weight:600 }                    /* headword */
+
+/* The dictionary author's own colour and indent. These override nothing:
+   write a plain rule and yours wins, no !important needed. */
+.wu-c { color:var(--wd-c,green) }
+.wu-m { padding-left:calc(var(--wd-m,0)*1em) }
+
+/* No look of their own — give them one if you want it:
+   .wu-def  definition body
+   .wu-trn  translation      .wu-trn-not  everything that is not translation
+   .wu-trs  transcription    .wu-trs-not  everything that is not transcription
+   .wu-lang a foreign-language passage; [lang="ru"] and [data-lang="Russian"]
+            select one particular language */`},
+  {n:"Quiet examples",g:"Roles",article:
+`/* Examples in the text colour instead of blue, one size down. */
+.wu-ex { color:inherit; opacity:.8; font-size:.94em }`},
+  {n:"Tighter indents",g:"Roles",article:
+`/* DSL articles indent by level. Halve it, or set the multiplier to 0 to
+   flatten the article completely. */
+.wu-m { padding-left:calc(var(--wd-m,0)*.5em) }`},
 ];
 let stylerTab="app",
     stylerText={app:"",article:""},

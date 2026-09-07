@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/wuweidict/wudict/internal/artmark"
 	"io"
 	"os"
 	"path/filepath"
@@ -294,6 +295,7 @@ func IngestPlan(r dict.Reader, dbPath string, plan Plan, progress Progress) (rep
 		"ingest_level":     string(level),
 		"has_trigram":      boolMeta(plan.Contains),      // cheap-list flag; Open feature-detects the table
 		"fold_version":     fmt.Sprint(dict.FoldVersion), // which text folding built the trigram index
+		"markup_version":   fmt.Sprint(artmark.Version),  // which role markup the articles were written with
 		"body_encoding":    bodyEncoding(),
 		"created":          time.Now().UTC().Format(time.RFC3339),
 		"source_sha256_1M": sourceHash(srcMeta.Path),

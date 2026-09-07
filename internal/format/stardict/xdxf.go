@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/wuweidict/wudict/internal/artmark"
 )
 
 // xdxfToHTML converts XDXF article markup (StarDict sametypesequence 'x')
@@ -55,7 +57,7 @@ func attr(e xml.StartElement, name string) string {
 func xdxfOpen(e xml.StartElement) string {
 	switch e.Name.Local {
 	case "k":
-		return `<div class="xdxf-k"><b>`
+		return `<div class="wu-k">`
 	case "b":
 		return "<b>"
 	case "i":
@@ -71,20 +73,22 @@ func xdxfOpen(e xml.StartElement) string {
 	case "br":
 		return "<br/>"
 	case "c":
-		if c := attr(e, "c"); c != "" {
-			return fmt.Sprintf(`<span style="color:%s">`, htmlEscape(c))
+		// The colour is the author's parameter, carried as --wd-c for
+		// internal/artmark to consume; an unusable value is simply no colour.
+		if c := attr(e, "c"); artmark.IsColor(c) {
+			return `<span class="wu-c" style="--wd-c:` + c + `">`
 		}
-		return `<span class="xdxf-c">`
+		return `<span class="wu-c">`
 	case "ex":
-		return `<span class="xdxf-ex">`
+		return `<span class="wu-ex">`
 	case "co":
-		return `<span class="xdxf-co">(`
+		return `<span class="wu-com">(`
 	case "abr", "abbr":
-		return `<span class="xdxf-abr"><i>`
+		return `<span class="wu-p">`
 	case "dtrn":
-		return `<span class="xdxf-dtrn">`
+		return `<span class="wu-trn">`
 	case "tr":
-		return `<span class="xdxf-tr">[`
+		return `<span class="wu-ipa">[`
 	case "kref", "iref":
 		href := attr(e, "href")
 		if href == "" {
@@ -94,9 +98,9 @@ func xdxfOpen(e xml.StartElement) string {
 	case "rref":
 		return "" // resource reference: text content is the file name
 	case "blockquote", "def":
-		return `<div class="xdxf-def">`
+		return `<div class="wu-def">`
 	case "sr", "pos", "gr":
-		return `<span class="xdxf-gr"><i>`
+		return `<span class="wu-gr">`
 	case "nu", "mrkd":
 		return ""
 	default:
@@ -107,7 +111,7 @@ func xdxfOpen(e xml.StartElement) string {
 func xdxfClose(name string) string {
 	switch name {
 	case "k":
-		return "</b></div>"
+		return "</div>"
 	case "b":
 		return "</b>"
 	case "i":
@@ -127,7 +131,7 @@ func xdxfClose(name string) string {
 	case "co":
 		return ")</span>"
 	case "abr", "abbr":
-		return "</i></span>"
+		return "</span>"
 	case "tr":
 		return "]</span>"
 	case "kref", "iref":
@@ -137,7 +141,7 @@ func xdxfClose(name string) string {
 	case "blockquote", "def":
 		return "</div>"
 	case "sr", "pos", "gr":
-		return "</i></span>"
+		return "</span>"
 	default:
 		return ""
 	}

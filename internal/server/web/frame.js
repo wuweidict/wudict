@@ -425,7 +425,7 @@
 		} else if (/\.(mp3|ogg|wav|spx|m4a)([?#]|$)/i.test(href)) {
 			e.preventDefault();
 			ownAudio(e, href);
-		} else if (a.classList && a.classList.contains("wudict-file")) {
+		} else if (a.classList && a.classList.contains("wu-file")) {
 			// A dictionary attachment this page cannot display (PDF, document,
 			// a DSL video format no browser decodes). Following it in place
 			// is the one thing that must not happen: with no
@@ -513,7 +513,7 @@
 			return;
 		}
 		var box = document.createElement("div");
-		box.className = "wudict-sub";
+		box.className = "wu-sub";
 		box.textContent = "…";
 		link.parentNode.insertBefore(box, link.nextSibling);
 		link.wudictSub = box;
@@ -531,9 +531,9 @@
 				});
 				if (html === null) { box.textContent = "(not in this dictionary)"; post(); return; }
 				// the fragment repeats the article's stylesheet link; one is enough
-				box.innerHTML = '<span class="wudict-sub-close" title="Close">✕</span>' +
+				box.innerHTML = '<span class="wu-sub-close" title="Close">✕</span>' +
 					html.replace(/<link\b[^>]*>/gi, "");
-				box.querySelector(".wudict-sub-close").addEventListener("click", function () {
+				box.querySelector(".wu-sub-close").addEventListener("click", function () {
 					toggleSub(link, word);
 				});
 				post();

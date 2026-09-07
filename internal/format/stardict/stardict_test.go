@@ -212,11 +212,11 @@ func TestXdxfToHTML(t *testing.T) {
 	src := `<k>word</k><c c="red">colored</c> <kref>other</kref> <tr>wɜːd</tr> <ex>an example</ex>`
 	got := xdxfToHTML(src)
 	for _, want := range []string{
-		`<div class="xdxf-k"><b>word</b></div>`,
-		`<span style="color:red">colored</span>`,
+		`<div class="wu-k">word</div>`,
+		`<span class="wu-c" style="--wd-c:red">colored</span>`,
 		`<a href="">other</a>`,
 		`[wɜːd]`,
-		`class="xdxf-ex"`,
+		`class="wu-ex"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("xdxf missing %q in %q", want, got)

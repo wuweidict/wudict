@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wuweidict/wudict/internal/artmark"
 	"github.com/wuweidict/wudict/internal/config"
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/htmlref"
@@ -72,7 +73,8 @@ type Server struct {
 	Version string
 
 	// indexOnce caches the substitutions index.html needs that never change
-	// after startup ({{VERSION}} in the About box, {{FRAMEJS}}'s hash).
+	// after startup ({{VERSION}} in the About box, {{FRAMEJS}}'s hash,
+	// {{ARTCSS}}).
 	// Version is assigned after the Server is built, so this cannot be done at
 	// embed time; doing it per request would re-copy the whole page on every
 	// load. {{USERCSS}} is deliberately left standing here - see pageFor.
@@ -326,6 +328,11 @@ func (s *Server) basePage() []byte {
 		}
 		page := strings.ReplaceAll(string(indexHTML), "{{VERSION}}", v)
 		page = strings.ReplaceAll(page, "{{FRAMEJS}}", assetTag(frameJS))
+		// The role stylesheet for articles wudict writes itself
+		// (internal/artmark). It is a floor under BOTH article surfaces, so
+		// it is substituted once here and index.html hands it to the shadow
+		// root and to the iframe from the same constant.
+		page = strings.ReplaceAll(page, "{{ARTCSS}}", artmark.DefaultCSS)
 		s.indexBase = []byte(page)
 	})
 	return s.indexBase

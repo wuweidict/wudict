@@ -1590,12 +1590,13 @@ func (e *entry) setFeatures(want features, progress store.Progress) error {
 	mediaDB := store.MediaDBPath(dir)
 
 	have := features{}
-	staleFold := false
+	staleFold, staleMarkup := false, false
 	if fileExists(textDB) {
 		if m, err := store.ReadMeta(textDB); err == nil {
 			have.FullText = m["ingest_level"] != string(store.LevelHeadwords)
 			have.Contains = m["has_trigram"] == "1"
 			staleFold = store.FoldStale(m)
+			staleMarkup = store.MarkupStale(m)
 		}
 	}
 	have.Media = fileExists(mediaDB)
@@ -1606,6 +1607,13 @@ func (e *entry) setFeatures(want features, progress store.Progress) error {
 		err = e.rebuild(name, textDB, plan, progress)
 	case store.SourceChanged(textDB, e.Path):
 		logx.V("%ssource changed since it was prepared - re-indexing", logx.Dict(name))
+		err = e.rebuild(name, textDB, plan, progress)
+	case staleMarkup:
+		// the article roles are baked in at ingest, the same way the
+		// abbreviation expansions are: a dictionary the user is already
+		// changing is rebuilt with the current vocabulary, and one they are
+		// not is left alone (store.MarkupStale).
+		logx.V("%sarticle markup predates the current role vocabulary - re-indexing", logx.Dict(name))
 		err = e.rebuild(name, textDB, plan, progress)
 	case abbrevStale(textDB, e.Path):
 		// the abbreviation glossary is baked into the articles, so a changed,

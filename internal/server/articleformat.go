@@ -6,6 +6,7 @@ package server
 
 import (
 	"fmt"
+	"github.com/wuweidict/wudict/internal/artmark"
 	"net/http"
 	"strings"
 
@@ -72,6 +73,28 @@ var cleanDrop = map[string]bool{
 
 var cleanGlobalAttr = map[string]bool{
 	"title": true, "lang": true, "dir": true, "id": true,
+	// class is allowed only as far as keepRoleClasses lets it: a dictionary's
+	// own class names are presentation and go, wudict's own roles stay.
+	"class": true,
+}
+
+// keepRoleClasses reduces a class attribute to wudict's own role vocabulary
+// (internal/artmark). `clean` exists to strip a dictionary's presentation, and
+// a class it wrote is presentation by definition - but an article wudict
+// SYNTHESIZED has no other structure at all: drop wu-ex and an example stops
+// being an example, in the one output where nothing else can say so. Nothing
+// survives, and the attribute goes with it.
+func keepRoleClasses(val string) (string, bool) {
+	var keep []string
+	for _, c := range strings.Fields(val) {
+		if strings.HasPrefix(c, artmark.Prefix) {
+			keep = append(keep, c)
+		}
+	}
+	if len(keep) == 0 {
+		return "", false
+	}
+	return strings.Join(keep, " "), true
 }
 
 // cleanAttrOK is an allowlist per element, not a denylist: an article is
@@ -177,6 +200,9 @@ func cleanPolicy(base string, st htmlref.Styles) htmlref.Policy {
 			}
 			if name == "href" || name == "src" {
 				return cleanURL(val, base)
+			}
+			if name == "class" {
+				return keepRoleClasses(val)
 			}
 			return val, true
 		},
