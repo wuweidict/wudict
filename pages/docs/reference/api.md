@@ -219,20 +219,25 @@ so there is one description only.
 
 ## A working example
 
-The same search three ways: read the stream line by line, print every headword
+The same search three ways: read the response NDJSON stream line by line, print every headword
 and its article.
 
 === "Shell"
 
-    ``` sh title="curl and jq are enough - jq reads NDJSON natively"
-    curl -sN 'http://127.0.0.1:6888/api/search?q=flight&mode=exact&format=text&n=3' |
+    ``` sh title="with curl and jq which supports NDJSON natively"
+    curl -sN 'http://127.0.0.1:6888/api/search?q=phubbing&mode=exact&format=text&n=3' |
       jq -r --unbuffered 'select(.t == "hit") | .name as $d | (.results // [])[]
              | "\($d) | \(.Headword)", ("=" * 70), (.Body // "")'
+
+    # same as above but limit to a specific dictionary by its id (4112242f8cf1)
+    curl -sN 'http://127.0.0.1:6888/api/search?q=flight&mode=exact&format=text&n=3&dict=4112242f8cf1' |
+          jq -r --unbuffered 'select(.t == "hit") | .name as $d | (.results // [])[]
+                 | "\($d) | \(.Headword)", ("=" * 70), (.Body // "")'
     ```
 
-    `-N` stops curl buffering and `--unbuffered` stops jq doing the same, so
-    each dictionary prints as it answers. `(.results // [])` is what skips the
-    dictionaries that missed - a `hit` line with no results is normal.
+    `-N` prevents curl from buffering and `--unbuffered` prevents buffering for jq, so
+    results are printed eagerly. `(.results // [])` skips the
+    dictionaries that don't have the search term.
 
 === "Python"
 
@@ -250,6 +255,7 @@ and its article.
                     print("=" * 70)
                     print(r.get("Body", ""))
     ```
+    To limit result to one specific dictionary only append the dict=<DICTIONARY-ID> to the URL.
 
     A program sends no `Origin` header, so nothing has to be configured.
 
@@ -283,8 +289,8 @@ and its article.
 NOTE: 
 
 All three read the stream as it arrives rather than waiting for the body, which
-is the whole point of the format: the first dictionary prints while the slowest
-one is still reading.
+is the whole point of the format: the first dictionary prints data while the slowest
+one is still searching.
 
 ### The JavaScript version needs WEB_ORIGINS
 
