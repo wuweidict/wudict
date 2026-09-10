@@ -20,6 +20,14 @@ on:
       tag:
         description: "Tag for the release (e.g., v0.1) or use latest tag if empty"
         required: false
+      prerelease:
+        description: "Mark the release as a pre-release"
+        type: boolean
+        default: false
+      draft:
+        description: "Create the release as a draft (nothing is downloadable until it is published)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -172,13 +180,26 @@ jobs:
 
       - name: Create or update GitHub release
         if: ${{ steps.signing.outputs.enabled == 'true' }}
+        # The two dispatch checkboxes. They apply when the release is CREATED;
+        # on one that already exists they are only ever ADDED, never cleared.
+        # Three workflows publish into the same tag, so the second to arrive
+        # must not un-draft what the first staged, and a re-upload of assets
+        # onto an older release must not strip its pre-release marker.
         run: |
+          FLAGS=()
+          [ "${{ inputs.prerelease }}" = "true" ] && FLAGS+=(--prerelease)
+          [ "${{ inputs.draft }}" = "true" ] && FLAGS+=(--draft)
           if gh release view "${TAG}" > /dev/null 2>&1; then
             echo "Release ${TAG} exists - replacing assets."
             gh release upload "${TAG}" "$APK" --clobber
+            # An `if`, not a trailing `&&`: this is the last command in the
+            # branch, so a false test would become the step's exit status.
+            if [ ${#FLAGS[@]} -gt 0 ]; then
+              gh release edit "${TAG}" "${FLAGS[@]}"
+            fi
           else
             echo "Creating release ${TAG}."
             gh release create "${TAG}" "$APK" \
               --title "${{ github.event.repository.name }} ${TAG}" \
-              --generate-notes
+              --generate-notes "${FLAGS[@]}"
           fi
