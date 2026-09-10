@@ -549,4 +549,30 @@
 		var sel = String(document.getSelection() || "").trim();
 		if (sel) HOST.postMessage({ t: "pick", w: sel }, "*");
 	});
+
+	// --- keys belong to the app, not to the article -----------------------
+	// This is a sandboxed iframe, so the moment the user clicks into an
+	// article — to select a word, to follow a cross-reference — every
+	// keystroke is delivered HERE and the app's keyboard is dead, "/"
+	// included, with no way back to the search box that does not involve the
+	// mouse. Forward the two kinds the app wants: "/" (focus and select) and
+	// one printable character (start typing). The event cannot cross the
+	// document boundary, so the character travels with the message and the
+	// app inserts it.
+	// An editable target inside the article keeps its keys: a dictionary is
+	// allowed to ship a form, and Space stays a scroll key for reading.
+	document.addEventListener("keydown", function (e) {
+		if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+		var t = e.target;
+		if (t && (t.isContentEditable ||
+			/^(input|textarea|select)$/i.test(t.tagName || ""))) return;
+		var k = e.key || "";
+		if (k !== "/" && (k.length !== 1 || k === " ")) return;
+		// "/" would otherwise open the browser's quick-find inside the frame;
+		// a printable key does nothing here in any case.
+		e.preventDefault();
+		try {
+			HOST.postMessage({ t: "key", k: k }, "*");
+		} catch (err) { /* the app is gone; there is nobody to type at */ }
+	});
 })();

@@ -43,6 +43,7 @@ public class MainActivity extends Activity {
 
     private volatile boolean gone;   // onDestroy ran: late server callbacks must not touch the views
     private Object backCallback;     // OnBackInvokedCallback (API 33+), registered only while canGoBack()
+    private boolean wantAutoFocus;   // this load is a cold start onto an empty screen
     private String pendingQuery;     // arrived from LookupActivity (D67, D100)
     private String pendingMode;
     private String pendingDict;
@@ -170,6 +171,14 @@ public class MainActivity extends Activity {
             // web/index.html knows what Android is - the D54 rule (the shell
             // absorbs the platform, not the page), applied to the DOM.
             Storage.onPageFinished(view);
+            // One-shot, and only for the load showPage armed: the access-key
+            // redirect can finish more than one document on the way in, and
+            // every later navigation in this WebView is the user going
+            // somewhere, which is never a moment to raise a keyboard.
+            if (wantAutoFocus) {
+                wantAutoFocus = false;
+                Ime.showWhenPageFocuses(view);
+            }
         }
     }
 
@@ -301,6 +310,22 @@ public class MainActivity extends Activity {
             String q = pendingQuery;
             String m = pendingMode, d = pendingDict;
             pendingQuery = pendingMode = pendingDict = null;
+            // Nothing was forwarded, so this is a cold start onto an empty
+            // screen: a search field and no content at all, which is the one
+            // state where typing is unambiguously the task. A forwarded query
+            // is the opposite - an article is on its way, and a keyboard would
+            // be standing over it.
+            //
+            // Armed here and spent in onPageFinished, not started here: at
+            // this instant the WebView still holds the OUTGOING document -
+            // about:blank on a cold start, which is `complete` and has no
+            // search field, so a watcher started now would take that for a
+            // page with nothing to focus and give up before this load began.
+            //
+            // Reached only from onReady, which runs once per activity, so a
+            // resume onto whatever the user was reading never arrives here and
+            // needs no lifecycle test of its own.
+            wantAutoFocus = q == null;
             web.loadUrl(q == null ? Shell.pageUrl(this) : Shell.searchUrl(this, q, m, d));
         });
     }

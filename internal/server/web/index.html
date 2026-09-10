@@ -781,7 +781,10 @@ body.styling{padding-bottom:var(--styler-h)}
 <svg class="mag" viewBox="0 0 16 16" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M7.1 2.4a4.7 4.7 0 1 0 0 9.4 4.7 4.7 0 0 0 0-9.4zm3.6 8.3l3 3"/></svg>
 <span class="spin"></span>
 </span>
-<input type="search" id="q" placeholder="Search…" autocomplete="off" autofocus aria-label="Search term" disabled>
+<!-- enterkeyhint is declared, not inferred: type=search happens to label the
+     soft key "Search" on most Android builds, but that is a browser default
+     and not a contract. -->
+<input type="search" id="q" placeholder="Search…" autocomplete="off" enterkeyhint="search" autofocus aria-label="Search term" disabled>
 </span>
 <span class="seg">
 <span class="chip" id="modeChip" aria-hidden="true"></span>
@@ -1223,9 +1226,22 @@ function setPhase(p){
   $("frm").setAttribute("aria-busy",busy?"true":"false");
   if(busy){startBootScreen();return}
   stopBootScreen();
-  // a disabled input cannot hold focus (autofocus no-ops), so hand it back
-  // the moment it can take it — the user should be able to just type
-  if(wasBoot&&document.activeElement===document.body)$("q").focus();
+  /* A disabled input cannot hold focus (autofocus no-ops), so hand it back
+     the moment it can take it — the user should be able to just type.
+
+     Every device, deliberately, and NOT gated on a pointer the way the
+     mid-session focus below is. Focusing an element does not summon a soft
+     keyboard on its own: mobile browsers and Android WebView place the caret
+     and stop there, because raising the IME wants a user gesture. So this
+     costs a touch user nothing, and it is the signal a host shell can read to
+     decide the keyboard question for itself — which is a platform concern and
+     stays out of this file (D54).
+
+     Two conditions, and they carry the whole rule. `activeElement===body`
+     means the user has not already gone somewhere else during the load, and
+     an empty field means there is nothing on screen to read: a deep link that
+     arrived carrying ?q= has its answer coming and must not be retyped. */
+  if(wasBoot&&document.activeElement===document.body&&!$("q").value)$("q").focus();
 }
 
 /* Waiting messages. Cook Ding (庖丁解牛) — the cook whose blade never dulls
@@ -2360,6 +2376,22 @@ addEventListener("message",e=>{
        app's resource route: no scheme to smuggle, and "//host" cannot match. */
     if(/^https?:\/\//i.test(d.url)||/^\/res\//.test(d.url))
       window.open(d.url,"_blank","noopener,noreferrer");
+  }else if(d.t==="key"&&typeof d.k==="string"){
+    /* A keystroke that landed inside a sandboxed article (see frame.js). Once
+       the user clicks into an article — to select a word, to follow a link —
+       every key is delivered to THAT document and this page's shortcuts are
+       dead, "/" included; there is no keyboard route back to the search box.
+       The event itself cannot cross the boundary, so the character travels as
+       data and is inserted here. This is the one place in this file that
+       synthesizes input, which is why the `input` event has to be dispatched
+       by hand for the debounced search to see it. */
+    const qi=$("q");
+    if(qi.disabled)return;
+    if(d.k==="/"){qi.focus();qi.select();return}
+    if(d.k.length!==1)return;
+    qi.focus();
+    qi.value+=d.k;
+    qi.dispatchEvent(new Event("input",{bubbles:true}));
   }else if(d.t==="jserr"&&d.fid){
     /* A dictionary's own script threw. That is not fatal to us and must not
        interrupt reading - but a dead article and a working one look identical,
@@ -2842,10 +2874,46 @@ $("q").addEventListener("input",()=>{
   debounce=setTimeout(doSearch,300);
 });
 
-/* keyboard: "/" focuses search */
+/* keyboard: "/" focuses search, and any printable key starts one ─────────
+   The bar has one field and this app does one thing, so a keystroke that
+   lands nowhere in particular is a keystroke meant for the search box.
+   Routing it there subsumes autofocus, and is safe on every device precisely
+   because it is gesture-driven: a touch-only device produces no keystroke, so
+   nothing here can ever raise a soft keyboard (cf. setPhase).
+   Deliberately NOT preventDefault'ed for a printable key: focus() is
+   synchronous, so the character lands in the field by itself on this same
+   event and no value is synthesized. "/" is the exception — it focuses AND
+   selects, and must not type itself into the box. */
+function editable(el){
+  return !!el&&(el.isContentEditable||/^(input|textarea|select)$/i.test(el.tagName));
+}
+/* Where a stray keystroke should go, or nothing. An open dialog is a place
+   the user is working in and keeps its keys — the old "/" handler tested only
+   `!== #q` and so stole the character out of the custom-CSS editor. */
+function typeTarget(){
+  if($("styler").classList.contains("show")||$("panel").classList.contains("show"))return null;
+  if(document.activeElement===$("q")||editable(document.activeElement))return null;
+  return $("q").disabled?null:$("q");
+}
 document.addEventListener("keydown",e=>{
-  if(e.key==="/"&&document.activeElement!==$("q")){e.preventDefault();$("q").focus();$("q").select()}
-  if(e.key==="Escape")hidePanel();
+  if(e.key==="Escape"){
+    // Focus return (D102 is about labels, this is the same courtesy for the
+    // caret): dismissing an overlay from the keyboard must not drop focus
+    // onto <body>, where the next keystroke has nowhere to go.
+    const inPanel=$("panel").classList.contains("show")&&
+      $("panel").contains(document.activeElement);
+    hidePanel();
+    if(inPanel&&!$("q").disabled)$("q").focus();
+    return;
+  }
+  if(e.ctrlKey||e.metaKey||e.altKey||e.isComposing)return;
+  const q=typeTarget();if(!q)return;
+  if(e.key==="/"){e.preventDefault();q.focus();q.select();return}
+  // One printable character. `e.key` is a NAME for everything else ("Tab",
+  // "F5", "ArrowUp", "Dead"), so length is the whole test — except Space,
+  // which is how a reader pages through a long article and must stay a
+  // scroll key.
+  if(e.key.length===1&&e.key!==" ")q.focus();
 });
 
 /* clicks inside shadow roots arrive via composedPath */
@@ -3166,7 +3234,17 @@ window.addEventListener("popstate",()=>{
   doSearch();
 });
 $("frm").removeEventListener("submit",_doSearch);
-$("frm").addEventListener("submit",e=>doSearch(e));
+$("frm").addEventListener("submit",e=>{
+  /* Submit is the one moment the user has finished the word and wants to SEE
+     the answer — and on a touch device the soft keyboard is standing over the
+     results they just asked for. Give the screen back.
+     Submit only, never the 300 ms input debounce: dismissing the keyboard
+     mid-word would make the field unusable. Pointer devices keep focus, since
+     nothing is covering anything and refining the term is the next thing a
+     mouse user does. */
+  if(!matchMedia("(hover:hover)").matches)$("q").blur();
+  return doSearch(e);
+});
 
 /* ── the custom-styles editor ────────────────────────────────────────
    Two boxes over one textarea. The split is not bureaucracy: `body{}`,

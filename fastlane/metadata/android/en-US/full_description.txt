@@ -25,17 +25,16 @@ Four ways to look a word up:
 - Contains — the word anywhere in a headword
 - Full text — the word anywhere in an article
 
-Results from all of your dictionaries arrive together, streamed as each one
-answers, so a large collection stays responsive.
+All dictionaries are searched concurrently, with results displayed live as they become available.
 
 BUILT FOR LARGE COLLECTIONS
 
-Dictionaries are searched directly as soon as you add them. In the background
-each one is prepared into a compact local index, after which lookups are
-effectively instant even across a hundred dictionaries. Preparation is
+Dictionaries are searchable immediately after adding them. wudict
+builds a compact headword index in the background, after which lookups are
+almost instant even across hundreds of dictionaries. Preparation is
 automatic and needs no configuration; contains-search, full-text search and
 media packing are per-dictionary switches you can turn on only for the dictionaries
-that you select.
+that you select — these will take extra space with the estimated size displayed in the dictionary panel.
 
 PRIVACY
 
@@ -49,7 +48,7 @@ PRIVACY
 OPEN SOURCE
 
 wuDict is free software, licensed under GPL-3.0. The same program runs on
-Linux, macOS and Windows, in your default web browser.
+Linux, macOS, Windows, and even Raspberry Pi.
 
 Source code: https://github.com/wuweidict/wudict
 User guide: https://wudict.legbehindneck.com/apps/android/

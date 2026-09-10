@@ -1,0 +1,4 @@
+v3.7.2
+
+- stability fixes and performance tweaks
+- Lingvo DSL styling engine revamp

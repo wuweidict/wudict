@@ -1,1 +1,1 @@
-Search every offline dictionary you own: MDX, StarDict, Slob, DSL, BGL.
+Search all your offline dictionaries: MDict, StarDict, AARD2, DSL, BGL, ZIM.
