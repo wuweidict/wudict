@@ -119,6 +119,20 @@ type Rewriter struct {
 	// lower-case tag name. wudict uses it for <base>, whose href would
 	// otherwise re-root every relative reference in the article.
 	Drop func(tag string) bool
+
+	// Text maps one prose text node to its replacement, given the RAW source
+	// bytes as they appear in the document - entities intact, nothing
+	// unescaped. Returning the input unchanged is the case that preserves the
+	// original bytes, and a nil Text is that case for free.
+	//
+	// It is called only for text that is prose: never inside <script>,
+	// <style>, <title> or any other raw-text element (rawTextTag), and never
+	// for a comment or a doctype, which are different token types entirely.
+	// wudict uses it to mark full-text matches (internal/hilite), which is why
+	// the hook takes raw bytes and returns raw bytes: a marker that unescaped
+	// its input would have to re-escape it, and any disagreement between the
+	// two would rewrite what the article says.
+	Text func(raw string) string
 }
 
 // rawTextTag reports whether an element's content is raw text rather than
@@ -175,12 +189,19 @@ func (rw Rewriter) Rewrite(doc string) string {
 
 		case html.TextToken:
 			// Only <style> holds rewritable text. <script> explicitly does
-			// not, and neither does prose.
-			if raw == "style" && rw.URL != nil {
+			// not, and neither does prose - but prose is exactly what Text
+			// wants, so the two hooks are mutually exclusive by construction:
+			// raw == "" IS the definition of prose here.
+			switch {
+			case raw == "style" && rw.URL != nil:
 				b.WriteString(rewriteCSS(string(z.Raw()), func(u string) string {
 					return rw.URL(Ref{Site: SiteCSS, Tag: "style", URL: u})
 				}))
-			} else {
+			case raw == "" && rw.Text != nil:
+				// Raw() is only valid until the next Next(); the hook is
+				// called and its result written before that happens.
+				b.WriteString(rw.Text(string(z.Raw())))
+			default:
 				b.Write(z.Raw())
 			}
 

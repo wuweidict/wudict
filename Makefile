@@ -527,6 +527,11 @@ version: ## Print the version stamp used for builds
 	@echo $(VERSION)
 
 
+.PHONY: release-notes
+release-notes: ## Preview the release notes CI will publish (TAG=v3.8.0; default: latest tag)
+	@sh tools/release-notes.sh $(TAG)
+
+
 .PHONY: remotes
 remotes: ## git remotes
 	git remote -v

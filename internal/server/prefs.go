@@ -55,6 +55,18 @@ type DictPref struct {
 // — would hand them 15px there, and again the first time SERVER_PORT changes.
 type UIPrefs struct {
 	FontSize int `json:"fontSize,omitempty"` // article text, px; 0 = the default
+
+	// HLOff turns OFF marking of full-text matches inside articles. It is
+	// negating for the same reason DictPref.Off is: the default is on, and a
+	// default that is the zero value is a default a hand-written or
+	// half-written state.json cannot get wrong. An absent key is the feature
+	// working, never the feature silently missing.
+	//
+	// It is remembered state for the UI, not an instruction to the server: the
+	// search path never reads it. The SPA turns it into ?hl= on the request,
+	// which is what keeps an API client that never saw this file from
+	// inheriting a preference set in somebody's browser.
+	HLOff bool `json:"hlOff,omitempty"`
 }
 
 // Article text-size bounds. The ceiling is deliberately past what the layout

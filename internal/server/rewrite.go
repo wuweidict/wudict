@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/hilite"
 	"github.com/wuweidict/wudict/internal/htmlref"
 )
 
@@ -131,41 +132,84 @@ func RewriteEntryHTML(html, dictID string) string {
 	// (srcset⊃src, style⊃<style, and every attribute name below), so their
 	// absence guarantees no match. Plain-text definitions - common for
 	// StarDict and DSL - skip the whole pipeline.
-	if !strings.Contains(html, "src") && !strings.Contains(html, "href") &&
-		!strings.Contains(html, "data") && !strings.Contains(html, "poster") &&
-		!strings.Contains(html, "style") && !strings.Contains(html, "background") &&
-		!strings.Contains(html, "longdesc") && !strings.Contains(html, "usemap") &&
-		!strings.Contains(html, "<base") {
+	if !hasRewritableRef(html) {
 		return html
+	}
+	return entryRewriter(dictID, nil).Rewrite(html)
+}
+
+// RewriteEntryHTMLMarked is RewriteEntryHTML with full-text matches wrapped in
+// <mark class="wu-hl"> (internal/hilite). hl may be nil, which is plain
+// RewriteEntryHTML.
+//
+// The marking costs no pass of its own: it rides the tokenizer walk this
+// function was already doing, as the Rewriter's Text hook. That fusion is the
+// whole design - a separate highlighting pass would double the parse of every
+// article in a full-text fan-out, and a client-side one (mark.js, removed)
+// paid for a DOM walk and a layout invalidation per article on top of that.
+//
+// The one thing marking cannot share is the fast path above. That test asks
+// "has this article any rewritable reference", and an article of pure prose -
+// which is precisely what a full-text search finds - answers no while still
+// being full of matches to mark. So the tokenizer runs unconditionally here,
+// on the cheapest documents there are.
+func RewriteEntryHTMLMarked(html, dictID string, hl *hilite.Terms) string {
+	if hl == nil {
+		return RewriteEntryHTML(html, dictID)
+	}
+	if html == "" {
+		return html
+	}
+	return entryRewriter(dictID, hl.Mark).Rewrite(html)
+}
+
+// hasRewritableRef reports whether the article can contain a reference at all.
+func hasRewritableRef(html string) bool {
+	return strings.Contains(html, "src") || strings.Contains(html, "href") ||
+		strings.Contains(html, "data") || strings.Contains(html, "poster") ||
+		strings.Contains(html, "style") || strings.Contains(html, "background") ||
+		strings.Contains(html, "longdesc") || strings.Contains(html, "usemap") ||
+		strings.Contains(html, "<base")
+}
+
+// entryRewriter builds the article rewriter for one dictionary, optionally
+// with a prose-text hook. There is one of these rather than two because the
+// URL policy below is long, exact, and must never exist in two copies that
+// can drift apart. A dictID of "" leaves URL and Drop nil, which htmlref
+// treats as "emit the original bytes" - so a caller that only wants marking
+// gets marking and nothing else.
+func entryRewriter(dictID string, text func(string) string) htmlref.Rewriter {
+	rw := htmlref.Rewriter{Text: text}
+	if dictID == "" {
+		return rw
 	}
 
 	absPrefix := "/res/" + dictID + "/"
 	relPrefix := "res/" + dictID + "/"
 
-	return htmlref.Rewriter{
-		Drop: func(tag string) bool { return tag == "base" },
-		URL: func(r htmlref.Ref) string {
-			ref := r.URL
-			switch {
-			case ref == "",
-				strings.HasPrefix(ref, "#"),
-				strings.HasPrefix(ref, "?"),
-				strings.HasPrefix(ref, "//"),
-				strings.HasPrefix(ref, absPrefix),
-				strings.HasPrefix(ref, relPrefix):
-				return ref
-			case subEntryRef.MatchString(ref):
-				// Must precede the scheme case, which would pass it through.
-				return subEntryRef.ReplaceAllString(ref, "$1:@")
-			case schemeRef.MatchString(ref) && !soundOrFile.MatchString(ref):
-				return ref
-			}
-			if !isResourceRef(r) {
-				return ref
-			}
-			return resURL(dictID, ref)
-		},
-	}.Rewrite(html)
+	rw.Drop = func(tag string) bool { return tag == "base" }
+	rw.URL = func(r htmlref.Ref) string {
+		ref := r.URL
+		switch {
+		case ref == "",
+			strings.HasPrefix(ref, "#"),
+			strings.HasPrefix(ref, "?"),
+			strings.HasPrefix(ref, "//"),
+			strings.HasPrefix(ref, absPrefix),
+			strings.HasPrefix(ref, relPrefix):
+			return ref
+		case subEntryRef.MatchString(ref):
+			// Must precede the scheme case, which would pass it through.
+			return subEntryRef.ReplaceAllString(ref, "$1:@")
+		case schemeRef.MatchString(ref) && !soundOrFile.MatchString(ref):
+			return ref
+		}
+		if !isResourceRef(r) {
+			return ref
+		}
+		return resURL(dictID, ref)
+	}
+	return rw
 }
 
 // resURL maps one dictionary-internal reference to its root-absolute /res/

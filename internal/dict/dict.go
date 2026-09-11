@@ -138,6 +138,23 @@ type FullTextSearcher interface {
 	FullText(query string, limit int) ([]Result, error)
 }
 
+// FullTextPlanner is implemented by backends that can run a MATCH expression
+// the caller composed - the prepared SQLite store, and nothing else.
+//
+// It exists because a full-text query has more than one reading. `Физика в
+// конспектах` is first a phrase, then a proximity, then a bag of words
+// (internal/ftsq), and only the caller knows which readings to try and in what
+// order; the backend's job is to run the one it is handed. A direct-format
+// backend has no query language to hand anything to, so it keeps answering
+// through FullText and its single reading.
+//
+// match is an FTS5 expression, and it is composed by internal/ftsq - never
+// assembled from user text anywhere else. Raw input reaching MATCH is how a
+// quote in a search box becomes a syntax error (FTS-audit #2).
+type FullTextPlanner interface {
+	FullTextMatch(match string, limit int) ([]Result, error)
+}
+
 // Entry is one dictionary article as produced by a format Reader during
 // an ingest scan. When LinkTo is non-empty the entry is a pure redirect
 // (e.g. MDX @@@LINK): Body is ignored and Headwords become aliases of the

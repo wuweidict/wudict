@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/ftsq"
 )
 
 // Mode selects the query type; dictionaries lacking the capability are
@@ -37,6 +38,18 @@ type Hit struct {
 	Results []dict.Result
 	Err     error
 	Skipped bool // dictionary does not support the requested mode
+
+	// Term is what was actually searched for. It is normally the caller's
+	// term, and differs only on the lemma wave, where the caller needs to know
+	// which word these results answer in order to mark them.
+	Term string
+
+	// Rung names which reading of a full-text query produced these results -
+	// "phrase", "near" or "words" (internal/ftsq). Empty for every other mode
+	// and for a backend that has only one reading. The relaxation is PER
+	// DICTIONARY: one may answer the phrase while the next needs the words, so
+	// this belongs on the hit and not on the request.
+	Rung string
 }
 
 // workers bounds how many dictionaries are queried at once. Eight is right for
@@ -74,6 +87,7 @@ func Workers() int {
 // All queries every dictionary with term, at most perDict results each.
 func All(ctx context.Context, dicts []dict.Dictionary, mode Mode, term string, perDict int) []Hit {
 	hits := make([]Hit, len(dicts))
+	plan := planFor(mode, term)
 	sem := make(chan struct{}, Workers())
 	var wg sync.WaitGroup
 	for i, d := range dicts {
@@ -91,7 +105,7 @@ func All(ctx context.Context, dicts []dict.Dictionary, mode Mode, term string, p
 				hits[i] = Hit{Meta: d.Meta(), Err: err}
 				return
 			}
-			hits[i] = query(d, mode, term, perDict)
+			hits[i] = query(d, mode, term, plan, perDict)
 		}(i, d)
 	}
 	wg.Wait()
@@ -124,6 +138,7 @@ type Opener func() (dict.Dictionary, error)
 // one open, not the sum of all of them. emit calls are serialized (safe for a
 // shared response) but arrive in completion order; i is the input index.
 func StreamOpen(ctx context.Context, openers []Opener, mode Mode, term string, perDict int, emit func(i int, h Hit)) {
+	plan := planFor(mode, term)
 	sem := make(chan struct{}, Workers())
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -173,14 +188,24 @@ func StreamOpen(ctx context.Context, openers []Opener, mode Mode, term string, p
 				send(i, Hit{Err: err})
 				return
 			}
-			send(i, query(d, mode, term, perDict))
+			send(i, query(d, mode, term, plan, perDict))
 		}(i, open)
 	}
 	wg.Wait()
 }
 
-func query(d dict.Dictionary, mode Mode, term string, perDict int) Hit {
-	h := Hit{Meta: d.Meta()}
+// planFor parses a full-text query ONCE per fan-out. Parsing it per dictionary
+// would be cheap and still wrong: a hundred dictionaries must answer the same
+// question, and a query is not a per-dictionary object.
+func planFor(mode Mode, term string) []ftsq.Rung {
+	if mode != FullText {
+		return nil
+	}
+	return ftsq.Parse(term).Rungs()
+}
+
+func query(d dict.Dictionary, mode Mode, term string, plan []ftsq.Rung, perDict int) Hit {
+	h := Hit{Meta: d.Meta(), Term: term}
 	caps := d.Caps()
 	switch mode {
 	case Exact:
@@ -208,7 +233,47 @@ func query(d dict.Dictionary, mode Mode, term string, perDict int) Hit {
 			h.Skipped = true
 			return h
 		}
+		if p, ok := d.(dict.FullTextPlanner); ok && len(plan) > 0 {
+			if ran := runPlan(p, plan, perDict, &h); ran {
+				return h
+			}
+			// Every rung failed to execute. That is a defect in the lowering,
+			// not an answer, and the reader is better served by the backend's
+			// own single reading than by an error page.
+		}
 		h.Results, h.Err = f.FullText(term, perDict)
+		if h.Err == nil {
+			h.Rung = "words"
+		}
 	}
 	return h
+}
+
+// runPlan walks the relaxation ladder and stops at the FIRST rung that returns
+// anything, reporting whether any rung executed at all.
+//
+// Descent is on EMPTINESS, never on "few results". A phrase that matched three
+// articles has answered the question; adding the bag-of-words hits underneath
+// it would bury the three that were actually asked for, which is the failure
+// mode this whole design exists to remove. An error is not emptiness either -
+// it means this reading was never tried, so the ladder keeps going and the
+// caller is told only if nothing ran.
+func runPlan(p dict.FullTextPlanner, plan []ftsq.Rung, perDict int, h *Hit) bool {
+	ran := false
+	for _, r := range plan {
+		res, err := p.FullTextMatch(r.Match, perDict)
+		if err != nil {
+			h.Err = err
+			continue
+		}
+		ran = true
+		if len(res) > 0 {
+			h.Results, h.Rung, h.Err = res, r.Name, nil
+			return true
+		}
+	}
+	if ran {
+		h.Err = nil // the ladder ran to the end and the answer is "nothing"
+	}
+	return ran
 }

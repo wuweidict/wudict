@@ -108,10 +108,37 @@ paths:
 
             `contains` and `fts` need the dictionary to carry that index; ask
             `/api/dicts` for `caps` first, and expect `skipped` if you do not.
+
+            A multi-word `fts` query is a PHRASE first. It is retried as a
+            proximity and then as separate words only when the stricter reading
+            returns nothing, and the hit says which reading answered (`rung`).
+            Quotes and the operators `AND`, `OR`, `NOT` and `NEAR(a b, n)` are
+            parsed when present, and an explicit query like
+            `"faux ami" NOT linguistics` is answered exactly as written, without
+            relaxation. Anything unparseable is read as plain words rather than
+            rejected.
           schema:
             type: string
             enum: [exact, prefix, contains, fts, fuzzy]
             default: prefix
+        - name: hl
+          in: query
+          description: |
+            Mark the query's words inside each article body, wrapped in
+            `<mark class="wu-hl">`. Read ONLY in `mode=fts`, where the reason a
+            result matched is invisible otherwise; ignored in every other mode,
+            where the match is the headword itself.
+
+            Off unless you ask, so an article you fetch is the dictionary's own
+            bytes by default. wudict's own UI sends `hl=1` from a remembered
+            preference, which is why the default here is off and the default
+            there is on. Marking is prefix-based and whole-token, matching what
+            the full-text index matched, and is capped at 500 marks per article
+            - past the cap the article is still returned complete, just no
+            longer marked. `format=text` drops the marks with all other markup.
+          schema:
+            type: boolean
+            default: false
         - name: format
           in: query
           description: |
@@ -1210,6 +1237,19 @@ components:
             Only beside deferred: this dictionary is already being prepared,
             because something asked for it by name. It will stop being deferred
             once the ingest finishes.
+        rung:
+          type: string
+          enum: [phrase, near, words, query]
+          description: >
+            Which reading of a full-text query this dictionary answered.
+            `phrase` = the words adjacent and in order; `near` = within ten
+            tokens of one another, any order; `words` = anywhere in the article;
+            `query` = the operator expression as written. A multi-word `fts`
+            search tries phrase, then near, then words, and stops at the first
+            that returns anything - per dictionary, so two dictionaries in one
+            response may answer on different rungs. Absent outside `fts`. Show
+            it: a result on `near` or `words` means the phrase itself was not
+            found.
         error:
           type: string
           description: This dictionary failed. The others still answered.
@@ -1371,6 +1411,14 @@ components:
           description: >
             Article text size in px. Absent or 0 means the default (15).
             Out-of-range values are clamped, not rejected.
+        hlOff:
+          type: boolean
+          description: >
+            Turns OFF full-text match marking in wudict's own UI. Negated so
+            that absent - the state of a file nobody has written - is the
+            feature working. It is remembered state for that UI and nothing
+            else: the search endpoint never reads it, and marks are applied
+            only when a request carries `hl=1`.
 
     Style:
       type: object

@@ -221,6 +221,32 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      # Notes are rendered from the commit history by cliff.toml, through the
+      # same tools/release-notes.sh that `make release-notes TAG=v3.8.0` runs -
+      # so what CI publishes is what you read before tagging. The script is
+      # built never to fail: a missing git-cliff, an empty range, a commit
+      # nobody could parse, all end as empty output and exit 0. Empty is read
+      # here as "let GitHub write them", never as a reason to sink the run.
+      - name: Render release notes
+        id: notes
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          sh tools/release-notes.sh "$TAG" > notes.md 2> notes.log || true
+          cat notes.log || true
+          # The OUTPUT decides, not the exit status: git-cliff renders a bare
+          # "[unreleased]" heading and exits 0 when a range holds no commits,
+          # and a release published with blank notes is the failure this
+          # check exists to prevent.
+          if grep -q '^- ' notes.md 2>/dev/null; then
+            echo "have=1" >> "$GITHUB_OUTPUT"
+            echo "--- release notes ---"; cat notes.md
+          else
+            echo "have=0" >> "$GITHUB_OUTPUT"
+            echo "::warning title=No changelog::git-cliff produced no entries for ${TAG} - falling back to GitHub's generated notes"
+          fi
+
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
@@ -239,17 +265,30 @@ jobs:
           FLAGS=()
           [ "${{ inputs.prerelease }}" = "true" ] && FLAGS+=(--prerelease)
           [ "${{ inputs.draft }}" = "true" ] && FLAGS+=(--draft)
+          # This workflow OWNS the notes: it sets them on a release it finds
+          # as well as on one it creates. Three workflows publish into the
+          # same tag, so leaving the notes to whoever arrived first would make
+          # the release page read differently depending on which matrix
+          # finished faster. The two dispatch checkboxes stay add-only for
+          # exactly the opposite reason - a later upload must not un-draft or
+          # un-prerelease what an earlier one deliberately staged.
+          NOTES=()
+          [ "${{ steps.notes.outputs.have }}" = "1" ] && NOTES+=(--notes-file notes.md)
           if gh release view "${TAG}" > /dev/null 2>&1; then
             echo "Release ${TAG} exists - replacing native assets."
             gh release upload "${TAG}" artifacts/* --clobber
+            EDIT=("${NOTES[@]}" "${FLAGS[@]}")
             # An `if`, not a trailing `&&`: this is the last command in the
             # branch, so a false test would become the step's exit status.
-            if [ ${#FLAGS[@]} -gt 0 ]; then
-              gh release edit "${TAG}" "${FLAGS[@]}"
+            if [ ${#EDIT[@]} -gt 0 ]; then
+              gh release edit "${TAG}" "${EDIT[@]}"
             fi
           else
             echo "Creating release ${TAG}."
+            # --generate-notes only when cliff gave us nothing; the two are
+            # mutually exclusive and GitHub's is the fallback, not the default.
+            [ ${#NOTES[@]} -eq 0 ] && NOTES=(--generate-notes)
             gh release create "${TAG}" artifacts/* \
               --title "${{ github.event.repository.name }} ${TAG}" \
-              --generate-notes "${FLAGS[@]}"
+              "${NOTES[@]}" "${FLAGS[@]}"
           fi

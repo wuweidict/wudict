@@ -28,6 +28,8 @@ import (
 	"github.com/wuweidict/wudict/internal/artmark"
 	"github.com/wuweidict/wudict/internal/config"
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/ftsq"
+	"github.com/wuweidict/wudict/internal/hilite"
 	"github.com/wuweidict/wudict/internal/htmlref"
 	"github.com/wuweidict/wudict/internal/lang"
 	"github.com/wuweidict/wudict/internal/logx"
@@ -876,6 +878,16 @@ type streamMsg struct {
 	Skipped bool          `json:"skipped,omitempty"`
 	Error   string        `json:"error,omitempty"`
 
+	// Rung says which reading of a full-text query this dictionary answered:
+	// "phrase" (the words adjacent, in order), "near" (within ten tokens, any
+	// order) or "words" (anywhere in the article). Absent in every other mode.
+	//
+	// It is reported because the relaxation is silent otherwise, and a search
+	// tool that quietly answers a weaker question than the one asked is lying
+	// about its result. The UI says so only when the answer is NOT the phrase -
+	// the precise reading needs no announcement (D102).
+	Rung string `json:"rung,omitempty"`
+
 	// Deferred: this dictionary was not searched because the fan-out cap
 	// declined to materialise it (see fanout). It is NOT an error and must not
 	// be reported as one: the dictionary is fine, the query was wide, and
@@ -907,6 +919,63 @@ type streamMsg struct {
 // catch a wedged backend, not to police a slow one.
 const demandSearchBudget = 5 * time.Minute
 
+// boolParam reads a query flag that is absent-means-off. Anything that is not
+// an explicit negation turns it on; "0", "false", "no" and "off" turn it off,
+// so a client templating the parameter can say off without having to omit it.
+// A valueless "?hl" is indistinguishable from an absent one in net/url, and is
+// therefore off - say "hl=1".
+func boolParam(v string) bool {
+	switch strings.ToLower(v) {
+	case "", "0", "false", "no", "off":
+		return false
+	}
+	return true
+}
+
+// marker returns the per-hit highlighter for one request.
+//
+// The marks are compiled from the query's OWN lowering, not from the raw
+// search box: internal/ftsq produced both the FTS5 expression that matched and
+// the phrases handed here, so what is painted is exactly what was matched. That
+// is the whole cure for `Физика в конспектах` lighting up every в in the
+// article - the phrase rung marks one three-word span, and only a descent to
+// the word rung marks в at all.
+//
+// Compiled once per (term, rung) and cached, because a fan-out asks the same
+// question of a hundred dictionaries and they do not all answer on the same
+// rung. The cache is unsynchronised on purpose: search.StreamOpen serialises
+// its emit callbacks, and the lemma wave runs after the first wave finishes, so
+// there is never a second goroutine here. It is bounded by the query plus at
+// most one lemma per language.
+//
+// on=false returns a function that always yields nil, which every caller may
+// pass straight to Mark: an API client that did not ask for marks gets the
+// article's own bytes, unchanged.
+func marker(on bool) func(term, rung string) *hilite.Terms {
+	if !on {
+		return func(string, string) *hilite.Terms { return nil }
+	}
+	cache := map[string]*hilite.Terms{}
+	return func(term, rung string) *hilite.Terms {
+		if rung == "" {
+			return nil
+		}
+		key := rung + "\x00" + term
+		if t, ok := cache[key]; ok {
+			return t
+		}
+		var t *hilite.Terms
+		for _, r := range ftsq.Parse(term).Rungs() {
+			if r.Name == rung {
+				t = hilite.NewPhrases(r.Marks)
+				break
+			}
+		}
+		cache[key] = t
+		return t
+	}
+}
+
 // handleSearch streams results as newline-delimited JSON so the client can
 // render each dictionary's accordion the instant it completes, in the
 // caller's preference order (SPEC §6, progressive rendering). The `dict`
@@ -931,6 +1000,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	origin := originOf(r)
+	// Full-text match marking, compiled ONCE for the whole fan-out rather than
+	// per result: the terms are the query, and the query does not change while
+	// twenty dictionaries answer it.
+	//
+	// Opt-in, and only here. An API client that did not ask for marks gets the
+	// article's own bytes, unchanged - which is what makes "on by default in
+	// the UI" (the SPA sends hl=1 from its remembered preference) and "off by
+	// default for everyone else" the same rule rather than two. And only in
+	// full-text mode: in exact, prefix or contains the match IS the headword
+	// the reader clicked, and marking it inside the article would mark the
+	// word they are already looking at, on every line it appears (D102).
+	marks := marker(mode == search.FullText && boolParam(r.URL.Query().Get("hl")))
 	n := 20
 	if v := r.URL.Query().Get("n"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil && p > 0 {
@@ -1036,8 +1117,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		// dictionary's internal ref into /res/{dict}/…, and `clean` then
 		// absolutises exactly those. Reducing first would throw away the
 		// references before they had been named.
+		hl := marks(h.Term, h.Rung)
 		for j := range h.Results {
-			h.Results[j].Body = RewriteEntryHTML(h.Results[j].Body, id)
+			h.Results[j].Body = RewriteEntryHTMLMarked(h.Results[j].Body, id, hl)
 		}
 		// `clean` and `text` need this dictionary's own CSS to know which of
 		// its classes are blocks and which are hidden (D68); derived once per
@@ -1050,7 +1132,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		for j := range h.Results {
 			h.Results[j].Body = applyFormat(h.Results[j].Body, format, origin, st)
 		}
-		m := streamMsg{T: "hit", I: i, Dict: id, Name: name, Results: h.Results, Skipped: h.Skipped}
+		m := streamMsg{T: "hit", I: i, Dict: id, Name: name, Results: h.Results, Skipped: h.Skipped, Rung: h.Rung}
 		var heavy tooHeavy
 		switch {
 		case errors.As(h.Err, &heavy):

@@ -333,12 +333,22 @@ func (s *Store) Exact(word string, limit int) ([]dict.Result, error) {
 	}
 	// accent-fold fallback, APPROXIMATING the direct backends: exact phrase
 	// over the diacritic-stripping tokenizer, then keep only whole-headword
-	// folded matches. Not parity - FTS5's remove_diacritics strips combining
-	// marks, while dict.Fold also maps the letters that carry their stroke or
-	// slash INSIDE the codepoint (o/, d-, l/, h-), which no amount of
-	// decomposition reaches. A folded query for "dansk" will not find "đansk"
-	// here even though the direct backend finds it. Closing that would mean a
-	// second folded column in the schema; it is not worth a re-ingest.
+	// folded matches.
+	//
+	// Not parity, but not for the reason this comment used to give. It claimed
+	// dict.Fold reaches the letters carrying their stroke or slash INSIDE the
+	// codepoint (o/, d-, l/, h-) where FTS5's remove_diacritics does not, and
+	// offered "dansk" finding "đansk" as the difference. dict.Fold is
+	// ToLower + NFD + drop-Mn (dict/fold.go), and đ has no canonical
+	// decomposition - so Fold("đansk") is "đansk", neither side finds it, and
+	// the direct backends, which call the same Fold, do not find it either.
+	//
+	// What actually differs is narrower: FTS5 tokenizes and folds with its own
+	// unicode61 rules, this filter re-checks with dict.Fold, and the two agree
+	// on combining marks but need not agree on every token boundary. Closing
+	// even that would mean a second folded column in the schema, and folding
+	// stroke letters would mean a fold table and a FoldVersion bump that
+	// invalidates every trigram index in the library. Neither is worth it.
 	match := buildExactMatch(word, "w")
 	if match == "" {
 		return nil, nil
@@ -467,12 +477,26 @@ func (s *Store) Contains(word string, limit int) ([]dict.Result, error) {
 		"%"+escapeLike(word)+"%", n))
 }
 
-// FullText searches headwords and article text, ordered by BM25 rank.
+// FullText searches headwords and article text, ordered by BM25 rank. It reads
+// the input as a bag of prefix words - the last rung of the ladder - and is the
+// path for callers that do not plan (dict.FullTextPlanner is the one that
+// does).
 func (s *Store) FullText(query string, limit int) ([]dict.Result, error) {
+	return s.FullTextMatch(buildMatch(query, ""), limit)
+}
+
+// FullTextMatch runs a composed FTS5 expression (dict.FullTextPlanner).
+//
+// BM25 ranking here is IDF and term frequency only: the table is declared
+// columnsize=0, which discards the per-row token counts bm25() needs for length
+// normalisation, so a long article is not penalised for its length. Measured on
+// a 200-document probe, that reorders the middle of a result list but not its
+// head. Restoring it means re-indexing every prepared dictionary to gain a
+// column of token counts, which is not worth it (D115).
+func (s *Store) FullTextMatch(match string, limit int) ([]dict.Result, error) {
 	if !s.ftsOK {
 		return nil, dict.ErrUnsupported
 	}
-	match := buildMatch(query, "")
 	if match == "" {
 		return nil, nil
 	}

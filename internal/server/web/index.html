@@ -253,6 +253,29 @@ details.dict[open]>summary{border-bottom:1px solid var(--line-soft)}
    The size hint keeps the scrollbar from jumping as they are rendered. */
 details.dict[open]>dl{content-visibility:auto;contain-intrinsic-size:0 400px}
 summary .count{margin-left:auto;font-weight:400;color:var(--fg-faint);font-size:12px}
+/* The relaxation note (renderSlot, h.rung). A full-text search asks for the
+   words as a phrase first; when no article had them adjacent the server answers
+   a weaker question, and saying so is not an explanation of the machinery but
+   the difference between "this phrase is not in the dictionary" and "here it
+   is" (D102). Accent-coloured because it qualifies the result it precedes. */
+summary .rung{color:var(--accent)}
+/* Walking the matches of the section you are reading (markNav). It lives in
+   the sticky header because that is the only surface still on screen halfway
+   down a 27000px article, and because it moves through exactly what the count
+   beside it is counting. The chevrons carry a ~36px touch target on a 25px row
+   via padding plus a matching negative margin, so the finger gets its target
+   and the header keeps its height; ‹ › rather than words because the row also
+   holds a dictionary name that is allowed to wrap and this must never be what
+   pushes it to a second line. */
+summary .mnav{display:flex;align-items:center;gap:1px;margin-left:auto;font-weight:400}
+summary .mnav~.count{margin-left:var(--sp-1)} /* two auto margins would split the row */
+summary .mbtn{cursor:pointer;color:var(--fg-soft);font-size:16px;line-height:1;
+  padding:9px 7px;margin:-9px 0;border-radius:5px;user-select:none;
+  -webkit-tap-highlight-color:transparent}
+summary .mbtn:hover{color:var(--fg);background:var(--bg)}
+summary .mbtn:active{color:var(--accent)}
+summary .mpos{font-size:11px;color:var(--fg-faint);min-width:2.8em;text-align:center;
+  font-variant-numeric:tabular-nums}
 /* a dictionary's own script threw; the article is intact but inert */
 summary .jserr{margin-left:6px;font-weight:400;color:var(--accent);font-size:12px;cursor:help}
 /* A deferred dictionary's hint (renderSlot, h.deferred). Link-coloured because
@@ -265,6 +288,16 @@ summary .more{font-weight:400;font-size:12px;color:var(--link);cursor:pointer;
   text-decoration:underline;text-underline-offset:2px;margin-left:var(--sp-2)}
 summary .upgrade{font-weight:400;font-size:12px;color:var(--link);cursor:pointer;
   text-decoration:underline;text-underline-offset:2px;margin-left:auto}
+/* The dictionaries this mode could not search, as one line instead of one
+   section each (renderSlot, h.skipped). The offer inside is per dictionary
+   because that is the unit the user acts on; the count outside is what they
+   need to read. */
+details.noindex>summary{font-weight:400;color:var(--fg-faint)}
+.noidx{padding:var(--sp-1) .62rem var(--sp-2)}
+.noidx>div{display:flex;align-items:baseline;gap:var(--sp-1);font-size:12px;
+  color:var(--fg-soft);padding:.15rem 0}
+.noidx .upgrade{font-size:12px;color:var(--link);cursor:pointer;
+  text-decoration:underline;text-underline-offset:2px;margin-left:auto;white-space:nowrap}
 dl{margin:0;padding:var(--sp-1) var(--sp-2) var(--sp-2)}
 dt{font-size:1.272em;font-weight:700;color:var(--accent);word-break:break-word;
   margin-top:var(--sp-2)}
@@ -869,6 +902,13 @@ body.styling{padding-bottom:var(--styler-h)}
          means "folders and configuration", and one glyph cannot mean two
          things without meaning neither. -->
     <button type="button" class="act" id="stylerLink" title="Your own CSS for the app and for dictionary articles"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M11.6 1.9l2.5 2.5-7 7-3.2.7.7-3.2z"/><path d="M9.9 3.6l2.5 2.5"/></svg>Custom styles…</button>
+    <!-- Reading appearance again, so it sits beside the brush and not in the
+         top bar: a control that only bites in ONE search mode has no business
+         taking width away from the four that are used constantly (D102). A
+         highlighter pen, and aria-pressed rather than a checkbox, because the
+         row it joins is made of buttons and a lone checkbox would read as a
+         different kind of thing. -->
+    <button type="button" class="act" id="hlBtn" aria-pressed="true" title="Mark the words you searched for inside the article — full-text search only"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9.4 1.9l4.7 4.7-5.6 5.6H3.8V7.5z"/><path d="M1.9 14.4h12.2"/></svg>Highlight matches</button>
   </div>
   <!-- Quiet, and NOT shaped like the three above: verb, object, scope,
        ellipsis, on a line of its own beside the box it opens.
@@ -964,7 +1004,7 @@ async function loadPrefs(){
     prefsReady=true;
     // Read before the exists branch below returns: on a first run there is no
     // ui record, but there is also nothing here that can go wrong.
-    if(st.ui)applyFS(st.ui.fontSize,false);
+    if(st.ui){applyFS(st.ui.fontSize,false);applyHL(!st.ui.hlOff,false)}
     if(!st.exists){adoptLocalPrefs();return} // first run: keep whatever we had
     prefOrder=rows.map(d=>d.id);
     disabled=new Set(rows.filter(d=>d.off).map(d=>d.id));
@@ -986,7 +1026,7 @@ function savePrefs(now){
   if(!prefsReady){setStatus("⚠ settings are not being saved — reload the page");return}
   if(!now){prefsTimer=setTimeout(()=>savePrefs(true),400);return}
   const body=JSON.stringify({dicts:orderedDicts().map(d=>({id:d.id,name:dictLabel(d),off:disabled.has(d.id)})),
-    ui:{fontSize:articleFS}});
+    ui:{fontSize:articleFS,hlOff:!hlOn}});
   if(body===prefsSent)return;
   prefsSent=body;
   fetch("/api/prefs",{method:"PUT",headers:{"Content-Type":"application/json"},body})
@@ -1098,6 +1138,36 @@ function applyFS(px,save){
    on the way back up, which is in time: the default action is taken after
    dispatch, not during it. */
 $("fsCtl").addEventListener("click",e=>{e.preventDefault();e.stopPropagation()});
+/* Full-text match marking (?hl=). Server-side: the words you searched for come
+   back already wrapped in <mark class="wu-hl">, so nothing walks the article
+   here — no mark.js, no DOM pass, no work at all on the phone that has to
+   render it.
+
+   Sent on every search and read only in full-text mode, which is why there is
+   no mode branch here: in the other three modes the match IS the headword you
+   clicked, and marking it inside its own article would light up every line.
+
+   Default ON, stored NEGATED (hlOff) in state.json for the reason prefs.go
+   gives: the zero value has to be the working default. Read before the search
+   field is even enabled — loadPrefs settles before loadDicts, which is what
+   ungreys the input — so no query can go out under the wrong setting. */
+let hlOn=true;
+function applyHL(on,save){
+  const v=!!on,moved=v!==hlOn;
+  hlOn=v;
+  const b=$("hlBtn");
+  b.setAttribute("aria-pressed",v?"true":"false");
+  b.style.color=v?"var(--accent)":"";
+  if(save&&moved)savePrefs();
+}
+/* Re-run only what the change can alter. Toggling this with a full-text answer
+   on screen must repaint it — the marks live in the HTML the server sent, so
+   the answer cannot be re-marked without asking again. */
+$("hlBtn").addEventListener("click",()=>{
+  applyHL(!hlOn,true);
+  if($("mode").value==="fts"&&$("q").value.trim())doSearch();
+});
+applyHL(true,false);
 for(const [id,step] of [["fsDown",-1],["fsUp",1],["fsVal",0]])
   $(id).addEventListener("click",()=>applyFS(step?articleFS+step:FS_DEF,true));
 applyFS(FS_DEF,false);   // paints --wd-fs and the .lim state before any load
@@ -1190,7 +1260,7 @@ $("expandBtn").onclick=()=>{
   // including them here would turn one click into a dozen simultaneous opens —
   // precisely the burst the fan-out cap deferred them to avoid. They stay a
   // per-dictionary decision.
-  for(const d of $("out").querySelectorAll("details.dict:not([data-deferred])"))d.open=expandAll;
+  for(const d of $("out").querySelectorAll("details.dict:not([data-deferred]):not(.noindex)"))d.open=expandAll;
 };
 
 function cycleTheme(){
@@ -1303,12 +1373,15 @@ $("out").addEventListener("click",e=>{if(e.target.id==="retryBtn")loadDicts()});
    --stick. */
 const lessMotion=matchMedia("(prefers-reduced-motion: reduce)");
 $("out").addEventListener("click",e=>{
-  const sum=e.target.closest("details.dict>summary");
-  if(!sum)return;
+  const sum=e.target.closest("details.dict:not(.noindex)>summary");
+  if(!sum)return; // the no-index group is not an answer: opening it decides nothing
   // these live inside the summary, run their own handlers and preventDefault
   // the toggle — but not before this listener, which is nearer the target
-  if(e.target.closest(".more,.upgrade"))return;
+  if(e.target.closest(".more,.upgrade,.mnav"))return;
   const det=sum.parentElement,opening=!det.open; // the toggle lands after us
+  // The walk follows attention: it belongs to the section being read, and one
+  // section at a time is also why nothing is counted for the other 154.
+  if(opening){if(markedAnswer)navAttach(det)}else if(det===navDet)navDetach();
   openedIdx=-1; // the user decided; no arrival may take the slot back (D73)
   requestAnimationFrame(()=>{  // measure the section at its new height
     const top=det.getBoundingClientRect().top;
@@ -2090,9 +2163,10 @@ async function runRemove(id,kind,node){
 $("panelList").addEventListener("change",e=>{
   if(e.target.classList.contains("en"))toggleDict(e.target.closest(".pd").dataset.id);
 });
-/* the "enable full-text search" link inside result summaries */
+/* the "enable full-text search" link - in a result summary when the search
+   named one dictionary, in the grouped no-index list when it named many */
 document.addEventListener("click",e=>{
-  const up=e.target.closest("summary .upgrade");
+  const up=e.target.closest(".upgrade");
   if(!up)return;
   e.preventDefault(); // don't toggle the <details>
   runIngest(up.dataset.id,{[up.dataset.feat||"fts"]:1},up);
@@ -2354,6 +2428,10 @@ addEventListener("message",e=>{
     // still move the reading position; there is no latch there and so no
     // section we are entitled to call the focused one (D73/M4).
     if(f)f.style.height=Math.min(Math.max((+d.h||0)+6,48),60000)+"px";
+    // A frame that just reported its height has parsed: its marks exist now.
+    // Coalesced, because this message arrives once per frame and again on
+    // every reflow inside it.
+    if(f&&navDet&&navDet.contains(f)){clearTimeout(navTimer);navTimer=setTimeout(navRefresh,200)}
   }else if(d.t==="ref"&&d.w){
     searchFor(d.w,{scope:d.dict,frag:d.frag}); // author's link: exact, scoped
   }else if(d.t==="pick"&&d.w){
@@ -2557,7 +2635,7 @@ function loadDeferred(det,box,h,mode,q){
   const cnt=det.querySelector(".count");
   if(cnt)cnt.innerHTML='<span class="spin"></span>searching…';
   let shown=false;
-  fetchStream("/api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+encodeURIComponent(h.dict)+"&n=25",msg=>{
+  fetchStream("/api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&hl="+(hlOn?1:0)+"&dict="+encodeURIComponent(h.dict)+"&n=25",msg=>{
     // The user has moved on: a new search replaced every box, so this one is
     // detached and writing into it would paint nothing at a cost.
     if(msg.t!=="hit"||!box.isConnected)return;
@@ -2635,7 +2713,7 @@ function promote(boxes,i){
     ref.after(b);ref=b;       // in order, so preference survives among them
   }
 }
-function renderSlot(box,h,mode,q,perDict){
+function renderSlot(box,h,mode,q,perDict,group){
   box.innerHTML="";
   if(h.deferred){
     const det=document.createElement("details");
@@ -2663,6 +2741,21 @@ function renderSlot(box,h,mode,q,perDict){
     // end: offer to add the one this search needed, right where it was missed.
     const feat=mode==="fts"?"fts":mode==="contains"?"contains":"";
     if(feat){
+      /* But it has not answered the QUERY - it has answered about itself, and
+         a slot in the answer list is for answers. On a corpus where the heavy
+         indexes are the exception (155 dictionaries, 2 with full-text), the
+         offers arrive first because having no index is instant, they are not
+         empty so `promote` may not move them, and the one dictionary that did
+         answer ends up under a wall of identical lines. So when the search
+         spans more than one dictionary they are collected into a single line
+         below the results (`noIndexRow`) and this slot stays empty - which is
+         what makes it promotable, and what puts the answer back on top.
+
+         A search aimed at ONE dictionary still gets the offer in place: there
+         is no wall to build, and nothing above it to bury. That is also why a
+         link-scoped search keeps its own `shown`, and with it the guard that
+         stops a scoped miss from silently widening. */
+      if(group)return{shown:true,noIndex:{dict:h.dict,name:h.name,feat}};
       const what=feat==="fts"?"full-text search":"substring search";
       box.innerHTML=`<details class="dict"><summary>${esc(h.name)}`+
         `<span class="upgrade" data-id="${h.dict}" data-feat="${feat}">enable ${what} for this dictionary</span></summary></details>`;
@@ -2673,7 +2766,11 @@ function renderSlot(box,h,mode,q,perDict){
   if(!h.results?.length)return{};
   const det=document.createElement("details");det.className="dict";
   const more=h.results.length>=perDict?`<span class="more" data-id="${h.dict}">more…</span>`:"";
-  det.innerHTML=`<summary>${esc(h.name)}<span class="count">${h.results.length}${more?"+":""} result${h.results.length===1?"":"s"}</span>${more}</summary>`;
+  // Only for a multi-word full-text query: a single word has no phrase to fail
+  // at, and every other mode has no ladder at all.
+  const rung=mode==="fts"&&/\s/.test(q||"")&&(h.rung==="near"||h.rung==="words")
+    ?`<span class="rung">phrase not found · ${h.rung==="near"?"words proximity":"words anywhere"} · </span>`:"";
+  det.innerHTML=`<summary>${esc(h.name)}<span class="count">${rung}${h.results.length}${more?"+":""} result${h.results.length===1?"":"s"}</span>${more}</summary>`;
   const dl=document.createElement("dl"),roots=[];
   for(const r of h.results){
     const dt=document.createElement("dt");dt.textContent=r.Headword;
@@ -2698,6 +2795,29 @@ function renderSlot(box,h,mode,q,perDict){
   return{shown:true,results:true};
 }
 
+/* One line for every dictionary the mode could not search, built as they
+   arrive: the count is the part that gets read, the per-dictionary offer is
+   the part that gets acted on, and it is closed because a hundred and fifty
+   names are a reference, not a result. Appended to `out` after every slot box
+   (they are all created on `begin`), so it stays below the answers. */
+function noIndexRow(el,out,info){
+  if(!el){
+    el=document.createElement("details");
+    el.className="dict noindex";
+    el.innerHTML='<summary></summary><div class="noidx"></div>';
+    out.appendChild(el);
+  }
+  const list=el.lastElementChild,row=document.createElement("div");
+  row.innerHTML=`<span>${esc(info.name)}</span>`+
+    `<span class="upgrade" data-id="${info.dict}" data-feat="${info.feat}">enable</span>`;
+  list.appendChild(row);
+  const n=list.childElementCount;
+  el.firstElementChild.textContent=
+    `${n} dictionar${n===1?"y has":"ies have"} no `+
+    (info.feat==="fts"?"full-text":"substring")+" index";
+  return el;
+}
+
 async function doSearch(ev){
   if(ev)ev.preventDefault();
   const q=$("q").value.trim();
@@ -2705,6 +2825,7 @@ async function doSearch(ev){
   // consumed before the first await, so the history wrapper below can still
   // read which scope was used
   const scope=scopeOnce;scopeOnce=null;lastScope=scope;
+  const commit=commitOnce;commitOnce=false; // this query was asked for, not typed
   const widened=widenedFrom;widenedFrom=null; // set by the fallback below
   const mode=$("mode").value,dictSel=scope||$("dict").value,seq=++searchSeq;
   // abort the previous in-flight search so the server stops streaming
@@ -2752,21 +2873,27 @@ async function doSearch(ev){
      inline @font-face it declares (hoistShadowFonts). The box a slot renders
      into is attached for its whole life here, exactly as before. */
   let boxes=[],anyShown=false,anyResults=false,stale=null;
+  // Not part of `anyShown`: these are the dictionaries that were NOT searched,
+  // and the empty state below has to be able to tell the difference.
+  let noIdx=null,noIdxCount=0;
   let morphNote=null,morphAll=null;const morphSeen=new Set();
   const swap=()=>{if(stale){for(const n of stale)n.remove();stale=null}};
   try{
-    await fetchStream("/api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&dict="+encodeURIComponent(dictParam)+"&n="+perDict,msg=>{
+    await fetchStream("/api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&hl="+(hlOn?1:0)+"&dict="+encodeURIComponent(dictParam)+"&n="+perDict,msg=>{
       if(seq!==searchSeq)return; // superseded by a newer search
       if(msg.t==="begin"){
+        navDetach(); // the section it was walking is about to be replaced
+        markedAnswer=mode==="fts"&&hlOn; // only a marked answer has anything to walk
         stale=[...out.childNodes];
         boxes=(msg.slots||[]).map(()=>{const b=document.createElement("div");out.appendChild(b);return b});
         openedIdx=null; // re-arm the latch: a new generation, a new decision
         setStatus("");
       }else if(msg.t==="hit"){
         const box=boxes[msg.i];if(!box)return;
-        const res=renderSlot(box,msg,mode,q,perDict);
-        if(res.shown)swap();
-        if(res.shown)anyShown=true;
+        const res=renderSlot(box,msg,mode,q,perDict,boxes.length>1);
+        if(res.shown)swap(); // including the grouped line: it is this generation's first paint
+        if(res.noIndex){noIdx=noIndexRow(noIdx,out,res.noIndex);noIdxCount++}
+        else if(res.shown)anyShown=true;
         if(res.results)anyResults=true;
         /* The latch (D73/M3). The FIRST dictionary to answer takes the open
            slot and keeps it; a higher-preference one that finishes later fills
@@ -2790,7 +2917,13 @@ async function doSearch(ev){
            that opens — auto-opening a deferred one would fetch it unasked. */
         if(!expandAll&&res.results&&openedIdx===null){
           const det=box.querySelector("details.dict");
-          if(det){det.open=true;openedIdx=msg.i;promote(boxes,msg.i)}
+          if(det){
+            det.open=true;openedIdx=msg.i;promote(boxes,msg.i);
+            if(markedAnswer)navAttach(det);
+            // Not deferred to a frame: it observes its own timing, because
+            // the section it was just handed is not laid out yet.
+            if(commit&&mode==="fts"&&hlOn&&!anchorOnce)revealFirstMark(det);
+          }
         }
       }else if(msg.t==="morph"){
         /* The server lemmatizes the dictionaries that came back empty, and
@@ -2833,7 +2966,14 @@ async function doSearch(ev){
         }                         // screen until the re-run has something
         swap();                   // nothing came, or everything did: commit
         // (the empty-state innerHTML below also clears the boxes — they are empty)
-        if(!anyShown)out.innerHTML=`<div class="empty">${noResultsSVG}<p>No results for “${esc(q)}”</p></div>`;
+        /* "No results" is a statement about the dictionaries that were
+           actually searched. If every slot lacked the index, none was, and the
+           no-index line IS the answer; otherwise the line keeps its place
+           under the empty state, which innerHTML would otherwise drop. */
+        if(!anyShown&&noIdxCount<boxes.length){
+          out.innerHTML=`<div class="empty">${noResultsSVG}<p>No results for “${esc(q)}”</p></div>`;
+          if(noIdx)out.appendChild(noIdx);
+        }
         if(scope&&anyShown)out.appendChild(scopeNote(scope));
         else if(widened)out.appendChild(widenNote(widened,q));
         // Searched a list that is still filling up: say so rather than let an
@@ -2860,7 +3000,7 @@ document.addEventListener("click",e=>{
   e.preventDefault();
   const det=more.closest("details.dict"),box=det.parentElement,id=more.dataset.id,mode=$("mode").value;
   more.textContent="…";
-  fetchStream("/api/search?q="+encodeURIComponent(lastQuery)+"&mode="+mode+"&dict="+id+"&n=100",msg=>{
+  fetchStream("/api/search?q="+encodeURIComponent(lastQuery)+"&mode="+mode+"&hl="+(hlOn?1:0)+"&dict="+id+"&n=100",msg=>{
     if(msg.t==="hit"){renderSlot(box,msg,mode,lastQuery,1e9);const nd=box.querySelector("details.dict");if(nd)nd.open=true}
   }).catch(()=>{more.textContent="more…"});
 });
@@ -2906,6 +3046,14 @@ document.addEventListener("keydown",e=>{
     if(inPanel&&!$("q").disabled)$("q").focus();
     return;
   }
+  /* The same action as the two chevrons, for the hand already on the
+     keyboard. F3 and ⌘/Ctrl-G are what every find bar in every browser binds,
+     and both are dead keys on a page that is not being found in - so this
+     takes them only while a section is actually being walked. It sits above
+     the modifier guard because ⌘G IS a modifier chord. */
+  if(navDet&&(e.key==="F3"||((e.metaKey||e.ctrlKey)&&(e.key==="g"||e.key==="G")))){
+    e.preventDefault();navGo(e.shiftKey?-1:1);return;
+  }
   if(e.ctrlKey||e.metaKey||e.altKey||e.isComposing)return;
   const q=typeTarget();if(!q)return;
   if(e.key==="/"){e.preventDefault();q.focus();q.select();return}
@@ -2942,6 +3090,7 @@ function searchFor(term,opts){
   // on the dictionary id, so without a scope there is nothing to match
   anchorOnce=frag&&scope?{dict:scope,frag}:null;
   navRecord=opts?.record||"push"; // following a reference IS navigation
+  commitOnce=true;                // …and navigation may move the page
   doSearch();
 }
 /* Prose the user selected: first run before punctuation or space, minus a
@@ -3020,10 +3169,201 @@ function anchorTarget(root,frag){
 /* Scroll so a point at `viewportTop` clears the fixed bar AND its section's
    sticky header (D37), which scrollIntoView cannot know about. Shared by the
    shadow-DOM articles and the iframe ones, which report a position instead. */
-function revealAt(viewportTop,det){
+/* Bring the first full-text match on screen, once per search.
+   In full-text mode the marked words ARE the reason the article is on screen,
+   and a dictionary article can be pages long with its only match below every
+   screen of it - the reader would have to hunt for what they searched for.
+
+   Why this is a settle loop and not one measurement. At the frame the section
+   opens, the answer is not laid out yet and the numbers a single measurement
+   would use are all wrong at once: `details.dict[open]>dl` carries
+   content-visibility:auto, so the whole list is still one 400px estimate and
+   the document is not yet taller than the viewport - a scrollTo past its
+   extent CLAMPS, silently, to no movement at all. Then the dl renders, images
+   and stylesheets land, iframe articles report their height, and the match
+   ends up thousands of pixels from wherever it was measured. Both halves of
+   the reported bug are that one fact: the search that did not scroll, and the
+   one that scrolled and snapped back to the top of the article.
+
+   So the target is re-checked while the section is still growing. A
+   ResizeObserver on the opened section delivers one callback immediately
+   (after layout, which is the earliest honest measurement) and one per growth
+   after that; each callback re-finds the first match and moves the page only
+   if it is off screen. It stops at the first sign of the reader taking over,
+   after eight corrections, or after four seconds - whichever comes first.
+
+   The invariant it maintains is "the first match is on screen", not a scroll
+   offset: a match already visible never moves the page, and content growing
+   above it is ignored until it actually pushes it off.
+
+   Both article shapes are read directly. A shadow-DOM article answers through
+   its root; a script-bearing one is a sandboxed srcdoc iframe that carries
+   allow-same-origin, so its document is readable here and its match is placed
+   by adding the frame's own offset - no postMessage round trip, and no reason
+   to treat frames as the rare case they are not (a wiki slob renders every
+   article that way). */
+/* ── walking the marks ───────────────────────────────────────────────
+   `revealFirstMark` puts you on the first match; this is the rest of them.
+   Scope is ONE section - the one the arrival latch opened, or the one you
+   opened yourself - because that is the answer you are reading, and a control
+   that silently carried you into a dictionary you did not choose would be a
+   different feature wearing the same two chevrons.
+
+   Cost. The list is built from the rendered articles (`markList`) and cached,
+   never from a second server round; it is built only for the ONE section being
+   walked, only after a full-text answer that was actually marked, and rebuilt
+   only when a frame in that section reports a new height - so an ordinary
+   search, and every non-full-text mode, pays nothing at all. `checkVisibility`
+   filters the same phantom marks `revealFirstMark` learned about (a wiki's own
+   collapsed table of contents), so the count and the walk agree with the eye.
+
+   Hidden below two matches: with one there is nowhere to go, and a control
+   that cannot act is furniture (D102). */
+let navEl=null,navDet=null,navList=null,navIdx=0,navTimer=0,markedAnswer=false;
+function markList(det){
+  const out=[];
+  for(const host of det.querySelectorAll(".article")){
+    const root=host.shadowRoot||host.contentDocument;
+    if(!root)continue;
+    for(const m of root.querySelectorAll(".wu-hl"))
+      if(!m.checkVisibility||m.checkVisibility())out.push({host,el:m});
+  }
+  return out; // DOM order across articles is reading order
+}
+function navBuild(){
+  if(navEl)return navEl;
+  navEl=document.createElement("span");
+  navEl.className="mnav";navEl.hidden=true;
+  navEl.setAttribute("role","group");navEl.setAttribute("aria-label","matches");
+  navEl.innerHTML=
+    '<span class="mbtn" role="button" tabindex="0" data-step="-1" aria-label="Previous match">\u2039</span>'+
+    '<span class="mpos" aria-live="polite"></span>'+
+    '<span class="mbtn" role="button" tabindex="0" data-step="1" aria-label="Next match">\u203a</span>';
+  const hit=e=>{
+    // The whole control sits inside a <summary>, whose default action is to
+    // collapse the very section being walked - so every event that lands on it
+    // is spent here, hit or miss.
+    e.preventDefault();e.stopPropagation();
+    const b=e.target.closest(".mbtn");
+    if(b)navGo(+b.dataset.step);
+  };
+  navEl.addEventListener("click",hit);
+  navEl.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")hit(e)});
+  // The row must not move between the press and the jump either: a scroll
+  // still settling from the previous press would otherwise hide the bar and
+  // take the chevrons with it, mid-tap.
+  navEl.addEventListener("pointerdown",freezeBar);
+  return navEl;
+}
+function navAttach(det){
+  const sum=det.querySelector(":scope>summary");
+  if(!sum)return navDetach();
+  const el=navBuild(),cnt=sum.querySelector(".count");
+  cnt?sum.insertBefore(el,cnt):sum.appendChild(el);
+  navDet=det;navList=null;navIdx=0;
+  navRefresh();
+}
+function navDetach(){
+  clearTimeout(navTimer);
+  if(navEl){navEl.hidden=true;navEl.remove()}
+  navDet=null;navList=null;navIdx=0;
+}
+function navRefresh(){
+  if(!navDet||!navDet.isConnected)return navDetach();
+  const cur=navList&&navList[navIdx]&&navList[navIdx].el;
+  navList=markList(navDet);
+  // A late frame adds marks ABOVE the one you are on; keeping the element
+  // rather than the number is what stops the position from drifting.
+  const at=cur?navList.findIndex(m=>m.el===cur):-1;
+  navIdx=at<0?0:at;
+  navEl.hidden=navList.length<2;
+  navPos();
+}
+function navPos(){
+  const p=navEl&&navEl.querySelector(".mpos");
+  if(p)p.textContent=navList&&navList.length?(navIdx+1)+"/"+navList.length:"";
+}
+function navGo(step){
+  if(!navDet||!navDet.isConnected)return navDetach();
+  if(!navList||!navList.length||!navList[navIdx].el.isConnected)navRefresh();
+  const n=navList.length;if(n<2)return;
+  navIdx=((navIdx+step)%n+n)%n; // wraps: the list is a ring, not a rail
+  for(const m of navList)m.el.classList.remove("wu-cur");
+  const cur=navList[navIdx];
+  cur.el.classList.add("wu-cur");
+  const top=cur.el.getBoundingClientRect().top+
+    (cur.host.shadowRoot?0:cur.host.getBoundingClientRect().top);
+  // Smooth for a neighbouring match, instant across an article: a two-second
+  // glide over 18000px of text is not orientation, it is waiting.
+  revealAt(top,navDet,Math.abs(top)>innerHeight*2);
+  navPos();
+}
+let markSettle=null;
+function revealFirstMark(det){
+  if(markSettle)markSettle(); // one search, one settle: the old one is over
+  let moved=false,moves=0,timer=0;
+  const quit=["wheel","touchstart","pointerdown","keydown"];
+  const stop=()=>{
+    ro.disconnect();clearTimeout(timer);
+    for(const t of quit)removeEventListener(t,stop);
+    if(markSettle===stop)markSettle=null;
+  };
+  const align=()=>{
+    if(!det.isConnected)return stop(); // a newer answer replaced it
+    for(const host of det.querySelectorAll(".article")){
+      const root=host.shadowRoot||host.contentDocument;
+      if(!root)continue; // its frame has not parsed yet
+      /* The first mark in DOM order is not always a mark on the page. A wiki
+         article carries its own collapsed <details> table of contents, whose
+         headings are the very words that matched; Chromium skips layout for a
+         closed <details> rather than zeroing it, so the mark inside answers
+         getBoundingClientRect with a perfectly plausible box - one that is
+         near the top of the article and therefore "already on screen", which
+         is why this dictionary looked like it had turned the feature off.
+         getClientRects().length and offsetParent are fooled the same way;
+         checkVisibility is not. Its options are left at their defaults on
+         purpose: contentVisibilityAuto:true would also reject the marks inside
+         OUR OWN content-visibility:auto result list, which are precisely the
+         off-screen ones worth scrolling to. */
+      let el=null;
+      for(const m of root.querySelectorAll(".wu-hl"))
+        if(!m.checkVisibility||m.checkVisibility()){el=m;break}
+      if(!el)continue; // no match in this article, or none of them is rendered
+      const top=el.getBoundingClientRect().top+
+        (host.shadowRoot?0:host.getBoundingClientRect().top);
+      if(top>=barH()&&top<=innerHeight-48)return; // on screen already
+      if(++moves>8)return stop(); // an article that never settles is not worth chasing
+      revealAt(top,det,moved); // the first move is the visible one; corrections are instant
+      moved=true;
+      return; // the FIRST match: never keep looking past it
+    }
+  };
+  const ro=new ResizeObserver(align);
+  for(const t of quit)addEventListener(t,stop,{passive:true});
+  timer=setTimeout(stop,4000);
+  markSettle=stop;
+  ro.observe(det); // delivers the first callback itself, once the section is laid out
+}
+/* The bar's EFFECTIVE height: 0 while it is hidden. offsetHeight reports the
+   full height either way — .bar.hidden only translates it — so aiming at
+   offsetHeight while the bar is off-screen left a bar-sized hole above the
+   thing we scrolled to. Read it, do not assume it: the walk is deliberately
+   allowed to run with the bar in either state. */
+function barH(){const b=$("bar");return b.classList.contains("hidden")?0:b.offsetHeight}
+/* Suspends the auto-hide for the duration of a scroll we started. Cleared by
+   scrollend where it exists, by the timer where it does not, and immediately
+   by a wheel or a drag — a user who takes over mid-flight is scrolling for
+   real and the bar should answer to them again. */
+let barFrozen=false,barThaw=0;
+function freezeBar(){clearTimeout(barThaw);barFrozen=true;barThaw=setTimeout(thawBar,1200)}
+function thawBar(){clearTimeout(barThaw);barFrozen=false;prevScroll=pageYOffset}
+addEventListener("scrollend",thawBar);
+for(const t of ["wheel","touchmove"])addEventListener(t,()=>{if(barFrozen)thawBar()},{passive:true});
+function revealAt(viewportTop,det,instant){
   const head=det?.querySelector(":scope>summary")?.offsetHeight||0;
-  scrollTo({top:Math.max(0,viewportTop+scrollY-$("bar").offsetHeight-head-8),
-    behavior:lessMotion.matches?"auto":"smooth"});
+  freezeBar();
+  scrollTo({top:Math.max(0,viewportTop+scrollY-barH()-head-8),
+    behavior:instant||lessMotion.matches?"auto":"smooth"});
 }
 document.addEventListener("click",e=>{
   const path=e.composedPath();
@@ -3158,6 +3498,16 @@ new ResizeObserver(measureBar).observe($("bar"));
 let prevScroll=window.pageYOffset;
 addEventListener("scroll",()=>{
   const cur=window.pageYOffset;
+  /* A scroll WE started is not the user scrolling away from the bar, and
+     treating it as one broke the ‹ n/N › walk (D118): each press scrolled
+     down, the bar hid, body.barhidden collapsed --stick to 0, and every
+     sticky summary — including the one holding the chevrons — slid up by the
+     bar's height, out from under the finger that was pressing them. The next
+     press landed on whatever had moved into that spot. prevScroll is still
+     tracked through the freeze so the user's next real gesture is measured
+     from where they LANDED, not from where the jump began (which would spend
+     that gesture on a spurious hide). */
+  if(barFrozen){prevScroll=cur;return}
   const hide=cur>80&&cur>prevScroll;
   $("bar").classList.toggle("hidden",hide);
   document.body.classList.toggle("barhidden",hide);
@@ -3186,13 +3536,23 @@ let navRecord="replace"; // how the NEXT doSearch should record itself
    anchorOnce is the #fragment such a link carried, revealed once the target
    article is on screen. */
 let scopeOnce=null,anchorOnce=null,lastScope=null,widenedFrom=null;
+/* commitOnce is "I have finished the word". Live search runs 300 ms after
+   every keystroke pause, so without this flag `revealFirstMark` treated "прео"
+   as a finished query and threw the page at a match while the user was still
+   typing the next letter. Scrolling is navigation and navigation needs an
+   act: submit (Enter or the soft keyboard's search key), a ?q= link opened or
+   restored, or a cross-reference followed. Typing renders in place and stays
+   still — the ‹ n/N › control (D118) appears with the count, so the match is
+   one tap away rather than one yank away. Same one-shot idiom as navRecord:
+   set by the act, consumed by the next doSearch. */
+let commitOnce=false;
 function applyURL(){
   const p=new URLSearchParams(location.search);
   if(p.get("theme")){localStorage.setItem("wudict_theme",p.get("theme"));applyTheme(p.get("theme"))}
   if(p.get("mode"))$("mode").value=p.get("mode");
   if(p.get("dict"))$("dict").value=p.get("dict");
   syncChips();
-  if(p.get("q")){$("q").value=p.get("q");scopeOnce=p.get("from")||null;doSearch()}
+  if(p.get("q")){$("q").value=p.get("q");scopeOnce=p.get("from")||null;commitOnce=true;doSearch()}
 }
 const _doSearch=doSearch;
 doSearch=function(ev){
@@ -3231,6 +3591,7 @@ window.addEventListener("popstate",()=>{
   }
   navRecord="none";
   scopeOnce=p.get("from")||null; // a link-followed view was scoped; restore that
+  commitOnce=true;               // Back/Forward restores a view, it does not type
   doSearch();
 });
 $("frm").removeEventListener("submit",_doSearch);
@@ -3243,6 +3604,7 @@ $("frm").addEventListener("submit",e=>{
      nothing is covering anything and refining the term is the next thing a
      mouse user does. */
   if(!matchMedia("(hover:hover)").matches)$("q").blur();
+  commitOnce=true; // the one moment the query is finished: this search may scroll
   return doSearch(e);
 });
 

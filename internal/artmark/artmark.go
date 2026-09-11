@@ -54,6 +54,8 @@
 //	wu-m     author-indented block (--wd-m, in em)
 //	wu-audio wu-video wu-file  media the article points at
 //	wu-sub   an article section pulled in beside a link (written by the UI)
+//	wu-hl    a full-text match, marked at response time (internal/hilite)
+//	wu-cur   the one match being walked to (written by the UI, not ingested)
 //
 // DefaultCSS is served once per page into both article surfaces (the shadow
 // root and the sandboxed iframe), so an article carries none of it: a role
@@ -98,6 +100,12 @@ const DefaultCSS = `
   background:rgba(224,134,0,.06);border-radius:0 6px 6px 0}
 :where(.wu-sub-close){float:right;cursor:pointer;color:#999;font-size:12px;padding:0 .3em}
 :where(.wu-sub-close:hover){color:var(--wd-sub,#e08600)}
+:where(.wu-hl){background:var(--wd-hl,#ffe066);color:inherit;border-radius:2px}
+/* One of the marks is where the reader was just taken; the rest are still
+   the same colour, because losing sight of them is what a stronger tint on
+   the current one is for. Written by the UI, never ingested, so no Version
+   bump: an article already in a library folder is unaffected. */
+:where(.wu-hl.wu-cur){background:var(--wd-hl-cur,#ffab40);box-shadow:0 0 0 2px var(--wd-hl-cur,#ffab40)}
 `
 
 // IsColor accepts the two forms a DSL [c] argument may legally take - a
