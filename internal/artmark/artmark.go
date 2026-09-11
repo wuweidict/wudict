@@ -100,12 +100,23 @@ const DefaultCSS = `
   background:rgba(224,134,0,.06);border-radius:0 6px 6px 0}
 :where(.wu-sub-close){float:right;cursor:pointer;color:#999;font-size:12px;padding:0 .3em}
 :where(.wu-sub-close:hover){color:var(--wd-sub,#e08600)}
-:where(.wu-hl){background:var(--wd-hl,#ffe066);color:inherit;border-radius:2px}
+/* The two highlight rules are the ONE exception to the zero-specificity law,
+   and the exception is the point. Every other default here dresses a ROLE the
+   article HAS, so the dictionary's own sheet and the reader's Custom styles
+   must be able to win. A highlight is not a role: it is the app answering the
+   query that was just typed, drawn on top of whatever the article happens to
+   be, and an article that can erase it turns the feature off silently. DLE
+   v23.8.1 ships a rule setting background-color:inherit on mark - one element
+   of specificity, enough to beat :where() - and the marks went invisible: the
+   ring drew, the fill did not. The doubled class plus !important survives that
+   and a dictionary's own !important too, while --wd-hl / --wd-hl-cur keep both
+   colours themeable: the custom property is read, the cascade is not fought. */
+.wu-hl.wu-hl{background:var(--wd-hl,#ffe066)!important;color:inherit!important;border-radius:2px}
 /* One of the marks is where the reader was just taken; the rest are still
    the same colour, because losing sight of them is what a stronger tint on
    the current one is for. Written by the UI, never ingested, so no Version
    bump: an article already in a library folder is unaffected. */
-:where(.wu-hl.wu-cur){background:var(--wd-hl-cur,#ffab40);box-shadow:0 0 0 2px var(--wd-hl-cur,#ffab40)}
+.wu-hl.wu-hl.wu-cur{background:var(--wd-hl-cur,#ffab40)!important;box-shadow:0 0 0 2px var(--wd-hl-cur,#ffab40)}
 `
 
 // IsColor accepts the two forms a DSL [c] argument may legally take - a

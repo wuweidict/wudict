@@ -2463,6 +2463,14 @@ addEventListener("message",e=>{
        data and is inserted here. This is the one place in this file that
        synthesizes input, which is why the `input` event has to be dispatched
        by hand for the debounced search to see it. */
+    /* The two arrows are not typing: they walk the matches, the same as the
+       chevrons and F3. They come through this channel because a click into an
+       article moves focus into another document, where the app's own keydown
+       listener can no longer hear anything. */
+    if(d.k==="ArrowRight"||d.k==="ArrowLeft"){
+      if(navWalkable())navGo(d.k==="ArrowRight"?1:-1);
+      return;
+    }
     const qi=$("q");
     if(qi.disabled)return;
     if(d.k==="/"){qi.focus();qi.select();return}
@@ -3054,6 +3062,23 @@ document.addEventListener("keydown",e=>{
   if(navDet&&(e.key==="F3"||((e.metaKey||e.ctrlKey)&&(e.key==="g"||e.key==="G")))){
     e.preventDefault();navGo(e.shiftKey?-1:1);return;
   }
+  /* The same action again, for the hand that is on the page rather than in
+     the box. The two arrows are free HERE and nowhere else: a text field owns
+     them for the caret, a <select> owns them for its options, and `editable`
+     is the same test the "/" and printable-key rules below already use. The
+     page itself has nothing to lose - it does not scroll horizontally, and a
+     <summary>, which is what a reader has focused after clicking a section
+     header, gives arrows no default action at all. Modifier-free only:
+     Shift-arrow extends a selection, and Alt-Left is Back on two of three
+     desktop platforms, so neither chord can ever be ours. Arrows that land
+     INSIDE an article never reach this listener; frame.js forwards them (the
+     same route "/" already travels) and the message handler calls navGo. */
+  if((e.key==="ArrowRight"||e.key==="ArrowLeft")&&
+     !e.shiftKey&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.isComposing&&
+     navWalkable()&&!editable(document.activeElement)&&
+     !$("styler").classList.contains("show")&&!$("panel").classList.contains("show")){
+    e.preventDefault();navGo(e.key==="ArrowRight"?1:-1);return;
+  }
   if(e.ctrlKey||e.metaKey||e.altKey||e.isComposing)return;
   const q=typeTarget();if(!q)return;
   if(e.key==="/"){e.preventDefault();q.focus();q.select();return}
@@ -3283,6 +3308,11 @@ function navPos(){
   const p=navEl&&navEl.querySelector(".mpos");
   if(p)p.textContent=navList&&navList.length?(navIdx+1)+"/"+navList.length:"";
 }
+/* Is there a ring to walk right now? navEl.hidden is the one truth about
+   that - it is false only when the list holds two or more marks (D102: a
+   control that cannot do anything is not shown), so a key guard that reads it
+   can never disagree with what the reader can see. */
+function navWalkable(){return !!(navDet&&navDet.isConnected&&navEl&&!navEl.hidden)}
 function navGo(step){
   if(!navDet||!navDet.isConnected)return navDetach();
   if(!navList||!navList.length||!navList[navIdx].el.isConnected)navRefresh();
@@ -3595,6 +3625,21 @@ window.addEventListener("popstate",()=>{
   doSearch();
 });
 $("frm").removeEventListener("submit",_doSearch);
+/* Enter on a query that has not changed since it was answered is the find
+   bar's idiom, and it is free twice over: every browser's find bar walks its
+   matches with it, and the submit it replaces was re-running an identical
+   search over the network for an identical answer (doSearch has no repeat
+   guard - `lastQuery` is written there and never compared).
+   Strictly narrower than submit: the moment a character changes the query,
+   this is a search again. It sits on the FIELD and preventDefaults, which is
+   what stops implicit submission - the form's own handler never sees the key.
+   Shift-Enter walks back; it is not a newline here, because a single-line
+   input has none. */
+$("q").addEventListener("keydown",e=>{
+  if(e.key!=="Enter"||e.isComposing||e.ctrlKey||e.metaKey||e.altKey)return;
+  if(!navWalkable()||$("q").value.trim()!==lastQuery)return;
+  e.preventDefault();navGo(e.shiftKey?-1:1);
+});
 $("frm").addEventListener("submit",e=>{
   /* Submit is the one moment the user has finished the word and wants to SEE
      the answer — and on a touch device the soft keyboard is standing over the

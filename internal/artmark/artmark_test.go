@@ -26,6 +26,17 @@ func TestDefaultCSSIsInjectionSafe(t *testing.T) {
 
 // Every default must be zero-specificity, or the dictionary's own CSS and the
 // reader's Custom styles have to fight it (law 3).
+//
+// The highlight is the one exception, and it is listed here BY SELECTOR so
+// that adding a second exception is a deliberate edit to this test rather than
+// something a new rule can drift into. A highlight is not a role the article
+// has; it is the app answering the query the reader just typed, and a
+// dictionary that can erase it turns the feature off without saying so.
+var specificityExempt = map[string]bool{
+	".wu-hl.wu-hl":        true,
+	".wu-hl.wu-hl.wu-cur": true,
+}
+
 func TestDefaultCSSSelectorsAreZeroSpecificity(t *testing.T) {
 	for _, line := range strings.Split(DefaultCSS, "\n") {
 		i := strings.Index(line, "{")
@@ -35,6 +46,9 @@ func TestDefaultCSSSelectorsAreZeroSpecificity(t *testing.T) {
 		sel := strings.TrimSpace(line[:i])
 		if sel == "" {
 			continue // continuation of a declaration block
+		}
+		if specificityExempt[sel] {
+			continue
 		}
 		if !strings.HasPrefix(sel, ":where(") || !strings.HasSuffix(sel, ")") {
 			t.Errorf("selector %q is not wrapped in :where()", sel)

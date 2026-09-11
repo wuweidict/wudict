@@ -567,7 +567,14 @@
 		if (t && (t.isContentEditable ||
 			/^(input|textarea|select)$/i.test(t.tagName || ""))) return;
 		var k = e.key || "";
-		if (k !== "/" && (k.length !== 1 || k === " ")) return;
+		// The two match-navigation arrows travel the same route, for the same
+		// reason: once the reader has clicked into an article, every key is
+		// delivered to THIS document and the app's own keyboard is dead. They
+		// are not typing, and the app routes them to the match walker rather
+		// than to the search box. Shift-arrow is left alone - it extends a
+		// selection, which is a thing a reader does inside an article.
+		var arrow = (k === "ArrowRight" || k === "ArrowLeft") && !e.shiftKey;
+		if (!arrow && k !== "/" && (k.length !== 1 || k === " ")) return;
 		// "/" would otherwise open the browser's quick-find inside the frame;
 		// a printable key does nothing here in any case.
 		e.preventDefault();
