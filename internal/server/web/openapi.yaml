@@ -1586,7 +1586,7 @@ components:
           type: string
           description: The file name, which is also its address.
         size: { type: integer, description: Size in bytes. }
-        mtime: { type: integer, description: Last modified, unix seconds. }
+        mtime: { type: integer, description: "Last modified, unix seconds." }
         type:
           type: string
           description: >
