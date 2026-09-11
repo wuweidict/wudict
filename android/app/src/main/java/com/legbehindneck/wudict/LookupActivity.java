@@ -391,6 +391,15 @@ public class LookupActivity extends Activity {
     }
 
     @Override
+    @SuppressWarnings("deprecation") // startActivityForResult: no androidx here, by design
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        // Only the WebView's file picker (D123) can land here: this window runs
+        // no import flow of its own, deliberately (see the Storage note above).
+        Shell.onActivityResult(this, requestCode, resultCode, data);
+    }
+
+    @Override
     protected void onDestroy() {
         gone = true;
         // false, always: a popup closing never stops the server (D67). It goes

@@ -65,6 +65,16 @@ func TestRewriteEntryHTML(t *testing.T) {
 		{"protocol-relative untouched", `<script src="//cdn.x/y.js"></script>`, `<script src="//cdn.x/y.js"></script>`},
 		{"already absolute", `<img src="` + R + `a.png">`, `<img src="` + R + `a.png">`},
 		{"already relative", `<img src="res/` + id + `/a.png">`, `<img src="res/` + id + `/a.png">`},
+		// The user's own file store (userfiles.go) is global and root-absolute,
+		// and belongs to no dictionary: rewriting it under /res/<id>/ would
+		// break the case it exists for - a dictionary the user wrote
+		// themselves, pointing at a font or an image they uploaded.
+		{"user file store untouched", `<img src="/files/w1.jpg">`, `<img src="/files/w1.jpg">`},
+		{"user file store in CSS untouched", `<div style="background:url(/files/bg.png)">`, `<div style="background:url(/files/bg.png)">`},
+		{"user font untouched", `<link rel="stylesheet" href="/files/fonts.css">`, `<link rel="stylesheet" href="/files/fonts.css">`},
+		// Not a prefix match on the word: a dictionary's own files/ folder is
+		// still its own, and keeps landing under /res/.
+		{"relative files/ still rewritten", `<img src="files/w1.jpg">`, `<img src="` + R + `files/w1.jpg">`},
 
 		// ── attribute-name discrimination ───────────────────────────────────
 		{"metadata untouched", `<span metadata="keep.png">x</span>`, `<span metadata="keep.png">x</span>`},

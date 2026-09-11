@@ -114,6 +114,13 @@ func (s *Server) routes() []route {
 		{"GET", "/api/lemmas", s.handleLemmas, "/api/lemmas", false},
 		{"POST", "/api/lemmas", s.handleLemmaInstall, "/api/lemmas", false},
 		{"DELETE", "/api/lemmas", s.handleLemmaRemove, "/api/lemmas", false},
+		// the user's own file store (userfiles.go): what their custom CSS,
+		// or a dictionary they wrote themselves, can reference by URL. Never
+		// CORS - the list names a folder on the user's disk, and the other
+		// two write to it.
+		{"GET", "/api/files", s.handleFiles, "/api/files", false},
+		{"POST", "/api/files", s.handleFileUpload, "/api/files", false},
+		{"DELETE", "/api/files", s.handleFileDelete, "/api/files", false},
 
 		// ---- the app itself: pages and assets, not part of the API document.
 		{"GET", "/", s.handleIndex, "", false},
@@ -128,6 +135,10 @@ func (s *Server) routes() []route {
 		// under /assets/ - nothing here is embedded in the binary, and the
 		// immutable week-long cache those get would hide every edit.
 		{"GET", "/style/", s.handleUserCSS, "", false},
+		// The files that stylesheet references. Same folder, same no-cache
+		// reasoning, and not under /assets/ for the same reason: /assets/ is
+		// the binary's own embedded, immutably cached content.
+		{"GET", "/files/", s.handleUserFile, "", false},
 		{"GET", "/assets/frame.js", serveAsset("application/javascript; charset=utf-8", frameJS), "", false},
 		{"GET", "/assets/setup.css", serveAsset("text/css; charset=utf-8", setupCSS), "", false},
 		{"GET", "/assets/favicon.svg", serveFavicon, "", false},

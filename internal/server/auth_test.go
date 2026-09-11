@@ -58,6 +58,12 @@ func TestAuthFreeMatchesRoutes(t *testing.T) {
 		"DELETE /api/library", "GET /api/rescan", "GET /api/ingest", "GET /api/setup",
 		"GET /api/reveal", "POST /api/demand", "GET /api/about", "POST /api/power",
 		"GET /api/lemmas", "POST /api/lemmas", "DELETE /api/lemmas",
+		// The user's file store, and the files themselves: both name and
+		// serve bytes off the user's own disk (userfiles.go). /files/ is
+		// gated rather than open because the two surfaces that consume it
+		// both carry the cookie - the page is same-origin, and the article
+		// iframe is a srcdoc with allow-same-origin.
+		"GET /api/files", "POST /api/files", "DELETE /api/files", "GET /files/",
 	} {
 		if authFree[op] {
 			t.Errorf("%s is reachable without the key", op)

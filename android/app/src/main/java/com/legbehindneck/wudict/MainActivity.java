@@ -381,6 +381,7 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         Storage.onActivityResult(this, requestCode, resultCode, data);
+        Shell.onActivityResult(this, requestCode, resultCode, data);
     }
 
     @Override

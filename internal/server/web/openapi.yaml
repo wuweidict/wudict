@@ -883,6 +883,124 @@ paths:
         '500':
           description: A file could not be written.
 
+  /api/files:
+    get:
+      tags: [internal]
+      operationId: listFiles
+      x-internal: true
+      summary: The user's own file store
+      description: >
+        Files the user uploaded so that something they wrote can reference them
+        by URL: an image for a `background-image` in their custom CSS, a font
+        for an `@font-face`, an imported stylesheet, a script, a PDF a private
+        dictionary links to. They live beside the two stylesheets, in an
+        `assets` folder under the same directory `GET /api/style` reports, and
+        are served from `/files/<name>`.
+
+
+        No type restriction: the store is "files the page can reach by URL",
+        and an extension allowlist would only mean the feature is missing for
+        whoever needed the entry it lacks. `limits` is reported rather than
+        assumed, so a client's message about a refused upload cannot drift from
+        the rule that refused it.
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s 'http://127.0.0.1:6888/api/files' | jq -r '.files[].name'
+      responses:
+        '200':
+          description: The store.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserFiles' }
+    post:
+      tags: [internal]
+      operationId: uploadFile
+      x-internal: true
+      summary: Add or replace one file
+      description: >
+        The request body is the file itself, raw - there is one file per
+        request and no other field, so multipart would add a parser to carry
+        nothing. The name comes from `name`, and is one path segment of
+        `A-Z a-z 0-9 . _ -` starting with a letter or digit, at most 64
+        characters; it is an allowlist, not a cleaning pass, so nothing here
+        can name a path.
+
+
+        Uploading onto an existing name is refused with 409 unless `replace=1`:
+        a silent overwrite is the one mistake this endpoint can make that the
+        user cannot undo, because their stylesheet already points at that name.
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: The file name, which is also its URL under `/files/`.
+          schema: { type: string }
+        - name: replace
+          in: query
+          description: Set to `1` to overwrite a file that is already there.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s -X POST --data-binary @w1.jpg \
+              'http://127.0.0.1:6888/api/files?name=w1.jpg'
+      responses:
+        '200':
+          description: The store, as stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserFiles' }
+        '400':
+          description: The name is not one this store can hold, or the body is empty.
+        '409':
+          description: >
+            There is no config directory, so there is nowhere to save; or a
+            file of that name is already there and `replace` was not set.
+        '413':
+          description: >
+            The file is over 8 MiB, or the store would be over 64 MiB or 64
+            files.
+        '500':
+          description: The file could not be written.
+    delete:
+      tags: [internal]
+      operationId: removeFile
+      x-internal: true
+      summary: Delete one file
+      description: >
+        Removing what is not there is a success: the caller asked for it to be
+        gone and it is. Nothing checks whether a stylesheet still references
+        the name - that is the caller's warning to give, before it asks.
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: The file to remove.
+          schema: { type: string }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s -X DELETE 'http://127.0.0.1:6888/api/files?name=w1.jpg'
+      responses:
+        '200':
+          description: The store, as it now stands.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserFiles' }
+        '400':
+          description: The name is not one this store can hold.
+        '500':
+          description: The file could not be removed.
+
   /api/demand:
     post:
       tags: [internal]
@@ -1436,6 +1554,48 @@ components:
         writable:
           type: boolean
           description: Whether PUT can store anything.
+
+    UserFiles:
+      type: object
+      description: The user's file store, plus where it lives and what it allows.
+      properties:
+        files:
+          type: array
+          items: { $ref: '#/components/schemas/UserFile' }
+        dir:
+          type: string
+          description: The folder holding them, or empty when there is none.
+        writable:
+          type: boolean
+          description: Whether anything can be stored at all.
+        total:
+          type: integer
+          description: The sum of the sizes below, in bytes.
+        limits:
+          type: object
+          description: The caps this server enforces, in bytes and in files.
+          properties:
+            file: { type: integer, description: The largest one file may be. }
+            total: { type: integer, description: The largest the folder may be. }
+            count: { type: integer, description: How many files it may hold. }
+
+    UserFile:
+      type: object
+      properties:
+        name:
+          type: string
+          description: The file name, which is also its address.
+        size: { type: integer, description: Size in bytes. }
+        mtime: { type: integer, description: Last modified, unix seconds. }
+        type:
+          type: string
+          description: >
+            The media type served for it, resolved from the extension; empty
+            when the extension is not one wudict knows, in which case it is
+            served as application/octet-stream.
+        url:
+          type: string
+          description: Where it is served, e.g. `/files/w1.jpg`.
 
     Prefs:
       type: object

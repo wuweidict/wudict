@@ -20,6 +20,7 @@ import android.net.Uri;
 import android.os.Message;
 import android.util.Log;
 import android.webkit.CookieManager;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
@@ -145,6 +146,43 @@ final class Shell {
         return true;
     }
 
+    // The file picker <input type="file"> needs (D123: the styler's "Add…"
+    // button). A WebView answers a file input with nothing whatsoever unless a
+    // WebChromeClient implements onShowFileChooser - the page was never the
+    // problem, the shell simply had no ear for it.
+    //
+    // Distinct from Storage.REQ_TREE: both flavours' onActivityResult and this
+    // one are called for every result the activity receives.
+    private static final int REQ_FILES = 0x5AF1;
+
+    // The callback the page is blocked on. Static because the picker is another
+    // activity and ours may be stopped - or, for the lookup popup (D67),
+    // recreated - before the answer lands; one file input can be open at a
+    // time, so a single slot is the entire state.
+    private static ValueCallback<Uri[]> pendingFiles;
+
+    /**
+     * Answers the page's file input, exactly once, with whatever we have.
+     *
+     * <p>Null is a legitimate answer and means "cancelled". What is NOT legal is
+     * silence: an unanswered callback leaves that input permanently dead, so
+     * every exit from the chooser path runs through here.
+     */
+    private static void settleFiles(Uri[] uris) {
+        ValueCallback<Uri[]> cb = pendingFiles;
+        pendingFiles = null;
+        if (cb != null) cb.onReceiveValue(uris);
+    }
+
+    /**
+     * The picker's answer, forwarded by whichever activity hosts the WebView.
+     * parseResult handles single, multiple (clipData) and cancel alike.
+     */
+    static void onActivityResult(Activity a, int requestCode, int resultCode, Intent data) {
+        if (requestCode != REQ_FILES) return;
+        settleFiles(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+    }
+
     /** Answers window.open(): reads the URL the new window wants, then sends it out. */
     static WebChromeClient windows(Activity a) {
         return new WebChromeClient() {
@@ -165,6 +203,27 @@ final class Shell {
                 });
                 ((WebView.WebViewTransport) resultMsg.obj).setWebView(sink);
                 resultMsg.sendToTarget();
+                return true;
+            }
+
+            @Override
+            @SuppressWarnings("deprecation") // startActivityForResult: no androidx here, by design
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                                             FileChooserParams params) {
+                // A second request supersedes the first; the abandoned one still
+                // has to be answered or its input stays dead.
+                settleFiles(null);
+                pendingFiles = callback;
+                try {
+                    // createIntent() carries the accept= types and the multiple
+                    // flag the page asked for, so the picker matches the markup.
+                    a.startActivityForResult(params.createIntent(), REQ_FILES);
+                } catch (ActivityNotFoundException | SecurityException e) {
+                    Log.w(TAG, "no file picker on this device", e);
+                    settleFiles(null);
+                }
+                // True either way: the callback is ours now, and it has already
+                // been answered on the failure path.
                 return true;
             }
         };

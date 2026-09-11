@@ -384,6 +384,27 @@ body.styling{padding-bottom:var(--styler-h)}
   max-height:2.8em;overflow:hidden}
 #stylerNote .p{cursor:pointer}
 #stylerNote .p:hover{color:var(--fg-soft)}
+/* The files pane occupies exactly the textarea's box, so switching tabs does
+   not resize the sheet under the reader's thumb. */
+#stylerFiles{flex:1 1 auto;min-height:0;width:100%;margin-top:.5em;overflow:auto;
+  background:var(--bg-card);border:1px solid var(--line);border-radius:8px}
+#stylerFiles .empty{padding:1.2em .8em;text-align:center;color:var(--fg-faint);
+  font-size:12px;line-height:1.5}
+#stylerFiles .f{display:flex;align-items:center;gap:.6em;padding:.4em .6em;
+  border-bottom:1px solid var(--line)}
+#stylerFiles .f:last-child{border-bottom:0}
+/* A fixed box whatever the image's shape: a column of thumbnails that each
+   set their own height is a list nobody can scan. */
+#stylerFiles .th{flex:0 0 auto;width:2.4em;height:2.4em;border-radius:5px;
+  object-fit:cover;background:var(--bg);border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;
+  font-size:9px;letter-spacing:.02em;color:var(--fg-faint);overflow:hidden}
+#stylerFiles .n{flex:1 1 auto;min-width:0;cursor:pointer}
+#stylerFiles .n b{display:block;font-weight:500;font-size:12.5px;color:var(--fg);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#stylerFiles .n s{display:block;text-decoration:none;font-size:11px;color:var(--fg-faint)}
+#stylerFiles .n:hover b{color:var(--accent)}
+#stylerFiles .btn{flex:0 0 auto;font-size:12px;padding:.25em .55em}
 
 /* ── dictionaries panel ────────────────────────────────────────────── */
 #panel{position:fixed;inset:0;z-index:200;display:none;background:color-mix(in srgb,var(--fg) 24%,transparent)}
@@ -949,15 +970,24 @@ body.styling{padding-bottom:var(--styler-h)}
   <div class="row">
     <button type="button" class="tab" id="tabApp" role="tab" aria-selected="true" aria-controls="stylerCSS">App</button>
     <button type="button" class="tab" id="tabArticle" role="tab" aria-selected="false" aria-controls="stylerCSS">Article</button>
+    <!-- The third tab is not a third stylesheet: it is the things the other
+         two can point at. Same sheet, because a file is uploaded in order to
+         be referenced, and the reference is written one tab away. -->
+    <button type="button" class="tab" id="tabFiles" role="tab" aria-selected="false" aria-controls="stylerFiles">Files</button>
     <span class="grow"></span>
     <select id="stylerPreset" aria-label="Insert a preset"></select>
     <!-- Hidden while the box is empty: an action that would do nothing is a
          control you have to read and dismiss on every visit. -->
     <button type="button" class="btn" id="stylerClear" hidden title="Empty this box — Save then removes the file">Clear</button>
     <button type="button" class="btn" id="stylerSave">Save</button>
+    <!-- Only on the Files tab, and it stands where Save stands, because it is
+         the same thing there: the one button that writes. -->
+    <button type="button" class="btn" id="stylerAdd" hidden title="Upload a file the stylesheets can reference">Add…</button>
     <button type="button" class="btn" id="stylerClose" aria-label="Close">✕</button>
   </div>
   <textarea id="stylerCSS" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Custom CSS"></textarea>
+  <div id="stylerFiles" hidden role="tabpanel" aria-label="Uploaded files"></div>
+  <input type="file" id="stylerUpload" multiple hidden aria-hidden="true" tabindex="-1">
   <div id="stylerNote"></div>
 </div>
 
@@ -1217,8 +1247,16 @@ function pushFrameCSS(){
 }
 function applyArticleCSS(css){
   userArticleCSS=STYLE_OFF?"":String(css||"");
-  // replaceSync drops rules it cannot parse rather than throwing; it throws
-  // only on @import, which is exactly the one thing worth reporting.
+  // replaceSync drops what it cannot parse rather than throwing, and @import
+  // is part of what it drops: the rule is discarded with a console warning
+  // from the engine, the rest of the sheet still applies, and nothing is
+  // raised here. (Measured, not assumed - an earlier comment here claimed it
+  // threw.) So an @import written in the Article box takes effect in iframe
+  // articles, which are real documents, and not in shadow-root ones; the
+  // same is true of @font-face, which a constructed sheet ignores outright
+  // while one declared in the App box reaches shadow content. The catch is
+  // kept for what replaceSync CAN raise - a sheet already being modified -
+  // which is our bug to see, not the user's CSS.
   if(userSheet)try{userSheet.replaceSync(userArticleCSS)}
   catch(e){console.warn("custom article CSS:",e)}
   pushFrameCSS();
@@ -3882,7 +3920,16 @@ let stylerTab="app",
     stylerDirty={app:false,article:false},
     stylerDir="",
     stylerLoaded=false,
-    stylerTimer=null;
+    stylerTimer=null,
+    // "css" (either stylesheet) or "files". A third TAB, but not a third
+    // box: stylerTab stays the stylesheet the editor is on, so coming back
+    // from Files lands where you left, and stylerCommit never has to know
+    // that a pane without a textarea exists.
+    stylerView="css",
+    // null until the folder has been read once, which is what lets the dot
+    // on the Files tab mean "there are files" rather than "not looked yet".
+    stylerFileRows=null,
+    stylerFileLimits=null;
 
 /* The app half of the preview, and it has to OWN the app layer, not merely
    sit on top of it. Winning on order is enough to ADD a rule and nowhere near
@@ -3925,7 +3972,28 @@ function stylerEdit(text){
 function stylerSync(){
   $("tabApp").dataset.has=stylerText.app.trim()?"1":"";
   $("tabArticle").dataset.has=stylerText.article.trim()?"1":"";
-  $("stylerClear").hidden=!$("stylerCSS").value;
+  $("tabFiles").dataset.has=(stylerFileRows&&stylerFileRows.length)?"1":"";
+  $("stylerClear").hidden=stylerView==="files"||!$("stylerCSS").value;
+}
+/* Which pane the sheet is showing, and which buttons that pane can act on.
+   Examples, Clear and Save all address the textarea; on the Files tab they
+   would be three controls pointing at something not on screen, so they are
+   not on screen either. Add takes Save's place, because it is the button
+   that writes there. */
+function stylerSetView(v){
+  stylerView=v;
+  const files=v==="files";
+  $("stylerCSS").hidden=files;
+  $("stylerFiles").hidden=!files;
+  $("stylerPreset").hidden=files;
+  $("stylerSave").hidden=files;
+  $("stylerAdd").hidden=!files;
+  $("tabFiles").setAttribute("aria-selected",String(files));
+  if(files){
+    $("tabApp").setAttribute("aria-selected","false");
+    $("tabArticle").setAttribute("aria-selected","false");
+  }
+  stylerSync();
 }
 function stylerNote(msg){
   const n=$("stylerNote");
@@ -3975,6 +4043,174 @@ function stylerShowTab(tab){
   $("stylerCSS").placeholder=tab==="app"
     ? "CSS for the app itself — its colours and its own layout.\nTokens set on :root reach articles too."
     : "CSS for what dictionaries render, in every article.\nUse :host, :root > body to reach the article's own root.";
+  stylerSetView("css");
+}
+
+/* ── the files tab ───────────────────────────────────────────────────
+   What the two stylesheets can point at. It exists because there was
+   nowhere for a reference to lead: file:// is refused by every browser as a
+   subresource of an http page, and the one writable-by-URL surface that
+   existed is addressed by a dictionary id the UI deliberately never shows
+   (D102). Uploading and referencing are one tab apart on purpose - a file is
+   put here in order to be named in CSS, and Insert writes that name where
+   the caret is rather than leaving the reader to transcribe a path. */
+async function stylerFilesShow(){
+  stylerCommit();
+  stylerSetView("files");
+  if(stylerFileRows===null){stylerFilesRender("Loading…");await stylerFilesLoad()}
+  else stylerFilesRender();
+}
+function stylerFilesTake(j){
+  stylerFileRows=j.files||[];
+  stylerFileLimits=j.limits||null;
+  stylerFilesRender();
+}
+async function stylerFilesLoad(){
+  try{
+    const r=await fetch("/api/files");
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    stylerFilesTake(await r.json());
+    return true;
+  }catch(e){
+    console.warn("could not list files:",e);
+    stylerFilesRender("Could not read the files folder.");
+    return false;
+  }
+}
+/* Built element by element rather than as markup: a file name is the user's
+   text and goes in as text, and each row's buttons close over the row they
+   belong to instead of over an index that a reload could shift. */
+function stylerFilesRender(msg){
+  const box=$("stylerFiles");
+  box.textContent="";
+  const say=t=>{const d=document.createElement("div");d.className="empty";d.textContent=t;box.appendChild(d)};
+  if(msg){say(msg);stylerSync();return}
+  if(!stylerFileRows||!stylerFileRows.length){
+    say(stylerDir
+      ? "No files yet. Add an image, a font, a stylesheet — anything the CSS should be able to reach — then insert a reference to it."
+      : "No configuration folder, so there is nowhere to keep files.");
+    stylerSync();return;
+  }
+  for(const f of stylerFileRows){
+    const row=document.createElement("div");row.className="f";
+    if(/^image\//.test(f.type||"")){
+      const img=document.createElement("img");
+      img.className="th";img.src=f.url;img.alt="";img.loading="lazy";
+      row.appendChild(img);
+    }else{
+      // The extension, because for everything that is not an image it is the
+      // only thing about the file worth a glance.
+      const d=document.createElement("div");d.className="th";
+      const dot=f.name.lastIndexOf(".");
+      d.textContent=dot>0?f.name.slice(dot+1,dot+5).toUpperCase():"FILE";
+      row.appendChild(d);
+    }
+    const n=document.createElement("div");n.className="n";
+    n.title="Click to copy "+f.url;
+    const b=document.createElement("b");b.textContent=f.name;
+    const sub=document.createElement("s");sub.textContent=f.url+" · "+mb(f.size);
+    n.appendChild(b);n.appendChild(sub);
+    n.onclick=()=>stylerCopy(f.url);
+    row.appendChild(n);
+    const ins=document.createElement("button");
+    ins.type="button";ins.className="btn";ins.textContent="Insert";
+    ins.title='Write url("'+f.url+'") where the caret is';
+    ins.onclick=()=>stylerFileInsert(f);
+    row.appendChild(ins);
+    const del=document.createElement("button");
+    del.type="button";del.className="btn";del.textContent="Delete";
+    del.onclick=()=>stylerFileDelete(f);
+    row.appendChild(del);
+    box.appendChild(row);
+  }
+  stylerSync();
+}
+function stylerCopy(text){
+  if(!navigator.clipboard)return;
+  navigator.clipboard.writeText(text).then(
+    ()=>{stylerNote("Copied "+text);setTimeout(stylerNote,1400)},()=>{});
+}
+/* url("…"), not the bare path: it is what a reference looks like in CSS in
+   every position that takes one, and the quotes are what make a name with a
+   space or a parenthesis in it still parse. */
+function stylerFileInsert(f){
+  stylerShowTab(stylerTab);
+  stylerEdit('url("'+f.url+'")');
+  stylerNote("Inserted into "+BOXNAME[stylerTab]);
+  setTimeout(stylerNote,1800);
+}
+/* The confirmation names the box that will break, because the reader cannot
+   see their CSS from here and "is anything using this?" is the only question
+   that makes deleting a file a decision rather than a guess. */
+async function stylerFileDelete(f){
+  const used=["app","article"].filter(b=>stylerText[b].includes(f.name)).map(b=>BOXNAME[b]);
+  if(!confirm("Delete "+f.name+"?"+(used.length
+    ? "\n\nYour "+used.join(" and ")+" CSS refers to it and will stop finding it."
+    : "")))return;
+  stylerNote("Deleting…");
+  try{
+    const r=await fetch("/api/files?name="+encodeURIComponent(f.name),{method:"DELETE"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    stylerFilesTake(await r.json());
+    stylerNote("Deleted "+f.name);setTimeout(stylerNote,1600);
+  }catch(e){
+    stylerNote("Could not delete "+f.name+": "+e.message);
+  }
+}
+/* The server's name grammar, applied here as well - not instead. A picked
+   file is named by the operating system and may hold spaces, accents or a
+   directory the browser keeps; the reader should see the name it will have
+   and the URL that follows from it, rather than a 400 explaining one. */
+function stylerFileName(raw){
+  let n=String(raw||"").replace(/^.*[\\/]/,"").replace(/[^A-Za-z0-9._-]+/g,"-");
+  if(!n)n="file";
+  // Prefixed rather than trimmed: a name whose whole stem is non-ASCII
+  // collapses to a leading "-", and trimming that would throw the extension
+  // away with it, leaving "png".
+  if(!/^[A-Za-z0-9]/.test(n))n="f"+n;
+  if(n.length>64){
+    const dot=n.lastIndexOf(".");
+    let ext=dot>0?n.slice(dot):"";
+    if(ext.length>16)ext="";
+    n=n.slice(0,64-ext.length)+ext;
+  }
+  return n;
+}
+/* One at a time and stopping at the first refusal: these are uploads to the
+   reader's own disk, and a loop that carried on past a full folder would
+   report a count nobody can map back onto what is now there. */
+async function stylerUpload(list){
+  if(!list.length)return;
+  const cap=(stylerFileLimits&&stylerFileLimits.file)||(8<<20);
+  let done=0;
+  for(const file of list){
+    const name=stylerFileName(file.name);
+    if(file.size>cap){
+      stylerNote(name+" is "+mb(file.size)+" — one file may be "+mb(cap)+" at most");
+      return;
+    }
+    let q="";
+    if((stylerFileRows||[]).some(x=>x.name===name)){
+      if(!confirm(name+" is already there. Replace it?"))continue;
+      q="&replace=1";
+    }
+    stylerNote("Uploading "+name+"…");
+    try{
+      const r=await fetch("/api/files?name="+encodeURIComponent(name)+q,
+        {method:"POST",headers:{"Content-Type":file.type||"application/octet-stream"},body:file});
+      if(!r.ok){
+        let why="HTTP "+r.status;
+        try{const t=(await r.text()).trim();if(t)why=t}catch(_){}
+        throw new Error(why);
+      }
+      stylerFilesTake(await r.json());
+      done++;
+    }catch(e){
+      stylerNote("Could not upload "+name+": "+e.message);
+      return;
+    }
+  }
+  if(done){stylerNote(done===1?"Added":"Added "+done+" files");setTimeout(stylerNote,1600)}
 }
 /* One menu for both tabs, built once. Grouped, because a reader arrives
    wanting a RESULT — sepia, a wider column — and not knowing which of our two
@@ -4029,6 +4265,9 @@ async function stylerOpen(){
       stylerSaved={...stylerText};
       stylerDir=j.writable?(j.dir||""):"";
       stylerLoaded=true;
+      // Alongside, not on first click of the Files tab: the dot that says
+      // "there are files" has to be right the first time the sheet opens.
+      await stylerFilesLoad();
     }catch(e){
       console.warn("could not load custom styles:",e);
       stylerNote("Could not read the stylesheets.");
@@ -4041,7 +4280,7 @@ async function stylerOpen(){
   // Reopening also restores a preview that closing put back.
   stylerPreviewAll(stylerText);
   stylerNote();
-  $("stylerCSS").focus();
+  if(stylerView==="css")$("stylerCSS").focus();
 }
 function stylerCloseSheet(){
   $("styler").classList.remove("show");
@@ -4081,6 +4320,15 @@ $("stylerClose").onclick=stylerCloseSheet;
 $("stylerSave").onclick=stylerSave;
 $("tabApp").onclick=()=>stylerShowTab("app");
 $("tabArticle").onclick=()=>stylerShowTab("article");
+$("tabFiles").onclick=stylerFilesShow;
+$("stylerAdd").onclick=()=>$("stylerUpload").click();
+$("stylerUpload").addEventListener("change",e=>{
+  // Copied out first: clearing the input empties its own FileList, and it is
+  // cleared so that picking the SAME file twice still fires a change.
+  const list=Array.from(e.target.files||[]);
+  e.target.value="";
+  stylerUpload(list);
+});
 $("stylerCSS").addEventListener("input",()=>{
   stylerCommit();stylerSync();
   clearTimeout(stylerTimer);

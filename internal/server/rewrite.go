@@ -196,7 +196,13 @@ func entryRewriter(dictID string, text func(string) string) htmlref.Rewriter {
 			strings.HasPrefix(ref, "?"),
 			strings.HasPrefix(ref, "//"),
 			strings.HasPrefix(ref, absPrefix),
-			strings.HasPrefix(ref, relPrefix):
+			strings.HasPrefix(ref, relPrefix),
+			// The user's own file store (userfiles.go). It is a global,
+			// root-absolute URL that is nobody's dictionary resource, so
+			// rewriting it to /res/<id>/files/... would break exactly the
+			// case it exists for: a dictionary the user wrote themselves,
+			// referencing a font or an image they uploaded.
+			strings.HasPrefix(ref, userFileURL):
 			return ref
 		case subEntryRef.MatchString(ref):
 			// Must precede the scheme case, which would pass it through.
