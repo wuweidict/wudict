@@ -102,34 +102,56 @@ func (d *Dict) ensureFold() {
 	})
 }
 
+// Prefix returns up to limit headwords starting with word, the exact matches
+// first (raw pass first, folded passes only when the raw pass is empty).
+//
+// An exact hit does not end the search. It did until a headword typed in full
+// was reported as hiding its own siblings - "starts with" answered a complete
+// headword with that one article and dropped every longer key under it - so it
+// now only takes precedence, not the whole answer. It is seeded from the
+// headword index rather than left to the scan because the scan walks the file
+// in storage order and stops at limit: under a prefix with more than `limit`
+// entries behind it, the word actually typed could be the one cut.
 func (d *Dict) Prefix(word string, limit int) ([]dict.Result, error) {
 	word = strings.TrimSpace(word)
-	if res, err := d.Exact(word, limit); err != nil || len(res) > 0 {
-		return res, err
+	d.ensureExact()
+	idxs := append([]int(nil), d.exactIdx[word]...)
+	seen := make(map[int]bool, len(idxs))
+	for _, i := range idxs {
+		seen[i] = true
 	}
-	scan := func(useFold bool) []int {
+	scan := func(useFold bool) {
 		key := word
 		if useFold {
 			key = fold(word)
 		}
-		var idxs []int
 		for i, r := range d.c.refs {
+			if seen[i] {
+				continue
+			}
 			k := r.key
 			if useFold {
 				k = fold(k)
 			}
 			if strings.HasPrefix(k, key) {
 				idxs = append(idxs, i)
-				if len(idxs) >= limit {
-					break
+				if limit > 0 && len(idxs) >= limit {
+					return
 				}
 			}
 		}
-		return idxs
 	}
-	idxs := scan(false)
+	scan(false)
 	if len(idxs) == 0 {
-		idxs = scan(true)
+		// The folded EXACT index first, and the folded scan only behind it:
+		// the index is built once and answers every later keystroke, while the
+		// scan re-folds every headword on each call.
+		d.ensureFold()
+		idxs = append(idxs, d.foldIdx[fold(word)]...)
+		for _, i := range idxs {
+			seen[i] = true
+		}
+		scan(true)
 	}
 	return d.results(idxs, limit)
 }

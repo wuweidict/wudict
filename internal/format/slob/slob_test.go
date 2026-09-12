@@ -54,12 +54,14 @@ func buildSlob(t *testing.T) string {
 	text("text/html; charset=utf-8")
 	text("image/png")
 
-	// blobs: bin0: item0 = corazón html, item1 = png resource
+	// blobs: bin0: item0 = corazón html, item1 = png resource,
+	// item2 = an article whose key has item0's key as a strict prefix
 	items := [][]byte{
 		[]byte("<p><b>corazón</b> órgano muscular</p>"),
 		{0x89, 'P', 'N', 'G'},
+		[]byte("<p>generosidad</p>"),
 	}
-	ctypeIDs := []byte{0, 1}
+	ctypeIDs := []byte{0, 1, 0}
 	var binContent bytes.Buffer
 	pos := 0
 	for _, it := range items {
@@ -86,6 +88,7 @@ func buildSlob(t *testing.T) string {
 		{"corazón", 0, 0, ""},
 		{"Corazón", 0, 0, ""},
 		{"img.png", 0, 1, ""},
+		{"corazón grande", 0, 2, ""},
 	}
 	var refData bytes.Buffer
 	var refPos []uint64
@@ -146,7 +149,7 @@ func TestSyntheticSlob(t *testing.T) {
 	if d.Meta().Name != "Test Slob Diccionario" {
 		t.Errorf("editable tag mis-read: %q", d.Meta().Name)
 	}
-	if d.Meta().EntryCount != 3 {
+	if d.Meta().EntryCount != 4 {
 		t.Errorf("EntryCount = %d", d.Meta().EntryCount)
 	}
 
@@ -177,10 +180,26 @@ func TestSyntheticSlob(t *testing.T) {
 		t.Error("missing resource must error")
 	}
 
-	// prefix
+	// prefix: two articles, the png ref is not one of them (corazón and
+	// Corazón point at the same blob and collapse to a single result)
 	res, err = d.Prefix("cora", 10)
-	if err != nil || len(res) != 1 {
+	if err != nil || len(res) != 2 {
 		t.Fatalf("Prefix: %v %v", res, err)
+	}
+	// A headword typed in full is the first result, not the only one: the
+	// keys it is a strict prefix of must follow it (the "starts with" mode
+	// used to answer an exact hit with that article alone).
+	res, err = d.Prefix("corazón", 10)
+	if err != nil || len(res) != 2 {
+		t.Fatalf("Prefix(corazón): %v %v", res, err)
+	}
+	if res[0].Headword != "corazón" || res[1].Headword != "corazón grande" {
+		t.Errorf("exact match must come first: %v", res)
+	}
+	// …and the limit still cuts the siblings, never the word itself.
+	res, err = d.Prefix("corazón", 1)
+	if err != nil || len(res) != 1 || res[0].Headword != "corazón" {
+		t.Fatalf("Prefix(corazón, 1): %v %v", res, err)
 	}
 }
 
@@ -201,9 +220,16 @@ func TestSyntheticSlobIngestReader(t *testing.T) {
 	if e.Kind != dict.BodyHTML {
 		t.Errorf("kind: %v", e.Kind)
 	}
-	// resource blob skipped -> EOF
+	// the resource blob between them is skipped, the second article is not
+	e, err = r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.Headwords) != 1 || e.Headwords[0] != "corazón grande" {
+		t.Errorf("headwords: %v", e.Headwords)
+	}
 	if _, err := r.Next(); err != io.EOF {
-		t.Errorf("want EOF after skipping resource, got %v", err)
+		t.Errorf("want EOF after the last article, got %v", err)
 	}
 }
 

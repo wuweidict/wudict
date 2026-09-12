@@ -132,16 +132,17 @@ func TestExactBodyIsRewritten(t *testing.T) {
 
 func TestPrefix(t *testing.T) {
 	d := openSample(t)
-	// An exact hit wins outright, as it does for every other backend.
+	// An exact hit comes first but does not stand alone: "starts with" has to
+	// show the siblings under the word, as every other backend now does.
 	res, err := d.Prefix("cat", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res) != 1 || res[0].Headword != "cat" {
+	if len(res) != 2 || res[0].Headword != "cat" || res[1].Headword != "catalog" {
 		t.Fatalf("Prefix(cat) = %+v", res)
 	}
-	// No exact hit: scan forward in byte order. "_res_/a.css" sorts inside
-	// this range and must not be returned.
+	// Scan forward in byte order. "_res_/a.css" sorts inside this range and
+	// must not be returned.
 	res, err = d.Prefix("ca", 10)
 	if err != nil {
 		t.Fatal(err)

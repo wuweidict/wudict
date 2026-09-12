@@ -400,32 +400,64 @@ func buildExactMatch(input, column string) string {
 	return strings.Join(parts, " ")
 }
 
-// Prefix returns exact matches if any, else prefix matches ordered by
-// headword (LIKE input escaped - FTS-audit #5).
+// Prefix returns every headword starting with word, ordered by headword, the
+// exact match first (LIKE input escaped - FTS-audit #5).
+//
+// The exact match is NOT a short-circuit, though it was until a headword typed
+// in full was reported as hiding its own siblings: "starts with" answered a
+// complete headword with that one article and dropped every longer key under
+// it, while the same word mistyped with a double space returned all of them.
+// The LIKE pattern already contains the exact row - a string is a prefix of
+// itself - and ORDER BY w puts it first, because a proper prefix sorts before
+// everything it prefixes. Exact survives one step lower, as the fallback whose
+// NOCASE and folded passes reach what a LIKE that is case-sensitive outside
+// ASCII cannot.
+//
+// Ordering is by the key that MATCHED, not by the headword it belongs to: an
+// alias is a way of typing its entry, so `a…` typed into a dictionary of
+// phrases must not open with "(Administration of) All the Talents" - reached
+// through the alias "all the talents", sorted under a bracket the user never
+// typed - and must not spend the LIMIT there either. NOCASE first, then binary
+// as the tiebreak, so a capitalized headword and its lowercase twin stay
+// adjacent and the word typed in full still sorts ahead of the keys it
+// prefixes.
+//
+// The sort runs over (id, key) and the bodies are joined back onto the LIMIT
+// rows that survive it. Selecting `m` into the sorted subquery instead pulls
+// every matching article into the temp b-tree: measured on the 879k-entry OED
+// (docs.local/PERF.md), a one-letter prefix cost 1.1 s ("a") and 2.4 s ("s")
+// that way against 95 ms and 120 ms this way - and with the short-circuit gone,
+// one-letter prefixes are no longer a rare path but every first keystroke.
 func (s *Store) Prefix(word string, limit int) ([]dict.Result, error) {
 	word = strings.TrimSpace(word)
 	if word == "" {
 		return nil, nil
 	}
-	if res, err := s.Exact(word, limit); err != nil || len(res) > 0 {
-		return res, err
-	}
 	n := clamp(limit)
 	pat := escapeLike(word) + "%"
+	// GROUP BY id, not UNION: an entry its own headword AND an alias match is
+	// one article, filed under the earlier of the two keys.
 	res, err := s.collect(s.db.Query(`
-		SELECT w, m FROM (
-			SELECT e.w AS w, e.m AS m FROM entry e WHERE e.w LIKE ?1 ESCAPE '\'`+subEntryFilter("e.w")+`
-			UNION
-			SELECT e.w AS w, e.m AS m FROM alias a JOIN entry e ON e.id = a.entry_id WHERE a.w LIKE ?1 ESCAPE '\'`+subEntryFilter("a.w")+`
-		) ORDER BY w LIMIT ?2`, pat, n))
+		SELECT e.w, e.m FROM entry e JOIN (
+			SELECT id, min(k) AS k FROM (
+				SELECT e2.id AS id, e2.w AS k FROM entry e2
+					WHERE e2.w LIKE ?1 ESCAPE '\'`+subEntryFilter("e2.w")+`
+				UNION ALL
+				SELECT e3.id AS id, a.w AS k FROM alias a JOIN entry e3 ON e3.id = a.entry_id
+					WHERE a.w LIKE ?1 ESCAPE '\'`+subEntryFilter("a.w")+`
+			) GROUP BY id ORDER BY k COLLATE NOCASE, k LIMIT ?2
+		) m ON e.id = m.id ORDER BY m.k COLLATE NOCASE, m.k`, pat, n))
 	if err != nil || len(res) > 0 {
 		return res, err
 	}
-	// accent/case-fold fallback, with the same approximation as Exact above:
-	// when the raw prefix finds nothing, retry as a diacritic-insensitive
-	// prefix over the FTS `w` column (so `corazon` still prefix-matches
-	// `corazón…`).
+	// Nothing starts with the word as typed: fall back to the exact passes
+	// (NOCASE over entry and alias, then folded), and finally to a
+	// diacritic-insensitive prefix over the FTS `w` column, so `corazon`
+	// typed without the ó still prefix-matches `corazón…`.
 	// entry_fts always indexes `w`, even at headwords level.
+	if res, err := s.Exact(word, limit); err != nil || len(res) > 0 {
+		return res, err
+	}
 	return s.Fuzzy(word, n)
 }
 

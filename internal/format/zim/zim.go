@@ -138,13 +138,18 @@ func (d *Dict) Exact(word string, limit int) ([]dict.Result, error) {
 	return d.results(idxs, limit)
 }
 
+// Prefix returns up to limit articles whose path starts with word, the exact
+// one first.
+//
+// No exact short-circuit, unlike the shape this had: an exact hit used to be
+// returned alone, which made "starts with" hide the siblings of any headword
+// typed in full. Nothing else is needed to put it back on top - the content
+// namespace is sorted, prefixScan starts at the key itself, and a string is a
+// prefix of itself, so the exact entry is simply the scan's first hit.
 func (d *Dict) Prefix(word string, limit int) ([]dict.Result, error) {
 	word = strings.TrimSpace(word)
 	if word == "" {
 		return nil, nil
-	}
-	if res, err := d.Exact(word, limit); err != nil || len(res) > 0 {
-		return res, err
 	}
 	if limit <= 0 {
 		limit = 100

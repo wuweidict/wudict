@@ -366,6 +366,35 @@ func TestPrefix(t *testing.T) {
 	}
 }
 
+// A headword typed in full must not hide the keys it is a strict prefix of:
+// "starts with" used to return the exact article alone, so a DSL entry set
+// whose base headword is also the stem of its variants answered a full,
+// correctly-typed headword with one result and the same word mistyped with a
+// double space (which misses the exact pass) with all of them.
+func TestPrefixDoesNotStopAtExact(t *testing.T) {
+	s := testStore(t)
+	res, err := s.Prefix("pregunta", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range res {
+		got = append(got, r.Headword)
+	}
+	if len(got) != 2 || got[0] != "pregunta" || got[1] != "preguntar" {
+		t.Fatalf("Prefix(pregunta) = %v, want [pregunta preguntar]", got)
+	}
+	// The exact match sorts first because a proper prefix precedes everything
+	// it prefixes, so the limit cuts the siblings and never the word itself.
+	if res, err := s.Prefix("pregunta", 1); err != nil || len(res) != 1 || res[0].Headword != "pregunta" {
+		t.Fatalf("Prefix(pregunta, 1) = %v, %v", res, err)
+	}
+	// An alias that starts with the word reaches its entry the same way.
+	if res, err := s.Prefix("cuestiona", 10); err != nil || len(res) != 1 || res[0].Headword != "preguntar" {
+		t.Fatalf("Prefix(cuestiona) = %v, %v", res, err)
+	}
+}
+
 // P-E: an accent/case-stripped prefix that the raw LIKE pass cannot match
 // must still resolve via the folded FTS fallback, matching the direct
 // backends (so "coraz" typed without the ó still finds corazón/corazonada).
