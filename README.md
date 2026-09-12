@@ -1,11 +1,13 @@
-# WuWeiDict
+# WuWeiDict - desktop and mobile dictionary app
 
 Fast, _native_, self-contained, multi-format dictionary server that runs in your
-browser at [http://localhost:6888](http://localhost:6888). One native binary, no
-dependencies; set the folders with your .mdx/.slob/.bgl/.zim/.ifo dictionaries, and search them all at
-once.
+browser at [http://localhost:6888](http://localhost:6888). 
 
-Runs natively on android, mac, windows, linux and even raspberry pi.
+Runs on Android, macOS, Linux, Windows.
+
+One native golang binary, no dependencies and minimum configuration — just set the folders with your .mdx/.slob/.bgl/.zim/.ifo dictionaries, and you are good to go.
+
+Runs natively on [android](https://wuweidict.github.io/wudict/apps/android/), [mac](https://wuweidict.github.io/wudict/apps/macos/), [windows](https://wuweidict.github.io/wudict/apps/windows/), [linux](https://wudict.legbehindneck.com/running/#__tabbed_1_2), and even raspberry pi.
 
 **Supported formats**
 
@@ -19,18 +21,22 @@ Runs natively on android, mac, windows, linux and even raspberry pi.
 | ZIM | `.zim`                              | Kiwix/Wikimedia offline archives; see https://library.kiwix.org
 | WuWeiDict | cache folder (`text.db`)            | wuDict's own SQLite-based format (see *Sharing*, below) |
 
-## Quick start
+## wuDict for Android
+<div class="badges">
+<a href="https://github.com/wuweidict/wudict/releases/latest"><img src="https://raw.githubusercontent.com/Kunzisoft/Github-badge/master/get-it-on-github.png" alt="Get it on GitHub" height="80"></a> <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22:%22com.legbehindneck.wudict%22,%22url%22:%22https://github.com/wuweidict/wudict%22,%22author%22:%22wuweidict%22,%22name%22:%22wudict%22%7D"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="80"></a> <a href="https://play.google.com/store/apps/details?id=com.legbehindneck.wudict"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="80"></a>
+</div>
+
+## wuDict for Desktop
 
 1. Download the binary for your OS from
    [releases](https://github.com/wuweidict/wudict/releases), rename to `wudict`, 
    `chmod +x wudict` (macOS/Linux) and move to a folder in `$PATH`, e.g. `/usr/local/bin`.
-2. Run `wudict` or `./wudict` if the file is in the current folder. On windows use the installer [`wudict-windows-x64-setup-<x.y.z>.exe`](https://github.com/wuweidict/wudict/releases/latest) or download the standalone executable `wudict-windows-amd64-cgo.exe` and then double-click to run. For macOS an app bundle is provided too (it is not signed with a commercial Apple Developer Certificate, will be flagged by the system as unverified by Apple and requires additional steps to de-quarantine the app as described in the [manual](https://wuweidict.github.io/wudict/apps/macos/)).
+2. Run `wudict` or `./wudict` if the file is in the current folder. For windows you can either use the installer [`wudict-windows-x64-setup-<x.y.z>.exe`](https://github.com/wuweidict/wudict/releases/latest), or download the standalone executable `wudict-windows-amd64-cgo.exe` and then double-click to run. For macOS an app bundle is provided  (it is not signed with a commercial Apple Developer Certificate, macOS flags it as unverified, and extra steps are needed to de-quarantine the app as described in the [manual](https://wuweidict.github.io/wudict/apps/macos/)).
 3. By default `wudict` searches for dictionaries under `~/Dictionaries` (including subfolders); 
-   if the dictionary folder is missing or
-   empty, a setup page opens where you can configure your dictionary folders.
+   if the dictionary folder is missing or empty, a setup page opens where you can configure your dictionary folders.
 
 ## Adding dictionaries 
-With wuDict running dictionary folders can be configured from [http://localhost:6888/setup](http://localhost:6888/setup). The browser setup page is a convenience 
+With wuDict running, dictionary folders can be configured from [http://localhost:6888/setup](http://localhost:6888/setup). The browser setup page is a convenience 
 for writing `DICT_DIR` in the configuration file at `~/.wudict/wudict.toml` and other actions.
 
 ### Multiple dictionary folders
@@ -92,27 +98,6 @@ For macOS you can either run the `wudict` binary from a terminal, or as an
 alternative use the wudict-macos-app.zip from [releases](https://github.com/wuweidict/wudict/releases) 
 which wraps `wudict` into an macOS app bundle.
 
-### Building the macOS bundle from source
-
-Run `make mac-app-install` from project root to build **wuDict.app** and install it to
-`~/Applications` (no sudo, no admin prompt):
-
-```sh
-make mac-app            # dist/wuDict.app — universal-ready, ad-hoc signed
-make mac-app-install    # copy it to ~/Applications (APP_DEST= to relocate)
-```
-
-The bundle is the same binary as console `wudict` which which spawns no terminal window, and 
-additionally puts  a **menu-bar icon** up for common actions. See more about [running on macOS](https://wuweidict.github.io/wudict/apps/macos/).
-
-## Run as an app (Windows)
-
-In windows `wudict` runs from `cmd` or PowerShell as an ordinary
-command-line program. When double-clicked, started from a shortcut, or by double-clicking 
-a dictionary file, it hides the  console window, and shows a **tray icon** instead, logging to
-`%LOCALAPPDATA%\wudict\wudict.log`. See also [running on windows](https://wuweidict.github.io/wudict/apps/windows/).
-
-
 ## Run wudict as a service (macOS)
 
 `wudict` can be installed as a `launchctl` LaunchAgent using Makefile targets:
@@ -126,6 +111,14 @@ make mac-agent-restart   # rebuild, then launchctl kickstart -k gui/$UID/<label>
 make mac-agent-status    # launchctl print    gui/$UID/<label>
 make mac-agent-uninstall # stop it and delete the plist
 ```
+
+## Run as an app (Windows)
+
+In windows `wudict` runs from `cmd` or PowerShell as an ordinary
+command-line program. When double-clicked, started from a shortcut, or by double-clicking 
+a dictionary file, it hides the  console window, and shows a **tray icon** instead, logging to
+`%LOCALAPPDATA%\wudict\wudict.log`. See also [running on windows](https://wuweidict.github.io/wudict/apps/windows/).
+
 
 ## Run as a service (Linux)
 
@@ -366,6 +359,7 @@ If wuDict was built without the internal speex decoder (the purego flavours)
 then the external `speexdec` utility can be used (for mac: `brew install speex`, 
 linux: `apt install speex`, etc).
 
+
 ## Build from source
 
 Requires [Go](https://go.dev/doc/install) (and a C compiler for the
@@ -398,6 +392,23 @@ for the cgo flavour with internal speex decoder and optimized sqlite3, and
 `.github/workflows/build-purego.yml` for purego builds.
 Supported OS's: macOS (arm64/amd64), Linux (amd64/arm64/armv7/armv6) and Windows
 (amd64/arm64).
+
+### Building the macOS bundle from source
+
+> 💡A golang environment is required for the commands above to work. See [Build from source](#build-from-source) above.
+
+Run `make mac-app-install` from project root to build **wuDict.app** and install it to
+`~/Applications` (no sudo, no admin prompt):
+
+```sh
+make mac-app            # dist/wuDict.app — universal-ready, ad-hoc signed
+make mac-app-install    # copy it to ~/Applications (APP_DEST= to relocate)
+```
+
+The bundle is the same binary as console `wudict` which which spawns no terminal window, and 
+additionally puts  a **menu-bar icon** up for common actions. See more about [running on macOS](https://wuweidict.github.io/wudict/apps/macos/).
+
+
 ## Acknowledgements
 
 Almost nothing here was invented by this project. The formats it reads are
