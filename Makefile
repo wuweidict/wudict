@@ -182,6 +182,24 @@ NDK_BIN      := $(ANDROID_NDK)/toolchains/llvm/prebuilt/$(NDK_HOST)/bin
 ANDROID_API  ?= 26
 ANDROID_LIB  := android/app/src/main/jniLibs/arm64-v8a/libwudict.so
 
+# APK names come from android/app/build.gradle (androidComponents.onVariants),
+# which is also what build-android.yml publishes - the workflow no longer
+# renames anything, so there is one name per artifact and it is written once.
+# versionName/versionCode likewise come from git inside build.gradle; nothing
+# is passed on the Gradle command line, so local and CI cannot drift.
+ANDROID_ABI  := arm64
+APK_OUT      := android/app/build/outputs/apk
+APK_FOSS           := $(APK_OUT)/foss/release/$(BINARY)-android-$(ANDROID_ABI)-foss.apk
+APK_FOSS_DEBUG     := $(APK_OUT)/foss/debug/$(BINARY)-android-$(ANDROID_ABI)-foss-debug.apk
+APK_PLAY           := $(APK_OUT)/play/release/$(BINARY)-android-$(ANDROID_ABI)-play.apk
+APK_PLAY_DEBUG     := $(APK_OUT)/play/debug/$(BINARY)-android-$(ANDROID_ABI)-play-debug.apk
+AAB_PLAY           := android/app/build/outputs/bundle/playRelease/$(BINARY)-play-release.aab
+
+# Lets CI read a path out of here instead of restating it: make -s print-APK_FOSS
+# (a pattern rule, so no .PHONY - GNU make does not match patterns there.)
+print-%: ## print the value of a make variable, e.g. make -s print-APK_FOSS
+	@echo '$($*)'
+
 # Gradle needs JDK 17+. Respect an inherited JAVA_HOME; on macOS fall back to
 # an installed JDK 17 rather than whatever ancient default `java` resolves to.
 ifeq ($(shell uname),Darwin)
@@ -204,46 +222,75 @@ android-go-purego: ## NDK-less fallback lib (pure-Go sqlite; .spx audio unavaila
 	@mkdir -p $(dir $(ANDROID_LIB))
 	CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build $(PUREGO_FLAGS) -ldflags "$(LDFLAGS)" -o $(ANDROID_LIB) $(CMD)
 
+.PHONY: android-require-keystore
+android-require-keystore:
+	@# Fail in one second instead of after a five-minute Gradle run, and fail
+	@# LOUDLY: without KEYSTORE, AGP happily emits an unsigned release APK,
+	@# which adb refuses with an error that names neither the cause nor this.
+	@# `keytool` is the JDK's own - Gradle already requires the JDK, so this
+	@# check adds no tool to the build.
+	@for v in KEYSTORE STORE_PASSWORD KEY_ALIAS; do \
+	  eval "test -n \"\$$$$v\"" || { \
+	    echo "error: $$v is not set - the release APK would be unsigned."; \
+	    echo "  export KEYSTORE=/path/to/keystore STORE_PASSWORD=... KEY_ALIAS=..."; \
+	    echo "  or build unsigned on purpose: ALLOW_UNSIGNED=1 make apk-foss-release"; \
+	    exit 2; }; \
+	done
+	@test -f "$$KEYSTORE" || { echo "error: KEYSTORE=$$KEYSTORE: no such file"; exit 2; }
+	@keytool -list -keystore "$$KEYSTORE" -storepass "$$STORE_PASSWORD" \
+	  -alias "$$KEY_ALIAS" > /dev/null 2>&1 \
+	  || { echo "error: the keystore, the alias or the password was rejected."; exit 2; }
+
+# `ALLOW_UNSIGNED=1` drops the preflight; the APK is then named
+# ...-foss-unsigned.apk by build.gradle, so it can never be mistaken for one.
+ifeq ($(ALLOW_UNSIGNED),1)
+KEYSTORE_GUARD :=
+else
+KEYSTORE_GUARD := android-require-keystore
+endif
+
 # Two flavours (D62), one binary: `foss` is the GitHub/F-Droid build and keeps
 # All-files access; `play` declares no storage permission and imports through
 # SAF. Both package the same libwudict.so, so android-go is a shared prereq.
-.PHONY: apk-apk-foss-debug
-apk-apk-foss-debug: android-go ## Build the FOSS debug APK (needs Android SDK: ANDROID_HOME or local.properties)
+.PHONY: apk-foss-debug
+apk-foss-debug: android-go ## Build the FOSS debug APK (needs Android SDK: ANDROID_HOME or local.properties)
 	cd android && ./gradlew assembleFossDebug
-	@echo "android/app/build/outputs/apk/foss/debug/$(BINARY)-foss-debug.apk"
+	@echo "$(APK_FOSS_DEBUG)"
 
 .PHONY: apk-foss-release
-apk-foss-release: android-go ## Build the FOSS release APK (signed only if a keystore is exported - see build-android.yml)
+apk-foss-release: $(KEYSTORE_GUARD) android-go ## Build + sign the FOSS release APK, copy to dist/ (needs KEYSTORE; ALLOW_UNSIGNED=1 to skip)
+	@# Removed BEFORE Gradle runs, not after: a dist/ copy that survives a
+	@# FAILED build is one `adb install dist/...` away from silently
+	@# reinstalling yesterday's APK, exactly while you are debugging and
+	@# least likely to notice. Deleting first makes a failed build leave
+	@# nothing behind rather than something stale.
+	@rm -f "dist/$(notdir $(APK_FOSS))"
 	cd android && ./gradlew assembleFossRelease
-	@# The APK is left where Gradle put it, deliberately: a copy under dist/
-	@# survives a FAILED build, so `adb install dist/wudict.apk` would then
-	@# silently install the previous one - exactly when you are debugging and
-	@# least likely to notice. archivesName already gives it a real name; the
-	@# echo is only so you do not have to remember the path.
-	@echo "android/app/build/outputs/apk/foss/release/$(BINARY)-foss-release.apk"
+	@mkdir -p dist && cp "$(APK_FOSS)" dist/
+	@echo "dist/$(notdir $(APK_FOSS))"
 
 .PHONY: apk-foss-release-install
 apk-foss-release-install: apk-foss-release ## build FOSS release and install via adb
-	adb install "android/app/build/outputs/apk/foss/release/$(BINARY)-foss-release.apk"
+	adb install "$(APK_FOSS)"
 
 .PHONY: apk-play-debug
 apk-play-debug: android-go ## Build the Play-flavour debug APK (SAF import)
 	cd android && ./gradlew assemblePlayDebug
-	@echo "android/app/build/outputs/apk/play/debug/$(BINARY)-play-debug.apk"
+	@echo "$(APK_PLAY_DEBUG)"
 
 .PHONY: apk-play-release
-apk-play-release: android-go ## Build the Play-flavour release APK (SAF import)
+apk-play-release: $(KEYSTORE_GUARD) android-go ## Build the Play-flavour release APK (SAF import)
 	cd android && ./gradlew assemblePlayRelease
-	@echo "android/app/build/outputs/apk/play/release/$(BINARY)-play-release.apk"
+	@echo "$(APK_PLAY)"
 
 .PHONY: apk-play-release-install
-apk-play-release-install: apk-play-release ## build FOSS release and install via adb
-	adb install "android/app/build/outputs/apk/play/release/$(BINARY)-play-release.apk"
+apk-play-release-install: apk-play-release ## build Play release and install via adb
+	adb install "$(APK_PLAY)"
 
 .PHONY: aab-play
 aab-play: android-go ## Build the Play release bundle (unsigned: Play App Signing owns the key)
 	cd android && ./gradlew bundlePlayRelease
-	@echo "android/app/build/outputs/bundle/playRelease/$(BINARY)-play-release.aab"
+	@echo "$(AAB_PLAY)"
 
 .PHONY: apk-verify
 apk-verify: ## Assert the Play APK declares no storage permission and still extracts the binary
@@ -541,3 +588,7 @@ remotes: ## git remotes
 .PHONY: open
 open: build  ## run browser
 	open http://localhost:6888
+
+.PHONY: android-clean
+android-clean: ## Remove Gradle's Android build outputs (stale APKs under an older name)
+	rm -rf android/app/build

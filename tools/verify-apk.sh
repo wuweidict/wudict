@@ -4,7 +4,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Asserts the two properties that make the flavour split worth having (D62),
-# on APKs that already exist — build them first with `make apk` / `make apk-play`.
+# on APKs that already exist — build them first with `make apk-foss-release` /
+# `make apk-play-release` (or the -debug targets).
 #
 #   1. the Play APK declares no permission beyond the four it is entitled to
 #      (three install-time, plus POST_NOTIFICATIONS, the single runtime one),

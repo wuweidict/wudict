@@ -82,14 +82,13 @@ jobs:
             VERSION="$(git describe --tags --always --abbrev=0 2>/dev/null || echo dev)"
           fi
 
-          # versionCode is the commit count
-          CODE="$(git rev-list --count HEAD)"
-          [ "$CODE" -gt 0 ] || CODE=1
-
+          # versionCode is NOT passed: app/build.gradle derives it from the
+          # commit count itself, so a local `make apk-foss-release` and this
+          # workflow agree on it. Passing it here too would be a second source
+          # of truth, which is how they came to disagree in the first place.
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "TAG=$VERSION" >> "$GITHUB_ENV"
-          echo "building $VERSION (versionCode $CODE)"
+          echo "building $VERSION (versionCode = $(git rev-list --count HEAD))"
 
       - name: Configure signing
         id: signing
@@ -124,37 +123,37 @@ jobs:
           else
             TASK=assembleFossDebug
           fi
+          # versionName is overridden with the release TAG; without it the
+          # build would stamp `git describe --dirty`, which is right for a
+          # working tree and wrong for a release.
           ./gradlew --no-daemon "$TASK" assemblePlayDebug \
-            -PversionName="${{ steps.ver.outputs.version }}" \
-            -PversionCode="${{ steps.ver.outputs.code }}"
+            -PversionName="${{ steps.ver.outputs.version }}"
 
       - name: Assert the flavour split held
         # The Play APK must declare no storage permission and the FOSS one
         # must declare All-files access.
         run: sh tools/verify-apk.sh
 
-      - name: Collect and verify the APK
+      - name: Locate the APK
         run: |
-          # Named to the house pattern - wudict-<os>-<arch>, as in
-          # wudict-linux-arm64-purego and wudict-darwin-arm64-cgo. No version:
-          # NO release asset in this repo carries one, because the tag already
-          # does. No -v8a: the other assets say plain arm64. No flavour: the
-          # desktop workflows state cgo/purego because both land in the same
-          # release and must be told apart, and only the cgo APK is published.
+          # No renaming here any more. app/build.gradle names the APK
+          # (androidComponents.onVariants) and the Makefile exports the path,
+          # so the published asset, `make apk-foss-release` and dist/ all carry
+          # ONE name: wudict-android-arm64-foss.apk. The old copy step invented
+          # a second name (wudict-android-arm64.apk) that said nothing about
+          # the flavour and existed nowhere else in the project.
           if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
-            SRC=android/app/build/outputs/apk/foss/release/wudict-foss-release.apk
-            OUT="wudict-android-arm64.apk"
+            APK="$(make -s print-APK_FOSS)"
           else
-            SRC=android/app/build/outputs/apk/foss/debug/wudict-foss-debug.apk
-            OUT="wudict-android-arm64-debug.apk"
+            APK="$(make -s print-APK_FOSS_DEBUG)"
           fi
-          if [ ! -f "$SRC" ]; then
-            echo "expected $SRC - Gradle produced:"
+          if [ ! -f "$APK" ]; then
+            echo "expected $APK - Gradle produced:"
             find android/app/build/outputs/apk -name '*.apk' -print
             exit 1
           fi
-          cp "$SRC" "$OUT"
-          echo "APK=$OUT" >> "$GITHUB_ENV"
+          echo "APK=$APK" >> "$GITHUB_ENV"
+          echo "publishing $(basename "$APK")"
 
       # - name: Upload artifact
       #   uses: actions/upload-artifact@v7

@@ -10,7 +10,11 @@ plugins {
 }
 
 // Same stamp the Makefile puts into the Go binary: git describe, or "dev".
-// CI overrides both fields with -PversionName=… -PversionCode=…
+// build-android.yml overrides versionName with the release TAG; versionCode is
+// computed here and nowhere else, so a local build and a CI build of the same
+// commit cannot disagree about it (they used to: CI passed the commit count,
+// the Makefile passed nothing and got the literal 1, and every locally built
+// APK was then a DOWNGRADE of any released one - uninstall-or-nothing).
 def gitVersion = {
     try {
         def p = ['git', '-C', rootDir.parent, 'describe', '--tags', '--always', '--dirty'].execute()
@@ -24,17 +28,28 @@ def gitVersion = {
     }
 }
 
+// versionCode = commits on HEAD. Monotonic, needs no stored state, and is what
+// the released APKs already carry (v3.7.3 shipped as 202). A shallow clone
+// yields a wrong count, so CI checks out with fetch-depth: 0.
+def gitCount = {
+    try {
+        def p = ['git', '-C', rootDir.parent, 'rev-list', '--count', 'HEAD'].execute()
+        def out = p.text.trim()
+        if (p.waitFor() != 0 || !out.isInteger()) return 1
+        def n = out as int
+        return n > 0 ? n : 1
+    } catch (Exception ignored) {
+        return 1
+    }
+}
+
 android {
     namespace = 'com.legbehindneck.wudict'
     compileSdk = 36
 
-    // Names the APK after the product instead of AGP's generic app-<variant>:
-    // wudict-release.apk / wudict-debug.apk. archivesName is the supported
-    // route on AGP 9 - the old applicationVariants.outputs.outputFileName
-    // hook is GONE (verified: "unknown property 'applicationVariants'"), and
-    // renaming through the new Variant API needs a custom task wired to the
-    // APK artifact, which is a lot of build logic to buy a file name. The
-    // Makefile copies the release APK to a stable dist/wudict.apk.
+    // The AAB name only; the APK name is set below in androidComponents.
+    // Play ingests a bundle by content, not by file name, so wudict-play-
+    // release.aab is fine and needs no abi or flavour token.
     base { archivesName = 'wudict' }
 
     signingConfigs {
@@ -55,7 +70,7 @@ android {
         // vector adaptive icon needs no PNG fallbacks at 26+.
         minSdk 26
         targetSdk 36
-        versionCode(project.hasProperty('versionCode') ? project.property('versionCode') as int : 1)
+        versionCode(project.hasProperty('versionCode') ? project.property('versionCode') as int : gitCount())
         versionName(project.hasProperty('versionName') ? project.property('versionName') as String : gitVersion())
     }
 
@@ -106,6 +121,40 @@ android {
             // filesystem at install time (the manifest's extractNativeLibs
             // attribute is rejected by AGP 9 in favor of this).
             useLegacyPackaging = true
+        }
+    }
+}
+
+// One name for the APK, produced identically by `make apk-foss-release` and by
+// build-android.yml - which is why the workflow no longer copies the file to a
+// second name of its own. Two names for one artifact is the whole bug class.
+//
+//   wudict-android-arm64-foss.apk            signed release (the published one)
+//   wudict-android-arm64-foss-unsigned.apk   release built without a keystore
+//   wudict-android-arm64-foss-debug.apk      debug
+//   wudict-android-arm64-play-*.apk          the same, Play flavour
+//
+// The flavour token is not editorial: it is `variant.flavorName` verbatim, so a
+// third flavour names itself and nobody has to decide what to call it.
+//
+// This is AGP's supported Variant API (VariantOutput.outputFileName, present in
+// 9.3.1) - no plugin, no dependency, no custom task. The earlier comment here
+// claimed a custom task was required; that applies to renaming the ARTIFACT,
+// not to this property. AGP appends "-unsigned" only when it names the file
+// itself, so an explicit name has to carry that marker on its own - an unsigned
+// APK wearing the release name is exactly the mistake worth spending a line on.
+def apkAbi = 'arm64'
+def apkSigned = System.getenv("KEYSTORE") != null
+
+androidComponents {
+    // selector().all() is passed explicitly: the no-selector overload is a
+    // Kotlin default argument and is not callable from the Groovy DSL.
+    onVariants(selector().all()) { variant ->
+        def suffix = variant.buildType == 'release'
+                ? (apkSigned ? '' : '-unsigned')
+                : "-${variant.buildType}"
+        variant.outputs.each { output ->
+            output.outputFileName.set("wudict-android-${apkAbi}-${variant.flavorName}${suffix}.apk")
         }
     }
 }

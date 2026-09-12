@@ -2,7 +2,6 @@
 dist/**
 docs.local/
 *_NOTRACK.md
-!dist/api-explorer.html
 coverage.out
 /wudict.toml
 /state.json
