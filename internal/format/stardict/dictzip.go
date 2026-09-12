@@ -65,17 +65,21 @@ func newDzReader(ra io.ReaderAt, fileSize int64) (*dzReader, error) {
 	for len(extra) >= 4 {
 		si1, si2 := extra[0], extra[1]
 		slen := int(binary.LittleEndian.Uint16(extra[2:]))
-		// the loop guard is len(extra) >= 4, which bounds si1/si2/slen and not
-		// the subfield those describe.
-		if 4+slen > len(extra) {
-			break
+		// The loop guard is len(extra) >= 4, which bounds si1/si2/slen and not
+		// the subfield those describe. SLEN is clamped rather than rejected:
+		// writers exist whose RA subfield declares two bytes more than XLEN
+		// left for it (one chunk-table slot too many), and XLEN - not SLEN -
+		// is what the rest of the gzip header is positioned by, so the field
+		// truly ends where XLEN says. Walking past it panicked on
+		// `extra[4+slen:]`, because the reslice is bounded by cap (the whole
+		// 64 KiB header buffer) and only len(extra) makes 4+slen illegal.
+		if slen > len(extra)-4 {
+			slen = len(extra) - 4
 		}
 		sub := extra[4 : 4+slen]
 		if si1 == 'R' && si2 == 'A' {
 			// RA layout: version u16, chunk length u16, chunk count u16, then
-			// one u16 per chunk. The count is read out of the subfield and
-			// then indexes it, so it must be checked against the subfield's
-			// own declared length before the loop, not trusted by it.
+			// one u16 per chunk.
 			if len(sub) < 6 {
 				return nil, fmt.Errorf("dictzip RA field truncated (%d bytes)", len(sub))
 			}
@@ -85,8 +89,15 @@ func newDzReader(ra io.ReaderAt, fileSize int64) (*dzReader, error) {
 			}
 			d.chunkLen = int(binary.LittleEndian.Uint16(sub[2:]))
 			chcnt := int(binary.LittleEndian.Uint16(sub[4:]))
-			if 6+2*chcnt > len(sub) {
-				return nil, fmt.Errorf("dictzip RA declares %d chunks but holds %d bytes", chcnt, len(sub))
+			// Same truncation, one level down: the count is read out of the
+			// subfield and then indexes it, so it is bounded by the bytes
+			// actually present. A table cut short costs the articles in the
+			// chunks it no longer names, not the dictionary.
+			if avail := (len(sub) - 6) / 2; chcnt > avail {
+				chcnt = avail
+			}
+			if chcnt == 0 {
+				return nil, fmt.Errorf("dictzip RA lists no chunks")
 			}
 			d.sizes = make([]int, chcnt)
 			for i := 0; i < chcnt; i++ {
@@ -128,6 +139,13 @@ func (d *dzReader) readRange(offset int64, size int) ([]byte, error) {
 	if size == 0 {
 		return nil, nil
 	}
+	// (offset,size) is a u32 pair straight out of the .idx. size is widened to
+	// int, which is negative on a 32-bit build for anything past 2 GiB, and
+	// offset*chunk arithmetic below assumes both are sane; a corrupt index must
+	// cost one article, not a slice-bounds panic in a fan-out worker.
+	if offset < 0 || size < 0 {
+		return nil, fmt.Errorf("record range out of bounds (offset %d, %d bytes)", offset, size)
+	}
 	first := int(offset) / d.chunkLen
 	last := int(offset+int64(size)-1) / d.chunkLen
 	if first >= len(d.offsets) {
@@ -142,7 +160,7 @@ func (d *dzReader) readRange(offset int64, size int) ([]byte, error) {
 		buf.Write(chunk)
 	}
 	start := int(offset) - first*d.chunkLen
-	if start+size > buf.Len() {
+	if start < 0 || start > buf.Len() || start+size > buf.Len() {
 		return nil, io.ErrUnexpectedEOF
 	}
 	return buf.Bytes()[start : start+size], nil

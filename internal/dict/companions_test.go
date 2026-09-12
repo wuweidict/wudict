@@ -32,8 +32,8 @@ func TestStemAndMainExt(t *testing.T) {
 		{"/d/x.bgl", "/d/x", ".bgl"},
 	}
 	for _, c := range cases {
-		if got := stem(c.src); got != c.stem {
-			t.Errorf("stem(%q) = %q, want %q", c.src, got, c.stem)
+		if got := Stem(c.src); got != c.stem {
+			t.Errorf("Stem(%q) = %q, want %q", c.src, got, c.stem)
 		}
 		if got := mainExt(c.src); got != c.ext {
 			t.Errorf("mainExt(%q) = %q, want %q", c.src, got, c.ext)

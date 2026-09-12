@@ -26,11 +26,15 @@ import (
 // below and are why SourceFiles is presented to the user before anything is
 // deleted rather than trusted silently.
 
-// stem returns the main file's path with its format suffix removed, which is
+// Stem returns the main file's path with its format suffix removed, which is
 // what every companion is named after. ".dz" is stripped first, so "x.dsl.dz"
 // and "x.dsl" both yield "x" - a compressed DSL's companions are named for the
 // dictionary, not for the compression.
-func stem(src string) string {
+//
+// Exported because the format packages resolve the same companions at READ
+// time that this package resolves at removal time, and the two answering
+// differently is how a dictionary comes to list media it will never serve.
+func Stem(src string) string {
 	s := src
 	if strings.EqualFold(filepath.Ext(s), ".dz") {
 		s = s[:len(s)-len(".dz")]
@@ -55,7 +59,7 @@ func mainExt(src string) string {
 // offering and, once packed, what the packing came from.
 func CompanionMedia(src string) []string {
 	dir := filepath.Dir(src)
-	base := stem(src)
+	base := Stem(src)
 	var out []string
 	switch mainExt(src) {
 	case ".mdx":
@@ -108,7 +112,15 @@ func CompanionMedia(src string) []string {
 func indexCompanions(src string) []string {
 	switch mainExt(src) {
 	case ".ifo":
-		return []string{".idx", ".idx.gz", ".idx.oft", ".dict", ".dict.dz", ".syn", ".syn.dz", ".ann"}
+		// Every spelling the format reader accepts, or removal leaves the
+		// orphan behind and the panel under-reports what a dictionary is: the
+		// index and the synonyms each exist plain, gzipped or dictzipped.
+		return []string{
+			".idx", ".idx.gz", ".idx.dz", ".idx.oft",
+			".dict", ".dict.dz",
+			".syn", ".syn.gz", ".syn.dz",
+			".ann",
+		}
 	case ".dsl", ".dsl.dz":
 		return []string{"_abrv.dsl", "_abrv.dsl.dz", ".ann", ".dsl.ann"}
 	}
@@ -135,7 +147,7 @@ func AbbrevCompanion(src string) (string, bool) {
 	if abbrevParentStem(src) != "" {
 		return "", false // a companion has no companion of its own
 	}
-	base := stem(src)
+	base := Stem(src)
 	for _, suf := range abbrevSuffixes {
 		if p := base + suf; !strings.EqualFold(p, src) && fileExists(p) {
 			return p, true
@@ -201,7 +213,7 @@ func SourceFiles(src string) []string {
 			out = append(out, p)
 		}
 	}
-	base := stem(src)
+	base := Stem(src)
 	for _, suf := range indexCompanions(src) {
 		p := base + suf
 		if !strings.EqualFold(p, src) && fileExists(p) {

@@ -5,7 +5,6 @@
 package dsl
 
 import (
-	"io"
 	"os"
 	"strings"
 
@@ -87,14 +86,8 @@ func loadAnn(srcPath string) (dict.About, bool) {
 	}
 	defer f.Close()
 
-	// Sniffed, not derived from the name: a .ann is never called .dz, and the
-	// two magic bytes cost nothing.
-	var magic [2]byte
-	n, _ := io.ReadFull(f, magic[:])
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return dict.About{}, false
-	}
-	sc, err := decodedScanner(f, path, n == 2 && magic[0] == 0x1f && magic[1] == 0x8b)
+	// Compression is sniffed inside decodedScanner: a .ann is never called .dz.
+	sc, err := decodedScanner(f, path)
 	if err != nil {
 		logx.V("dsl annotation: %s: %v", path, err)
 		return dict.About{}, false

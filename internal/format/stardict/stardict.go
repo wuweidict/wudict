@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package stardict is the direct backend + ingest reader for StarDict
-// dictionaries: NAME.ifo (metadata), NAME.idx[.gz] (sorted headword
+// dictionaries: NAME.ifo (metadata), NAME.idx[.gz|.dz] (sorted headword
 // index), NAME.dict[.dz] (article data), optional NAME.syn (synonyms)
 // and res/ dir or res.zip (resources). Layout ported from
 // pyglossary/plugins/stardict/reader.py.
@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -103,7 +104,7 @@ func Open(ifoPath string) (*Dict, error) {
 	if ifo["idxoffsetbits"] == "64" {
 		offBits = 64
 	}
-	idxData, err := readMaybeGz(base+".idx", base+".idx.gz")
+	idxData, err := readCompanion(base, ".idx")
 	if err != nil {
 		return nil, fmt.Errorf("stardict %s: %w", ifoPath, err)
 	}
@@ -111,7 +112,7 @@ func Open(ifoPath string) (*Dict, error) {
 		return nil, fmt.Errorf("stardict %s: %w", ifoPath, err)
 	}
 
-	if synData, err := readMaybeGz(base+".syn", base+".syn.gz"); err == nil {
+	if synData, err := readCompanion(base, ".syn"); err == nil {
 		parseSyn(synData, len(d.entries), d.synonyms)
 	}
 
@@ -208,21 +209,54 @@ func parseIfo(path string) (map[string]string, error) {
 	return m, nil
 }
 
-func readMaybeGz(plain, gzPath string) ([]byte, error) {
-	if data, err := os.ReadFile(plain); err == nil {
+// compressedSuffixes are the spellings a StarDict companion may be compressed
+// under, in probe order. ".dz" is dictzip - a gzip member carrying a random-
+// access chunk table in FEXTRA - so compress/gzip reads it like any other gzip
+// stream, and only the .dict needs the chunk table at all. Tools that dictzip a
+// whole dictionary leave ".idx.dz" and ".syn.dz" behind; reading only ".gz"
+// declared those dictionaries index-less while the index sat right there.
+var compressedSuffixes = []string{".gz", ".dz"}
+
+// readCompanion reads base+ext, or its gzip/dictzip spelling, whole.
+func readCompanion(base, ext string) ([]byte, error) {
+	if data, err := os.ReadFile(base + ext); err == nil {
 		return data, nil
 	}
-	f, err := os.Open(gzPath)
-	if err != nil {
-		return nil, fmt.Errorf("%s(.gz) not found", plain)
+	for _, z := range compressedSuffixes {
+		f, err := os.Open(base + ext + z)
+		if err != nil {
+			continue
+		}
+		data, err := readGzAll(f)
+		f.Close()
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", filepath.Base(base+ext+z), err)
+		}
+		return data, nil
 	}
-	defer f.Close()
+	return nil, fmt.Errorf("%s not found (nor %s%s or %s%s)",
+		filepath.Base(base+ext), filepath.Base(base+ext), compressedSuffixes[0],
+		filepath.Base(base+ext), compressedSuffixes[1])
+}
+
+// readGzAll decompresses f whole, keeping what it got when the stream is
+// damaged at its TAIL. gzip verifies a CRC and a length that sit after the last
+// byte of data, so a file whose final bytes are malformed - the same class of
+// writer fault that skews a dictzip chunk table - yields every good record and
+// then an error. Discarding all of it over the last record loses the
+// dictionary; a header-level failure still does, because nothing decompressed.
+func readGzAll(f *os.File) ([]byte, error) {
 	gr, err := gzip.NewReader(f)
 	if err != nil {
 		return nil, err
 	}
 	defer gr.Close()
-	return io.ReadAll(gr)
+	data, err := io.ReadAll(gr)
+	if err != nil && len(data) > 0 &&
+		(errors.Is(err, gzip.ErrChecksum) || errors.Is(err, io.ErrUnexpectedEOF)) {
+		return data, nil
+	}
+	return data, err
 }
 
 // parseIdx decodes the sorted index: word\0 + offset (32/64-bit BE) +
@@ -242,6 +276,12 @@ func parseIdx(data []byte, offBits int) ([]idxEntry, error) {
 		word := string(data[pos : pos+nul])
 		pos += nul + 1
 		if pos+offSize+4 > len(data) {
+			// A record cut in half at the end of the file: keep the ones
+			// already parsed. Returning nothing turned a single truncated
+			// trailing entry into a dictionary with no index at all.
+			if len(out) > 0 {
+				return out, nil
+			}
 			return nil, fmt.Errorf("truncated idx at %q", word)
 		}
 		var off uint64
@@ -396,8 +436,14 @@ func (d *Dict) Prefix(word string, limit int) ([]dict.Result, error) {
 	return d.results(idxs, limit)
 }
 
+// results renders the matched entries, dropping the ones whose article bytes
+// cannot be read. A record range that falls outside the .dict - a truncated
+// dictzip tail, a corrupt .idx row - is damage to ONE entry, and failing the
+// whole lookup for it hid every other match for the same word behind an error.
+// The error is reported only when it is the entire answer.
 func (d *Dict) results(idxs []int, limit int) ([]dict.Result, error) {
 	var out []dict.Result
+	var firstErr error
 	seen := map[int]bool{}
 	for _, i := range idxs {
 		if seen[i] {
@@ -406,12 +452,18 @@ func (d *Dict) results(idxs []int, limit int) ([]dict.Result, error) {
 		seen[i] = true
 		body, err := d.article(i)
 		if err != nil {
-			return nil, err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		out = append(out, dict.Result{Headword: d.entries[i].word, Body: body})
 		if limit > 0 && len(out) >= limit {
 			break
 		}
+	}
+	if len(out) == 0 && firstErr != nil {
+		return nil, firstErr
 	}
 	return out, nil
 }

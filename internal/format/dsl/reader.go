@@ -110,9 +110,19 @@ func (r *Reader) ExtraMeta() map[string]string {
 // dictionary reader and by the .ann annotation loader (ann.go), so a Lingvo
 // file - which is UTF-16LE far more often than not - is decoded in exactly one
 // place. path is used for the error text only.
-func decodedScanner(f *os.File, path string, gzipped bool) (*bufio.Scanner, error) {
+//
+// Compression is SNIFFED, never derived from the name. Both mistakes are in
+// the wild: a gzipped glossary saved as plain ".dsl", and a ".dsl.dz" somebody
+// already decompressed in place. Two magic bytes settle it, and the file is
+// rewound whatever they say, so every caller may hand over a fresh handle.
+func decodedScanner(f *os.File, path string) (*bufio.Scanner, error) {
+	var magic [2]byte
+	n, _ := io.ReadFull(f, magic[:])
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("dsl %s: %w", path, err)
+	}
 	var src io.Reader = f
-	if gzipped {
+	if n == 2 && magic[0] == 0x1f && magic[1] == 0x8b {
 		gz, err := gzip.NewReader(f)
 		if err != nil {
 			return nil, fmt.Errorf("dsl %s: %w", path, err)
@@ -130,7 +140,7 @@ func decodedScanner(f *os.File, path string, gzipped bool) (*bufio.Scanner, erro
 }
 
 func (r *Reader) init(path string) error {
-	sc, err := decodedScanner(r.f, path, strings.HasSuffix(strings.ToLower(path), ".dz"))
+	sc, err := decodedScanner(r.f, path)
 	if err != nil {
 		return err
 	}

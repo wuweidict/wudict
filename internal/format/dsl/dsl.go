@@ -167,10 +167,21 @@ func (d *Dict) loadSources() {
 // above is the same call, so the two can never drift apart.
 func MediaSources(srcPath string) []resource.Source {
 	// A ".dsl.dz" names its resources after either the compressed file or the
-	// ".dsl" inside it; both spellings are in the wild.
+	// ".dsl" inside it; both spellings are in the wild, and so is the bare
+	// dictionary name with no format suffix at all ("x.files.zip" beside
+	// "x.dsl.dz"). All three are tried, most specific first.
+	//
+	// The bare stem is dict.Stem, the same function removal and the dictionary
+	// panel name companions with (internal/dict/companions.go): a spelling
+	// listed there but not resolved here is a zip the user is told belongs to
+	// this dictionary, and is deleted with it, while every image inside it
+	// 404s.
 	bases := []string{srcPath}
 	if strings.EqualFold(filepath.Ext(srcPath), ".dz") {
 		bases = append(bases, strings.TrimSuffix(srcPath, filepath.Ext(srcPath)))
+	}
+	if st := dict.Stem(srcPath); st != srcPath {
+		bases = append(bases, st)
 	}
 	var res []resource.Source
 	for _, b := range bases {

@@ -732,3 +732,53 @@ func TestMediaSourcesFromPathAlone(t *testing.T) {
 		t.Fatal("dsl registered no media provider")
 	}
 }
+
+// A ".files.zip" is named after the compressed file, after the ".dsl" inside
+// it, or after the bare dictionary name - all three are in the wild. Every
+// spelling internal/dict lists as a companion must be one this package can
+// actually open: a name listed there and unresolved here is a zip the user is
+// told belongs to the dictionary, and which removal deletes, while every image
+// in it 404s.
+func TestMediaSourcesEveryZipSpelling(t *testing.T) {
+	for _, name := range []string{"AHD5.dsl.dz.files.zip", "AHD5.dsl.files.zip", "AHD5.files.zip"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, "AHD5.dsl.dz")
+			if err := os.WriteFile(src, gzipBytesDSL([]byte(sampleDSL)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			zf, err := os.Create(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			zw := zip.NewWriter(zf)
+			w, _ := zw.Create("pic.png")
+			w.Write([]byte{1, 2, 3})
+			zw.Close()
+			zf.Close()
+
+			var found bool
+			for _, s := range MediaSources(src) {
+				if rc, err := s.Open("pic.png"); err == nil {
+					rc.Close()
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("MediaSources did not resolve %s", name)
+			}
+			if got := dict.CompanionMedia(src); len(got) != 1 || filepath.Base(got[0]) != name {
+				t.Errorf("dict.CompanionMedia(%q) = %v, want just %s", src, got, name)
+			}
+		})
+	}
+}
+
+func gzipBytesDSL(data []byte) []byte {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	zw.Write(data)
+	zw.Close()
+	return buf.Bytes()
+}
