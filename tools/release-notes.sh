@@ -31,9 +31,12 @@ if [ -z "$TAG" ]; then
   exit 0
 fi
 
-# The tag vocabulary, kept identical to `tag_pattern` in cliff.toml. A tag
-# outside it (v3.8.0-rc1, v3.8-beta, a stray `git describe` output) is not a
-# release and must never become a range endpoint.
+# The tag vocabulary for RANGE ENDPOINTS. Wider than `tag_pattern` in
+# cliff.toml on purpose: cliff.toml matches stable tags only, so that a whole
+# vX.Y.Z cycle renders as ONE section with each category appearing once, while
+# a pre-release still has to be able to start and end a range here. A tag
+# outside this vocabulary (v3.8.0-rc1, v3.8-beta, a stray `git describe`
+# output) is not a release and must never become a range endpoint.
 RE_ANY='^v[0-9]+\.[0-9]+(\.[0-9]+)?(-(alpha|beta|rc)\.[0-9]+)?$'
 RE_STABLE='^v[0-9]+\.[0-9]+(\.[0-9]+)?$'
 
