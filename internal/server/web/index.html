@@ -364,10 +364,13 @@ body.styling{padding-bottom:var(--styler-h)}
 #styler .tab:hover{color:var(--fg);border-color:var(--fg-faint)}
 #styler .tab[aria-selected="true"]{color:var(--fg);border-color:var(--accent);
   background:var(--accent-soft)}
-/* Which box actually holds something, readable while looking at the other
-   one. Without it "do I have custom styles?" is a question you can only
-   answer by clicking both tabs. */
-#styler .tab[data-has="1"]::after{content:"•";margin-left:.35em;color:var(--accent)}
+/* One glyph, two questions. Faint: this box holds something - readable while
+   looking at the other tab, without which "do I have custom styles?" can only
+   be answered by clicking both. Accent: and it is not saved yet, which is why
+   it also shows on a box someone has just emptied. The colour is never the
+   only carrier: the tab's title says it in words. */
+#styler .tab[data-has="1"]::after{content:"•";margin-left:.35em;color:var(--fg-faint)}
+#styler .tab[data-dirty="1"]::after{content:"•";margin-left:.35em;color:var(--accent)}
 #styler .tab:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
 #styler .btn{font-size:13px}
 #stylerCSS{flex:1 1 auto;min-height:0;width:100%;margin-top:.5em;resize:none;
@@ -3917,7 +3920,6 @@ let stylerTab="app",
     // What is actually on disk. Closing without saving must put the page back
     // to this: a preview that outlives the editor is a change nobody made.
     stylerSaved={app:"",article:""},
-    stylerDirty={app:false,article:false},
     stylerDir="",
     stylerLoaded=false,
     stylerTimer=null,
@@ -3970,10 +3972,24 @@ function stylerEdit(text){
 /* Everything the toolbar says about the text, in one place, so the dot and
    the Clear button can never disagree with the box. */
 function stylerSync(){
-  $("tabApp").dataset.has=stylerText.app.trim()?"1":"";
-  $("tabArticle").dataset.has=stylerText.article.trim()?"1":"";
-  $("tabFiles").dataset.has=(stylerFileRows&&stylerFileRows.length)?"1":"";
+  stylerMark($("tabApp"),stylerText.app.trim(),stylerDirty("app"));
+  stylerMark($("tabArticle"),stylerText.article.trim(),stylerDirty("article"));
+  // Files is never dirty: an upload and a delete are already on disk when the
+  // row appears or goes, so there is nothing there for Save to do.
+  stylerMark($("tabFiles"),stylerFileRows&&stylerFileRows.length,false);
   $("stylerClear").hidden=stylerView==="files"||!$("stylerCSS").value;
+}
+/* Unsaved is the text differing from what was read back from disk, computed
+   rather than latched: typing a line and deleting it again leaves nothing to
+   save, and a flag set on the first keystroke would go on claiming otherwise
+   until the sheet was closed. Save clears it by construction, because saving
+   is what makes the two equal. */
+function stylerDirty(tab){return stylerText[tab]!==stylerSaved[tab]}
+function stylerMark(tab,has,dirty){
+  tab.dataset.has=has?"1":"";
+  tab.dataset.dirty=dirty?"1":"";
+  if(dirty)tab.title="Unsaved changes — press Save";
+  else tab.removeAttribute("title");
 }
 /* Which pane the sheet is showing, and which buttons that pane can act on.
    Examples, Clear and Save all address the textarea; on the Files tab they
@@ -4021,7 +4037,7 @@ function stylerNote(msg){
 function stylerCommit(){
   const v=$("stylerCSS").value;
   if(v===stylerText[stylerTab])return;
-  stylerText[stylerTab]=v;stylerDirty[stylerTab]=true;
+  stylerText[stylerTab]=v;
 }
 function stylerPreview(){
   if(STYLE_OFF)return;
@@ -4288,13 +4304,13 @@ function stylerCloseSheet(){
   // Unsaved text is kept — it is still in the box when you come back — but it
   // stops being shown. Preview is preview; the page a closed editor leaves
   // behind is the page the files describe.
-  if(stylerDirty.app||stylerDirty.article)stylerPreviewAll(stylerSaved);
+  if(stylerDirty("app")||stylerDirty("article"))stylerPreviewAll(stylerSaved);
 }
 async function stylerSave(){
   stylerCommit();
   const body={};
-  if(stylerDirty.app)body.app=stylerText.app;
-  if(stylerDirty.article)body.article=stylerText.article;
+  if(stylerDirty("app"))body.app=stylerText.app;
+  if(stylerDirty("article"))body.article=stylerText.article;
   if(!Object.keys(body).length){stylerNote("No changes");setTimeout(stylerNote,1400);return}
   stylerNote("Saving…");
   try{
@@ -4306,7 +4322,6 @@ async function stylerSave(){
     const j=await r.json();
     stylerText={app:j.app||"",article:j.article||""};
     stylerSaved={...stylerText};
-    stylerDirty={app:false,article:false};
     $("stylerCSS").value=stylerText[stylerTab];
     stylerSync();
     stylerNote(Object.values(stylerText).some(Boolean)?"Saved":"Saved — nothing left, both files removed");
