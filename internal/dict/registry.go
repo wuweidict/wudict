@@ -243,8 +243,24 @@ func Open(path string) (d Dictionary, err error) {
 
 func recoverOpen(path string, err *error) {
 	if r := recover(); r != nil {
-		*err = fmt.Errorf("%s: corrupt or unsupported file (parser panic: %v)", filepath.Base(path), r)
+		*err = PanicError(path, r)
 	}
+}
+
+// PanicError is the conversion Open performs on a parser panic, exported so
+// that the OTHER paths which run the same parsers can perform it too. A
+// format backend is reached twice: once through Open, where the recover above
+// has always caught a slice-bounds panic on a corrupt file, and once per
+// lookup, where until now there was nothing - and a panic in a fan-out worker
+// goroutine is not recoverable by the HTTP handler that started it, so one
+// malformed dictionary killed the process rather than failing one row.
+//
+// It is a function rather than a second deferred recover helper because the
+// callers differ in where the error goes (an *error, a Hit, a channel); only
+// the message shape is shared, and it must stay shared so a user sees the same
+// sentence whether the file broke at open or at query time.
+func PanicError(path string, r any) error {
+	return fmt.Errorf("%s: corrupt or unsupported file (parser panic: %v)", filepath.Base(path), r)
 }
 
 // excludedDirs are subtrees Discover never walks - canonical absolute paths.

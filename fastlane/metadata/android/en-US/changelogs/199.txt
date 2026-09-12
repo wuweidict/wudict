@@ -1,0 +1,4 @@
+- styler support for user files
+- full text search highlight: navigate occurrences using 🔎 key and chevrons 
+- improved auto-focus
+

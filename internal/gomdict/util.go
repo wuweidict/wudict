@@ -26,6 +26,7 @@ package go_mdict
 import (
 	"bytes"
 	"compress/zlib"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -119,17 +120,33 @@ func beBinToU8(bin []byte) uint8 {
 	return uint8(bin[0] & 255)
 }
 
-func readFileFromPos(file *os.File, start, len int64) ([]byte, error) {
-	// Set the pointer to the 10th byte from the start of the file.
-	_, err := file.Seek(start, io.SeekStart)
+// readFileFromPos reads exactly n bytes at start.
+//
+// Every caller passes an n that came out of the file being parsed (a block's
+// declared compressed size, an index region's length), so n is attacker-chosen
+// for a hostile or merely corrupt dictionary: unbounded, it is an allocation
+// of up to the declared value before the read that would have failed.
+//
+// io.ReadFull, not one Read, for a second reason that is a correctness bug
+// rather than a robustness one: a single Read returns what it got with a nil
+// error, so a short read left the tail of data zero-filled and the parser then
+// decompressed article bytes the file never contained.
+func readFileFromPos(file *os.File, start, n int64) ([]byte, error) {
+	if start < 0 || n < 0 {
+		return nil, fmt.Errorf("invalid read (offset %d, %d bytes)", start, n)
+	}
+	st, err := file.Stat()
 	if err != nil {
 		return nil, err
 	}
-
-	// Read len bytes from the current pointer position.
-	data := make([]byte, len)
-	_, err = file.Read(data)
-	if err != nil {
+	if size := st.Size(); start > size || n > size-start {
+		return nil, fmt.Errorf("read out of bounds (offset %d, %d bytes, file %d)", start, n, size)
+	}
+	if _, err := file.Seek(start, io.SeekStart); err != nil {
+		return nil, err
+	}
+	data := make([]byte, n)
+	if _, err := io.ReadFull(file, data); err != nil {
 		return nil, err
 	}
 	return data, nil

@@ -46,9 +46,20 @@ type articleSource interface {
 	readRange(offset int64, size int) ([]byte, error)
 }
 
-type plainDict struct{ f *os.File }
+// plainDict serves ranges of an uncompressed .dict. size is the file's real
+// length: the (offset,size) pair comes from the .idx, where size is a u32, so
+// a corrupt index can ask for 4 GiB per lookup. Checking the range first turns
+// that into an error on one article instead of an allocation the process may
+// not survive - and this is the LOOKUP path, reached per query.
+type plainDict struct {
+	f    *os.File
+	size int64
+}
 
 func (p plainDict) readRange(offset int64, size int) ([]byte, error) {
+	if offset < 0 || size < 0 || offset > p.size || int64(size) > p.size-offset {
+		return nil, fmt.Errorf("record range out of bounds (offset %d, %d bytes, file %d)", offset, size, p.size)
+	}
 	out := make([]byte, size)
 	_, err := p.f.ReadAt(out, offset)
 	return out, err
@@ -151,8 +162,13 @@ func probe(ifoPath string) (dict.Meta, error) {
 
 func (d *Dict) openDictData(base string) error {
 	if f, err := os.Open(base + ".dict"); err == nil {
+		st, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return err
+		}
 		d.dictFile = f
-		d.data = plainDict{f: f}
+		d.data = plainDict{f: f, size: st.Size()}
 		return nil
 	}
 	f, err := os.Open(base + ".dict.dz")

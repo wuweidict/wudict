@@ -42,6 +42,7 @@ type ref struct {
 
 type container struct {
 	f            *os.File
+	size         int64 // the real file length; every span is checked against it
 	uuid         [16]byte
 	encoding     string
 	compression  string
@@ -237,12 +238,33 @@ func (c *container) parse() error {
 	if int64(size) != fileSize {
 		return fmt.Errorf("file size mismatch: header says %d, file is %d", size, fileSize)
 	}
+	c.size = fileSize
 	refsOffset := int64(br.pos)
 
 	if err := c.parseRefs(refsOffset, int64(storeOffset)); err != nil {
 		return err
 	}
-	return c.parseStoreDir(int64(storeOffset), fileSize)
+	return c.parseStoreDir(int64(storeOffset))
+}
+
+// checkSpan rejects a span that does not lie inside the file, BEFORE it is
+// used as an allocation size. Every length in this format is a u32 or u64 read
+// out of the file being parsed, so an allocation sized from one is an
+// allocation sized by whoever wrote the file: a store offset of 1<<31 asks for
+// 2 GiB and a store offset of 1<<62 asks for more than makeslice will accept.
+// Neither failure is a parse error the caller can survive - the first is a
+// runtime out-of-memory abort, which no recover converts, and on Android it
+// kills the server inside a few-hundred-MB ceiling.
+//
+// The header's own file_size field is NOT this check: it is compared against
+// the real length once (above), and that comparison says nothing about where
+// any later offset points. This is the same guard internal/format/zim applies
+// to its pointer lists, written the same way on purpose.
+func (c *container) checkSpan(off, n int64, what string) error {
+	if off < 0 || n < 0 || off > c.size || n > c.size-off {
+		return fmt.Errorf("%s out of range (offset %d, %d bytes, file %d)", what, off, n, c.size)
+	}
+	return nil
 }
 
 // parseRefs loads the whole refs region (refsOffset..storeOffset) into
@@ -250,6 +272,9 @@ func (c *container) parse() error {
 func (c *container) parseRefs(refsOffset, storeOffset int64) error {
 	if storeOffset <= refsOffset {
 		return fmt.Errorf("invalid store offset")
+	}
+	if err := c.checkSpan(refsOffset, storeOffset-refsOffset, "refs region"); err != nil {
+		return err
 	}
 	region := make([]byte, storeOffset-refsOffset)
 	if _, err := c.f.ReadAt(region, refsOffset); err != nil {
@@ -259,6 +284,11 @@ func (c *container) parseRefs(refsOffset, storeOffset int64) error {
 	count, err := br.u32()
 	if err != nil {
 		return err
+	}
+	// count is bounded by the region it indexes into, not by the file: each
+	// position is 8 bytes of that already-read region.
+	if int64(count)*8 > int64(len(region)-br.pos) {
+		return fmt.Errorf("ref count %d exceeds refs region (%d bytes)", count, len(region))
 	}
 	positions := make([]uint64, count)
 	for i := range positions {
@@ -288,12 +318,15 @@ func (c *container) parseRefs(refsOffset, storeOffset int64) error {
 	return nil
 }
 
-func (c *container) parseStoreDir(storeOffset, fileSize int64) error {
+func (c *container) parseStoreDir(storeOffset int64) error {
 	var cnt [4]byte
 	if _, err := c.f.ReadAt(cnt[:], storeOffset); err != nil {
 		return fmt.Errorf("reading store dir: %w", err)
 	}
 	count := binary.BigEndian.Uint32(cnt[:])
+	if err := c.checkSpan(storeOffset+4, int64(count)*8, "store position table"); err != nil {
+		return err
+	}
 	posBytes := make([]byte, int64(count)*8)
 	if _, err := c.f.ReadAt(posBytes, storeOffset+4); err != nil {
 		return fmt.Errorf("reading store positions: %w", err)
@@ -303,7 +336,6 @@ func (c *container) parseStoreDir(storeOffset, fileSize int64) error {
 		c.storePos[i] = binary.BigEndian.Uint64(posBytes[i*8:])
 	}
 	c.storeDataOff = storeOffset + 4 + int64(count)*8
-	_ = fileSize
 	return nil
 }
 
@@ -321,6 +353,9 @@ func (c *container) getItem(bin uint32, item uint16) (string, []byte, error) {
 	itemCount := binary.BigEndian.Uint32(hdr[:])
 	if uint32(item) >= itemCount {
 		return "", nil, fmt.Errorf("item %d out of range (bin has %d)", item, itemCount)
+	}
+	if err := c.checkSpan(base+4, int64(itemCount), "bin content-type ids"); err != nil {
+		return "", nil, err
 	}
 	ctids := make([]byte, itemCount)
 	if _, err := c.f.ReadAt(ctids, base+4); err != nil {
@@ -399,6 +434,12 @@ func (c *container) binContent(bin uint32, zlenOff int64) ([]byte, error) {
 		return nil, err
 	}
 	zlen := binary.BigEndian.Uint32(zl[:])
+	// On the LOOKUP path, unlike the five sites above: a bin that declares a
+	// 4 GiB compressed length is a 4 GiB allocation per query, so this one
+	// cannot wait for Open-time validation that never ran.
+	if err := c.checkSpan(zlenOff+4, int64(zlen), "bin data"); err != nil {
+		return nil, err
+	}
 	compressed := make([]byte, zlen)
 	if _, err := c.f.ReadAt(compressed, zlenOff+4); err != nil {
 		return nil, err

@@ -177,7 +177,7 @@ func StreamOpen(ctx context.Context, openers []Opener, mode Mode, term string, p
 				send(i, Hit{Err: err})
 				return
 			}
-			d, err := open()
+			d, err := safeOpen(open)
 			if err != nil {
 				send(i, Hit{Err: err})
 				return
@@ -194,6 +194,19 @@ func StreamOpen(ctx context.Context, openers []Opener, mode Mode, term string, p
 	wg.Wait()
 }
 
+// safeOpen runs a caller-supplied opener under the same panic conversion as
+// the query. dict.Open already recovers internally, but an Opener is a closure
+// the server builds (registry lookup, store open, format dispatch) and it runs
+// on the worker goroutine, where an escaping panic is fatal to the process.
+func safeOpen(open Opener) (d dict.Dictionary, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			d, err = nil, dict.PanicError("dictionary", r)
+		}
+	}()
+	return open()
+}
+
 // planFor parses a full-text query ONCE per fan-out. Parsing it per dictionary
 // would be cheap and still wrong: a hundred dictionaries must answer the same
 // question, and a query is not a per-dictionary object.
@@ -204,8 +217,24 @@ func planFor(mode Mode, term string) []ftsq.Rung {
 	return ftsq.Parse(term).Rungs()
 }
 
-func query(d dict.Dictionary, mode Mode, term string, plan []ftsq.Rung, perDict int) Hit {
-	h := Hit{Meta: d.Meta(), Term: term}
+// query runs one dictionary's lookup, converting a parser panic into that
+// dictionary's error.
+//
+// The recover is not defensive programming against bugs in this package: it is
+// the same policy internal/dict already applies at Open, applied at the other
+// end of the same parsers. A corrupt record block reaches a slice expression
+// whose bounds came out of the file, and the fan-out runs it in a goroutine
+// the HTTP handler did not create - so Go's rule that a panic can only be
+// recovered on its own goroutine means the handler's recover cannot see it and
+// the process dies. One bad file must cost one row, not the server.
+func query(d dict.Dictionary, mode Mode, term string, plan []ftsq.Rung, perDict int) (h Hit) {
+	defer func() {
+		if r := recover(); r != nil {
+			h.Err = dict.PanicError(h.Meta.Path, r)
+			h.Results = nil
+		}
+	}()
+	h = Hit{Meta: d.Meta(), Term: term}
 	caps := d.Caps()
 	switch mode {
 	case Exact:

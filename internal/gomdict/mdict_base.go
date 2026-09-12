@@ -1005,6 +1005,17 @@ func (mdict *MdictBase) decodeRecordBlock(startOffset, compLen int64, info *Mdic
 		return nil, err
 	}
 
+	// The block header is 8 bytes (4 compression type + 4 checksum) and
+	// info.compressSize is a PER-BLOCK value read out of the file.
+	// decodeRecordBlockInfo validates only the two aggregates - the total info
+	// size and the total compressed size - and both stay satisfied while one
+	// block declares 0 (indexing comp[0] on an empty slice) or 1-7 (slicing
+	// comp[8:compressSize] backwards). Either is a panic on the lookup path.
+	if int64(info.compressSize) < 8 || int64(info.compressSize) > int64(len(comp)) {
+		return nil, fmt.Errorf("record block at %d declares %d bytes, block holds %d",
+			startOffset, info.compressSize, len(comp))
+	}
+
 	// comp[0]: compression type (comp[0:4]); then optional decrypt + decompress.
 	var recordBlock []byte
 	if comp[0] == 0 {

@@ -114,12 +114,21 @@ most guest networks and many ISP routers. The link is correct, both devices are
 on the same Wi-Fi, and it cannot work. Nothing in the app can detect this before
 the recipient fails.
 
-## 3. The security ramification, which is the real one
+## 3. The security model
 
-There is **no authentication anywhere in the HTTP surface**. The only access
-control is `isLoopback(r)` on two things — reveal-in-file-manager
-(`folders.go:216`) and delete unless `ALLOW_REMOTE_DELETE`
-(`remove.go:237`). Everything else is open to whoever can reach the port:
+The token-access boundary is now implemented, and its one authoritative statement
+is the `authFree` allowlist in `internal/server/auth.go` — read that map rather
+than any table here, because a list restated in prose drifts and a list read
+from the source cannot. In outline: a token (cookie, `Bearer`, or `?k=`) is
+required for every route that is not in that map, the middleware runs
+unconditionally (`AuthRequired` decides whether a token is *demanded*, not
+whether the check *runs*), and `isLoopback(r)` still gates
+reveal-in-file-manager (`folders.go`) and delete-unless-`ALLOW_REMOTE_DELETE`
+(`remove.go`) on top of that.
+
+What remains true is the shape of the exposure for whatever `authFree` lists —
+today the three read-only client-API routes — and for every route when
+`AUTH=off`:
 
 | Reachable by a LAN peer | Effect |
 |---|---|
@@ -184,9 +193,9 @@ it inside option C.
 
 ## 7. If it is ever built — the full checklist
 
-1. **Go:** bearer-token auth (`WUDICT_TOKEN`), middleware over every non-loopback
-   request, token excluded from access logs, `/api/config` never echoing it.
-   Tests: loopback bypasses, remote without token 401, remote with token 200.
+1. ~~**Go:** bearer-token auth.~~ **Done** — `internal/server/auth.go`, with
+   `authFree` as the allowlist and `openapi_test.go` holding the invariants.
+   This item is kept only so the numbering below still matches older notes.
 2. **Go:** a `PowerShared` state, or an explicit "pinned" flag, so a remote
    reader is not starved by `PowerBackground`.
 3. **Java `LanShare.java`:** address discovery via `NetworkInterface` (§1),

@@ -46,8 +46,17 @@ func newDzReader(ra io.ReaderAt, fileSize int64) (*dzReader, error) {
 		return nil, fmt.Errorf("gzip file lacks dictzip extra field")
 	}
 	pos := 10
+	if pos+2 > len(head) {
+		return nil, fmt.Errorf("truncated gzip header")
+	}
 	xlen := int(binary.LittleEndian.Uint16(head[pos:]))
 	pos += 2
+	// head is at most 64 KiB and may be far shorter (it is min(fileSize, 64K)),
+	// while XLEN is a u16 that can name 65535 bytes regardless. Slicing one by
+	// the other panics on a truncated file.
+	if pos+xlen > len(head) {
+		return nil, fmt.Errorf("FEXTRA field of %d bytes exceeds the %d-byte header", xlen, len(head))
+	}
 	extra := head[pos : pos+xlen]
 	pos += xlen
 
@@ -56,14 +65,29 @@ func newDzReader(ra io.ReaderAt, fileSize int64) (*dzReader, error) {
 	for len(extra) >= 4 {
 		si1, si2 := extra[0], extra[1]
 		slen := int(binary.LittleEndian.Uint16(extra[2:]))
+		// the loop guard is len(extra) >= 4, which bounds si1/si2/slen and not
+		// the subfield those describe.
+		if 4+slen > len(extra) {
+			break
+		}
 		sub := extra[4 : 4+slen]
 		if si1 == 'R' && si2 == 'A' {
+			// RA layout: version u16, chunk length u16, chunk count u16, then
+			// one u16 per chunk. The count is read out of the subfield and
+			// then indexes it, so it must be checked against the subfield's
+			// own declared length before the loop, not trusted by it.
+			if len(sub) < 6 {
+				return nil, fmt.Errorf("dictzip RA field truncated (%d bytes)", len(sub))
+			}
 			ver := binary.LittleEndian.Uint16(sub[0:])
 			if ver != 1 {
 				return nil, fmt.Errorf("unsupported dictzip version %d", ver)
 			}
 			d.chunkLen = int(binary.LittleEndian.Uint16(sub[2:]))
 			chcnt := int(binary.LittleEndian.Uint16(sub[4:]))
+			if 6+2*chcnt > len(sub) {
+				return nil, fmt.Errorf("dictzip RA declares %d chunks but holds %d bytes", chcnt, len(sub))
+			}
 			d.sizes = make([]int, chcnt)
 			for i := 0; i < chcnt; i++ {
 				d.sizes[i] = int(binary.LittleEndian.Uint16(sub[6+2*i:]))
