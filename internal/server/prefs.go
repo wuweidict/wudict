@@ -124,8 +124,9 @@ type UIPrefs struct {
 	// links to sub-entries) shown instead of hidden. Spelled positively: the
 	// brief view is Lingvo's own default, so the zero value keeps it - the
 	// rule every flag here obeys is that an absent key is the standing
-	// default, not that the word is always a negation. It is the reader's last choice on a section's switch, and
-	// sets how the next section opens; the server never reads it.
+	// default, not that the word is always a negation. It is the reader's
+	// last choice on a section's switch, and sets how the next section
+	// opens; the server never reads it.
 	Full bool `json:"full,omitempty"`
 
 	// Mode is the search mode the reader last picked: "exact", "contains" or
@@ -420,12 +421,19 @@ func (p *Prefs) heal(r *Registry) []DictPref {
 // merge folds the client's ordered list into the stored one. The client can
 // only speak for the dictionaries it can see, so records it did not mention
 // are RETAINED rather than deleted: an unmounted drive must not cost the user
-// the settings for everything on it. A retained record keeps its place: it
-// follows the record it followed before, or leads when nothing the client
-// sent stood before it - so a pinned dictionary on a drive that is away is
-// back at its rank when the drive is (D166).
+// the settings for everything on it. A retained pinned record keeps its rank
+// among the pinned: it follows the record that was pinned before it and still
+// is, or leads when none was - so a pinned dictionary on a drive that is away
+// is back at its rank when the drive is (D166). A retained unpinned record
+// has no rank, and goes last.
 func (p *Prefs) merge(r *Registry, want []DictPref) []DictPref {
 	stored, _ := p.Snapshot()
+	storedPath := make(map[string]string, len(stored))
+	for _, d := range stored {
+		if d.Path != "" {
+			storedPath[d.ID] = d.Path
+		}
+	}
 	sent := make([]DictPref, 0, len(want))
 	seenID := map[string]bool{}
 	seenPath := map[string]string{} // cleaned path -> the id it was sent under
@@ -434,9 +442,14 @@ func (p *Prefs) merge(r *Registry, want []DictPref) []DictPref {
 			continue
 		}
 		// the registry, not the client, is authoritative about where a
-		// dictionary lives; the name is the client echoing our own label back
+		// dictionary lives; the name is the client echoing our own label back.
+		// For one the registry does not list right now - a page working from
+		// a list it cached, sent before the rescan that dropped it - the
+		// stored record is the next best: a save never loses a known path.
 		if e, err := r.get(d.ID); err == nil {
 			d.Path = e.Path
+		} else if d.Path == "" {
+			d.Path = storedPath[d.ID]
 		}
 		if d.Name == "" && d.Path != "" {
 			d.Name = filepath.Base(d.Path)
@@ -447,25 +460,33 @@ func (p *Prefs) merge(r *Registry, want []DictPref) []DictPref {
 		}
 		sent = append(sent, d)
 	}
-	// after[id] holds the retained records that followed the sent record id
-	// in the stored order; lead holds those that no sent record preceded.
+	pinnedNow := map[string]bool{}
+	for _, d := range sent {
+		if d.Pin {
+			pinnedNow[d.ID] = true
+		}
+	}
+	// after[id] holds the retained pinned records that followed the sent
+	// pinned record id in the stored order; lead holds those no sent pinned
+	// record preceded.
 	after := map[string][]DictPref{}
-	var lead []DictPref
+	var lead, tail []DictPref
 	prev := ""
 	for _, d := range stored {
-		if seenID[d.ID] {
-			prev = d.ID
-			continue
+		id, sentToo := d.ID, seenID[d.ID]
+		if !sentToo && d.Path != "" {
+			id, sentToo = seenPath[cleanAbs(d.Path)] // sent under its current id
 		}
-		if d.Path != "" {
-			if id, ok := seenPath[cleanAbs(d.Path)]; ok {
-				prev = id // the client sent it under its current id
-				continue
+		switch {
+		case sentToo:
+			if pinnedNow[id] {
+				prev = id
 			}
-		}
-		if prev == "" {
+		case !d.Pin:
+			tail = append(tail, d)
+		case prev == "":
 			lead = append(lead, d)
-		} else {
+		default:
 			after[prev] = append(after[prev], d)
 		}
 	}
@@ -475,7 +496,7 @@ func (p *Prefs) merge(r *Registry, want []DictPref) []DictPref {
 		out = append(out, d)
 		out = append(out, after[d.ID]...)
 	}
-	return out
+	return append(out, tail...)
 }
 
 // mentioned reports whether a request carried a UI patch: an absent key and

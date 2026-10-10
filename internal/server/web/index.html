@@ -547,7 +547,7 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
   color:#1f1a12;background:var(--accent)}
 .azgo:hover{filter:brightness(1.08)}
 /* ▲ ▼ and the drag handle place a card against neighbours in the WHOLE list,
-   which a filtered list does not show, so they leave. ⏫ and the pin keep
+   which a filtered list does not show, so they leave. To-top and the pin keep
    meaning the same thing. */
 #panelList.filtered .ord [data-mv=up],#panelList.filtered .ord [data-mv=down],
 #panelList.filtered .grip{display:none}
@@ -594,7 +594,7 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
   font-size:12px;line-height:1;padding:.15em .2em;border-radius:4px}
 .pd .ord button:hover{color:var(--fg);background:var(--line-soft)}
 .pd .ord button:disabled{opacity:.3;cursor:default;background:none}
-.pd .ord .pin svg{width:14px;height:14px;display:block}
+.pd .ord svg{width:14px;height:14px;display:block}
 .pd .ord .pin path{fill:none;stroke:currentColor;stroke-width:1.4;stroke-linejoin:round;stroke-linecap:round}
 .pd .ord .pin[aria-pressed=true]{color:var(--accent)}
 .pd .ord .pin[aria-pressed=true] .head{fill:currentColor}
@@ -692,6 +692,10 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
   color:var(--safe);background:var(--safe-soft);cursor:pointer;user-select:none;
   transition:background var(--t-1),color var(--t-1)}
 .rmno:hover{background:var(--safe);border-color:var(--safe);color:#fff}
+/* The answers of a confirmation, which a thumb must not miss: about 30px tall
+   instead of 20 (measured on a 411px-wide phone). After every rule it sizes,
+   which would otherwise win at the same specificity. */
+@media (pointer:coarse){.azgo,.rmno,.pd .rmgo{padding:.55em 1em}}
 /* A provenance row is a PATH plus optional annotations, held as separate
    elements rather than composed into one sentence — the path carries what it
    copies in data-full, so nothing downstream has to take a display string
@@ -1436,9 +1440,9 @@ function prefRow(d){
   if(d.pin)r.pin=true;
   return r;
 }
-/* Debounced, and silent when nothing actually changed — dragging a card emits
-   a move per hovered row, and startup normalisation usually yields the list
-   we just read, which is then not sent at all. */
+/* Debounced, and silent when nothing actually changed — ▲ ▼ pressed in a run
+   sends the order once, and startup normalisation usually yields the list we
+   just read, which is then not sent at all. */
 let prefsTimer=null,prefsSent=null;
 function savePrefs(now){
   clearTimeout(prefsTimer);
@@ -1473,15 +1477,38 @@ async function apiError(r){
 }
 /* a byte count in decimal units - the rule of logx.Size and the other pages */
 const mb=n=>n<1e3?n+" B":n<1e6?Math.round(n/1e3)+" kB":n<1e7?(n/1e6).toFixed(1)+" MB":n<1e9?Math.round(n/1e6)+" MB":(n/1e9).toFixed(1)+" GB";
-const collate=(a,b)=>a.localeCompare(b,undefined,{sensitivity:"base"});
+/* Labels in A–Z order, accents and case aside. One collator for every sort:
+   localeCompare with options builds a collator per comparison, about forty
+   times slower over a library this size, and the panel, the picker and every
+   save sort the whole library. */
+const collate=new Intl.Collator(undefined,{sensitivity:"base"}).compare;
 /* The one order (D166): the pinned dictionaries as the user placed them, then
-   every other one A→Z. */
+   every other one A→Z. Pinned first is an invariant the panel and the picker
+   build on, so a pinned dictionary the order does not place yet still leads,
+   after the placed ones. */
 function orderedDicts(){
   const byId=new Map(dicts.map(d=>[d.id,d]));
   const out=[];
-  for(const id of prefOrder){if(pinned.has(id)&&byId.has(id)){out.push(byId.get(id));byId.delete(id)}}
+  for(const id of prefOrder){const d=pinned.has(id)&&byId.get(id);if(d){out.push(d);byId.delete(id)}}
   const rest=[...byId.values()].sort((a,b)=>collate(dictLabel(a),dictLabel(b)));
-  return out.concat(rest);
+  return out.concat(rest.filter(d=>pinned.has(d.id)),rest.filter(d=>!pinned.has(d.id)));
+}
+/* The order as the user leaves it, set from the dictionaries this page lists.
+   A pinned dictionary it does not list right now - on a drive that is away,
+   or not yet arrived - keeps its rank: it stays after the pinned dictionary
+   it followed, as the server keeps it (prefs.go, merge). */
+function setOrder(ids){
+  const shown=new Set(ids),after=new Map(),lead=[];
+  let prev=null;
+  for(const id of prefOrder){
+    if(shown.has(id)){if(pinned.has(id))prev=id;continue}
+    if(!pinned.has(id))continue;
+    if(prev===null)lead.push(id);
+    else if(after.has(prev))after.get(prev).push(id);
+    else after.set(prev,[id]);
+  }
+  prefOrder=lead;
+  for(const id of ids)prefOrder.push(id,...(after.get(id)||[]));
 }
 /* A list saved before pins is an order of the whole library: the user's
    arrangement on top, and under it the run of dictionaries the page appended
@@ -2068,14 +2095,14 @@ function facetGroups(){
   return [...byF.values()].sort((a,b)=>a.fo-b.fo)
     .map(f=>({id:f.id,label:f.label,
       values:[...f.vals.values()].filter(v=>v.n<total)
-        .sort((a,b)=>b.n-a.n||a.label.localeCompare(b.label,undefined,{sensitivity:"base"}))}))
+        .sort((a,b)=>b.n-a.n||collate(a.label,b.label))}))
     .filter(f=>f.values.length);
 }
 let refreshTimer=null;
 function refreshDictUI(now){
   clearTimeout(refreshTimer);
   if(!now){refreshTimer=setTimeout(()=>refreshDictUI(true),120);return}
-  dicts.sort((a,b)=>dictLabel(a).localeCompare(dictLabel(b),undefined,{sensitivity:"base"}));
+  dicts.sort((a,b)=>collate(dictLabel(a),dictLabel(b)));
   // The live value first, then the remembered one. They say the same thing
   // until a rebuild has just dropped the option that held it — a rescan
   // replaces the whole list row by row, and a group is only counted once the
@@ -2247,7 +2274,7 @@ async function loadDicts(rescan,opts={}){
   // complete set — doing it mid-stream would drop the ids that had not
   // arrived yet, and convert an order it cannot see whole.
   convertOrder();
-  prefOrder=orderedIds();savePrefs(true);
+  setOrder(orderedIds());savePrefs(true);
   dictsSettled=true; // every row is in; the groups can be counted
   refreshDictUI(true);
   setPhase("ready");
@@ -2260,35 +2287,35 @@ async function loadDicts(rescan,opts={}){
 }
 /* Changing the order (D166 Am. 1). The pin says WHETHER a dictionary leads
    the list and adds it after the other pinned ones, so pinning never changes
-   which dictionary answers first; ⏫ makes one first, pinning it if it is not;
-   ▲ ▼ and the drag move one among the pinned. Each result is one action, so
-   where a new pin lands is not a setting. Nothing moves an unpinned
-   dictionary: its place is its title's. Each change redraws the picker with
-   the panel, because the two list one order. */
+   which dictionary answers first; to-top makes one first, pinning it if it
+   is not; ▲ ▼ and the drag move one among the pinned. Each result is one
+   action, so where a new pin lands is not a setting. Nothing moves an
+   unpinned dictionary: its place is its title's. Each change redraws the
+   picker with the panel, because the two list one order. */
 function orderChanged(){savePrefs();refreshDictUI(true)}
 function pinDict(id,on){
   const ids=orderedIds().filter(x=>x!==id);
   if(on)ids.splice(ids.filter(x=>pinned.has(x)).length,0,id);
   on?pinned.add(id):pinned.delete(id);
-  prefOrder=ids;orderChanged();
+  setOrder(ids);orderChanged();
 }
 function topDict(id){
   pinned.add(id);
-  prefOrder=[id,...orderedIds().filter(x=>x!==id)];orderChanged();
+  setOrder([id,...orderedIds().filter(x=>x!==id)]);orderChanged();
 }
 // One step within the pinned dictionaries, never across the A–Z line.
 function moveDict(id,step){
   const ids=orderedIds(),i=ids.indexOf(id),j=i+step;
   if(i<0||j<0||!pinned.has(id)||!pinned.has(ids[j]))return;
   [ids[i],ids[j]]=[ids[j],ids[i]];
-  prefOrder=ids;orderChanged();
+  setOrder(ids);orderChanged();
 }
 /* Unpinning every dictionary this page can see. One on a drive that is away
    keeps its pin: the page speaks only for the dictionaries it lists, as
    every save does (prefs.go, merge). */
 function unpinAll(){
   for(const d of dicts)pinned.delete(d.id);
-  prefOrder=orderedIds();orderChanged();
+  setOrder(orderedIds());orderChanged();
 }
 function pinnedShown(){return dicts.filter(d=>pinned.has(d.id))}
 function toggleDict(id){
@@ -2314,13 +2341,15 @@ function syncAZ(){
 function askAZ(open){
   const box=$("azAsk"),btn=$("azBtn");
   btn.setAttribute("aria-expanded",open?"true":"false");
-  if(!open){box.hidden=true;box.textContent="";return}
-  const p=pinnedShown();
-  // one pinned dictionary is named, and has no order among the pinned to lose
-  box.innerHTML=(p.length===1?`<b>Unpin ${esc(dictLabel(p[0]))}?</b> The list becomes A–Z.`
+  const p=open?pinnedShown():[];
+  if(!p.length){box.hidden=true;box.textContent="";btn.setAttribute("aria-expanded","false");return}
+  /* One pinned dictionary is named, and has no order among the pinned to
+     lose. The question describes both buttons, so a screen reader that lands
+     on cancel reads what it cancels. */
+  box.innerHTML=`<span id="azText">`+(p.length===1?`<b>Unpin ${esc(dictLabel(p[0]))}?</b> The list becomes A–Z.`
     :`<b>Unpin all ${p.length}?</b> The list becomes A–Z. The order of the pinned dictionaries is lost.`)+
-    `<br><button type="button" class="azgo">${p.length===1?"Unpin":"Unpin all"}</button>`+
-    `<button type="button" class="rmno">↩ cancel</button>`;
+    `</span><br><button type="button" class="azgo" aria-describedby="azText">${p.length===1?"Unpin":"Unpin all"}</button>`+
+    `<button type="button" class="rmno" aria-label="Cancel" aria-describedby="azText">↩ cancel</button>`;
   box.hidden=false;
   box.querySelector(".rmno").focus({preventScroll:true});
 }
@@ -2579,7 +2608,7 @@ function renderPanel(){
   el.innerHTML="";
   const ord=orderedDicts(),np=ord.filter(d=>pinned.has(d.id)).length;
   for(const [i,d] of ord.entries()){
-    const off=disabled.has(d.id),pin=i<np;
+    const off=disabled.has(d.id),pin=pinned.has(d.id);
     // the A–Z line, between the pinned and the rest when there are both
     if(i===np&&np>0)el.appendChild(Object.assign(document.createElement("div"),{className:"pdiv",textContent:"A–Z"}));
     const div=document.createElement("div");div.className="pd"+(off?" off":"");div.dataset.id=d.id;
@@ -2654,8 +2683,10 @@ function renderPanel(){
        This is the card for one dictionary, so unlike the row above it carries
        the id. */
     else acts=`<a class="browse" href="/browse?dict=${encodeURIComponent(d.id)}" title="Read this dictionary A–Z, page by page"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.4 3.4a1.2 1.2 0 0 1 1.2-1.2h6.2a1.2 1.2 0 0 1 1.2 1.2v9.2a1.2 1.2 0 0 1-1.2 1.2H3.6a1.2 1.2 0 0 1-1.2-1.2z"/><path d="M11 5h2.6"/><path d="M11 8h2.6"/><path d="M11 11h2.6"/></svg>Browse</a>`;
-    /* ⏫ and the pin are on every card: ⏫ means first in the list wherever
-       it is pressed, and the pin is the one way in or out of the pinned list.
+    /* To-top and the pin are on every card: to-top means first in the list
+       wherever it is pressed, and the pin is the one way in or out of the
+       pinned list. Both are monochrome SVG, as every icon here is: an emoji
+       arrow would be a colour blob on one platform and flat on another.
        ▲ ▼ and the handle exist only where there is a place to choose, among
        the pinned. An outline pin, filled once pinned: a pin predicts the move
        up that a star or a heart would not. */
@@ -2663,7 +2694,7 @@ function renderPanel(){
         ${pin?`<span class="grip" draggable="true" title="Drag to reorder">⠿</span>`:""}
         <b tabindex="0" role="button" title="Search only this dictionary">${esc(dictLabel(d))}</b>
         <span class="ord">
-          <button type="button" data-mv="top" title="${pin?"Move to the top":"Pin and move to the top"}" aria-label="Move to the top"${i===0?" disabled":""}>⏫</button>
+          <button type="button" data-mv="top" title="${pin?"Move to the top":"Pin and move to the top"}" aria-label="Move to the top"${i===0?" disabled":""}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.5 2.5h9"/><path d="M8 14V6"/><path d="M4.8 9.2 8 6l3.2 3.2"/></svg></button>
           ${pin?`<button type="button" data-mv="up" title="Move up" aria-label="Move up"${i===0?" disabled":""}>▲</button>
           <button type="button" data-mv="down" title="Move down" aria-label="Move down"${i===np-1?" disabled":""}>▼</button>`:""}
           <button type="button" class="pin" aria-pressed="${pin}" title="${pin?"Unpin":"Pin after the other pinned dictionaries"}" aria-label="Pin ${escAttr(dictLabel(d))}"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path class="head" d="M6 2h4l-.6 4.2L12 8.5v1H4v-1l2.6-2.3z"/><path d="M8 9.5v4.8"/></svg></button>
@@ -2714,7 +2745,7 @@ $("panelList").addEventListener("drop",e=>{
   const r=pd.getBoundingClientRect(),after=e.clientY>r.top+r.height/2;
   const ids=orderedIds(),from=ids.indexOf(dragId);ids.splice(from,1);
   let to=ids.indexOf(pd.dataset.id);if(after)to++;
-  ids.splice(to,0,dragId);prefOrder=ids;clearDrop();dragId=null;orderChanged();
+  ids.splice(to,0,dragId);setOrder(ids);clearDrop();dragId=null;orderChanged();
 });
 /* Finding a dictionary in the panel. Every word typed must occur, case and
    accents ignored, in the title or in one of the dictionary's groups, and the
@@ -3121,19 +3152,25 @@ function aboutLangs(j){
   return `<div class="aboutlangs">${parts.join(" · ")}</div>`;
 }
 $("panelList").addEventListener("click",e=>{
-  /* A move redraws the panel, so a keyboard user's focus is put back on the
-     same control of the same card, wherever it went (detail 0 is a click
-     made by a key). A pointer user's view stays where it was. */
+  /* A move redraws the panel. A step (▲ ▼) keeps the card where it was on
+     the screen and moves the list instead, so the next press of the same spot
+     moves the same card. A key moves focus with the card (detail 0 is a click
+     made by a key), to the same control where it can still be pressed. A
+     pin or to-top pressed with a pointer leaves the view where it was. */
   const mv=e.target.closest("[data-mv]"),pn=e.target.closest(".pin");
   if(mv||pn){
-    const id=(mv||pn).closest(".pd").dataset.id,key=e.detail===0;
+    const card=(mv||pn).closest(".pd"),id=card.dataset.id,
+      step=!!mv&&mv.dataset.mv!=="top",y=card.getBoundingClientRect().top;
     if(!mv)pinDict(id,!pinned.has(id));
     else if(mv.dataset.mv==="top")topDict(id);
     else moveDict(id,mv.dataset.mv==="up"?-1:1);
-    if(key){
-      const card=$("panelList").querySelector(`.pd[data-id="${CSS.escape(id)}"]`);
-      const want=mv?card?.querySelector(`[data-mv="${mv.dataset.mv}"]:not(:disabled)`):null;
-      (want||card?.querySelector(".pin"))?.focus();
+    const now=$("panelList").querySelector(`.pd[data-id="${CSS.escape(id)}"]`);
+    if(!now)return;
+    const sc=now.closest(".panel-scroll");
+    if(step&&sc)sc.scrollTop+=now.getBoundingClientRect().top-y;
+    if(e.detail===0){
+      const want=mv&&now.querySelector(`[data-mv="${mv.dataset.mv}"]:not(:disabled)`);
+      (want||now.querySelector(".pin")).focus({preventScroll:step});
     }
     return;
   }
@@ -5951,7 +5988,7 @@ function urlQuery(){$("q").value=new URLSearchParams(location.search).get("q")||
 function bootFromCache(c){
   dicts=c.rows;dictTotal=c.rows.length;dictsSettled=true;
   // the list is whole, and a 304 below would not reach loadDicts' own call
-  if(convertOrder()){prefOrder=orderedIds();savePrefs()}
+  if(convertOrder()){setOrder(orderedIds());savePrefs()}
   groupsTrouble(c.gp||0);
   refreshDictUI(true);
   // ready BEFORE the search, which judges "nothing enabled" by the phase;

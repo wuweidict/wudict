@@ -133,9 +133,9 @@ func TestPrefsKeepsUnseenDictionaries(t *testing.T) {
 	}
 }
 
-// A record the page could not send keeps its place in the stored order, and
-// its pin: a pinned dictionary on a drive that is away is back at its rank
-// when the drive is (D166).
+// A pinned record the page could not send keeps its rank among the pinned,
+// and its pin: a pinned dictionary on a drive that is away is back at its
+// rank when the drive is (D166). An unpinned one has no rank, and goes last.
 func TestPrefsMergeKeepsUnseenInPlace(t *testing.T) {
 	r := &Registry{}
 	for _, id := range []string{"a", "b", "c"} {
@@ -177,6 +177,16 @@ func TestPrefsMergeKeepsUnseenInPlace(t *testing.T) {
 		stored: []DictPref{{ID: "old", Path: "/d/a.dsl", Pin: true}, {ID: "x", Pin: true}, {ID: "b"}},
 		sent:   []DictPref{{ID: "b"}, {ID: "a", Pin: true}},
 		want:   []string{"b", "a", "x"},
+	}, {
+		name:   "a neighbour the page unpinned anchors nothing",
+		stored: []DictPref{{ID: "a", Pin: true}, {ID: "x", Pin: true}, {ID: "b", Pin: true}, {ID: "c"}},
+		sent:   []DictPref{{ID: "b", Pin: true}, {ID: "c"}, {ID: "a"}},
+		want:   []string{"x", "b", "c", "a"},
+	}, {
+		name:   "an unpinned record goes last",
+		stored: []DictPref{{ID: "y"}, {ID: "a", Pin: true}, {ID: "b"}},
+		sent:   []DictPref{{ID: "a", Pin: true}, {ID: "b"}},
+		want:   []string{"a", "b", "y"},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := LoadPrefs("")
@@ -191,6 +201,16 @@ func TestPrefsMergeKeepsUnseenInPlace(t *testing.T) {
 				t.Error("the retained record lost its pin")
 			}
 		})
+	}
+
+	// A page working from a list it cached may send a dictionary the
+	// registry no longer lists: its stored path is kept, not blanked.
+	p := LoadPrefs("")
+	if err := p.Replace([]DictPref{{ID: "gone", Path: "/away/gone.dsl", Pin: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.merge(r, []DictPref{{ID: "gone", Pin: true}}); len(got) != 1 || got[0].Path != "/away/gone.dsl" {
+		t.Errorf("the stored path was lost: %+v", got)
 	}
 }
 

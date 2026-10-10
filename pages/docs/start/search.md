@@ -165,8 +165,8 @@ Each dictionary row:
 -   pin: add the dictionary to the pinned ones, after the others. Pinned
     dictionaries come first, in your order; all the others follow A–Z.
     Results and the picker follow this order.
--   ⏫: make the dictionary the first in the list. An unpinned dictionary is
-    pinned.
+-   to the top (arrow under a bar): make the dictionary the first in the
+    list. An unpinned dictionary is pinned.
 -   ▲ ▼, or <kbd>⠿</kbd> (drag, desktop): move a pinned dictionary among the
     pinned ones.
 -   checkbox: enabled for *All dictionaries* searches. A disabled dictionary

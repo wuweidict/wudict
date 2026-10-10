@@ -174,7 +174,7 @@ In <kbd>☰</kbd> → ![](cog.svg):
 ### Per dictionary
 
 - ![](pin.svg) pin: add the dictionary to the pinned ones, after the others. Pinned dictionaries come first, in your order; all the others follow A–Z. The results and the picker use this order.
-- <kbd>⏫</kbd>: make the dictionary the first in the list. An unpinned dictionary is pinned.
+- ![](top.svg) to the top: make the dictionary the first in the list. An unpinned dictionary is pinned.
 - <kbd>▲</kbd> <kbd>▼</kbd>, or 💻 drag <kbd>⠿</kbd>: move a pinned dictionary among the pinned ones.
 - the checkbox: include/exclude from *All dictionaries* search, even when <kbd>OFF</kbd> a dictionary is still searchable when selected explicitly in the combobox.
 - click or tap the dictionary name: search only this dictionary.
