@@ -104,8 +104,8 @@ func probeCompanions(ctx context.Context, f Fetcher, base *url.URL, fileName, di
 // already, or listed by the collection the file came from (collection.go).
 func probeSiblings(ctx context.Context, f Fetcher, base *url.URL, fileName string, known func(string) bool) []Extra {
 	stem := dict.Stem(fileName)
-	if stem == "" || driveID(base) != "" {
-		// A Drive file's address is its id: there is no "beside it" to ask.
+	if _, _, mega := megaLink(base); stem == "" || driveID(base) != "" || mega {
+		// A Drive or MEGA file's address is its id: there is no "beside it" to ask.
 		return nil
 	}
 	var out []Extra

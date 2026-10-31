@@ -110,5 +110,8 @@ func partBase(u *url.URL) string {
 	if id := driveID(u); id != "" {
 		return "gdrive-" + id
 	}
+	if id, _, ok := megaLink(u); ok {
+		return "mega-" + id
+	}
 	return safeDirName(nameFromURL(u))
 }

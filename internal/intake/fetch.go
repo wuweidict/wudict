@@ -296,7 +296,17 @@ func (f Fetcher) Fetch(ctx context.Context, dest, raw string, progress Progress)
 	if reuse == nil {
 		offset, prev = resumePoint(part, meta, u.String())
 	}
-	resp, offset, err := f.get(ctx, u, offset, prev, reuse)
+	// A MEGA link is fetched from the address MEGA hands out for it, and
+	// decrypted on the way (mega.go); the link stays the download's identity.
+	get := u
+	var mf *megaFile
+	if id, key, ok := megaLink(u); ok {
+		if mf, err = f.megaResolve(ctx, id, key); err != nil {
+			return Source{}, err
+		}
+		get = mf.url
+	}
+	resp, offset, err := f.get(ctx, get, offset, prev, reuse)
 	if errors.Is(err, errNotModified) {
 		// Nothing was transferred and nothing is temporary: this is the file
 		// the user downloaded before, handed back under its own name.
@@ -310,8 +320,11 @@ func (f Fetcher) Fetch(ctx context.Context, dest, raw string, progress Progress)
 	}
 	defer resp.Body.Close()
 
-	name, err := archiveName(u, resp)
-	if err != nil {
+	var name string
+	var body io.Reader = resp.Body
+	if mf != nil {
+		name, body = mf.name, mf.reader(resp.Body, offset)
+	} else if name, err = archiveName(u, resp); err != nil {
 		return Source{}, err
 	}
 
@@ -351,7 +364,7 @@ func (f Fetcher) Fetch(ctx context.Context, dest, raw string, progress Progress)
 	if progress != nil {
 		report = func(done, total int64) { progress(name, done, total) }
 	}
-	n, err := copyBody(ctx, fh, resp.Body, offset, total, report)
+	n, err := copyBody(ctx, fh, body, offset, total, report)
 	if cerr := fh.Close(); err == nil {
 		err = cerr
 	}
@@ -473,6 +486,11 @@ func (f Fetcher) get(ctx context.Context, u *url.URL, offset int64, prev partMet
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		resp.Body.Close()
+		if resp.StatusCode == 509 {
+			// Bandwidth Limit Exceeded: MEGA's transfer quota for downloads
+			// without an account, and some shared hosts'. Go has no text for it.
+			return nil, 0, errors.New("the site's download quota is used up: try again later")
+		}
 		return nil, 0, fmt.Errorf("the site answered %s", strings.ToLower(http.StatusText(resp.StatusCode)))
 	}
 	if resp.StatusCode == http.StatusOK {
