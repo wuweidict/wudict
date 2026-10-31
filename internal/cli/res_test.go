@@ -10,10 +10,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/fsx"
+	"github.com/wuweidict/wudict/internal/resource"
 )
 
 // The names here come from real containers and from what a hostile one could
@@ -230,3 +233,181 @@ func TestWriteFileAtomic(t *testing.T) {
 type errReader struct{}
 
 func (errReader) Read([]byte) (int, error) { return 0, errors.New("decompression failed") }
+
+// mapRes is a dictionary's resources in memory, looked up as a container
+// looks them up: by resource.Key.
+type mapRes map[string]string
+
+func (m mapRes) Resource(name string) (io.ReadCloser, string, error) {
+	for n, body := range m {
+		if resource.Key(n) == resource.Key(name) {
+			return io.NopCloser(strings.NewReader(body)), "", nil
+		}
+	}
+	return nil, "", dict.ErrNotFound
+}
+
+func (m mapRes) open() *resSource {
+	names := make([]string, 0, len(m))
+	for n := range m {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return &resSource{ResourceOpener: m, list: func() []string { return names }, close: func() error { return nil }}
+}
+
+var testRes = mapRes{
+	"audio/US/ab/1.ogg": "us-ab",
+	"audio/US/ac/1.ogg": "us-ac",
+	"audio/UK/1.ogg":    "uk",
+	"img/A.png":         "png",
+	"what?.html":        "literal",
+	"whatX.html":        "other",
+	"audio/.DS_Store":   "junk",
+}
+
+func TestSelectRes(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    []string
+		wantErr string
+	}{
+		{name: "any depth", args: []string{"*.ogg"}, want: []string{"audio/UK/1.ogg", "audio/US/ab/1.ogg", "audio/US/ac/1.ogg"}},
+		{name: "folder", args: []string{"audio/US/"}, want: []string{"audio/US/ab/1.ogg", "audio/US/ac/1.ogg"}},
+		{name: "folder, any case", args: []string{"AUDIO/us/"}, want: []string{"audio/US/ab/1.ogg", "audio/US/ac/1.ogg"}},
+		{name: "exact name wins over its wildcard", args: []string{"what?.html"}, want: []string{"what?.html"}},
+		{name: "one resource once", args: []string{"audio/UK/1.ogg", "*.ogg"}, want: []string{"audio/UK/1.ogg", "audio/US/ab/1.ogg", "audio/US/ac/1.ogg"}},
+		{name: "literal keeps its spelling", args: []string{"IMG/a.PNG", "img/*"}, want: []string{"IMG/a.PNG"}},
+		{name: "everything but junk", args: []string{"**"}, want: []string{"audio/UK/1.ogg", "audio/US/ab/1.ogg", "audio/US/ac/1.ogg", "img/A.png", "what?.html", "whatX.html"}},
+		{name: "no match", args: []string{"*.ogg", "*.wav"}, wantErr: "matches no resource"},
+		{name: "folder without slash", args: []string{"audio/US"}, wantErr: `"audio/US/" extracts its 2 resources`},
+		{name: "missing name", args: []string{"img/b.png"}, wantErr: `no resource "img/b.png"`},
+		{name: "flag after the dictionary", args: []string{"img/A.png", "-o"}, wantErr: "flags go before the dictionary file"},
+	}
+	d := testRes.open()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := selectRes(d, tt.args)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("selectRes(%q) error = %v, want one containing %q", tt.args, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("selectRes(%q) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+// Every destination stays below the output folder, and what cannot be written
+// as asked is a problem, not a second write to the same file.
+func TestPlanRes(t *testing.T) {
+	out := filepath.Join("x", "out")
+	tests := []struct {
+		name     string
+		names    []string
+		want     []string // destinations below out, slash-separated
+		problems int
+	}{
+		{name: "tree kept", names: []string{"audio/US/ab/1.ogg", `\audio\x.spx`}, want: []string{"audio/US/ab/1.ogg", "audio/x.spx"}},
+		{name: "climbing removed", names: []string{"../../etc/passwd", "/abs/x.png", `C:\w\x.png`}, want: []string{"etc/passwd", "abs/x.png", "C-/w/x.png"}},
+		{name: "no usable name", names: []string{"..", "/", "ok.png"}, want: []string{"ok.png"}, problems: 2},
+		{name: "same file after sanitizing", names: []string{"a:b.png", "a-b.png"}, want: []string{"a-b.png"}, problems: 1},
+		{name: "same file but for case", names: []string{"Img/A.png", "img/a.png"}, want: []string{"Img/A.png"}, problems: 1},
+		{name: "file named like a folder", names: []string{"audio", "audio/x.ogg"}, want: []string{"audio/x.ogg"}, problems: 1},
+		{name: "file named like a nested folder", names: []string{"a/b", "a/b/c/d.ogg"}, want: []string{"a/b/c/d.ogg"}, problems: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jobs, problems := planRes(tt.names, out)
+			var got []string
+			for _, j := range jobs {
+				rel, err := filepath.Rel(out, j.dest)
+				if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					t.Fatalf("%q is written to %q, outside %q", j.name, j.dest, out)
+				}
+				got = append(got, filepath.ToSlash(rel))
+			}
+			if !slices.Equal(got, tt.want) || len(problems) != tt.problems {
+				t.Fatalf("planRes(%q) = %q with problems %q, want %q with %d", tt.names, got, problems, tt.want, tt.problems)
+			}
+		})
+	}
+}
+
+func TestResMany(t *testing.T) {
+	out := t.TempDir()
+	d := testRes.open()
+	read := func(rel string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(out, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	// a dry run writes nothing and prints each name with its file
+	stdout := os.Stdout
+	f, err := os.Create(filepath.Join(t.TempDir(), "stdout"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = f
+	err = resMany(d, []string{"audio/US/"}, out, false, true)
+	os.Stdout = stdout
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	printed, _ := os.ReadFile(f.Name())
+	wantLine := "audio/US/ab/1.ogg\t" + filepath.Join(out, "audio", "US", "ab", "1.ogg") + "\n"
+	if !strings.HasPrefix(string(printed), wantLine) || strings.Count(string(printed), "\n") != 2 {
+		t.Fatalf("dry run printed %q, want 2 lines starting %q", printed, wantLine)
+	}
+	if entries, _ := os.ReadDir(out); len(entries) != 0 {
+		t.Fatalf("a dry run wrote %d entries", len(entries))
+	}
+
+	if err := resMany(d, []string{"audio/US/"}, out, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if read("audio/US/ab/1.ogg") != "us-ab" || read("audio/US/ac/1.ogg") != "us-ac" {
+		t.Fatal("extracted files differ from the resources")
+	}
+
+	// a second run would overwrite: refused before anything is written
+	if err := os.WriteFile(filepath.Join(out, "audio", "US", "ab", "1.ogg"), []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = resMany(d, []string{"*.ogg"}, out, false, false)
+	if err == nil || !strings.Contains(err.Error(), "2 files would be overwritten") {
+		t.Fatalf("second run: err = %v, want the overwrite refusal", err)
+	}
+	if read("audio/US/ab/1.ogg") != "mine" {
+		t.Fatal("the refused run replaced a file")
+	}
+	if _, err := os.Stat(filepath.Join(out, "audio", "UK", "1.ogg")); !os.IsNotExist(err) {
+		t.Fatal("the refused run wrote a new file")
+	}
+
+	if err := resMany(d, []string{"*.ogg"}, out, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if read("audio/US/ab/1.ogg") != "us-ab" || read("audio/UK/1.ogg") != "uk" {
+		t.Fatal("-f did not overwrite")
+	}
+
+	if err := resMany(d, []string{"*.ogg"}, "-", true, false); err == nil {
+		t.Fatal("-o - with a pattern: want an error")
+	}
+	if err := resMany(d, []string{"*.ogg"}, filepath.Join(out, "audio", "UK", "1.ogg"), true, false); err == nil {
+		t.Fatal("-o naming a file: want an error")
+	}
+}

@@ -12,7 +12,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	neturl "net/url"
@@ -112,14 +111,27 @@ COMMANDS
                                           its library folder.
   keys   [-offset N] [-n count] <dictfile>  List headwords, all by default; for an
                                           .mdd, the files it contains
-  res    [-o out] [-f] <dictfile> <name>  Extract one resource, e.g. "audio/word.mp3";
-                                          <name> as keys prints it; an .mdd works
-                                          directly. Piped or redirected: to standard
-                                          output. On a terminal: to a file named after
-                                          the resource (-f overwrites). -o: a file
-                                          (missing folders are created), a folder,
-                                          or "-" for standard output.
-  dump   [-format csv|md] [-mode html|clean] [-compress gz] [-resources all|text|none] -o <outdir> <dictfile>
+  res    [-o out] [-f] [-dry-run] <dictfile> <name|pattern>…
+                                          Extract resources. One name, e.g.
+                                          "audio/word.mp3" (as keys prints it; an
+                                          .mdd works directly): piped or redirected,
+                                          to standard output; on a terminal, to a
+                                          file named after the resource (-f
+                                          overwrites); -o: a file (missing folders
+                                          are created), a folder, or "-" for
+                                          standard output.
+                                          A pattern or several names: files in the
+                                          -o folder (default: the current folder),
+                                          in the resources' own folders. * is any
+                                          characters in one name, ? one character,
+                                          ** any number of folders; 'audio/' is
+                                          everything in audio; '*.ogg' is every
+                                          .ogg in any folder. Quote the pattern.
+                                          If a file exists, nothing is written (-f
+                                          overwrites). -dry-run: print each name
+                                          and its file, write nothing.
+  dump   [-format csv|md] [-mode html|clean] [-compress gz] [-resources all|text|none]
+         [-include pattern]… [-exclude pattern]… [-articles=false] -o <outdir> <dictfile>
                                           Export a dictionary. csv (default):
                                           pyglossary's CSV layout, resources in
                                           <name>.csv_res. md: wudict markdown,
@@ -130,8 +142,13 @@ COMMANDS
                                           the first article it cannot convert;
                                           -compress gz writes <name>.wudict.md.gz.
                                           -resources text: text files only (.css,
-                                          .js, …); none: no resources. -output is
-                                          the long form of -o.
+                                          .js, …); none: no resources.
+                                          -include: only the resources that match a
+                                          pattern (as res reads it); -exclude: not
+                                          those. Both repeat; every filter narrows.
+                                          Quote the pattern. -articles=false: the
+                                          resources only, in the same folder.
+                                          -output is the long form of -o.
   ingest [-full] [-fulltext] [<dictfile|folder…>]
                                           Index dictionaries into the library:
                                           <DB_DIR>/<name>/text.db and info.txt.
@@ -1943,11 +1960,13 @@ func printStartup(cfg config.Config, in startupInfo) {
 	}
 }
 
-// multiFlag collects a repeatable path flag. Repetition rather than a
-// separator inside one value: nothing to escape and it reads the same on every
-// platform (`--dict-dir A --dict-dir B`). It joins with os.PathListSeparator
-// so the value travels through the same string-keyed config layering as the
-// environment variable, which follows the $PATH convention.
+// multiFlag collects a repeatable flag: folders (`--dict-dir A --dict-dir B`),
+// a dump's -include and -exclude patterns. Repetition rather than a separator
+// inside one value: nothing to escape - a resource name can hold a comma - and
+// it reads the same on every platform. String joins with
+// os.PathListSeparator so a folder list travels through the same string-keyed
+// config layering as the environment variable, which follows the $PATH
+// convention.
 type multiFlag []string
 
 func (m *multiFlag) String() string { return strings.Join(*m, string(os.PathListSeparator)) }
@@ -2291,143 +2310,6 @@ func cmdClean(args []string) error {
 // goes with the app, not with the user's folders, so it is never an orphan.
 func isHowtoSource(src string) bool {
 	return filepath.Base(src) == howto.FileName && filepath.Base(filepath.Dir(src)) == "builtin"
-}
-
-func cmdRes(args []string) error {
-	fs := flag.NewFlagSet("res", flag.ExitOnError)
-	out := fs.String("o", "", `output file; "-" is stdout, a directory means "in there", empty writes a file when stdout is a terminal and stdout otherwise`)
-	force := fs.Bool("f", false, "overwrite an existing file whose name was derived from the resource")
-	fs.Parse(args)
-	if fs.NArg() != 2 {
-		return fmt.Errorf("usage: wudict res [-o out] [-f] <dictfile> <name>")
-	}
-	d, err := dict.Open(fs.Arg(0))
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	name := fs.Arg(1)
-	rc, mimeType, err := d.Resource(name)
-	if err != nil {
-		return err
-	}
-	defer rc.Close()
-
-	dest, derived, err := resDest(*out, name, os.Stdout, os.Stat)
-	if err != nil {
-		return err
-	}
-	if dest == "" { // stdout
-		if _, err := io.Copy(os.Stdout, rc); err != nil {
-			return err
-		}
-		if mimeType != "" {
-			fmt.Fprintln(os.Stderr, "mime:", mimeType)
-		}
-		return nil
-	}
-	// A derived name is a guess, so it never destroys anything without -f; a
-	// name the user typed is an instruction, and truncating it is what every
-	// other tool does with an output path.
-	if derived && !*force {
-		if _, err := os.Stat(dest); err == nil {
-			return fmt.Errorf("%s already exists: pass -f to overwrite, or -o to name the output", dest)
-		}
-	}
-	n, err := fsx.WriteAtomicFrom(dest, rc, 0o644)
-	if err != nil {
-		return err
-	}
-	// stdout stays free of anything that is not the resource itself, so this
-	// remains usable in a pipeline that also asked for a file.
-	if mimeType != "" {
-		fmt.Fprintf(os.Stderr, "wrote %s (%d bytes, %s)\n", dest, n, mimeType)
-	} else {
-		fmt.Fprintf(os.Stderr, "wrote %s (%d bytes)\n", dest, n)
-	}
-	return nil
-}
-
-// resDest decides where `res` writes. It returns "" for stdout, and reports
-// whether the path was DERIVED from the resource name (the caller then refuses
-// to overwrite) rather than given by the user.
-//
-// The guard is "stdout is a terminal", NOT "stdout". Binary on a terminal is
-// the accident; binary down a pipe or a redirect is the command working as
-// intended, and `wudict res d.mdx img.png > img.png` and `… | file -` must keep
-// meaning what they always meant. `-o -` is an explicit instruction and beats
-// the terminal check - naming stdout IS the consent.
-//
-// stat is injected so the directory case is testable without touching disk.
-func resDest(out, name string, stdout *os.File, stat func(string) (os.FileInfo, error)) (dest string, derived bool, err error) {
-	if out == "-" {
-		return "", false, nil
-	}
-	if out != "" {
-		// An existing directory means "put it in there"; anything else is the
-		// file name itself, parents included (mkdir -p is done at write time).
-		if fi, err := stat(out); err == nil && fi.IsDir() {
-			base := resBasename(name)
-			if base == "" {
-				return "", false, fmt.Errorf("resource %q has no usable file name: name the output file with -o", name)
-			}
-			return filepath.Join(out, base), false, nil
-		}
-		return out, false, nil
-	}
-	if !isTerminal(stdout) {
-		return "", false, nil
-	}
-	base := resBasename(name)
-	if base == "" {
-		return "", false, fmt.Errorf("resource %q has no usable file name: pass -o to name the output, or -o - for stdout", name)
-	}
-	return base, true, nil
-}
-
-// resBasename reduces a resource name to a single, safe file name in the
-// current directory. It returns "" when nothing usable is left.
-//
-// The name comes from the DICTIONARY, not from the user: MDX stores paths as
-// `\audio\x.spx`, and a hostile or merely broken container can hold "..", an
-// absolute path, a Windows drive letter, or a NUL. So the whole path is
-// discarded and only the last element kept - the flat file the user asked for.
-// Recreating the container's directory tree from those strings is what turns
-// this into zip-slip, and is why -o exists for anyone who wants a specific
-// place. The server solved the same problem the same way (D59).
-func resBasename(name string) string {
-	// Both separators, whatever the host: an .mdd written on Windows is read
-	// on Linux, where a backslash is an ordinary character and would otherwise
-	// survive into the file name.
-	name = strings.ReplaceAll(name, "\\", "/")
-	if i := strings.LastIndexByte(name, '/'); i >= 0 {
-		name = name[i+1:]
-	}
-	// A drive-relative name ("c:x.png") keeps a colon that means something on
-	// Windows and nothing here; take what follows it.
-	if i := strings.LastIndexByte(name, ':'); i >= 0 {
-		name = name[i+1:]
-	}
-	name = strings.TrimSpace(name)
-	// "." and ".." are not file names, and a control byte in one is a
-	// terminal-escape vector as much as a filesystem problem.
-	if name == "." || name == ".." || strings.ContainsAny(name, "\x00") {
-		return ""
-	}
-	for _, r := range name {
-		if r < 0x20 || r == 0x7f {
-			return ""
-		}
-	}
-	return name
-}
-
-// isTerminal reports whether f is a character device - the same test logx uses
-// for stderr, kept here rather than shared because logx is about progress
-// output and this is about not vomiting a PNG into someone's shell.
-func isTerminal(f *os.File) bool {
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 // cmdToken prints the access key as a link, and rotates it on request.

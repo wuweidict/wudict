@@ -28,7 +28,6 @@ import (
 // mdDump is what a markdown dump wrote.
 type mdDump struct {
 	articles, empty, nameless, repaired int
-	format                              string // the format the entries were read as
 }
 
 // cleanFailure is a body -mode clean could not write (spec R6.8): the dump
@@ -251,5 +250,5 @@ func dumpMarkdown(src, outDir, path, stem string, mode wmd.Mode, gz bool) (r mdD
 	if err := os.Rename(tmp, path); err != nil {
 		return r, err
 	}
-	return mdDump{articles: w.Articles, empty: w.Empty, nameless: w.Nameless, repaired: w.Repaired, format: meta.Format}, nil
+	return mdDump{articles: w.Articles, empty: w.Empty, nameless: w.Nameless, repaired: w.Repaired}, nil
 }

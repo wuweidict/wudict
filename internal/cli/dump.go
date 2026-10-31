@@ -14,12 +14,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/wuweidict/wudict/internal/dict"
-	"github.com/wuweidict/wudict/internal/format/bgl"
-	"github.com/wuweidict/wudict/internal/format/dsl"
 	"github.com/wuweidict/wudict/internal/format/wmd"
 	"github.com/wuweidict/wudict/internal/fsx"
 	"github.com/wuweidict/wudict/internal/htmlref"
@@ -50,15 +48,19 @@ import (
 func cmdDump(args []string) error {
 	fs := flag.NewFlagSet("dump", flag.ExitOnError)
 	var out, format, modeFlag, compress, resFlag string
+	var include, exclude multiFlag
 	fs.StringVar(&out, "o", "", "output folder for the dump and its resources (created if missing)")
 	fs.StringVar(&out, "output", "", "long form of -o")
 	fs.StringVar(&format, "format", "csv", "csv, or md (WuWeiDict markdown)")
 	fs.StringVar(&modeFlag, "mode", "html", "md only: html (each article's HTML kept) or clean (markdown only, lossy)")
 	fs.StringVar(&compress, "compress", "", "md only: gz")
 	fs.StringVar(&resFlag, "resources", "all", "all, text (only .css, .js and other text files), or none")
+	fs.Var(&include, "include", "write only the resources that match this pattern (as `wudict res` reads one); repeat for several")
+	fs.Var(&exclude, "exclude", "do not write the resources that match this pattern; repeat for several")
+	articles := fs.Bool("articles", true, "write the articles; -articles=false writes the resources only")
 	fs.Parse(args)
 	if fs.NArg() != 1 || out == "" {
-		return fmt.Errorf("usage: wudict dump [-format csv|md] [-mode html|clean] [-compress gz] [-resources all|text|none] -o <outdir> <dictfile>")
+		return fmt.Errorf("usage: wudict dump [-format csv|md] [-mode html|clean] [-compress gz] [-resources all|text|none] [-include pattern]… [-exclude pattern]… [-articles=false] -o <outdir> <dictfile>")
 	}
 	scope, err := parseResScope(resFlag)
 	if err != nil {
@@ -89,11 +91,20 @@ func cmdDump(args []string) error {
 	if !md && (gz || modeSet) {
 		return fmt.Errorf("-mode and -compress are for -format md")
 	}
+	sel, err := newResSelect(scope, include, exclude, *articles, gz || modeSet)
+	if err != nil {
+		return err
+	}
 	applyLibrarySettings()
 	// A prepared dictionary is a folder, and the folder is the name a user
 	// types for it: resolved to its text.db here, once, so every stage below
 	// reads the same file.
 	src := dict.MainFile(fs.Arg(0))
+	// A self-preparing format's resources are read from its containers, which
+	// for a missing file are simply absent: say what is missing instead.
+	if _, err := os.Stat(src); err != nil {
+		return err
+	}
 
 	base := dumpBase(src)
 	if base == "" {
@@ -113,15 +124,84 @@ func cmdDump(args []string) error {
 	// warning. Named files, not a general caution: "will be overwritten" is
 	// only useful if you can tell whether it means yours.
 	if fsx.DirExists(out) {
-		if scope == resNone {
+		switch {
+		case !*articles:
+			fmt.Fprintf(os.Stderr, "%s already exists - anything already in %s/ under the same name will be overwritten\n",
+				out, filepath.Base(resDir))
+		case scope == resNone:
 			fmt.Fprintf(os.Stderr, "%s already exists - %s will be overwritten\n", out, filepath.Base(path))
-		} else {
+		default:
 			fmt.Fprintf(os.Stderr, "%s already exists - %s and anything already in %s/ under the same name will be overwritten\n",
 				out, filepath.Base(path), filepath.Base(resDir))
 		}
 	}
+	if scope == resNone {
+		return dumpArticles(src, out, path, base, md, mode, gz)
+	}
+	if !*articles { // one open: there is no article pass to keep it out of
+		return withResources(src, func(d *resSource) error {
+			plan, err := planDump(d, resDir, sel)
+			if err != nil {
+				return err
+			}
+			if len(plan.jobs)+len(plan.problems) == 0 {
+				return fmt.Errorf("%s: no resources to write", filepath.Base(src))
+			}
+			writeDump(d, resDir, plan)
+			return nil
+		})
+	}
+	// An -include is checked against the resources before the articles are
+	// written, so a mistyped one fails before the article pass. Without one
+	// there is nothing to check early, and the resources are planned and
+	// written after the articles, with one open of the dictionary.
+	var plan dumpPlan
+	early := len(sel.include) > 0
+	if early {
+		d, err := openResources(src, selfPreparedFormat(src))
+		if err != nil {
+			return fmt.Errorf("%w\nhint: -resources none dumps the articles without the resources", err)
+		}
+		plan, err = planDump(d, resDir, sel)
+		d.Close()
+		if err != nil {
+			return err
+		}
+	}
+	if err := dumpArticles(src, out, path, base, md, mode, gz); err != nil {
+		return err
+	}
+	if early && len(plan.jobs) == 0 {
+		writeDump(nil, resDir, plan)
+		return nil
+	}
+	return withResources(src, func(d *resSource) error {
+		if !early {
+			var err error
+			if plan, err = planDump(d, resDir, sel); err != nil {
+				return err
+			}
+		}
+		writeDump(d, resDir, plan)
+		return nil
+	})
+}
+
+// withResources opens src for its resources (openResources) for the length
+// of fn.
+func withResources(src string, fn func(d *resSource) error) error {
+	d, err := openResources(src, selfPreparedFormat(src))
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return fn(d)
+}
+
+// dumpArticles writes the dictionary's entries to path, as markdown or CSV,
+// and reports what it wrote.
+func dumpArticles(src, out, path, base string, md bool, mode wmd.Mode, gz bool) error {
 	var n int
-	var srcFormat string // the format the entries were read as
 	if md {
 		r, err := dumpMarkdown(src, out, path, base+".wudict", mode, gz)
 		if err != nil {
@@ -131,7 +211,7 @@ func cmdDump(args []string) error {
 			}
 			return err
 		}
-		n, srcFormat = r.articles, r.format
+		n = r.articles
 		dumpNote(r.empty, "article with an empty body SKIPPED")
 		dumpNote(r.nameless, "entry without a headword SKIPPED")
 		dumpNote(r.repaired, "name or header value repaired (control characters, invalid UTF-8)")
@@ -140,19 +220,11 @@ func cmdDump(args []string) error {
 		if err != nil {
 			return err
 		}
-		n, srcFormat = r.rows, r.format
+		n = r.rows
 		dumpNote(r.nameless, "entry without a headword SKIPPED")
 	}
 	size, _ := fileSize(path)
 	fmt.Printf("%s → %s (%s)\n", logx.Plural(n, "entry", "entries"), path, logx.Size(size))
-
-	files, bytes, err := dumpResources(src, srcFormat, resDir, scope)
-	if err != nil {
-		return err
-	}
-	if files > 0 {
-		fmt.Printf("%s → %s (%s)\n", logx.Plural(files, "resource", "resources"), resDir, logx.Size(bytes))
-	}
 	return nil
 }
 
@@ -193,6 +265,140 @@ var textExts = map[string]bool{
 
 func isTextResource(name string) bool { return textExts[strings.ToLower(path.Ext(name))] }
 
+// resSelect is which resources a dump writes: those that pass -resources,
+// match an -include when one is given, and match no -exclude. Every filter
+// narrows, so the order of the flags does not count.
+type resSelect struct {
+	scope            resScope
+	include, exclude []*resource.Glob
+	incSrc, excSrc   []string // the patterns as typed, for messages
+}
+
+// newResSelect compiles the resource flags of a dump, and refuses the
+// combinations that contradict themselves. articleFlags is whether -mode or
+// -compress was given.
+func newResSelect(scope resScope, include, exclude []string, articles, articleFlags bool) (resSelect, error) {
+	if scope == resNone && len(include)+len(exclude) > 0 {
+		return resSelect{}, errors.New("-include and -exclude choose resources, and -resources none writes none")
+	}
+	if !articles && scope == resNone {
+		return resSelect{}, errors.New("-articles=false with -resources none writes nothing")
+	}
+	if !articles && articleFlags {
+		return resSelect{}, errors.New("-mode and -compress are for the articles, and -articles=false writes none")
+	}
+	sel := resSelect{scope: scope, incSrc: include, excSrc: exclude}
+	for _, p := range include {
+		g, err := resource.NewGlob(p)
+		if err != nil {
+			return resSelect{}, fmt.Errorf("-include %q: %w", p, err)
+		}
+		sel.include = append(sel.include, g)
+	}
+	for _, p := range exclude {
+		g, err := resource.NewGlob(p)
+		if err != nil {
+			return resSelect{}, fmt.Errorf("-exclude %q: %w", p, err)
+		}
+		sel.exclude = append(sel.exclude, g)
+	}
+	return sel, nil
+}
+
+// pick returns the names sel writes, in their order, minus the operating
+// system's own files (a dump is for humans; .DS_Store is not). noInclude and
+// noExclude are the patterns that matched nothing they were asked about: an
+// -include among the names -resources keeps, an -exclude among the names the
+// includes keep.
+func (sel resSelect) pick(names []string) (kept, noInclude, noExclude []string) {
+	incHit := make([]bool, len(sel.include))
+	excHit := make([]bool, len(sel.exclude))
+	for _, n := range resource.Filter(names) {
+		if sel.scope == resText && !isTextResource(n) {
+			continue
+		}
+		k := resource.Key(n)
+		if len(sel.include) > 0 {
+			in := false
+			for i, g := range sel.include {
+				if g.MatchKey(k) {
+					incHit[i], in = true, true
+				}
+			}
+			if !in {
+				continue
+			}
+		}
+		out := false
+		for i, g := range sel.exclude {
+			if g.MatchKey(k) {
+				excHit[i], out = true, true
+			}
+		}
+		if !out {
+			kept = append(kept, n)
+		}
+	}
+	for i, hit := range incHit {
+		if !hit {
+			noInclude = append(noInclude, sel.incSrc[i])
+		}
+	}
+	for i, hit := range excHit {
+		if !hit {
+			noExclude = append(noExclude, sel.excSrc[i])
+		}
+	}
+	return kept, noInclude, noExclude
+}
+
+// dumpPlan is the resources a dump writes, decided before the articles are
+// written: a mistyped -include fails before a long article pass, not after it.
+type dumpPlan struct {
+	jobs     []resJob
+	problems []string // what planRes left out
+}
+
+// planDump picks d's resources and maps them to files in resDir. A dump that
+// plans before its articles closes d again before reading them, so the
+// article pass does not hold a second open dictionary.
+func planDump(d *resSource, resDir string, sel resSelect) (dumpPlan, error) {
+	names, noInclude, noExclude := sel.pick(d.list())
+	if len(noInclude) > 0 {
+		q := make([]string, len(noInclude))
+		for i, p := range noInclude {
+			q[i] = strconv.Quote(p)
+		}
+		return dumpPlan{}, fmt.Errorf("-include %s: matches no resource", strings.Join(q, ", "))
+	}
+	for _, p := range noExclude {
+		fmt.Fprintf(os.Stderr, "  -exclude %q matches no resource\n", p)
+	}
+	jobs, problems := planRes(names, resDir)
+	return dumpPlan{jobs: jobs, problems: problems}, nil
+}
+
+// writeDump writes the planned resources into resDir, preserving the folders
+// the names carry so that an article's `src="audio/x.mp3"` still resolves
+// after the conversion. d may be nil when nothing is to be written. A resource
+// that cannot be written is reported, and the dump still succeeds (writeRes).
+func writeDump(d dict.ResourceOpener, resDir string, plan dumpPlan) {
+	for _, p := range plan.problems {
+		fmt.Fprintf(os.Stderr, "  %s\n", p)
+	}
+	var files, failed int
+	var written int64
+	if len(plan.jobs) > 0 {
+		files, written, failed = writeRes(d, plan.jobs)
+	}
+	if failed += len(plan.problems); failed > 0 {
+		fmt.Fprintf(os.Stderr, "  %d of %d resources could not be extracted\n", failed, files+failed)
+	}
+	if files > 0 {
+		fmt.Printf("%s → %s (%s)\n", logx.Plural(files, "resource", "resources"), resDir, logx.Size(written))
+	}
+}
+
 // dumpBase names the output after the SOURCE FILE rather than after the
 // dictionary's own title: the title is free text that may be empty, may repeat
 // across a collection, and routinely holds characters no filesystem accepts.
@@ -212,9 +418,8 @@ func dumpBase(src string) string {
 
 // csvDump is what a CSV dump wrote.
 type csvDump struct {
-	rows     int    // entries written
-	nameless int    // entries left out for having no headword
-	format   string // the format the entries were read as (dict.Meta.Format)
+	rows     int // entries written
+	nameless int // entries left out for having no headword
 }
 
 // dumpEntries writes the CSV. The ingest Reader is preferred wherever a format
@@ -251,7 +456,6 @@ func dumpEntries(src, outDir, csvPath string) (r csvDump, err error) {
 		each = func(row func([]string, string) error) error { return readAll(rd, row) }
 	}
 	defer closeSrc()
-	r.format = meta.Format
 
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return r, err
@@ -349,207 +553,6 @@ func writeInfoRows(w *csv.Writer, m dict.Meta) error {
 		}
 	}
 	return nil
-}
-
-// dumpResources unpacks every resource the dictionary holds into resDir,
-// preserving the folder structure the names carry so that an article's
-// `src="audio/x.mp3"` still resolves after the conversion. format is the
-// format the entries were read as (openResources).
-//
-// A resource that cannot be read is reported and skipped rather than ending
-// the dump: the names come from a container that may be truncated or lying,
-// and 40,000 good files are not worth losing to one bad record.
-func dumpResources(src, format, resDir string, scope resScope) (files int, written int64, err error) {
-	if scope == resNone {
-		return 0, 0, nil
-	}
-	d, err := openResources(src, format)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer d.Close()
-	names := d.list()
-	names = resource.Filter(names) // a dump is for humans; .DS_Store is not
-	if scope == resText {
-		names = slices.DeleteFunc(names, func(n string) bool { return !isTextResource(n) })
-	}
-	if len(names) == 0 {
-		return 0, 0, nil
-	}
-	if err := os.MkdirAll(resDir, 0o755); err != nil {
-		return 0, 0, err
-	}
-	var failed int
-	m := newMeter("resources", len(names), resourceEvery)
-	if m != nil {
-		m.bytes = true
-	}
-	for _, name := range names {
-		n, err := dumpOneResource(d, resDir, name)
-		m.AddBytes(n)
-		m.Add(1)
-		if err != nil {
-			m.Clear()
-			fmt.Fprintf(os.Stderr, "  %s: %v\n", name, err)
-			failed++
-			continue
-		}
-		files++
-		written += n
-	}
-	m.Clear()
-	if failed > 0 {
-		fmt.Fprintf(os.Stderr, "  %d of %d resources could not be extracted\n", failed, len(names))
-	}
-	return files, written, nil
-}
-
-// dumpRes is a dictionary opened for its resources alone.
-type dumpRes struct {
-	dict.ResourceOpener
-	list  func() []string // every resource name
-	close func() error
-}
-
-func (d *dumpRes) Close() error { return d.close() }
-
-// selfPrepared holds the formats whose Dictionary prepares a library folder
-// when opened (store.OpenSelfPrepared), each with the containers its resources
-// are in. A dump reads these formats' resources from the containers and opens
-// no Dictionary, so it never indexes what it dumps (D157).
-var selfPrepared = map[string]func(path string) ([]resource.Source, error){
-	"dsl":      func(p string) ([]resource.Source, error) { return dsl.MediaSources(p), nil },
-	wmd.Format: func(p string) ([]resource.Source, error) { return wmd.MediaSources(p), nil },
-	"bgl": func(p string) ([]resource.Source, error) {
-		e, err := bgl.ReadEmbedded(p)
-		if err != nil {
-			return nil, err
-		}
-		return []resource.Source{e}, nil
-	},
-}
-
-// openResources opens src for its resources, given the format its entries
-// were read as. A self-preparing format is read from its containers; any
-// other source - a format with an index of its own, a library folder's
-// text.db - opens as the Dictionary it is, which prepares nothing.
-func openResources(src, format string) (*dumpRes, error) {
-	if read, ok := selfPrepared[format]; ok && !store.IsTextDB(src) {
-		srcs, err := read(dict.MainFile(src))
-		if err != nil {
-			return nil, err
-		}
-		set := sourceSet(srcs)
-		return &dumpRes{ResourceOpener: set, list: func() []string { return resource.ListAll(srcs) }, close: set.Close}, nil
-	}
-	d, err := dict.Open(src)
-	if err != nil {
-		return nil, err
-	}
-	list := func() []string {
-		switch t := d.(type) {
-		case *store.Store:
-			return t.MediaNames() // packed media.db, if this library folder has one
-		case dict.ResourceLister:
-			return t.Resources()
-		}
-		return nil
-	}
-	return &dumpRes{ResourceOpener: d, list: list, close: d.Close}, nil
-}
-
-// sourceSet serves a name from the first container that holds it, in the
-// order the format's Dictionary searches them.
-type sourceSet []resource.Source
-
-func (s sourceSet) Resource(name string) (io.ReadCloser, string, error) {
-	for _, src := range s {
-		if rc, err := src.Open(name); err == nil {
-			return rc, resource.MIME(name), nil
-		}
-	}
-	return nil, "", dict.ErrNotFound
-}
-
-func (s sourceSet) Close() error {
-	var first error
-	for _, src := range s {
-		if err := src.Close(); err != nil && first == nil {
-			first = err
-		}
-	}
-	return first
-}
-
-func dumpOneResource(d dict.ResourceOpener, resDir, name string) (int64, error) {
-	dest := resFilePath(resDir, name)
-	if dest == "" {
-		return 0, fmt.Errorf("no usable file name")
-	}
-	rc, _, err := d.Resource(name)
-	if err != nil {
-		return 0, err
-	}
-	defer rc.Close()
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return 0, err
-	}
-	f, err := os.Create(dest)
-	if err != nil {
-		return 0, err
-	}
-	n, err := io.Copy(f, rc)
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	return n, err
-}
-
-// resFilePath maps a stored resource name to a path inside resDir.
-//
-// The name comes from the DICTIONARY, and a container can hold "..", an
-// absolute path, a drive letter or a NUL. resource.Clean removes the climbing
-// and the leading slash; safeName then takes each remaining component, so
-// nothing this writes can land outside resDir. The structure BELOW resDir is
-// kept, unlike `wudict res` which flattens to a basename: there the user asked
-// for one file in a place they named, here the tree is the point - the HTML
-// being dumped alongside references these paths.
-func resFilePath(resDir, name string) string {
-	rel := resource.Clean(name)
-	if rel == "" {
-		return ""
-	}
-	parts := strings.Split(rel, "/")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if s := safeName(p); s != "" {
-			out = append(out, s)
-		}
-	}
-	if len(out) == 0 {
-		return ""
-	}
-	return filepath.Join(append([]string{resDir}, out...)...)
-}
-
-// safeName makes one path component legal on every host wudict runs on, the
-// same rules store.FolderName applies to a library folder - minus its length
-// cap, which would silently merge two resources into one file.
-func safeName(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r < 0x20, r == 0x7f:
-			// control characters (NUL included): drop
-		case strings.ContainsRune(`/\:*?"<>|`, r):
-			b.WriteByte('-')
-		default:
-			b.WriteRune(r)
-		}
-	}
-	// trailing dots and spaces are illegal in Windows names; "." and ".." are
-	// gone with them, so no component can mean "the parent".
-	return strings.TrimRight(strings.TrimSpace(b.String()), " .")
 }
 
 func firstWord(words []string) string {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -311,5 +312,67 @@ func TestDumpEntriesPreparedNeverBword(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("dump lacks %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestNewResSelect(t *testing.T) {
+	tests := []struct {
+		name             string
+		scope            resScope
+		include, exclude []string
+		articles         bool
+		articleFlags     bool
+		wantErr          bool
+	}{
+		{name: "defaults", scope: resAll, articles: true},
+		{name: "filters", scope: resText, include: []string{"css/"}, exclude: []string{"*.map"}, articles: true},
+		{name: "resources only", scope: resAll, include: []string{"*.ogg"}},
+		{name: "none with include", scope: resNone, include: []string{"*.ogg"}, articles: true, wantErr: true},
+		{name: "none with exclude", scope: resNone, exclude: []string{"*.ogg"}, articles: true, wantErr: true},
+		{name: "nothing at all", scope: resNone, wantErr: true},
+		{name: "article flags without articles", scope: resAll, articleFlags: true, wantErr: true},
+		{name: "empty include", scope: resAll, include: []string{""}, articles: true, wantErr: true},
+		{name: "empty exclude", scope: resAll, exclude: []string{".."}, articles: true, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := newResSelect(tt.scope, tt.include, tt.exclude, tt.articles, tt.articleFlags)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, want an error: %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestResSelectPick(t *testing.T) {
+	names := []string{"style.css", "css/print.css", "audio/US/1.ogg", "audio/US/2.wav", "audio/UK/1.ogg", "img/a.png", "audio/.DS_Store"}
+	tests := []struct {
+		name                       string
+		scope                      resScope
+		include, exclude           []string
+		want, noInclude, noExclude []string
+	}{
+		{name: "all, junk dropped", scope: resAll, want: names[:6]},
+		{name: "text", scope: resText, want: []string{"style.css", "css/print.css"}},
+		{name: "text and include narrow together", scope: resText, include: []string{"css/"}, want: []string{"css/print.css"}},
+		{name: "includes add up", scope: resAll, include: []string{"*.png", "audio/UK/"}, want: []string{"audio/UK/1.ogg", "img/a.png"}},
+		{name: "exclude beats include", scope: resAll, include: []string{"audio/"}, exclude: []string{"*.wav"}, want: []string{"audio/US/1.ogg", "audio/UK/1.ogg"}},
+		{name: "no slash: any depth", scope: resAll, exclude: []string{"*.ogg", "*.wav"}, want: []string{"style.css", "css/print.css", "img/a.png"}},
+		{name: "case ignored", scope: resAll, include: []string{"AUDIO/us/*"}, want: []string{"audio/US/1.ogg", "audio/US/2.wav"}},
+		{name: "include outside -resources matches nothing", scope: resText, include: []string{"*.png", "*.css"}, want: []string{"style.css", "css/print.css"}, noInclude: []string{"*.png"}},
+		{name: "exclude of nothing", scope: resAll, include: []string{"img/"}, exclude: []string{"*.ogg"}, want: []string{"img/a.png"}, noExclude: []string{"*.ogg"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sel, err := newResSelect(tt.scope, tt.include, tt.exclude, true, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, noInc, noExc := sel.pick(names)
+			if !slices.Equal(got, tt.want) || !slices.Equal(noInc, tt.noInclude) || !slices.Equal(noExc, tt.noExclude) {
+				t.Fatalf("pick = %q (no include %q, no exclude %q), want %q (%q, %q)",
+					got, noInc, noExc, tt.want, tt.noInclude, tt.noExclude)
+			}
+		})
 	}
 }

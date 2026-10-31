@@ -68,24 +68,33 @@ func ReadBounded(path string, max int64) ([]byte, error) {
 //   - writing where a symlink points, not over the link: a dotfile manager's
 //     link keeps working.
 func WriteAtomic(path string, data []byte, perm fs.FileMode) error {
-	_, err := write(path, bytes.NewReader(data), perm, true)
+	_, err := write(path, bytes.NewReader(data), perm, true, true)
 	return err
 }
 
 // WriteAtomicExact is WriteAtomic with the mode always perm, whatever the
 // replaced file had: for a secret, where an inherited 0644 would leak it.
 func WriteAtomicExact(path string, data []byte, perm fs.FileMode) error {
-	_, err := write(path, bytes.NewReader(data), perm, false)
+	_, err := write(path, bytes.NewReader(data), perm, false, true)
 	return err
 }
 
 // WriteAtomicFrom is WriteAtomic for a stream, returning the bytes written.
 // On an error the previous file is untouched.
 func WriteAtomicFrom(path string, r io.Reader, perm fs.FileMode) (int64, error) {
-	return write(path, r, perm, true)
+	return write(path, r, perm, true, true)
 }
 
-func write(path string, r io.Reader, perm fs.FileMode, keepMode bool) (int64, error) {
+// WriteReplaceFrom is WriteAtomicFrom without the sync: an interrupted process
+// leaves the old file or the new one, never a truncated one, but a power loss
+// can lose the file. For writing many files that can be written again from
+// where they came from: on darwin a sync is a full device flush (F_FULLFSYNC),
+// paid once per file.
+func WriteReplaceFrom(path string, r io.Reader, perm fs.FileMode) (int64, error) {
+	return write(path, r, perm, true, false)
+}
+
+func write(path string, r io.Reader, perm fs.FileMode, keepMode, sync bool) (int64, error) {
 	if real, err := filepath.EvalSymlinks(path); err == nil {
 		path = real
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -112,7 +121,7 @@ func write(path string, r io.Reader, perm fs.FileMode, keepMode bool) (int64, er
 	if err == nil {
 		err = tmp.Chmod(perm)
 	}
-	if err == nil {
+	if err == nil && sync {
 		err = tmp.Sync()
 	}
 	if cerr := tmp.Close(); err == nil {

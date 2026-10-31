@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -216,6 +217,101 @@ func TestDumpResourceScope(t *testing.T) {
 	}
 	if err := cmdDump([]string{"-resources", "some", "-o", "x", src}); err == nil {
 		t.Error("-resources some accepted")
+	}
+}
+
+// TestDumpResourcesOnly: -include, -exclude and -articles=false pick from the
+// same resources as -resources, into the folder a full dump uses, so a later
+// -resources none dump completes it.
+func TestDumpResourcesOnly(t *testing.T) {
+	t.Setenv("WUDICT_DB_DIR", t.TempDir())
+	dir := t.TempDir()
+	src := filepath.Join(dir, "Pics"+wmd.Ext)
+	if err := os.WriteFile(src, []byte("# Pics\nwudict: 1\n\n## cat\n\n![a cat](cat.png)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := filepath.Join(dir, "Pics.wudict.files")
+	for name, data := range map[string]string{"cat.png": "PNG", "style.css": "p{}", "audio/x.ogg": "OGG", "audio/y.wav": "WAV"} {
+		p := filepath.Join(files, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree := func(root string) []string {
+		var got []string
+		filepath.WalkDir(root, func(p string, e os.DirEntry, err error) error {
+			if err == nil && !e.IsDir() {
+				rel, _ := filepath.Rel(root, p)
+				got = append(got, filepath.ToSlash(rel))
+			}
+			return nil
+		})
+		return got
+	}
+	dump := func(args ...string) error {
+		return silence(t, func() error { return cmdDump(args) })
+	}
+
+	out := filepath.Join(t.TempDir(), "out")
+	if err := dump("-articles=false", "-include", "audio/", "-exclude", "*.wav", "-o", out, src); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tree(out), []string{"Pics.csv_res/audio/x.ogg"}; !slices.Equal(got, want) {
+		t.Fatalf("-articles=false -include audio/ -exclude *.wav wrote %q, want %q", got, want)
+	}
+
+	out = filepath.Join(t.TempDir(), "out")
+	if err := dump("-format", "md", "-articles=false", "-o", out, src); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Pics.wudict.files/audio/x.ogg", "Pics.wudict.files/audio/y.wav", "Pics.wudict.files/cat.png", "Pics.wudict.files/style.css"}
+	if got := tree(out); !slices.Equal(got, want) {
+		t.Fatalf("-format md -articles=false wrote %q, want %q", got, want)
+	}
+	if err := dump("-format", "md", "-resources", "none", "-o", out, src); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tree(out), append(slices.Clone(want), "Pics.wudict.md"); !slices.Equal(got, want) {
+		t.Fatalf("a -resources none dump beside it: %q, want %q", got, want)
+	}
+
+	// refused before anything is written
+	for _, args := range [][]string{
+		{"-include", "*.mp3"},
+		{"-articles=false", "-resources", "text", "-include", "*.png"},
+		{"-articles=false", "-exclude", "*"},
+		{"-articles=false", "-format", "md", "-mode", "clean"},
+		{"-articles=false", "-resources", "none"},
+		{"-resources", "none", "-exclude", "*.wav"},
+	} {
+		out := filepath.Join(t.TempDir(), "out")
+		if err := dump(append(args, "-o", out, src)...); err == nil {
+			t.Errorf("%q accepted", args)
+		}
+		if _, err := os.Stat(out); !os.IsNotExist(err) {
+			t.Errorf("%q wrote %s", args, out)
+		}
+	}
+}
+
+// TestDumpIncludeOpenFailure: when -include makes the dump read the
+// resources before the articles and they cannot be opened, the error names
+// the way to get the articles alone.
+func TestDumpIncludeOpenFailure(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "Broken.bgl")
+	if err := os.WriteFile(src, []byte("not a bgl file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "out")
+	err := silence(t, func() error { return cmdDump([]string{"-include", "*.png", "-o", out, src}) })
+	if err == nil || !strings.Contains(err.Error(), "-resources none") {
+		t.Fatalf("err = %v, want the -resources none hint", err)
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Fatalf("wrote %s", out)
 	}
 }
 

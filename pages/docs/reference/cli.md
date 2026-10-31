@@ -23,7 +23,7 @@ or two dashes.
 | [`lookup`, `prefix`, `fts`, `wildcard`](#lookup-prefix-fts-wildcard) | search one dictionary |
 | [`searchall`](#searchall) | search all dictionaries in the dictionary folders |
 | [`keys`](#keys) | list headwords, or the files in an `.mdd` |
-| [`res`](#res) | extract one resource |
+| [`res`](#res) | extract resources |
 | [`dump`](#dump) | export a dictionary to CSV or wudict markdown |
 | [`ingest`](#ingest) | index dictionaries |
 | [`reindex`](#reindex) | rebuild outdated indexes |
@@ -152,12 +152,15 @@ contains.
 ## res
 
 ``` sh
-wudict res [-o out] [-f] <dictfile> <name>
+wudict res [-o out] [-f] [-dry-run] <dictfile> <name|pattern>…
 wudict res ~/Dictionaries/Oxford.mdd audio/word.mp3
+wudict res -o ~/oxford-audio ~/Dictionaries/Oxford.mdx 'audio/US/'
 ```
 
-Extracts one resource. `<name>` is a name `keys` prints; an `.mdd` can be given
+Extracts resources. A `<name>` is a name `keys` prints; an `.mdd` can be given
 directly.
+
+One name writes one resource:
 
 | Output | Where |
 | --- | --- |
@@ -165,10 +168,41 @@ directly.
 | on a terminal | a file named after the resource; `-f` overwrites |
 | `-o <path>` | that file (missing folders are created), that folder, or `-` for standard output |
 
+A pattern, or more than one name, writes files. The files go in the `-o`
+folder, or in the current folder when there is no `-o`. Each file keeps the
+folders of its resource name: `audio/US/ab/1.ogg` is written to
+`<out>/audio/US/ab/1.ogg`. Standard output is not used.
+
+| Pattern | Selects |
+| --- | --- |
+| `*` | any number of characters in one folder or file name |
+| `?` | one character |
+| `**` | any number of folders, also none: `audio/**/1.ogg` |
+| `audio/` | everything in the folder `audio`, in all its folders |
+| `*.ogg` | a pattern without `/`: every `.ogg` file, in any folder |
+| `audio/*.ogg` | a pattern with `/`: from the top, `audio/1.ogg` but not `audio/US/1.ogg` |
+
+Case is ignored; accents are not. Put the pattern in quotes, or the shell
+expands it first. A name that exists is read as a name, also when it contains
+`*` or `?`.
+
+| Option | Effect |
+| --- | --- |
+| `-f` | overwrite existing files. Without `-f`, if one file exists, no file is written |
+| `-dry-run` | write nothing: print each resource name and its file, separated by a tab |
+
+A resource name that is invalid on the file system is normalized. A resource
+that cannot be written is reported and skipped:
+
+- two names that become the same file name, also when they differ only in case;
+- a file with the name of a folder that holds other resources.
+
 ## dump
 
 ``` sh
-wudict dump [-format csv|md] [-mode html|clean] [-compress gz] [-resources all|text|none] -o <outdir> <dictfile>
+wudict dump [-format csv|md] [-mode html|clean] [-compress gz] [-resources all|text|none]
+            [-include pattern]… [-exclude pattern]… [-articles=false] -o <outdir> <dictfile>
+wudict dump -articles=false -include 'audio/' -exclude '*.wav' -o ~/exports ~/Dictionaries/Oxford.mdx
 ```
 
 ### CSV
@@ -221,10 +255,25 @@ resources in `<name>.wudict.files`.
 | `-resources all` (default) | every resource |
 | `-resources text` | `.css`, `.js`, `.mjs`, `.json`, `.html`, `.htm`, `.xml`, `.txt` only |
 | `-resources none` | no resource folder |
+| `-include <pattern>` | only the resources that match the pattern; repeat for more patterns |
+| `-exclude <pattern>` | not the resources that match the pattern; repeat for more patterns |
+| `-articles=false` | no articles: the resource folder only |
 | `-o`, `-output` | the output folder |
 
-`dump` asks before overwriting an existing output folder. Files left there by
-an earlier dump under other names are not deleted. The library's SQLite schema
+`-include` and `-exclude` take the patterns of [`res`](#res): `'*.ogg'` is every
+`.ogg` file in any folder, `'audio/'` everything in the folder `audio`. Put the
+pattern in quotes. A resource is written when it passes `-resources`, matches
+one `-include` (if there is one) and matches no `-exclude`. An `-include` that
+matches no resource stops the dump before anything is written.
+
+`-articles=false` writes the resources to the same folder as a full dump. A
+later dump with `-resources none` adds the articles beside them.
+
+If the output folder exists, `dump` prints which files it overwrites, then
+overwrites them. Files left there by an earlier dump under other names are not
+deleted. A resource that cannot be written is reported and skipped: two names
+that become the same file name, or a file with the name of a folder that holds
+other resources. The library's SQLite schema
 is documented in [The text.db format](text-db.md).
 
 ## ingest
