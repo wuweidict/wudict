@@ -78,9 +78,6 @@ jobs:
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.16248370"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
 
-      - name: Build the Go server as libwudict.so (cgo - FTS5 + speex)
-        run: make android-go
-
       - name: Compute version
         id: ver
         run: |
@@ -112,6 +109,12 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "TAG=$VERSION" >> "$GITHUB_ENV"
           echo "building $VERSION (versionCode = $CODE)"
+
+      - name: Build the Go server as libwudict.so (cgo - FTS5 + speex)
+        # VERSION=$TAG: the checkout is the branch head, where the tag being
+        # released may not exist yet (the step below creates it), so the
+        # Makefile's own `git describe` would name the previous tag.
+        run: make android-go VERSION="$TAG"
 
       - name: Configure signing
         id: signing
