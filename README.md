@@ -157,14 +157,16 @@ on dictionaries and tools to read, write and convert data in these formats.
   it includes **[kiss_fft](https://github.com/mborgerding/kissfft)** by Mark
   Borgerding.
 - **[anchore/go-lzo](https://github.com/anchore/go-lzo)** — LZO1X
-  decompression for MDX record blocks, written from the kernel's format
+  decompression for MDX v1.2 key and record blocks, written from the kernel's format
   documentation and **[lzokay](https://github.com/AxioDL/lzokay)** by Jack
   Andersen.
 - **[c0mm4nd/go-ripemd](https://github.com/c0mm4nd/go-ripemd)** — RIPEMD, for
-  MDX key-block decryption.
-- **[cespare/xxhash](https://github.com/cespare/xxhash)** — MDX v3 checksums.
+  MDX decryption keys.
+- **[cespare/xxhash](https://github.com/cespare/xxhash)** — the MDX v3
+  decryption key.
 - **[klauspost/compress](https://github.com/klauspost/compress)** — zstd and
-  deflate, for ZIM clusters and Slob bins.
+  deflate, for ZIM clusters, Slob bins and MDX blocks.
+- **[pierrec/lz4](https://github.com/pierrec/lz4)** — LZ4, for MDX blocks.
 - **[ulikunitz/xz](https://github.com/ulikunitz/xz)** — LZMA, for Slob and ZIM
   content.
 - **[aaaton/golem](https://github.com/aaaton/golem)** — English lemmatiser, so

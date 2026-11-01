@@ -41,6 +41,34 @@ wudict logs a warning when it serves a `.js`, `.css`, `.html`, `.json`, `.xml`,
 `.svg` or `.txt` resource that contains NUL bytes, which these formats cannot
 contain, and names the `res/` path that would override it.
 
+## Files beside an MDict dictionary
+
+For an MDict dictionary, a file in the folder of the `.mdx` also replaces the
+copy packed in its `.mdd`. This is the MDict rule, and many MDict dictionaries
+come with their stylesheet and scripts as separate files.
+
+``` text title="~/Dictionaries/"
+Oxford.mdx
+Oxford.mdd     contains oxford.css
+oxford.css     wudict uses this file, not the copy in Oxford.mdd
+```
+
+Put the file at the path the article requests, relative to the `.mdx`. Only
+resource file types are used this way: stylesheets, scripts, fonts, images,
+audio, video and some text formats. Other files in the folder are never served.
+wudict sees a file added or removed there within 2 seconds.
+
+The order, first match wins:
+
+1. `res/<path>` in the library folder (above).
+2. `<path>` beside the `.mdx`, until the media pack is added.
+3. The `.mdd` files, or the media pack when it is added.
+
+The media pack takes a copy of the files beside the `.mdx` that the articles
+use. A file
+changed beside the `.mdx` after that has no effect until the dictionary is
+rebuilt. Use `res/` for a change that must apply at once.
+
 ## Serving
 
 Overrides are served with `Cache-Control: no-cache`: a reload shows a changed

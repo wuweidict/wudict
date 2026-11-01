@@ -236,7 +236,7 @@ After copying files into a folder, press ![](rescan.svg) <kbd>Rescan folders</kb
 
 | Format | Files |
 | --- | --- |
-| MDict | `.mdx`, and its `.mdd` resources |
+| MDict | `.mdx`, and its `.mdd` resources; a stylesheet, script or other resource file beside the `.mdx` replaces its `.mdd` copy |
 | StarDict | `.ifo` with `.idx` and `.dict` (or `.dict.dz`), `.syn` |
 | Aard 2 | `.slob` |
 | Lingvo DSL | `.dsl` or `.dsl.dz`, and its `.files.zip` |

@@ -7,7 +7,7 @@ description: The dictionary formats wudict reads, the files each needs, and how 
 
 | Format | Files | Resources and notes                                                     |
 | --- | --- |-------------------------------------------------------------------------|
-| **MDict** | `.mdx` | `.mdd`, `.1.mdd`, … archives; `.spx` audio auto-converted to WAV        |
+| **MDict** | `.mdx` | `.mdd`, `.1.mdd`, … archives; files beside the `.mdx` replace their `.mdd` copy ([Resource overrides](override.md#files-beside-an-mdict-dictionary)); `.spx` audio auto-converted to WAV |
 | **StarDict** | `.ifo` + `.idx` or `.idx.gz` + `.dict` or `.dict.dz` | `.syn` synonyms; `res/` folder or `res.zip`                             |
 | **Aard 2** | `.slob` | everything in the file; zlib, bz2 and LZMA2 compression                 |
 | **Lingvo DSL** | `.dsl` or `.dsl.dz` | `.dsl.files.zip`; `.ann` annotations; UTF-8, UTF-16 and UTF-32 detected |
