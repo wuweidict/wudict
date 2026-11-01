@@ -32,6 +32,12 @@ func TestParseXMLHeader(t *testing.T) {
 			desc:  `say "hi"`,
 		},
 		{
+			name:  "numeric character references",
+			xml:   `<Dictionary Title="Learner&#x27;s &#169;" Description="a&#10;b &#xD; &nbsp; &#0; &bogus"/>`,
+			title: "Learner's ©",
+			desc:  "a\nb \r &nbsp; &#0; &bogus",
+		},
+		{
 			name:  "empty description",
 			xml:   `<Dictionary Description="" Title="T"/>`,
 			title: "T",

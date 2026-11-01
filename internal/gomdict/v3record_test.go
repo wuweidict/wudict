@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
+	"hash/adler32"
 	"os"
 	"path/filepath"
 	"sync"
@@ -16,19 +17,17 @@ import (
 
 // v3 record-data section, written the way the format writes it, so the table
 // walker and the locator are exercised against bytes rather than against a
-// mock. The plan asked for the v3 locate to be checked "against the v1/v2
-// path"; there is no v1/v2 fixture in the repo to diff against, and the two
-// layouts do not share a record section anyway, so the stronger check is used
-// instead: the payload is synthesised here, so the expected bytes for every
-// offset range are known exactly.
+// mock. The payload is synthesised here, so the expected bytes for every
+// offset range are known exactly. There is no RecordIndex section, so the
+// table comes from the block walk (fixture_test.go builds whole files with one).
 //
 //	[4 BE] block count
-//	[8 BE] total decompressed size
+//	[8 BE] data size: the byte length of the framed blocks
 //	per block: [4 BE decompSize][4 BE compSize][payload]
-//	payload:   [4 LE info][4 BE adler32 over the compressed bytes][data]
+//	payload:   [4 LE info][4 BE adler32 over the decompressed bytes][data]
 //
 // info 0 is "no compression, no encryption", info 2 is zlib; both are written
-// so decodeBlockV3 is covered on the path the locator actually takes.
+// so decodeBlock is covered on the path the locator actually takes.
 func writeV3Records(t *testing.T, blocks [][]byte, zlibBlock bool) (path string, total int64) {
 	t.Helper()
 
@@ -56,14 +55,20 @@ func writeV3Records(t *testing.T, blocks [][]byte, zlibBlock bool) (path string,
 		}
 		var p bytes.Buffer
 		_ = binary.Write(&p, binary.LittleEndian, info)
-		_ = binary.Write(&p, binary.BigEndian, adler32Of(data))
+		// Unencrypted, so the checksum covers the decompressed bytes.
+		_ = binary.Write(&p, binary.BigEndian, adler32.Checksum(raw))
 		p.Write(data)
 		payloads = append(payloads, p.Bytes())
 		total += int64(len(raw))
 	}
 
+	// The data size is the byte length of the framed blocks.
+	var dataLen int
+	for _, p := range payloads {
+		dataLen += 8 + len(p)
+	}
 	_ = binary.Write(&body, binary.BigEndian, uint32(len(blocks)))
-	_ = binary.Write(&body, binary.BigEndian, uint64(total))
+	_ = binary.Write(&body, binary.BigEndian, uint64(dataLen))
 	for i, p := range payloads {
 		_ = binary.Write(&body, binary.BigEndian, uint32(len(blocks[i])))
 		_ = binary.Write(&body, binary.BigEndian, uint32(len(p)))

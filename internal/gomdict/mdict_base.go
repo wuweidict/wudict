@@ -17,78 +17,62 @@
 // Derived from medict (https://github.com/terasum/medict),
 // internal/libs/go-mdict.
 //
-// Modified in 2026 by glowinthedark: MDX v3 block scanning,
-// indexed record access and a logging shim replacing the go-logging.
+// Modified in 2026 by glowinthedark: MDX v3 block scanning, indexed record
+// access, a logging shim replacing the go-logging, and the header, key and
+// record tables read as MDict reads them (docs/mdict/).
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 package go_mdict
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/adler32"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/wuweidict/wudict/internal/logx"
 )
 
-// readDictHeader reads the dictionary header.
+// readDictHeader reads the header and the attributes the parser acts on, read
+// the way MDict reads them (mdx::ZDB_T::parseSpec; docs/mdict/FORMAT.md §2).
 func (mdict *MdictBase) readDictHeader() error {
-	// read dict header info
 	dictHeader, err := readMDictFileHeader(mdict.filePath)
 	if err != nil {
 		return err
 	}
-
 	mdict.header = dictHeader
 
-	// Parse header XML into a map
 	headerInfo, err := parseXMLHeader(dictHeader.headerInfo)
 	if err != nil {
 		return err
 	}
 
-	// TODO: Handle Alder32 checksum
-
 	meta := &mdictMeta{}
 
-	// Handle encryption flag.
-	// v1/v2: "Yes"/"No"; v3 may use "0"/"1"/"2" (integer bits:
-	//   0x00 = no encryption, 0x01 = record-block encrypted,
-	//   0x02 = key-info encrypted).
-	encrypted := headerInfo.Encrypted
-	switch {
-	case encrypted == "" || encrypted == "No":
-		meta.encryptType = EncryptNoEnc
-	case encrypted == "Yes":
-		meta.encryptType = EncryptRecordEnc
-	default:
-		n, parseErr := strconv.Atoi(encrypted)
-		if parseErr != nil {
-			// fall back to legacy single-char heuristic
-			if encrypted[0] == '2' {
-				meta.encryptType = EncryptKeyInfoEnc
-			} else if encrypted[0] == '1' {
-				meta.encryptType = EncryptRecordEnc
-			} else {
-				meta.encryptType = EncryptNoEnc
-			}
-		} else {
-			meta.encryptType = n
-		}
+	// The format version is RequiredEngineVersion, which MDict requires;
+	// GeneratedByEngineVersion is the writer's and the engine never reads it.
+	// Every known file gives both the same value, so the fallback only spares
+	// a header that names just one.
+	versionStr := headerInfo.RequiredEngineVersion
+	if strings.TrimSpace(versionStr) == "" {
+		versionStr = headerInfo.GeneratedByEngineVersion
 	}
-
-	// Handle version
-	versionStr := headerInfo.GeneratedByEngineVersion
-	version, err := strconv.ParseFloat(versionStr, 32)
-	if err != nil {
-		return err
+	version, ok := leadingFloat(versionStr)
+	if !ok {
+		return fmt.Errorf("the header names no format version (RequiredEngineVersion %q)", versionStr)
+	}
+	if int(version*100+1e-6) > 300 {
+		return fmt.Errorf("format version %s is newer than the 3.0 this reader knows", strings.TrimSpace(versionStr))
 	}
 	meta.version = float32(version)
 
-	// Handle number format and width based on version
 	if meta.version >= 2.0 {
 		meta.numberWidth = 8
 		meta.numberFormat = NumfmtBe8bytesq
@@ -97,24 +81,38 @@ func (mdict *MdictBase) readDictHeader() error {
 		meta.numberFormat = NumfmtBe4bytesi
 	}
 
-	meta.encoding = encodingOf(headerInfo.Encoding)
+	// atoi, as MDict reads it: "No", "Yes" and "" are all 0.
+	meta.encryptType = leadingInt(headerInfo.Encrypted)
 
-	// v3 is always UTF-8.
-	if meta.version >= 3.0 {
-		meta.encoding = EncodingUtf8
-	}
-
-	// Fix for MDD type
-	if mdict.fileType == MdictTypeMdd {
+	mdd := mdict.fileType == MdictTypeMdd
+	enc, named := encodingOf(headerInfo.Encoding)
+	switch {
+	case named:
+		meta.encoding = enc
+	case meta.version >= 3.0:
+		meta.encoding = EncodingUtf8 // the section trailers refine it (scanV3Blocks)
+	case mdd:
 		meta.encoding = EncodingUtf16
+	default:
+		// MDict's default for a v1/v2 .mdx whose Encoding is empty or unknown
+		// is code page 936; GB18030 is its superset.
+		meta.encoding = EncodingGb18030
 	}
+	meta.keyEncoding = meta.encoding
 
-	// v3 MDD: override the UTF-16 fix above; v3 is always UTF-8.
-	if meta.version >= 3.0 && mdict.fileType == MdictTypeMdd {
-		meta.encoding = EncodingUtf8
+	contentType := headerInfo.Format
+	if meta.version >= 3.0 {
+		contentType = headerInfo.ContentType
 	}
+	meta.contentType = contentTypeOf(contentType, mdd)
 
-	// 4 bytes header size + header_bytes_size + 4bytes alder checksum
+	compact := headerInfo.Compact
+	if strings.TrimSpace(compact) == "" {
+		compact = headerInfo.Compat
+	}
+	meta.compact = strings.EqualFold(strings.TrimSpace(compact), "Yes")
+
+	// 4 bytes header size + header_bytes_size + 4 bytes adler32
 	meta.keyBlockMetaStartOffset = int64(4 + dictHeader.headerBytesSize + 4)
 
 	meta.description = headerInfo.Description
@@ -130,24 +128,86 @@ func (mdict *MdictBase) readDictHeader() error {
 	}
 
 	mdict.meta = meta
-
 	return nil
 }
 
-// encodingOf maps the header's Encoding attribute. GBK and GB2312 are read as
-// their superset GB18030, as readmdict does; MdxBuilder also writes "GB18030"
-// itself. Anything unrecognised is UTF-8.
-func encodingOf(attr string) int {
+// encodingOf maps the header's Encoding attribute to an Encoding* constant and
+// reports whether the name was recognised. MDict recognises GBK, BIG5, UTF-16,
+// UTF-8 and ISO8859-1, case-insensitively; the aliases here are other
+// spellings of the same encodings. GBK and GB2312 are read as their superset
+// GB18030.
+func encodingOf(attr string) (int, bool) {
 	switch strings.ToLower(strings.TrimSpace(attr)) {
 	case "gbk", "gb2312", "gb18030":
-		return EncodingGb18030
+		return EncodingGb18030, true
 	case "big5":
-		return EncodingBig5
-	case "utf16", "utf-16", "utf-16le":
-		return EncodingUtf16
-	default:
-		return EncodingUtf8
+		return EncodingBig5, true
+	case "utf-16", "utf16", "utf-16le":
+		return EncodingUtf16, true
+	case "utf-8", "utf8":
+		return EncodingUtf8, true
+	case "iso8859-1", "iso-8859-1", "latin1":
+		return EncodingLatin1, true
 	}
+	return EncodingUtf8, false
+}
+
+// contentTypeOf maps Format (v1/v2) or ContentType (v3). An absent or unknown
+// value is HTML for an .mdx, where MDict would show plain text: the
+// dictionaries that omit it are written for readers that render every record
+// as HTML, and escaping their markup would break them. Only an explicit
+// "Text" - MdxBuilder writes it for SugarDict and KDict sources - is text. An
+// .mdd defaults to binary.
+func contentTypeOf(attr string, mdd bool) int {
+	switch strings.ToLower(strings.TrimSpace(attr)) {
+	case "text":
+		return ContentText
+	case "html":
+		return ContentHTML
+	case "xml":
+		return ContentXML
+	case "binary":
+		return ContentBinary
+	}
+	if mdd {
+		return ContentBinary
+	}
+	return ContentHTML
+}
+
+// leadingInt is C's atoi: optional leading space and sign, then the digits
+// that follow; anything else ends the number, and no digits is 0.
+func leadingInt(s string) int {
+	s = strings.TrimLeft(s, " \t\r\n")
+	neg := false
+	if s != "" && (s[0] == '+' || s[0] == '-') {
+		neg = s[0] == '-'
+		s = s[1:]
+	}
+	n := 0
+	for i := 0; i < len(s) && s[i] >= '0' && s[i] <= '9' && n < 1<<30; i++ {
+		n = n*10 + int(s[i]-'0')
+	}
+	if neg {
+		return -n
+	}
+	return n
+}
+
+// leadingFloat is C's atof over a plain decimal: the longest prefix that is a
+// number, so "2.0" and "2.0 beta" both read 2. ok is false when there is none.
+func leadingFloat(s string) (float64, bool) {
+	s = strings.TrimSpace(s)
+	end, dot := 0, false
+	for end < len(s) && (s[end] >= '0' && s[end] <= '9' || s[end] == '.' && !dot) {
+		dot = dot || s[end] == '.'
+		end++
+	}
+	f, err := strconv.ParseFloat(strings.TrimSuffix(s[:end], "."), 64)
+	if err != nil {
+		return 0, false
+	}
+	return f, true
 }
 
 func readMDictFileHeader(filename string) (*mdictHeader, error) {
@@ -157,174 +217,130 @@ func readMDictFileHeader(filename string) (*mdictHeader, error) {
 	}
 	defer file.Close()
 
-	dictHeaderPartByteSize := int64(0)
-
-	// Read dictionary header length
 	var headerBytesSize uint32
-	dictHeaderPartByteSize += 4
-	err = binary.Read(file, binary.BigEndian, &headerBytesSize)
-	if err != nil {
+	if err := binary.Read(file, binary.BigEndian, &headerBytesSize); err != nil {
 		return nil, err
 	}
 
-	// Read dictionary header info bytes. Via readFileFromPos, so a hostile
-	// length cannot allocate before the file is known to hold that many
-	// bytes - the header is an XML string, kilobytes in every real dictionary.
+	// Via readFileFromPos, so a hostile length cannot allocate before the file
+	// is known to hold that many bytes - the header is an XML string,
+	// kilobytes in every real dictionary.
 	headerInfoBytes, err := readFileFromPos(file, 4, int64(headerBytesSize))
 	if err != nil {
 		return nil, err
 	}
-	dictHeaderPartByteSize += int64(headerBytesSize)
 
-	// Read adler32 checksum
+	// The checksum is little-endian, unlike every other number in the format.
+	// MDict refuses a mismatch; it is noted here instead, because the XML
+	// either parses or fails on its own.
 	var adler32Checksum uint32
-	dictHeaderPartByteSize += 4
-	err = binary.Read(file, binary.BigEndian, &adler32Checksum)
-	if err != nil {
+	if err := binary.Read(file, binary.LittleEndian, &adler32Checksum); err != nil {
 		return nil, err
 	}
+	if adler32.Checksum(headerInfoBytes) != adler32Checksum {
+		logx.V("%s: header checksum does not match its text", filepath.Base(filename))
+	}
 
-	// v1/v2 headers are UTF-16LE ending with \x00\x00; v3 headers are UTF-8
-	// (ending with \x00 or just whitespace). Detect by the trailing NUL pair.
+	// UTF-16LE when the text starts "<\0" (v1/v2), which is MDict's test; a
+	// header ending in a two-byte NUL is UTF-16 too, which also covers one that
+	// opens with a byte-order mark. Otherwise UTF-8 (v3).
 	var utfHeaderInfo string
-	if len(headerInfoBytes) >= 2 && headerInfoBytes[len(headerInfoBytes)-1] == 0 && headerInfoBytes[len(headerInfoBytes)-2] == 0 {
-		utfHeaderInfo = littleEndianBinUTF16ToUTF8(headerInfoBytes, 0, int(headerBytesSize))
+	n := len(headerInfoBytes)
+	if n >= 2 && (headerInfoBytes[0] == '<' && headerInfoBytes[1] == 0 ||
+		n%2 == 0 && headerInfoBytes[n-1] == 0 && headerInfoBytes[n-2] == 0) {
+		utfHeaderInfo = littleEndianBinUTF16ToUTF8(headerInfoBytes, 0, n)
 	} else {
 		utfHeaderInfo = string(headerInfoBytes)
 	}
+	utfHeaderInfo = strings.TrimRight(utfHeaderInfo, "\x00")
 	utfHeaderInfo = strings.Replace(utfHeaderInfo, "Library_Data", "Dictionary", 1)
 
-	mdict := &mdictHeader{
+	return &mdictHeader{
 		headerBytesSize:          headerBytesSize,
 		headerInfoBytes:          headerInfoBytes,
 		headerInfo:               utfHeaderInfo,
 		adler32Checksum:          adler32Checksum,
-		dictionaryHeaderByteSize: dictHeaderPartByteSize,
-	}
-
-	return mdict, nil
+		dictionaryHeaderByteSize: int64(4 + n + 4),
+	}, nil
 }
 
-// readKeyBlockMeta keyblock header part contains keyblock meta info
+// byteCursor reads big-endian fields off a decoded buffer, reporting a short
+// buffer instead of panicking: every count and length in it came out of the
+// file.
+type byteCursor struct {
+	b   []byte
+	off int
+	bad bool
+}
+
+func (c *byteCursor) take(n int) []byte {
+	if c.bad || n < 0 || n > len(c.b)-c.off {
+		c.bad = true
+		return nil
+	}
+	out := c.b[c.off : c.off+n]
+	c.off += n
+	return out
+}
+
+// uint reads an unsigned big-endian integer of width 1, 2, 4 or 8 bytes.
+func (c *byteCursor) uint(width int) int64 {
+	b := c.take(width)
+	var n uint64
+	for _, x := range b {
+		n = n<<8 | uint64(x)
+	}
+	return int64(n)
+}
+
+// readKeyBlockMeta reads the v1/v2 key-block meta: the counts and sizes of the
+// key-block info and the key blocks (docs/mdict/FORMAT.md §3.1).
 func (mdict *MdictBase) readKeyBlockMeta() error {
+	// A registered dictionary encrypts this very header with a key derived
+	// from the purchaser's registration code, which a reader without that
+	// code cannot have.
+	if mdict.meta.encryptType&EncryptRecordEnc != 0 {
+		return errors.New("registered dictionary: it can only be read with the purchaser's registration code")
+	}
+
 	file, err := os.Open(mdict.filePath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	keyBlockMeta := &mdictKeyBlockMeta{}
-
-	// Key block meta info part
-	// if version > 2.0 key-block meta part bytes length: 40
-	// else: length: 16
-	keyBlockMetaBytesNum := 0
-	if mdict.meta.version >= 2.0 {
-		keyBlockMetaBytesNum = 8 * 5
-	} else {
-		keyBlockMetaBytesNum = 4 * 4
+	v2 := mdict.meta.version >= 2.0
+	n := 4 * 4
+	if v2 {
+		n = 8*5 + 4 // five numbers and their adler32
 	}
-
-	// Key block meta info buffer
-	keyBlockMetaBuffer, err := readFileFromPos(file, mdict.meta.keyBlockMetaStartOffset, int64(keyBlockMetaBytesNum))
+	buf, err := readFileFromPos(file, mdict.meta.keyBlockMetaStartOffset, int64(n))
 	if err != nil {
 		return err
 	}
-
-	// TODO: Key block info encrypted file not supported yet
-	if mdict.meta.encryptType == EncryptRecordEnc {
-		return errors.New("user identification is needed to read encrypted file")
+	// MDict refuses a mismatch here; it is noted instead. Registered
+	// dictionaries, whose encrypted counts are what the check exists to catch,
+	// were refused above, and corrupt counts fail on the reads they drive.
+	if v2 && adler32.Checksum(buf[:40]) != binary.BigEndian.Uint32(buf[40:44]) {
+		logx.V("%s: key-block header checksum does not match", filepath.Base(mdict.filePath))
 	}
 
-	// Key block meta info struct:
-	// [0:8]([0:4]) - Number of key blocks
-	// [8:16]([4:8]) - Number of entries
-	// [16:24] - Key block info decompressed size (if version >= 2.0, otherwise, this section does not exist)
-	// [24:32]([8:12]) - Key block info size
-	// [32:40]([12:16]) - Key block size
-	// Note: If version <2.0, the key info buffer size is 4 * 4
-	//       Otherwise, the key info buffer size is 5 * 8
-
-	// 1. [0:8]([0:4]) - Number of key blocks
-	keyBlockNumBytes := keyBlockMetaBuffer[0:mdict.meta.numberWidth]
-
-	var keyBlockNumber uint64
-	if mdict.meta.numberWidth == 8 {
-		keyBlockNumber = beBinToU64(keyBlockNumBytes)
-	} else if mdict.meta.numberWidth == 4 {
-		keyBlockNumber = uint64(beBinToU32(keyBlockNumBytes))
+	w := mdict.meta.numberWidth
+	c := byteCursor{b: buf}
+	m := &mdictKeyBlockMeta{}
+	m.keyBlockNum = c.uint(w)
+	m.entriesNum = c.uint(w)
+	if v2 {
+		m.keyBlockInfoDecompressSize = c.uint(w)
 	}
-	keyBlockMeta.keyBlockNum = int64(keyBlockNumber)
-
-	// 2. [8:16]([4:8]) - Number of entries
-	entriesNumBytes := keyBlockMetaBuffer[mdict.meta.numberWidth : mdict.meta.numberWidth+mdict.meta.numberWidth]
-	if err != nil {
-		return err
+	m.keyBlockInfoCompressedSize = c.uint(w)
+	m.keyBlockDataTotalSize = c.uint(w)
+	if c.bad || m.keyBlockNum < 0 || m.entriesNum < 0 || m.keyBlockInfoCompressedSize < 0 || m.keyBlockDataTotalSize < 0 {
+		return errors.New("the key-block header is corrupt")
 	}
+	m.keyBlockInfoStartOffset = mdict.meta.keyBlockMetaStartOffset + int64(n)
 
-	var entriesNum uint64
-	if mdict.meta.numberWidth == 8 {
-		entriesNum = beBinToU64(entriesNumBytes)
-	} else if mdict.meta.numberWidth == 4 {
-		entriesNum = uint64(beBinToU32(entriesNumBytes))
-	}
-	keyBlockMeta.entriesNum = int64(entriesNum)
-
-	var keyBlockInfoSizeBytesStartOffset int
-
-	// 3. [16:24] - Key block info decompressed size (if version >= 2.0, this section exists)
-	if mdict.meta.version >= 2.0 {
-		keyBlockInfoDecompressSizeBytes := keyBlockMetaBuffer[mdict.meta.numberWidth*2 : mdict.meta.numberWidth*2+mdict.meta.numberWidth]
-
-		var keyBlockInfoDecompressSize uint64
-		if mdict.meta.numberWidth == 8 {
-			keyBlockInfoDecompressSize = beBinToU64(keyBlockInfoDecompressSizeBytes)
-		} else if mdict.meta.numberWidth == 4 {
-			keyBlockInfoDecompressSize = uint64(beBinToU32(keyBlockInfoDecompressSizeBytes))
-		}
-		keyBlockMeta.keyBlockInfoDecompressSize = int64(keyBlockInfoDecompressSize)
-
-		keyBlockInfoSizeBytesStartOffset = mdict.meta.numberWidth * 3
-
-	} else {
-		keyBlockInfoSizeBytesStartOffset = mdict.meta.numberWidth * 2
-	}
-
-	// 4. [24:32]([8:12]) - Key block info size
-	keyBlockInfoSizeBytes := keyBlockMetaBuffer[keyBlockInfoSizeBytesStartOffset : keyBlockInfoSizeBytesStartOffset+mdict.meta.numberWidth]
-
-	var keyBlockInfoSize uint64
-	if mdict.meta.numberWidth == 8 {
-		keyBlockInfoSize = beBinToU64(keyBlockInfoSizeBytes)
-	} else if mdict.meta.numberWidth == 4 {
-		keyBlockInfoSize = uint64(beBinToU32(keyBlockInfoSizeBytes))
-	}
-
-	keyBlockMeta.keyBlockInfoCompressedSize = int64(keyBlockInfoSize)
-
-	// 5. [32:40]([12:16]) - Key block size
-	keyBlockDataSizeBytes := keyBlockMetaBuffer[keyBlockInfoSizeBytesStartOffset+mdict.meta.numberWidth : keyBlockInfoSizeBytesStartOffset+mdict.meta.numberWidth+mdict.meta.numberWidth]
-
-	var keyBlockDataSize uint64
-	if mdict.meta.numberWidth == 8 {
-		keyBlockDataSize = beBinToU64(keyBlockDataSizeBytes)
-	} else if mdict.meta.numberWidth == 4 {
-		keyBlockDataSize = uint64(beBinToU32(keyBlockDataSizeBytes))
-	}
-	keyBlockMeta.keyBlockDataTotalSize = int64(keyBlockDataSize)
-
-	// 6. [40:44] - 4 bytes checksum (TODO: Skip if version > 2.0)
-	// TODO checksum verification
-
-	// Free key block info buffer
-	if mdict.meta.version >= 2.0 {
-		keyBlockMeta.keyBlockInfoStartOffset = mdict.meta.keyBlockMetaStartOffset + 40 + 4
-	} else {
-		keyBlockMeta.keyBlockInfoStartOffset = mdict.meta.keyBlockMetaStartOffset + 16
-	}
-
-	mdict.keyBlockMeta = keyBlockMeta
-
+	mdict.keyBlockMeta = m
 	return nil
 }
 
@@ -339,170 +355,79 @@ func (mdict *MdictBase) readKeyBlockInfo() error {
 	if err != nil {
 		return err
 	}
-
-	err = mdict.decodeKeyBlockInfo(buffer)
-	if err != nil {
-		return err
-	}
-	return nil
-
+	return mdict.decodeKeyBlockInfo(buffer)
 }
 
+// decodeKeyBlockInfo decodes the key-block info: per key block, its entry
+// count, first and last keys, and compressed and decompressed sizes
+// (docs/mdict/FORMAT.md §3.2). v2 stores it as an ordinary block, which MDict
+// decodes with the general block codec, so any compression method is
+// accepted; v1 stores it uncompressed.
 func (mdict *MdictBase) decodeKeyBlockInfo(data []byte) error {
-	// key block info format differs by engine version:
-	//   v >= 2.0: [4-byte comp type 0x02000000][4-byte adler32][zlib-compressed data]
-	//   v <  2.0: raw uncompressed data (no comp-type tag, no adler32, no decompression)
+	v2 := mdict.meta.version >= 2.0
 
-	// decrypt (only v2.x supports key-info encryption; this is a no-op for v1.x)
-	var keyBlockInfoDecryptedBuffer []byte
-	if mdict.meta.encryptType == EncryptKeyInfoEnc {
-		keyBlockInfoDecryptedBuffer = mdxDecrypt(data, mdict.keyBlockMeta.keyBlockInfoCompressedSize)
-	} else {
-		keyBlockInfoDecryptedBuffer = data
+	// Encrypted bit 1: the payload after the 8-byte block header is
+	// fast-encrypted. MDict undoes it whatever the version.
+	if mdict.meta.encryptType&EncryptKeyInfoEnc != 0 {
+		decryptKeyInfo(data)
 	}
-
-	var decompressKeyInfoBuffer []byte
-
-	if mdict.meta.version >= 2.0 {
-		// v2.x: validate the comp-type magic, then zlib-decompress payload[8:]
-		if data[0] != 2 || data[1] != 0 || data[2] != 0 || data[3] != 0 {
-			return errors.New("check key-block info magic number 0x02000000 failed")
-		}
-
-		var err error
-		decompressKeyInfoBuffer, err = zlibDecompress(keyBlockInfoDecryptedBuffer, 8, mdict.keyBlockMeta.keyBlockInfoCompressedSize-8, maxLZOBlock())
+	info := data
+	if v2 {
+		out, err := mdict.decodeBlock(data, int(mdict.keyBlockMeta.keyBlockInfoDecompressSize))
 		if err != nil {
-			return err
+			return fmt.Errorf("key-block info: %w", err)
 		}
-		if int64(len(decompressKeyInfoBuffer)) != mdict.keyBlockMeta.keyBlockInfoDecompressSize {
-			return errors.New("decoded key block info data size not equals to key block meta indicates key block info size")
-		}
-	} else {
-		// v1.x: no compression, no header to skip - the buffer is already the data
-		decompressKeyInfoBuffer = keyBlockInfoDecryptedBuffer
+		info = out
 	}
 
-	// decode key-block entries
-	var counter int64 = 0
-	var currentEntriesSize int64 = 0
-	var numEntriesCounter int64 = 0
-	byteWidth := 1
-	textTerm := 0
+	sizeWidth, term := 1, 0
+	if v2 {
+		sizeWidth, term = 2, 1
+	}
+	unit := 1
+	if mdict.meta.keyEncoding == EncodingUtf16 {
+		unit = 2
+	}
+	w := mdict.meta.numberWidth
 
-	if mdict.meta.version >= 2.0 {
-		byteWidth = 2
-		textTerm = 1
+	c := byteCursor{b: info}
+	list := make([]*mdictKeyBlockInfoItem, 0)
+	var compAccu, decompAccu int64
+	for i := int64(0); i < mdict.keyBlockMeta.keyBlockNum; i++ {
+		// The entry count, then the first and last keys, which only a binary
+		// search over the key blocks would need: skipped.
+		entries := c.uint(w)
+		c.take((int(c.uint(sizeWidth)) + term) * unit)
+		c.take((int(c.uint(sizeWidth)) + term) * unit)
+		compSize := c.uint(w)
+		decompSize := c.uint(w)
+		if c.bad || compSize < 0 || decompSize < 0 {
+			return fmt.Errorf("the key-block info ends after %d of %d key blocks", i, mdict.keyBlockMeta.keyBlockNum)
+		}
+		list = append(list, &mdictKeyBlockInfoItem{
+			entries:                       entries,
+			keyBlockCompressSize:          compSize,
+			keyBlockDeCompressSize:        decompSize,
+			keyBlockDeCompressAccumulator: decompAccu,
+		})
+		compAccu += compSize
+		decompAccu += decompSize
 	}
 
-	var dataOffset = 0
-	var compressSizeAccumulator = 0
-	var decompressSizeAccumulator = 0
-
-	keyBlockInfo := &mdictKeyBlockInfo{
-		keyBlockEntriesStartOffset: 0,
-		keyBlockInfoList:           make([]*mdictKeyBlockInfoItem, 0),
+	mdict.keyBlockInfo = &mdictKeyBlockInfo{
+		keyBlockEntriesStartOffset: mdict.keyBlockMeta.keyBlockInfoCompressedSize + mdict.keyBlockMeta.keyBlockInfoStartOffset,
+		keyBlockInfoList:           list,
 	}
 
-	for counter < mdict.keyBlockMeta.keyBlockNum {
-		firstKeySize, lastKeySize := 0, 0
-		firstKey := ""
-		lastKey := ""
-
-		if mdict.meta.version >= 2.0 {
-			currentEntriesSize = int64(beBinToU64(decompressKeyInfoBuffer[dataOffset : dataOffset+mdict.meta.numberWidth]))
-			dataOffset += mdict.meta.numberWidth
-			firstKeySize = int(beBinToU16(decompressKeyInfoBuffer[dataOffset : dataOffset+byteWidth]))
-			dataOffset += byteWidth
-		} else {
-			currentEntriesSize = int64(beBinToU32(decompressKeyInfoBuffer[dataOffset : dataOffset+mdict.meta.numberWidth]))
-			dataOffset += mdict.meta.numberWidth
-			firstKeySize = int(int64(beBinToU8(decompressKeyInfoBuffer[dataOffset : dataOffset+byteWidth])))
-			dataOffset += byteWidth
-		}
-		numEntriesCounter += currentEntriesSize
-
-		// step_gap means first key start data_offset to first key end;
-		var stepGap = 0
-		var termSize = textTerm
-		if mdict.meta.encoding == EncodingUtf16 || mdict.fileType == MdictTypeMdd {
-			stepGap = (firstKeySize + textTerm) * 2
-			termSize = textTerm * 2
-		} else {
-			stepGap = firstKeySize + textTerm
-			termSize = textTerm
-		}
-
-		firstKey = bigEndianBinToUTF8(decompressKeyInfoBuffer, dataOffset, stepGap-termSize)
-
-		dataOffset += stepGap
-
-		if mdict.meta.version >= 2.0 {
-			lastKeySize = int(beBinToU16(decompressKeyInfoBuffer[dataOffset : dataOffset+byteWidth]))
-		} else {
-			lastKeySize = int(beBinToU8(decompressKeyInfoBuffer[dataOffset : dataOffset+byteWidth]))
-		}
-		dataOffset += byteWidth
-
-		if mdict.meta.encoding == EncodingUtf16 || mdict.fileType == MdictTypeMdd {
-			stepGap = (lastKeySize + textTerm) * 2
-			termSize = textTerm * 2
-		} else {
-			stepGap = lastKeySize + textTerm
-			termSize = textTerm
-		}
-
-		lastKey = bigEndianBinToUTF8(decompressKeyInfoBuffer, dataOffset, stepGap-termSize)
-
-		dataOffset += stepGap
-		// key block data meta part
-		keyBlockCompressSize := 0
-		if mdict.meta.version >= 2.0 {
-			keyBlockCompressSize = int(beBinToU64(decompressKeyInfoBuffer[dataOffset : dataOffset+mdict.meta.numberWidth]))
-		} else {
-			keyBlockCompressSize = int(beBinToU32(decompressKeyInfoBuffer[dataOffset : dataOffset+mdict.meta.numberWidth]))
-		}
-		dataOffset += mdict.meta.numberWidth
-
-		keyBlockDecompressSize := 0
-		if mdict.meta.version >= 2.0 {
-			keyBlockDecompressSize = int(beBinToU64(decompressKeyInfoBuffer[dataOffset : dataOffset+mdict.meta.numberWidth]))
-		} else {
-			keyBlockDecompressSize = int(beBinToU32(decompressKeyInfoBuffer[dataOffset : dataOffset+mdict.meta.numberWidth]))
-		}
-
-		dataOffset += mdict.meta.numberWidth
-
-		keyBlockInfoItem := &mdictKeyBlockInfoItem{
-			firstKey:                      firstKey,
-			firstKeySize:                  firstKeySize,
-			lastKey:                       lastKey,
-			lastKeySize:                   lastKeySize,
-			keyBlockInfoIndex:             int(counter),
-			keyBlockCompressSize:          int64(keyBlockCompressSize),
-			keyBlockCompAccumulator:       int64(compressSizeAccumulator),
-			keyBlockDeCompressSize:        int64(keyBlockDecompressSize),
-			keyBlockDeCompressAccumulator: int64(decompressSizeAccumulator),
-		}
-
-		compressSizeAccumulator += keyBlockCompressSize
-		decompressSizeAccumulator += keyBlockDecompressSize
-
-		keyBlockInfo.keyBlockInfoList = append(keyBlockInfo.keyBlockInfoList, keyBlockInfoItem)
-
-		counter++
-
+	// The meta's key-blocks size locates the record section and bounds the
+	// key-block read; MDict never compares it with the blocks' own sizes, so a
+	// difference is a note, and a block that falls outside is dropped by
+	// decodeKeyEntries.
+	if compAccu != mdict.keyBlockMeta.keyBlockDataTotalSize {
+		logx.V("%s: key blocks add up to %d bytes, the header says %d",
+			filepath.Base(mdict.filePath), compAccu, mdict.keyBlockMeta.keyBlockDataTotalSize)
 	}
-	//keyBlockInfo.keyBlockEntriesStartOffset = int64(dataOffset) + mdict.keyBlockMeta.keyBlockInfoStartOffset
-	keyBlockInfo.keyBlockEntriesStartOffset = mdict.keyBlockMeta.keyBlockInfoCompressedSize + mdict.keyBlockMeta.keyBlockInfoStartOffset
-
-	mdict.keyBlockInfo = keyBlockInfo
-
-	if int64(compressSizeAccumulator) != mdict.keyBlockMeta.keyBlockDataTotalSize {
-		return fmt.Errorf("key block data compress size not equals to meta key block data compress size(%d/%d)", compressSizeAccumulator, mdict.keyBlockMeta.keyBlockDataTotalSize)
-	}
-
 	return nil
-
 }
 
 func (mdict *MdictBase) readKeyEntries() error {
@@ -518,106 +443,76 @@ func (mdict *MdictBase) readKeyEntries() error {
 	if err != nil {
 		return err
 	}
-
-	err = mdict.decodeKeyEntries(buffer)
-	if err != nil {
-		return err
-	}
-	return nil
+	return mdict.decodeKeyEntries(buffer)
 }
 
-func (mdict *MdictBase) decodeKeyEntries(keyBlockDataCompressBuffer []byte) error {
+// decodeKeyEntries decodes every key block. A block that cannot be decoded
+// costs its own keys and nothing else: MDict loads key blocks lazily, so a
+// corrupt one leaves the rest of the dictionary readable, and refusing the
+// whole file would refuse a dictionary MDict opens.
+func (mdict *MdictBase) decodeKeyEntries(buf []byte) error {
+	list := mdict.keyBlockInfo.keyBlockInfoList
+	var keyBytes int64
+	if n := len(list); n > 0 {
+		keyBytes = list[n-1].keyBlockDeCompressAccumulator + list[n-1].keyBlockDeCompressSize
+	}
+	entries := make([]*MDictKeywordEntry, 0, keyCountHint(mdict.keyBlockMeta.entriesNum, keyBytes, mdict.meta.numberWidth))
+	var gaps []int // index of the last entry before an unreadable block
+	failed := 0
+	var firstErr error
 
 	start := int64(0)
-	end := int64(0)
-	compAccu := int64(0)
-
-	keyBlockData := &mdictKeyBlockData{
-		keyEntries:                 make([]*MDictKeywordEntry, 0),
-		keyEntriesSize:             0,
-		recordBlockMetaStartOffset: 0,
-	}
-
-	for idx := 0; idx < len(mdict.keyBlockInfo.keyBlockInfoList); idx++ {
-
-		compressedSize := mdict.keyBlockInfo.keyBlockInfoList[idx].keyBlockCompressSize
-		decompressedSize := mdict.keyBlockInfo.keyBlockInfoList[idx].keyBlockDeCompressSize
-
-		compAccu += mdict.keyBlockInfo.keyBlockInfoList[idx].keyBlockCompressSize
-
-		end = start + compressedSize
-
-		if int64(start) != int64(mdict.keyBlockInfo.keyBlockInfoList[idx].keyBlockCompAccumulator) {
-			return fmt.Errorf("[%d] the key-block data start offset not equal to key block compress accumulator(%d/%d/%d)\n",
-				idx, start, mdict.keyBlockInfo.keyBlockInfoList[idx].keyBlockCompAccumulator, compAccu)
-		}
-
-		kbCompType := keyBlockDataCompressBuffer[start : start+4]
-		// TODO 4 bytes adler32 checksum
-		// # 4 bytes : adler checksum of decompressed key block
-		// adler32 = unpack('>I', key_block_compressed[start + 4:start + 8])[0]
-
-		var key_block []byte
-
-		if kbCompType[0] == 0 {
-			key_block = keyBlockDataCompressBuffer[start+8 : end]
-
-		} else if kbCompType[0] == 1 {
-			// LZO1X: raw LZO1X data (no MDict \xf0 prefix), sized by the
-			// block header.
-			raw := keyBlockDataCompressBuffer[start+8 : end]
-			out, err1 := lzoDecompress1X(raw, int(decompressedSize))
-			if err1 != nil {
-				return err1
+	for idx, item := range list {
+		end := start + item.keyBlockCompressSize
+		if item.keyBlockCompressSize < 8 || end > int64(len(buf)) {
+			// This block and every later one lie outside the key section.
+			failed += len(list) - idx
+			if firstErr == nil {
+				firstErr = fmt.Errorf("key block %d lies outside the key section", idx)
 			}
-
-			key_block = out
-
-			//} else if (kbCompType.toString('hex') === '02000000') {
-		} else if kbCompType[0] == 2 {
-			// decompress key block, zlib decompress
-			out, err2 := zlibDecompress(keyBlockDataCompressBuffer, start+8, end-(start+8), maxLZOBlock())
-			if err2 != nil {
-				return err2
-			}
-			key_block = out
-
-			// extract one single key block into a key list
-			// notice that adler32 returns signed value
-			// TODO compare with previous word
-			// assert(adler32 == zlib.adler32(key_block) & 0xffffffff)
-		} else {
-			return fmt.Errorf("cannot determine the compress type %v", kbCompType)
+			break
 		}
-
-		splitKeys := mdict.splitKeyBlock(key_block)
-
-		keyBlockData.keyEntries = append(keyBlockData.keyEntries, splitKeys...)
-		keyBlockData.keyEntriesSize += int64(len(splitKeys))
-
-		//fmt.Printf("idx(%05d)[start:%05d/end:%05d/comps:%05d->datalen:%05d/compaccu:%d]\n", idx, start, end, compressedSize, len(key_block), compAccu)
-		//fmt.Printf("key_list %+v\n", splitKeys)
-
+		blk, err := mdict.decodeBlock(buf[start:end], int(item.keyBlockDeCompressSize))
 		start = end
+		if err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("key block %d: %w", idx, err)
+			}
+			gaps = append(gaps, len(entries)-1)
+			continue
+		}
+		entries = mdict.appendKeyBlock(entries, blk, item.entries)
+	}
+	if len(entries) == 0 && failed > 0 {
+		return firstErr
 	}
 
-	// splitKeyBlock backfills each entry's end offset from its successor, but
-	// only WITHIN the block it was handed: the last entry of every key block
-	// keeps the 0 sentinel, which locateByKeywordEntry reads as "to the end of
-	// the record block" - so that entry would hand back its own record plus
-	// everything filed after it in that block. Hence the chaining across the
-	// seams; 0 stays the sentinel for the one entry that is genuinely
-	// open-ended, the last of the dictionary.
-	chainRecordEnds(keyBlockData.keyEntries, 0)
-
-	if keyBlockData.keyEntriesSize != mdict.keyBlockMeta.entriesNum {
-		return errors.New("the key list items not equals to entries num")
+	// Each record ends where the next key's record starts, across key-block
+	// seams too. Across an unreadable block that successor is unknown, so the
+	// entry before the gap gets the open-ended sentinel and is read to the end
+	// of its record block.
+	chainRecordEnds(entries, 0)
+	for _, g := range gaps {
+		if g >= 0 {
+			entries[g].RecordEndOffset = 0
+		}
 	}
-	keyBlockData.recordBlockMetaStartOffset = mdict.keyBlockInfo.keyBlockEntriesStartOffset + mdict.keyBlockMeta.keyBlockDataTotalSize
 
-	// keep key list in memory
-	mdict.keyBlockData = keyBlockData
+	if failed > 0 {
+		logx.Warn("%s: %d of %d key blocks cannot be read (%v); the headwords in them are missing",
+			filepath.Base(mdict.filePath), failed, len(list), firstErr)
+	}
+	if int64(len(entries)) != mdict.keyBlockMeta.entriesNum && failed == 0 {
+		logx.V("%s: %d headwords read, the header says %d",
+			filepath.Base(mdict.filePath), len(entries), mdict.keyBlockMeta.entriesNum)
+	}
 
+	mdict.keyBlockData = &mdictKeyBlockData{
+		keyEntries:                 entries,
+		keyEntriesSize:             int64(len(entries)),
+		recordBlockMetaStartOffset: mdict.keyBlockInfo.keyBlockEntriesStartOffset + mdict.keyBlockMeta.keyBlockDataTotalSize,
+	}
 	return nil
 }
 
@@ -636,71 +531,91 @@ func chainRecordEnds(entries []*MDictKeywordEntry, lastEnd int64) {
 }
 
 func (mdict *MdictBase) splitKeyBlock(keyBlock []byte) []*MDictKeywordEntry {
-	// The terminator width follows the *encoding*, never the file type. MDD key
-	// lists are UTF-16 in v1/v2 - which is why readDictHeader forces the
-	// encoding to UTF-16 for those - but v3 is UTF-8 throughout, MDD included,
-	// and there the keys are single-byte with a single-NUL terminator. Deriving
-	// the width from fileType==MDD scanned a v3 MDD key block at a two-byte
-	// stride, walked past every terminator and then off the end of the block.
-	width := 1
-	if mdict.meta.encoding == EncodingUtf16 {
-		width = 2
+	return mdict.appendKeyBlock(nil, keyBlock, 0)
+}
+
+// appendKeyBlock splits one decompressed key block,
+//
+//	[record offset: Number][key text][NUL unit]   … to the end of the block
+//
+// and appends its entries to dst. Keys come back decoded to UTF-8 and
+// trimmed. The entries of a block share one backing array, sized by hint (the
+// block's declared key count; 0 when unknown): a dictionary has up to
+// millions of entries, and one heap object each was most of the open's
+// allocations. Record end offsets are left to chainRecordEnds.
+//
+// The terminator width follows the key *encoding*, never the file type. A
+// v1/v2 MDD defaults to UTF-16 keys - readDictHeader's default for an MDD
+// whose header names no encoding - but a v3 MDD is UTF-8 unless its KeyData
+// trailer says otherwise, with single-byte keys and a one-byte NUL. Deriving
+// the width from fileType==MDD scanned a v3 MDD key block at a two-byte
+// stride, walked past every terminator and then off the block.
+func (mdict *MdictBase) appendKeyBlock(dst []*MDictKeywordEntry, keyBlock []byte, hint int64) []*MDictKeywordEntry {
+	nw := mdict.meta.numberWidth
+	enc := mdict.meta.keyEncoding
+	// Every key takes at least its number and a terminator, which bounds a
+	// declared count that came out of the file.
+	if most := int64(len(keyBlock) / (nw + 1)); hint <= 0 || hint > most {
+		hint = min(most, 64)
 	}
+	slab := make([]MDictKeywordEntry, 0, hint)
 
-	keyList := make([]*MDictKeywordEntry, 0)
-
-	keyStartIndex := 0
-
-	for keyStartIndex+mdict.meta.numberWidth <= len(keyBlock) {
-		// # the corresponding record's offset in record block
-		recordStartOffset := int64(0)
-
-		if mdict.meta.numberWidth == 8 {
-			recordStartOffset = int64(beBinToU64(keyBlock[keyStartIndex : keyStartIndex+mdict.meta.numberWidth]))
+	for start := 0; start+nw <= len(keyBlock); {
+		var off int64
+		if nw == 8 {
+			off = int64(beBinToU64(keyBlock[start : start+8]))
 		} else {
-			recordStartOffset = int64(beBinToU32(keyBlock[keyStartIndex : keyStartIndex+mdict.meta.numberWidth]))
+			off = int64(beBinToU32(keyBlock[start : start+4]))
 		}
+		text := start + nw
 
-		// # key text ends with '\x00'. A truncated or mis-framed block may hold
-		// no terminator at all; take the remainder rather than reusing the
-		// previous entry's end, which would invert the slice below.
-		keyEndIndex := len(keyBlock)
-		for i := keyStartIndex + mdict.meta.numberWidth; i < len(keyBlock); i += width {
-			if keyBlock[i] != 0 {
-				continue
+		// The key ends at a NUL unit. A truncated or mis-framed block may hold
+		// no terminator at all; the remainder is then the key.
+		end := len(keyBlock)
+		if enc == EncodingUtf16 {
+			for i := text; i+1 < len(keyBlock); i += 2 {
+				if keyBlock[i] == 0 && keyBlock[i+1] == 0 {
+					end = i
+					break
+				}
 			}
-			if width == 1 || (i+1 < len(keyBlock) && keyBlock[i+1] == 0) {
-				keyEndIndex = i
-				break
-			}
+		} else if i := bytes.IndexByte(keyBlock[text:], 0); i >= 0 {
+			end = text + i
 		}
-
-		keyTextBytes := keyBlock[keyStartIndex+mdict.meta.numberWidth : keyEndIndex]
-		keyText := string(keyTextBytes)
-
-		if mdict.meta.encoding == EncodingUtf16 {
-			if decoded, err := decodeLittleEndianUtf16(keyTextBytes); err == nil {
-				keyText = decoded
-			}
+		width := 1
+		if enc == EncodingUtf16 {
+			width = 2
 		}
 
 		// v1.x (and some UTF-16 v2.x) dicts pad keys with leading/trailing
 		// spaces; the reference reader strips them so lookups match.
-		keyText = strings.TrimSpace(keyText)
-
-		keyStartIndex = keyEndIndex + width
-		keyList = append(keyList, &MDictKeywordEntry{
-			RecordStartOffset: recordStartOffset,
-			KeyWord:           keyText,
-			KeyBlockIdx:       int64(keyStartIndex),
+		slab = append(slab, MDictKeywordEntry{
+			RecordStartOffset: off,
+			KeyWord:           strings.TrimSpace(DecodeText(keyBlock[text:end], enc)),
 		})
-		if len(keyList) > 1 {
-			keyList[len(keyList)-2].RecordEndOffset = keyList[len(keyList)-1].RecordStartOffset
-		}
+		start = end + width
 	}
-	//keyList[len(keyList)-1].RecordLocateEndOffset = 0
+	for i := range slab {
+		dst = append(dst, &slab[i])
+	}
+	return dst
+}
 
-	return keyList
+// keyCountHint is how many entries to preallocate for: the declared count,
+// bounded by what the decoded key bytes could hold and by a fixed ceiling, as
+// the count is the file's word.
+func keyCountHint(declared, keyBytes int64, numberWidth int) int {
+	n := declared
+	if limit := keyBytes / int64(numberWidth+1); n > limit {
+		n = limit
+	}
+	if n > 1<<22 {
+		n = 1 << 22
+	}
+	if n < 0 {
+		n = 0
+	}
+	return int(n)
 }
 
 func (mdict *MdictBase) readRecordBlockMeta() error {
@@ -735,58 +650,30 @@ func (mdict *MdictBase) readRecordBlockMeta() error {
 	return nil
 }
 
-/**
- * STEP 7.
- * decode record header,
- * includes:
- * [0:8/4]    - record block number
- * [8:16/4:8] - num entries the key-value entries number
- * [16:24/8:12] - record block info size
- * [24:32/12:16] - record block size
- */
+// decodeRecordBlockMeta decodes the record section's header (docs/mdict/
+// FORMAT.md §3.4):
+//
+//	[record blocks][entries][record-info size][record-blocks size]   Numbers
+//
+// The entry count is read and not used. MDict never compares it with the
+// number of keys, and dictionaries in circulation disagree
+// (cedict_2026-8-7.mdx: 465 621 against 560 500 keys) while reading
+// perfectly well.
 func (mdict *MdictBase) decodeRecordBlockMeta(data []byte, startOffset, endOffset int64) error {
-	recordBlockMeta := &mdictRecordBlockMeta{
+	c := byteCursor{b: data}
+	w := mdict.meta.numberWidth
+	m := &mdictRecordBlockMeta{
 		keyRecordMetaStartOffset: startOffset,
 		keyRecordMetaEndOffset:   endOffset,
 	}
-
-	keyRecordBuffer := data
-	offset := 0
-
-	if mdict.meta.version >= 2.0 {
-		recordBlockMeta.recordBlockNum = int64(beBinToU64(keyRecordBuffer[offset : offset+mdict.meta.numberWidth]))
-	} else {
-		recordBlockMeta.recordBlockNum = int64(beBinToU32(keyRecordBuffer[offset : offset+mdict.meta.numberWidth]))
+	m.recordBlockNum = c.uint(w)
+	m.entriesNum = c.uint(w)
+	m.recordBlockInfoCompSize = c.uint(w)
+	m.recordBlockCompSize = c.uint(w)
+	if c.bad || m.recordBlockNum < 0 || m.recordBlockInfoCompSize < 0 || m.recordBlockCompSize < 0 {
+		return errors.New("the record section header is corrupt")
 	}
-
-	offset += mdict.meta.numberWidth
-
-	if mdict.meta.version >= 2.0 {
-		recordBlockMeta.entriesNum = int64(beBinToU64(keyRecordBuffer[offset : offset+mdict.meta.numberWidth]))
-	} else {
-		recordBlockMeta.entriesNum = int64(beBinToU32(keyRecordBuffer[offset : offset+mdict.meta.numberWidth]))
-
-	}
-	if recordBlockMeta.entriesNum != mdict.keyBlockMeta.entriesNum {
-		return fmt.Errorf("keyEntriesNum != meta.entriesNum")
-	}
-
-	offset += mdict.meta.numberWidth
-	if mdict.meta.version >= 2.0 {
-		recordBlockMeta.recordBlockInfoCompSize = int64(beBinToU64(keyRecordBuffer[offset : offset+mdict.meta.numberWidth]))
-	} else {
-		recordBlockMeta.recordBlockInfoCompSize = int64(beBinToU32(keyRecordBuffer[offset : offset+mdict.meta.numberWidth]))
-	}
-
-	offset += mdict.meta.numberWidth
-
-	if mdict.meta.version >= 2.0 {
-		recordBlockMeta.recordBlockCompSize = int64(beBinToU64(keyRecordBuffer[offset : offset+mdict.meta.numberWidth]))
-	} else {
-		recordBlockMeta.recordBlockCompSize = int64(beBinToU32(keyRecordBuffer[offset : offset+mdict.meta.numberWidth]))
-	}
-
-	mdict.recordBlockMeta = recordBlockMeta
+	mdict.recordBlockMeta = m
 	return nil
 }
 
@@ -796,84 +683,54 @@ func (mdict *MdictBase) readRecordBlockInfo() error {
 		return err
 	}
 	defer file.Close()
-	/*
-	 * [0:8/4]    - record block number
-	 * [8:16/4:8] - num entries the key-value entries number
-	 * [16:24/8:12] - record block info size
-	 * [24:32/12:16] - record block size
-	 *
-	 */
-	recordBlockInfoStartOffset := mdict.recordBlockMeta.keyRecordMetaEndOffset
-	recordBlockInfoLen := mdict.recordBlockMeta.recordBlockInfoCompSize
 
-	buffer, err := readFileFromPos(file, recordBlockInfoStartOffset, recordBlockInfoLen)
+	start := mdict.recordBlockMeta.keyRecordMetaEndOffset
+	n := mdict.recordBlockMeta.recordBlockInfoCompSize
+	buffer, err := readFileFromPos(file, start, n)
 	if err != nil {
 		return err
 	}
-
-	err = mdict.decodeRecordBlockInfo(buffer, recordBlockInfoStartOffset, recordBlockInfoStartOffset+recordBlockInfoLen)
-	if err != nil {
-		return err
-	}
-	return nil
+	return mdict.decodeRecordBlockInfo(buffer, start, start+n)
 }
 
+// decodeRecordBlockInfo decodes the record-block table: a compressed and a
+// decompressed size per block. Like MDict, it checks one thing: the
+// compressed sizes add up to the section's declared size.
 func (mdict *MdictBase) decodeRecordBlockInfo(data []byte, startOffset, endOffset int64) error {
+	w := mdict.meta.numberWidth
+	n := mdict.recordBlockMeta.recordBlockNum
+	if n > int64(len(data))/int64(2*w) {
+		return fmt.Errorf("the record table holds %d bytes, too few for %d blocks", len(data), n)
+	}
 
-	recordBlockInfoList := make([]*MdictRecordBlockInfoListItem, 0)
-	var offset = 0
-	var compAccu = int64(0)
-	var decompAccu = int64(0)
-	var i = int64(0)
-
-	for i = int64(0); i < mdict.recordBlockMeta.recordBlockNum; i++ {
-		compSize := int64(0)
-		if mdict.meta.version >= 2.0 {
-			compSize = int64(beBinToU64(data[offset : offset+mdict.meta.numberWidth]))
-		} else {
-			compSize = int64(beBinToU32(data[offset : offset+mdict.meta.numberWidth]))
+	c := byteCursor{b: data}
+	list := make([]*MdictRecordBlockInfoListItem, 0, n)
+	var compAccu, decompAccu int64
+	for i := int64(0); i < n; i++ {
+		compSize := c.uint(w)
+		decompSize := c.uint(w)
+		if compSize < 0 || decompSize < 0 {
+			return fmt.Errorf("record block %d declares a negative size", i)
 		}
-		offset += mdict.meta.numberWidth
-
-		decompSize := int64(0)
-		if mdict.meta.version >= 2.0 {
-			decompSize = int64(beBinToU64(data[offset : offset+mdict.meta.numberWidth]))
-		} else {
-			decompSize = int64(beBinToU32(data[offset : offset+mdict.meta.numberWidth]))
-		}
-		offset += mdict.meta.numberWidth
-
-		// then assign
-		recordBlockInfoList = append(recordBlockInfoList, &MdictRecordBlockInfoListItem{
+		list = append(list, &MdictRecordBlockInfoListItem{
 			compressSize:                compSize,
 			deCompressSize:              decompSize,
 			compressAccumulatorOffset:   compAccu,
 			deCompressAccumulatorOffset: decompAccu,
 		})
-
-		// accu last
 		compAccu += compSize
 		decompAccu += decompSize
 	}
-	if int64(i) != mdict.recordBlockMeta.recordBlockNum {
-		return fmt.Errorf("recordBlockInfo (i) not equals to meta.recordBlockNum [%d/%d] compA/decompA(%d/%d)", i, mdict.recordBlockMeta.recordBlockNum, compAccu, decompAccu)
-	}
-	if int64(offset) != mdict.recordBlockMeta.recordBlockInfoCompSize {
-		return errors.New("recordBlockInfo offset not equals to meta.recordBlockInfoCompSize")
-	}
-	if int64(compAccu) != mdict.recordBlockMeta.recordBlockCompSize {
-		return errors.New("recordBlockInfo compAccu not equals to meta.recordBlockCompSize")
+	if compAccu != mdict.recordBlockMeta.recordBlockCompSize {
+		return fmt.Errorf("record blocks add up to %d bytes, the header says %d", compAccu, mdict.recordBlockMeta.recordBlockCompSize)
 	}
 
-	recordBlockInfo := &mdictRecordBlockInfo{
-		recordInfoList:             recordBlockInfoList,
+	mdict.recordBlockInfo = &mdictRecordBlockInfo{
+		recordInfoList:             list,
 		recordBlockInfoStartOffset: startOffset,
 		recordBlockInfoEndOffset:   endOffset,
 		recordBlockDataStartOffset: endOffset,
 	}
-
-	mdict.recordBlockInfo = recordBlockInfo
-
 	return nil
 }
 
@@ -1006,46 +863,17 @@ func (mdict *MdictBase) decodeRecordBlock(startOffset, compLen int64, info *Mdic
 		return nil, err
 	}
 
-	// The block header is 8 bytes (4 compression type + 4 checksum) and
+	// The block header is 8 bytes (4 info word + 4 checksum) and
 	// info.compressSize is a PER-BLOCK value read out of the file.
-	// decodeRecordBlockInfo validates only the two aggregates - the total info
-	// size and the total compressed size - and both stay satisfied while one
-	// block declares 0 (indexing comp[0] on an empty slice) or 1-7 (slicing
-	// comp[8:compressSize] backwards). Either is a panic on the lookup path.
+	// decodeRecordBlockInfo validates only the aggregate - the total
+	// compressed size - which stays satisfied while one block declares 0 or
+	// 1-7 bytes, too few to hold its own header.
 	if int64(info.compressSize) < 8 || int64(info.compressSize) > int64(len(comp)) {
 		return nil, fmt.Errorf("record block at %d declares %d bytes, block holds %d",
 			startOffset, info.compressSize, len(comp))
 	}
 
-	// comp[0]: compression type (comp[0:4]); then optional decrypt + decompress.
-	var recordBlock []byte
-	if comp[0] == 0 {
-		recordBlock = comp[8:info.compressSize]
-	} else {
-		var dec []byte
-		if mdict.meta.encryptType == EncryptRecordEnc {
-			dec = mdxDecrypt(comp, info.compressSize)
-		} else {
-			dec = comp[8:info.compressSize]
-		}
-		switch comp[0] {
-		case 1:
-			// LZO1X: raw data, sized by the block header.
-			out, err1 := lzoDecompress1X(dec, int(info.deCompressSize))
-			if err1 != nil {
-				return nil, err1
-			}
-			recordBlock = out
-		case 2:
-			out, err2 := zlibDecompress(dec, 0, int64(len(dec)), maxLZOBlock())
-			if err2 != nil {
-				return nil, err2
-			}
-			recordBlock = out
-		}
-	}
-
-	return recordBlock, nil
+	return mdict.decodeBlock(comp[:info.compressSize], int(info.deCompressSize))
 }
 
 func (mdict *MdictBase) getKeyWordEntries() ([]*MDictKeywordEntry, error) {

@@ -79,7 +79,7 @@ func TestSplitKeyBlock(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			md := &MdictBase{
 				fileType: tt.fileType,
-				meta:     &mdictMeta{encoding: tt.encoding, numberWidth: 8, version: 2.0},
+				meta:     &mdictMeta{encoding: tt.encoding, keyEncoding: tt.encoding, numberWidth: 8, version: 2.0},
 			}
 			got := md.splitKeyBlock(tt.block)
 			if len(got) != len(tt.want) {

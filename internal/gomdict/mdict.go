@@ -17,8 +17,8 @@
 // Derived from medict (https://github.com/terasum/medict),
 // internal/libs/go-mdict.
 //
-// Modified in 2026 by glowinthedark: v3 dispatch and
-// BuildRecordIndex added.
+// Modified in 2026 by glowinthedark: v3 dispatch, BuildRecordIndex and the
+// content-type accessors added.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -181,19 +181,32 @@ func (mdict *Mdict) IsMDD() bool {
 }
 
 func (mdict *Mdict) IsRecordEncrypted() bool {
-	return mdict.meta.encryptType == EncryptRecordEnc
+	return mdict.meta.encryptType&EncryptRecordEnc != 0
 }
 
 func (mdict *Mdict) IsUTF16() bool {
 	return mdict.meta.encoding == EncodingUtf16
 }
 
-// Encoding returns the dictionary's text encoding as one of the Encoding* /
+// Encoding returns the record text encoding as one of the Encoding* /
 // ENCODING_* constants. For non-UTF16 MDX dictionaries LocateByKeywordEntry
 // returns record bytes still in this native encoding (UTF16 is decoded to
-// UTF-8 internally), so callers must transcode accordingly.
+// UTF-8 internally), so callers transcode them, with DecodeText. Keys are
+// always returned decoded.
 func (mdict *Mdict) Encoding() int {
 	return mdict.meta.encoding
+}
+
+// IsPlainText reports records to show as plain text: Format="Text" (v3:
+// ContentType="Text").
+func (mdict *Mdict) IsPlainText() bool {
+	return mdict.meta.contentType == ContentText
+}
+
+// IsCompact reports Compact (or, when that is empty, Compat) = Yes, which is
+// what turns StyleSheet substitution on.
+func (mdict *Mdict) IsCompact() bool {
+	return mdict.meta.compact
 }
 
 // StyleSheet returns the raw StyleSheet header attribute (groups of three

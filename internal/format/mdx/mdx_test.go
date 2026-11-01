@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wuweidict/wudict/internal/dict"
 )
@@ -30,30 +31,92 @@ func TestFold(t *testing.T) {
 }
 
 func TestParseStylesheet(t *testing.T) {
-	s := "1\r\n<b>\r\n</b>\r\n2\r\n<i>\r\n</i>"
-	m := parseStylesheet(s)
-	if len(m) != 2 {
-		t.Fatalf("want 2 styles, got %d: %v", len(m), m)
+	m := parseStylesheet("1\r\n<b>\r\n</b>\r\n2\r\n<i>\r\n</i>")
+	want := map[int][2]string{1: {"<b>", "</b>"}, 2: {"<i>", "</i>"}}
+	if len(m) != 2 || m[1] != want[1] || m[2] != want[2] {
+		t.Errorf("styles = %v, want %v", m, want)
 	}
-	if m["1"] != [2]string{"<b>", "</b>"} || m["2"] != [2]string{"<i>", "</i>"} {
-		t.Errorf("unexpected styles: %v", m)
+	// MdxBuilder's sample: an empty end string, and a token above 255 costs
+	// only its own triplet.
+	m = parseStylesheet("2\n<br>\n\n300\n<x>\n</x>\n3\n<f>\n</f>\n")
+	if len(m) != 2 || m[2] != [2]string{"<br>", ""} || m[3] != [2]string{"<f>", "</f>"} {
+		t.Errorf("styles = %v", m)
 	}
 	if parseStylesheet("  \n ") != nil {
 		t.Error("blank stylesheet should parse to nil")
 	}
 }
 
+// TestSubstituteStylesheet pins MDict's reFormat (docs/mdict/SEMANTICS.md
+// §3.1), the manual's own example first.
 func TestSubstituteStylesheet(t *testing.T) {
-	styles := map[string][2]string{"1": {"<b>", "</b>"}, "2": {"<i>", "</i>"}}
-	got := substituteStylesheet("plain `1`bold`2`italic", styles)
-	want := "plain <b>bold</b><i>italic</i>"
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
+	manual := map[int][2]string{
+		1: {"<font size=5>", "</font>"},
+		2: {"<br>", ""},
+		3: {`<font face="Kingsoft Phonetic Plain, Tahoma">`, "</font>"},
 	}
-	// unknown style id: marker consumed, text dropped per original semantics
-	got = substituteStylesheet("a`9`x", map[string][2]string{"1": {"<b>", "</b>"}})
-	if got != "a" {
-		t.Errorf("unknown style: got %q", got)
+	for _, tc := range []struct {
+		name, in, want string
+		styles         map[int][2]string
+	}{
+		{"manual example", "`1`whole&#96;s`2`<p>`3`(hol,hJl; houl)",
+			`<font size=5>whole&#96;s</font><br><p><font face="Kingsoft Phonetic Plain, Tahoma">(hol,hJl; houl)</font>`, manual},
+		{"text before the first token is kept", "plain `1`bold", "plain <font size=5>bold</font>", manual},
+		{"an undefined token keeps its text", "a`9`x`1`y", "ax<font size=5>y</font>", manual},
+		{"whitespace is left alone", "`1`line\r\n", "<font size=5>line\r\n</font>", manual},
+		{"an empty segment still gets its strings", "`1``2`z", "<font size=5></font><br>z", manual},
+		{"a trailing token emits nothing", "x`1`", "x", manual},
+		{"no token, no style 0", "just text", "just text", manual},
+		{"style 0 wraps the lead", "a`1`b", "[a]<font size=5>b</font>", map[int][2]string{0: {"[", "]"}, 1: manual[1]}},
+		{"no stylesheet strips the tokens", "`1`a`2`b", "ab", nil},
+		{"a lone backtick is text", "it`s `x` fine", "it`s `x` fine", manual},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := substituteStylesheet(tc.in, tc.styles); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTextToHTML pins MDict's rendering of a plain-text dictionary.
+func TestTextToHTML(t *testing.T) {
+	for in, want := range map[string]string{
+		"a < b & \"c\" > d":     "a &lt; b &amp; &quot;c&quot; &gt; d",
+		"line one\nline two":    "line one<br>line two",
+		`adj.好\nadj.贼好`:         "adj.好<br>adj.贼好",
+		`drop \x and \é here`:   "drop  and  here",
+		"trailing backslash \\": "trailing backslash ",
+		"<b>not markup</b>":     "&lt;b&gt;not markup&lt;/b&gt;",
+	} {
+		if got := textToHTML(in); got != want {
+			t.Errorf("textToHTML(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestArticle: a redirect is recognised before the content type applies; a
+// plain-text dictionary is escaped; StyleSheet tokens apply only when the
+// dictionary is compact.
+func TestArticle(t *testing.T) {
+	styles := map[int][2]string{1: {"<b>", "</b>"}}
+	for _, tc := range []struct {
+		name          string
+		d             *Dict
+		raw, body, to string
+		link          bool
+	}{
+		{"html", &Dict{styles: styles}, "`1`x <i>y</i>\x00", "`1`x <i>y</i>", "", false},
+		{"compact", &Dict{compact: true, styles: styles}, "`1`x", "<b>x</b>", "", false},
+		{"plain text", &Dict{plain: true, compact: true, styles: styles}, "a<b\nc", "a&lt;b<br>c", "", false},
+		{"redirect in a plain-text dictionary", &Dict{plain: true}, "@@@LINK=target\r\n", "", "target", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, to, link := tc.d.article([]byte(tc.raw))
+			if body != tc.body || to != tc.to || link != tc.link {
+				t.Errorf("article(%q) = %q, %q, %v; want %q, %q, %v", tc.raw, body, to, link, tc.body, tc.to, tc.link)
+			}
+		})
 	}
 }
 
@@ -233,6 +296,29 @@ func TestLooseSiblingAssets(t *testing.T) {
 	// a name that matches nothing is still a plain miss
 	if _, _, err := read("nope.css"); err == nil {
 		t.Error("a missing file must report not-found")
+	}
+
+	// The loose file wins over a packed one of the same name, as in MDict:
+	// that is how a user overrides a dictionary's stylesheet. The packed entry
+	// here has no container behind it, so reaching it would fail the read.
+	d.resOnce.Do(func() { d.resMap = map[string]resHit{"ldoce6.css": {}} })
+	if body, _, err := read("LDOCE6.css"); err != nil || body != "span{color:red}" {
+		t.Fatalf("loose file over a packed one: %q %v", body, err)
+	}
+
+	// The folder listing that spares packed lookups a failed open must not
+	// hide a file dropped in later: it is re-validated once its time is up.
+	if _, _, err := read("late.css"); err == nil {
+		t.Fatal("late.css found before it exists")
+	}
+	write("late.css", "b{}")
+	d.loose.at = time.Now().Add(-looseTTL)
+	if body, _, err := read("late.css"); err != nil || body != "b{}" {
+		t.Fatalf("a file added after the listing: %q %v", body, err)
+	}
+	// Names compare as a case-insensitive filesystem compares them.
+	if !d.loose.mayBeLoose(dir, "ldoce6.CSS") || d.loose.mayBeLoose(dir, "absent/x.png") {
+		t.Error("listing comparison")
 	}
 }
 

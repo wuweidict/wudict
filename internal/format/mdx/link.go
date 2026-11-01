@@ -53,11 +53,12 @@ func (a *assetDir) Open(name string) (io.ReadCloser, error) {
 // duplicate (first container, first entry), so a linked fetch and a direct one
 // can never disagree about which file "audio/x.mp3" is.
 func (d *Dict) MediaLinks() ([]resource.Part, []resource.Link, error) {
-	parts := make([]resource.Part, 0, len(d.mdds))
+	mdds := d.companions()
+	parts := make([]resource.Part, 0, len(mdds))
 	var links []resource.Link
 	seen := map[string]bool{}
-	for i := range d.mdds {
-		m := &d.mdds[i]
+	for i := range mdds {
+		m := &mdds[i]
 		st, err := os.Stat(m.path)
 		if err != nil {
 			return nil, nil, err

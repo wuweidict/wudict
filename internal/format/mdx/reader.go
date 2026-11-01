@@ -6,7 +6,6 @@ package mdx
 
 import (
 	"io"
-	"strings"
 
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/logx"
@@ -17,7 +16,7 @@ import (
 // what the Reader yields. Unlike the other formats there is no golden test to
 // catch a forgotten bump: MDX has no in-code writer to build a fixture with,
 // so the tests that exercise this Reader need a real file (WUDICT_TEST_MDX).
-const ReaderVersion = 2
+const ReaderVersion = 3
 
 func init() {
 	dict.RegisterReader(".mdx", func(path string) (dict.Reader, error) { return NewReader(path) })
@@ -51,15 +50,12 @@ func (r *Reader) Next() (dict.Entry, error) {
 			logx.V("%sentry %q could not be read: %v (skipped)", logx.Dict(r.d.meta.Name), e.KeyWord, err)
 			continue
 		}
-		body := strings.TrimSpace(strings.Trim(decodeEnc(raw, r.d.enc), "\x00"))
-		if target, ok := linkTarget(body); ok {
+		body, target, isLink := r.d.article(raw)
+		if isLink {
 			if target == "" || target == e.KeyWord {
 				continue
 			}
 			return dict.Entry{Headwords: []string{e.KeyWord}, LinkTo: target}, nil
-		}
-		if len(r.d.stylesheet) > 0 {
-			body = substituteStylesheet(body, r.d.stylesheet)
 		}
 		return dict.Entry{Headwords: []string{e.KeyWord}, Body: body, Kind: dict.BodyHTML}, nil
 	}

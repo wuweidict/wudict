@@ -82,7 +82,7 @@ func TestIntegrationLinkedResourcesMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if len(d.mdds) == 0 {
+	if len(d.companions()) == 0 {
 		t.Skip("dictionary has no .mdd resources")
 	}
 
@@ -90,8 +90,8 @@ func TestIntegrationLinkedResourcesMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(parts) != len(d.mdds) || len(links) == 0 {
-		t.Fatalf("MediaLinks: %d parts (want %d), %d links", len(parts), len(d.mdds), len(links))
+	if len(parts) != len(d.companions()) || len(links) == 0 {
+		t.Fatalf("MediaLinks: %d parts (want %d), %d links", len(parts), len(d.companions()), len(links))
 	}
 	fet, err := OpenFetcher(parts)
 	if err != nil {

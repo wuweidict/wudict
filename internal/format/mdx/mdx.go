@@ -24,11 +24,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"unicode"
+	"time"
+	"unicode/utf8"
 
-	"golang.org/x/text/encoding/simplifiedchinese"
-	"golang.org/x/text/encoding/traditionalchinese"
-	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/fsx"
@@ -117,9 +116,6 @@ func linkTarget(body string) (string, bool) {
 	return strings.TrimSpace(html.UnescapeString(rest[:end])), true
 }
 
-// reStyleTag matches `N` stylesheet markers embedded in record text.
-var reStyleTag = regexp.MustCompile("`\\d+`")
-
 type mddFile struct {
 	path    string
 	md      *gomdict.Mdict
@@ -133,42 +129,99 @@ type resHit struct {
 
 // Dict is one opened MDX dictionary. Safe for concurrent readers after Open.
 type Dict struct {
-	meta       dict.Meta
-	mdx        *gomdict.Mdict
-	entries    []*gomdict.MDictKeywordEntry // headwords decoded to UTF-8, dictionary order
-	exactOnce  sync.Once                    // exactIdx built on first exact lookup only
-	exactIdx   map[string][]int             // headword -> entry indexes
-	foldOnce   sync.Once                    // foldIdx built on first accent-folded lookup only
-	foldIdx    map[string][]int             // folded headword -> entry indexes
-	enc        int
-	stylesheet map[string][2]string
-	mdds       []mddFile
+	meta      dict.Meta
+	mdx       *gomdict.Mdict
+	entries   []*gomdict.MDictKeywordEntry // headwords decoded to UTF-8, dictionary order
+	exactOnce sync.Once                    // exactIdx built on first exact lookup only
+	exactIdx  map[string][]int             // headword -> entry indexes
+	foldOnce  sync.Once                    // foldIdx built on first accent-folded lookup only
+	foldIdx   map[string][]int             // folded headword -> entry indexes
+	enc       int
+	plain     bool              // records are plain text (Format="Text")
+	compact   bool              // StyleSheet tokens are substituted (Compact="Yes")
+	styles    map[int][2]string // the StyleSheet: token -> begin, end
+	mddOnce   sync.Once         // mdds is built on first use (companions)
+	mdds      []mddFile
 
 	resOnce sync.Once
 	resMap  map[string]resHit
+
+	loose looseNames
 }
 
-// Open opens an .mdx file and any companion .mdd files.
+// looseNames caches the names in the .mdx's folder, so the loose-first
+// resource lookup (Resource) costs a map probe instead of a failed open for
+// the packed resources that are nearly every request: a failed open is ~1 µs
+// on a local disk and far more on Android's shared storage, paid per image,
+// per sound and per packed item. The listing is re-validated at most every
+// looseTTL against the folder's modification time, so an override dropped in
+// beside a dictionary being read takes effect within that.
+type looseNames struct {
+	mu    sync.Mutex
+	at    time.Time       // when the listing was last validated
+	mtime time.Time       // the folder's modification time at that listing
+	names map[string]bool // looseKey of every entry; nil when unlistable
+}
+
+const looseTTL = 2 * time.Second
+
+// mayBeLoose reports whether the first path component of rel names an entry
+// in dir, compared the way a case- and normalisation-insensitive filesystem
+// compares, so that a false "no" never hides a file the open would find.
+func (l *looseNames) mayBeLoose(dir, rel string) bool {
+	first, _, _ := strings.Cut(rel, "/")
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if now := time.Now(); l.at.IsZero() || now.Sub(l.at) >= looseTTL {
+		fi, err := os.Stat(dir)
+		switch {
+		case err != nil:
+			l.names = nil
+		case l.at.IsZero() || !fi.ModTime().Equal(l.mtime):
+			l.names, l.mtime = listLoose(dir), fi.ModTime()
+		}
+		l.at = now
+	}
+	if l.names == nil {
+		return true // no listing: let the open decide
+	}
+	return l.names[looseKey(first)]
+}
+
+func listLoose(dir string) map[string]bool {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	m := make(map[string]bool, len(ents))
+	for _, e := range ents {
+		m[looseKey(e.Name())] = true
+	}
+	return m
+}
+
+func looseKey(name string) string { return strings.ToLower(norm.NFC.String(name)) }
+
+// Open opens an .mdx file. Its companion .mdd files are opened and indexed
+// on the first resource request (companions): the ingest scan reads articles
+// only, and an .mdd's key index is the bulk of an open's time and memory.
 func Open(filename string) (*Dict, error) {
 	md, entries, err := openIndexed(filename)
 	if err != nil {
 		return nil, err
 	}
-	enc := md.Encoding()
+	// Headwords arrive decoded to UTF-8 and trimmed (gomdict). No headword
+	// index is built here - both the raw (ensureExact) and accent-folded
+	// (ensureFold) indexes are lazy, so an open that only serves resources or
+	// feeds the ingest scan builds nothing. Runtime readers keep no in-memory
+	// headword index; our ingested SQLite path is that index.
 	d := &Dict{
-		mdx:        md,
-		entries:    entries,
-		enc:        enc,
-		stylesheet: parseStylesheet(md.StyleSheet()),
-	}
-	// Decode every headword to UTF-8 at open (entries carry the decoded key
-	// everywhere). No headword index is built here - both the raw
-	// (ensureExact) and accent-folded (ensureFold) indexes are lazy, so an open
-	// that only serves resources or feeds the ingest scan builds nothing.
-	// Runtime readers keep no in-memory headword index; our ingested SQLite
-	// path is that index.
-	for _, e := range entries {
-		e.KeyWord = strings.TrimSpace(decodeEnc([]byte(e.KeyWord), enc))
+		mdx:     md,
+		entries: entries,
+		enc:     md.Encoding(),
+		plain:   md.IsPlainText(),
+		compact: md.IsCompact(),
+		styles:  parseStylesheet(md.StyleSheet()),
 	}
 	d.meta = dict.Meta{
 		Name:        dictName(md, filename),
@@ -179,16 +232,23 @@ func Open(filename string) (*Dict, error) {
 		Header:      headerFields(md),
 	}
 
-	for _, f := range companionMdds(filename) {
-		rmd, rents, err := openIndexed(f)
-		if err != nil {
-			logx.Warn("%smedia file %s cannot be read: %v - its audio and images will be missing",
-				logx.Dict(d.meta.Name), filepath.Base(f), err)
-			continue
-		}
-		d.mdds = append(d.mdds, mddFile{path: f, md: rmd, entries: rents})
-	}
 	return d, nil
+}
+
+// companions opens and indexes the companion .mdd files, once.
+func (d *Dict) companions() []mddFile {
+	d.mddOnce.Do(func() {
+		for _, f := range companionMdds(d.meta.Path) {
+			rmd, rents, err := openIndexed(f)
+			if err != nil {
+				logx.Warn("%smedia file %s cannot be read: %v - its audio and images will be missing",
+					logx.Dict(d.meta.Name), filepath.Base(f), err)
+				continue
+			}
+			d.mdds = append(d.mdds, mddFile{path: f, md: rmd, entries: rents})
+		}
+	})
+	return d.mdds
 }
 
 func openIndexed(filename string) (*gomdict.Mdict, []*gomdict.MDictKeywordEntry, error) {
@@ -434,8 +494,8 @@ func (d *Dict) render(e *gomdict.MDictKeywordEntry, seen map[string]bool) []stri
 		logx.V("%sentry %q could not be read: %v", logx.Dict(d.meta.Name), e.KeyWord, err)
 		return nil
 	}
-	body := strings.TrimSpace(strings.Trim(decodeEnc(raw, d.enc), "\x00"))
-	if target, ok := linkTarget(body); ok {
+	body, target, ok := d.article(raw)
+	if ok {
 		if target == "" || seen[target] {
 			return nil
 		}
@@ -452,10 +512,26 @@ func (d *Dict) render(e *gomdict.MDictKeywordEntry, seen map[string]bool) []stri
 		}
 		return out
 	}
-	if len(d.stylesheet) > 0 {
-		body = substituteStylesheet(body, d.stylesheet)
-	}
 	return []string{body}
+}
+
+// article turns one record into what the dictionary shows, in MDict's order
+// (docs/mdict/SEMANTICS.md §1, §3): a redirect is recognised first and
+// reported as its target; otherwise a plain-text dictionary is HTML-escaped,
+// and a compact one has its StyleSheet tokens substituted. Both the runtime
+// and the ingest scan call it, so a dictionary reads the same either way.
+func (d *Dict) article(raw []byte) (body, target string, isLink bool) {
+	body = strings.TrimSpace(strings.Trim(decodeEnc(raw, d.enc), "\x00"))
+	if target, ok := linkTarget(body); ok {
+		return "", target, true
+	}
+	switch {
+	case d.plain:
+		body = textToHTML(body)
+	case d.compact:
+		body = substituteStylesheet(body, d.styles)
+	}
+	return body, "", false
 }
 
 func (d *Dict) Keywords(offset, n int) []string {
@@ -470,22 +546,27 @@ func (d *Dict) Keywords(offset, n int) []string {
 	return out
 }
 
-// Resource streams one .mdd resource. name uses forward slashes without a
-// leading slash (e.g. "audio/word.mp3"); lookup is case-insensitive, as
-// MDD keys are conventionally case-preserving but referenced loosely.
+// Resource streams one resource. name uses forward slashes without a leading
+// slash (e.g. "audio/word.mp3").
+//
+// A file beside the .mdx comes first and the .mdd files second, which is
+// MDict's order (mdx::MdxDict::getDictData): it is how a user overrides a
+// packed stylesheet - drop a corrected NAME.css next to the .mdx - and how
+// repacks ship their stylesheet and scripts with no .mdd at all (LDOCE6 keeps
+// LDOCE6.css and entry.js loose). The check is one stat, ~1 µs against a
+// ~100 µs HTTP round trip. Packed lookup is case-insensitive, as MDD keys are
+// case-preserving but referenced loosely.
 func (d *Dict) Resource(name string) (io.ReadCloser, string, error) {
 	norm := strings.ToLower(strings.TrimLeft(path.Clean(name), "/"))
 	if norm == "" || norm == "." || strings.HasPrefix(norm, "..") {
 		return nil, "", dict.ErrNotFound
 	}
+	if rc, mt, err := d.looseFile(name); err == nil {
+		return rc, mt, nil
+	}
 	hit, ok := d.resourceIndex()[norm]
 	if !ok {
-		// Not packed: MDict also serves files sitting next to the .mdx, which
-		// is how repacks ship their stylesheet and scripts (LDOCE6 keeps
-		// LDOCE6.css and entry.js loose). Only reached on a MISS - the packed
-		// path never touches the disk - and a stat costs ~1 µs against a
-		// ~100 µs HTTP round trip, so this is free where it matters.
-		return d.looseFile(name)
+		return nil, "", dict.ErrNotFound
 	}
 	data, err := hit.md.LocateByKeywordEntry(hit.entry)
 	if err != nil {
@@ -511,6 +592,9 @@ func (d *Dict) looseFile(name string) (io.ReadCloser, string, error) {
 		return nil, "", dict.ErrNotFound
 	}
 	dir := filepath.Dir(d.meta.Path)
+	if !d.loose.mayBeLoose(dir, rel) {
+		return nil, "", dict.ErrNotFound
+	}
 	p := filepath.Join(dir, filepath.FromSlash(rel))
 	// belt and braces: Clean above removes "..", this proves the result stayed
 	// inside the dictionary's folder even through symlinked spellings
@@ -544,8 +628,9 @@ func (d *Dict) Resources() []string {
 func (d *Dict) resourceIndex() map[string]resHit {
 	d.resOnce.Do(func() {
 		m := make(map[string]resHit)
-		for i := range d.mdds {
-			md := &d.mdds[i]
+		mdds := d.companions()
+		for i := range mdds {
+			md := &mdds[i]
 			for _, e := range md.entries {
 				key := strings.ReplaceAll(strings.TrimLeft(e.KeyWord, "\\/"), "\\", "/")
 				k := strings.ToLower(key)
@@ -559,74 +644,143 @@ func (d *Dict) resourceIndex() map[string]resHit {
 	return d.resMap
 }
 
-// ---- shared helpers (ported from mdict-go-web/reader.go) ----------------
-
-// decodeEnc converts record bytes in the dictionary's native encoding to
-// UTF-8 (go-mdict already decodes UTF-16 internally).
+// decodeEnc converts record bytes in the dictionary's encoding to UTF-8.
+// UTF-16 records arrive already decoded (gomdict).
 func decodeEnc(raw []byte, enc int) string {
-	switch enc {
-	case gomdict.EncodingUtf16, gomdict.EncodingUtf8:
-		return string(raw)
-	case gomdict.EncodingGb18030, gomdict.ENCODING_GBK, gomdict.ENCODING_GB2312:
-		out, _, err := transform.Bytes(simplifiedchinese.GB18030.NewDecoder(), raw)
-		if err != nil {
-			return string(raw)
-		}
-		return string(out)
-	case gomdict.EncodingBig5:
-		out, _, err := transform.Bytes(traditionalchinese.Big5.NewDecoder(), raw)
-		if err != nil {
-			return string(raw)
-		}
-		return string(out)
-	default:
+	if enc == gomdict.EncodingUtf16 {
 		return string(raw)
 	}
+	return gomdict.DecodeText(raw, enc)
 }
 
 // fold delegates to the shared accent/case folding.
 func fold(s string) string { return dict.Fold(s) }
 
-// parseStylesheet parses the MDX StyleSheet header attribute: groups of
-// three lines (number, begin-tag, end-tag).
-func parseStylesheet(s string) map[string][2]string {
+// textToHTML renders a plain-text record (Format="Text") as MDict does
+// (mdx::HtmlEscapeMDXText): & < > " escaped, a line feed and the two
+// characters \n become <br>, and a backslash before any other character is
+// dropped together with that character - the escape convention of the
+// SugarDict and KDict sources MdxBuilder builds such dictionaries from.
+func textToHTML(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + len(s)/8)
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '&':
+			b.WriteString("&amp;")
+		case '<':
+			b.WriteString("&lt;")
+		case '>':
+			b.WriteString("&gt;")
+		case '"':
+			b.WriteString("&quot;")
+		case '\n':
+			b.WriteString("<br>")
+		case '\\':
+			if i+1 < len(s) && s[i+1] == 'n' {
+				b.WriteString("<br>")
+			}
+			if i+1 < len(s) {
+				_, size := utf8.DecodeRuneInString(s[i+1:])
+				i += size
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// parseStylesheet parses the StyleSheet header attribute: lines in triplets
+// of token (a number, 0-255), begin string, end string (docs/mdict/
+// SEMANTICS.md §3.1). A token MDict would reject costs only its own triplet.
+func parseStylesheet(s string) map[int][2]string {
 	if strings.TrimSpace(s) == "" {
 		return nil
 	}
 	lines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n"), "\n")
-	m := make(map[string][2]string)
+	m := make(map[int][2]string)
 	for i := 0; i+2 < len(lines); i += 3 {
-		m[lines[i]] = [2]string{lines[i+1], lines[i+2]}
+		if n, ok := styleToken(strings.TrimSpace(lines[i])); ok {
+			m[n] = [2]string{lines[i+1], lines[i+2]}
+		}
 	}
 	return m
 }
 
-// substituteStylesheet replaces `N` style markers with their begin/end
-// tag pairs from the parsed StyleSheet header.
-func substituteStylesheet(txt string, stylesheet map[string][2]string) string {
-	parts := reStyleTag.Split(txt, -1)
-	tags := reStyleTag.FindAllString(txt, -1)
+// styleToken reads a style number: digits, at most 255.
+func styleToken(s string) (int, bool) {
+	if s == "" || len(s) > 3 {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+		n = n*10 + int(s[i]-'0')
+	}
+	return n, n <= 255
+}
+
+// substituteStylesheet applies StyleSheet tokens as MDict does
+// (mdx::MdxDict::reFormat): `N` switches the style, and the text up to the
+// next token, or to the end, is emitted between style N's begin and end
+// strings. Text before the first token takes style 0. A token with no
+// definition has empty strings, so its text is kept and only the marker goes.
+// Whitespace is left as it is. An article without a backtick - every article
+// of nearly every compact dictionary - is returned as it is, unallocated.
+func substituteStylesheet(txt string, styles map[int][2]string) string {
+	start, end, n, ok := nextStyleToken(txt, 0)
+	if !ok {
+		if s, ok := styles[0]; ok {
+			return s[0] + txt + s[1]
+		}
+		return txt
+	}
 	var b strings.Builder
-	b.WriteString(parts[0])
-	for j := 1; j < len(parts); j++ {
-		key := strings.Trim(tags[j-1], "`")
-		style, ok := stylesheet[key]
-		if !ok {
-			continue
-		}
-		p := parts[j]
-		if len(p) > 0 && p[len(p)-1] == '\n' {
-			b.WriteString(style[0])
-			b.WriteString(strings.TrimRightFunc(p, unicode.IsSpace))
-			b.WriteString(style[1])
-			b.WriteString("\r\n")
-		} else {
-			b.WriteString(style[0])
-			b.WriteString(p)
-			b.WriteString(style[1])
-		}
+	b.Grow(len(txt) + len(txt)/4)
+	style, prev := 0, 0
+	emit := func(seg string) {
+		s := styles[style]
+		b.WriteString(s[0])
+		b.WriteString(seg)
+		b.WriteString(s[1])
+	}
+	for ok {
+		emit(txt[prev:start])
+		style, prev = n, end
+		start, end, n, ok = nextStyleToken(txt, end)
+	}
+	if prev < len(txt) {
+		emit(txt[prev:])
 	}
 	return b.String()
+}
+
+// nextStyleToken finds the next `N` token (a backtick, ASCII digits, a
+// backtick) at or after from: where it starts and ends, and its number, -1
+// when it is above 255 and so can have no definition.
+func nextStyleToken(s string, from int) (start, end, n int, ok bool) {
+	for {
+		i := strings.IndexByte(s[from:], '`')
+		if i < 0 {
+			return 0, 0, 0, false
+		}
+		i += from
+		j := i + 1
+		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+			j++
+		}
+		if j > i+1 && j < len(s) && s[j] == '`' {
+			n, valid := styleToken(s[i+1 : j])
+			if !valid {
+				n = -1
+			}
+			return i, j + 1, n, true
+		}
+		from = i + 1
+	}
 }
 
 // headerFields is the MDX header minus what Meta already carries (Title,

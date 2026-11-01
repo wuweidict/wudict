@@ -26,7 +26,9 @@ package go_mdict
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Dictionary holds the attributes parsed from the MDict header.
@@ -77,15 +79,66 @@ var headerAttrRe = regexp.MustCompile(`(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')`)
 // unescapeEntities reverses the five standard XML predefined entities. The
 // MDict header never uses numeric character references, so we don't bother
 // with them either.
+// unescapeEntities undoes XML escaping in an attribute value: the five named
+// entities and numeric character references, decimal and hexadecimal, which
+// is what MDict's XML reader (CMarkup) undoes. Anything else - an HTML-only
+// entity such as &nbsp;, or a malformed reference - is left as written.
 func unescapeEntities(s string) string {
-	r := strings.NewReplacer(
-		"&lt;", "<",
-		"&gt;", ">",
-		"&amp;", "&",
-		"&apos;", "'",
-		"&quot;", `"`,
-	)
-	return r.Replace(s)
+	if !strings.Contains(s, "&") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		if s[i] != '&' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		semi := strings.IndexByte(s[i:], ';')
+		if semi < 0 || semi > 12 {
+			b.WriteByte('&')
+			i++
+			continue
+		}
+		name := s[i+1 : i+semi]
+		if r, ok := xmlEntity(name); ok {
+			b.WriteRune(r)
+			i += semi + 1
+			continue
+		}
+		b.WriteByte('&')
+		i++
+	}
+	return b.String()
+}
+
+// xmlEntity resolves one entity name (the text between & and ;).
+func xmlEntity(name string) (rune, bool) {
+	switch name {
+	case "lt":
+		return '<', true
+	case "gt":
+		return '>', true
+	case "amp":
+		return '&', true
+	case "apos":
+		return '\'', true
+	case "quot":
+		return '"', true
+	}
+	if len(name) < 2 || name[0] != '#' {
+		return 0, false
+	}
+	base, digits := 10, name[1:]
+	if digits[0] == 'x' || digits[0] == 'X' {
+		base, digits = 16, digits[1:]
+	}
+	n, err := strconv.ParseUint(digits, base, 32)
+	if err != nil || digits == "" || n == 0 || n > unicode.MaxRune || (n >= 0xD800 && n <= 0xDFFF) {
+		return 0, false
+	}
+	return rune(n), true
 }
 
 func parseXMLHeader(xmldata string) (*Dictionary, error) {

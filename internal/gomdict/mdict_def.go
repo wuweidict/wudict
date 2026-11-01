@@ -32,6 +32,10 @@ const (
 	MdictTypeMdd MdictType = 1
 	MdictTypeMdx MdictType = 2
 
+	// The header's Encrypted attribute is a bit set (MDict reads it with atoi):
+	// bit 0 is a registered dictionary, readable only with the purchaser's
+	// registration code; bit 1 is an encrypted key-block info, whose key is in
+	// the file.
 	EncryptNoEnc      = 0
 	EncryptRecordEnc  = 1
 	EncryptKeyInfoEnc = 2
@@ -43,6 +47,15 @@ const (
 	ENCODING_GBK      = 3
 	ENCODING_GB2312   = 4
 	EncodingGb18030   = 5
+	EncodingLatin1    = 6
+)
+
+// Record content types, from the header's Format (v1/v2) or ContentType (v3).
+const (
+	ContentText   = 0
+	ContentHTML   = 1
+	ContentXML    = 2
+	ContentBinary = 3
 )
 
 type MdictBase struct {
@@ -90,7 +103,10 @@ type mdictMeta struct {
 	version      float32
 	numberWidth  int
 	numberFormat int
-	encoding     int
+	encoding     int // record text (v3: RecordData@encoding)
+	keyEncoding  int // key text (v3: KeyData@encoding); equal to encoding in v1/v2
+	contentType  int // ContentText … ContentBinary
+	compact      bool
 
 	// key-block part bytes start offset in the mdx/mdd file
 	keyBlockMetaStartOffset int64
@@ -105,7 +121,7 @@ type mdictMeta struct {
 	// v3-only fields
 	uuid         string
 	encryptedKey []byte          // derived from UUID for v3 encrypted blocks; nil otherwise
-	v3Offsets    *v3BlockOffsets // file offsets of v3 block sections (nil for v1/v2)
+	v3Offsets    *v3BlockOffsets // the v3 sections (nil for v1/v2)
 }
 
 type mdictKeyBlockMeta struct {
@@ -129,13 +145,8 @@ type mdictKeyBlockInfo struct {
 }
 
 type mdictKeyBlockInfoItem struct {
-	firstKey                      string
-	firstKeySize                  int
-	lastKey                       string
-	lastKeySize                   int
-	keyBlockInfoIndex             int
+	entries                       int64 // keys in the block, as declared
 	keyBlockCompressSize          int64
-	keyBlockCompAccumulator       int64
 	keyBlockDeCompressSize        int64
 	keyBlockDeCompressAccumulator int64
 }
@@ -177,5 +188,4 @@ type MDictKeywordEntry struct {
 	RecordStartOffset int64
 	RecordEndOffset   int64
 	KeyWord           string
-	KeyBlockIdx       int64
 }
