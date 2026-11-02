@@ -23,7 +23,7 @@ import (
 func TestBuiltinGuide(t *testing.T) {
 	t.Setenv("WUDICT_DB_DIR", t.TempDir())
 	user := t.TempDir()
-	hdir := UserDir(user).Builtin()
+	hdir := FolderUserDir(user).Builtin()
 	guide, err := howto.Install(hdir)
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestBuiltinGuide(t *testing.T) {
 		t.Fatalf("the guide is not listed under %q: %v", howto.ID, err)
 	}
 	s := New(reg)
-	s.User = UserDir(user)
+	s.User = FolderUserDir(user)
 	if info, _ := s.dictInfoFor(e, "", ""); !info.Builtin || info.Name != "wudict howto" {
 		t.Errorf("row = builtin %v, name %q", info.Builtin, info.Name)
 	}

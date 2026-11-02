@@ -436,6 +436,13 @@ func isolate(t *testing.T) (exe, home string) {
 	homeDir = func() string { return home }
 	systemDir = etc
 	t.Cleanup(func() { exeDir, homeDir, systemDir = oldExe, oldHome, oldSys })
+	// a Linux runner's own XDG folders must not leak in either
+	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(root, "xdg"))
+	// the ~/.wudict layout unless a test asks for another (setGOOS)
+	setGOOS(t, "darwin")
 	return exe, home
 }
 
@@ -547,6 +554,85 @@ func TestConfigLocation(t *testing.T) {
 			t.Error("explicit missing config must error")
 		}
 	})
+
+	// On a free Unix desktop the file is created in $XDG_CONFIG_HOME/wudict,
+	// names the XDG folders it defaults to, and $XDG_CONFIG_DIRS is searched
+	// before /etc/wudict.
+	t.Run("XDG: created in the config folder", func(t *testing.T) {
+		_, home := isolate(t)
+		setGOOS(t, "linux")
+		p, created, err := EnsureConfigFile()
+		if err != nil || !created {
+			t.Fatalf("EnsureConfigFile() = %q, %v, %v", p, created, err)
+		}
+		if want := filepath.Join(home, ".config", "wudict", Name); p != want {
+			t.Errorf("created %q, want %q", p, want)
+		}
+		body, _ := os.ReadFile(p)
+		for _, want := range []string{"~/.config/wudict/wudict.toml", `"~/.local/share/wudict/db"`, `"~/.local/share/wudict/lemmas"`, "~/.local/state/wudict/token"} {
+			if !strings.Contains(string(body), want) {
+				t.Errorf("the template does not name %s", want)
+			}
+		}
+		if strings.Contains(string(body), ".wudict/") {
+			t.Error("the template still names ~/.wudict")
+		}
+		if want := filepath.Join(home, ".local", "share", "wudict", "lemmas"); defaults().LemmaDir != want {
+			t.Errorf("LEMMA_DIR default = %q, want %q", defaults().LemmaDir, want)
+		}
+		if want := filepath.Join(home, ".local", "state", "wudict", "token"); TokenPath() != want {
+			t.Errorf("TokenPath = %q, want %q", TokenPath(), want)
+		}
+	})
+
+	t.Run("XDG: an unmoved ~/.wudict stays in effect", func(t *testing.T) {
+		_, home := isolate(t)
+		setGOOS(t, "linux")
+		old := filepath.Join(home, ".wudict", Name)
+		write(t, old, `SERVER_PORT = "2222"`)
+		cfg, err := Load("", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Source != old || cfg.Port != "2222" {
+			t.Errorf("Source = %q port %q, want %q and 2222", cfg.Source, cfg.Port, old)
+		}
+	})
+
+	t.Run("XDG: config dirs before /etc/wudict", func(t *testing.T) {
+		isolate(t)
+		setGOOS(t, "linux")
+		xdg := filepath.Join(t.TempDir(), "xdg")
+		t.Setenv("XDG_CONFIG_DIRS", xdg)
+		write(t, filepath.Join(xdg, "wudict", Name), `SERVER_PORT = "4444"`)
+		write(t, filepath.Join(systemDir, Name), `SERVER_PORT = "3333"`)
+		cfg, err := Load("", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Port != "4444" || len(cfg.Shadowed) != 1 {
+			t.Errorf("port = %q, Shadowed = %q; want 4444 and /etc/wudict shadowed", cfg.Port, cfg.Shadowed)
+		}
+	})
+
+	t.Run("not XDG: the template is the ~/.wudict one", func(t *testing.T) {
+		isolate(t)
+		setGOOS(t, "darwin")
+		p, _, err := EnsureConfigFile()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body, _ := os.ReadFile(p); string(body) != configTemplate {
+			t.Error("the template changed on a platform that keeps ~/.wudict")
+		}
+	})
+}
+
+func setGOOS(t *testing.T, g string) {
+	t.Helper()
+	old := goos
+	goos = g
+	t.Cleanup(func() { goos = old })
 }
 
 // A key whose value says "off" must not turn the feature on. NO_COMPRESS used

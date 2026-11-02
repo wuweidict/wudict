@@ -18,7 +18,7 @@ import (
 func newStyleServer(t *testing.T) (*Server, string) {
 	t.Helper()
 	s := newTestServer(t)
-	s.User = UserDir(t.TempDir())
+	s.User = FolderUserDir(t.TempDir())
 	return s, s.User.Style()
 }
 

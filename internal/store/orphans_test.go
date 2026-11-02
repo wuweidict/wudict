@@ -184,3 +184,41 @@ func TestRelinkLeavesAPreparedFileAlone(t *testing.T) {
 		t.Fatalf("orphans = %v", got)
 	}
 }
+
+// A folder of sources that moved as a whole takes its prepared folders with
+// it - even a source changed since it was prepared - and nothing outside it.
+func TestRepoint(t *testing.T) {
+	t.Setenv("WUDICT_DB_DIR", t.TempDir())
+	root := t.TempDir()
+	from, to := filepath.Join(root, "old", "builtin"), filepath.Join(root, "new", "builtin")
+	if err := os.MkdirAll(from, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	guide := writeSrc(t, filepath.Join(from, "Guide.mdx"), "guide")
+	dir := prepare(t, guide, "Guide")
+	other := writeSrc(t, filepath.Join(root, "Other.mdx"), "other")
+	prepare(t, other, "Other")
+
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(from, to); err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(to, "Guide.mdx")
+	writeSrc(t, moved, "guide, a newer build") // rewritten after the move
+
+	got := Repoint(from, to)
+	if len(got) != 1 || got[0].Dir != dir || got[0].From != guide || got[0].To != moved {
+		t.Fatalf("Repoint = %+v", got)
+	}
+	if d, ok := LookupDir(moved); !ok || d != dir {
+		t.Fatalf("LookupDir(moved) = %q, %v; want %q", d, ok, dir)
+	}
+	if got := orphanFolders(t, nil); len(got) != 0 {
+		t.Fatalf("orphans = %v, want none", got)
+	}
+	if again := Repoint(from, to); len(again) != 0 {
+		t.Fatalf("second Repoint = %+v", again)
+	}
+}

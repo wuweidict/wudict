@@ -60,7 +60,7 @@ For problems, see [Troubleshooting](troubleshooting.md).
 
 ??? question "Where are wudict's files?"
 
-    ``` text title="macOS and Linux"
+    ``` text title="macOS"
     ~/.wudict/
       wudict.toml     settings
       state.json      dictionary order, enabled dictionaries, display preferences
@@ -71,7 +71,14 @@ For problems, see [Troubleshooting](troubleshooting.md).
     ~/Dictionaries    the default dictionary folder
     ```
 
-    Windows and Android: [Configuration → Files](../reference/configuration.md#files).
+    ``` text title="Linux"
+    ~/.config/wudict/        wudict.toml, groups.ini, style/
+    ~/.local/share/wudict/   db/ (the library), lemmas/, favourites.txt
+    ~/.local/state/wudict/   state.json, history.txt, token
+    ~/Dictionaries           the default dictionary folder
+    ```
+
+    Windows, Android and the `$XDG_*` variables: [Configuration → Files](../reference/configuration.md#files).
 
 ??? question "How do I update wudict?"
 
@@ -430,7 +437,7 @@ For problems, see [Troubleshooting](troubleshooting.md).
 
 ??? question "How do I stop the browser tab opening at startup?"
 
-    `wudict --no-browser`, or `NO_BROWSER = "1"` in `~/.wudict/wudict.toml`.
+    `wudict --no-browser`, or `NO_BROWSER = "1"` in `wudict.toml`.
 
 ??? question "How do I build this documentation site?"
 

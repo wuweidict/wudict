@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/wuweidict/wudict/internal/basedir"
 )
 
 // Orphaned prepared dictionaries (D156).
@@ -241,6 +243,36 @@ func Relink(discovered []string) []Relinked {
 			byBase[base] = append(cands[:i:i], cands[i+1:]...)
 			break
 		}
+	}
+	return out
+}
+
+// Repoint re-points the library folders prepared from files under the folder
+// from at the same files under to, where that folder has just moved as a
+// whole: wudict's own files moving into the XDG layout (internal/basedir) take
+// the howto with them, and it has been prepared like any dictionary. Unlike
+// Relink nothing needs proving - the move is known - and the content may have
+// changed since (a new build rewrites the howto): the folder then re-indexes
+// in place, as for any edited source. Only the claim in info.txt changes.
+func Repoint(from, to string) []Relinked {
+	folders, err := Folders()
+	if err != nil {
+		return nil
+	}
+	var out []Relinked
+	for _, f := range folders {
+		if f.Source == "" || !basedir.Within(f.Source, from) {
+			continue
+		}
+		rel, err := filepath.Rel(from, f.Source)
+		if err != nil {
+			continue
+		}
+		p := filepath.Join(to, rel)
+		if err := writeInfo(f.Dir, p); err != nil {
+			continue
+		}
+		out = append(out, Relinked{Dir: f.Dir, From: f.Source, To: p})
 	}
 	return out
 }

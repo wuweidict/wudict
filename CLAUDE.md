@@ -1,6 +1,6 @@
 # WuWeiDict
 
-**Naming (D27, amended 2026-09-28).** In anything a user reads, prefer **`wudict`** (lowercase; **wuDict** in the Android app and browser extensions); **WuWeiDict** is the official full name, used only where the official name is required. The technical name is **`wudict`** everywhere else — binary, env prefix (`WUDICT_*`), config dir (`~/.wudict`), db format prefix (`wudict:`), localStorage keys, CSS classes. The module path is `github.com/wuweidict/wudict` because the repo is `wudict`.
+**Naming (D27, amended 2026-09-28).** In anything a user reads, prefer **`wudict`** (lowercase; **wuDict** in the Android app and browser extensions); **WuWeiDict** is the official full name, used only where the official name is required. The technical name is **`wudict`** everywhere else — binary, env prefix (`WUDICT_*`), user folders (`~/.wudict`; `wudict` in each XDG base dir on Linux/BSD, `internal/basedir`), db format prefix (`wudict:`), localStorage keys, CSS classes. The module path is `github.com/wuweidict/wudict` because the repo is `wudict`.
 
 Go web dictionary app supporting MDX/MDD, StarDict, Aard2 Slob, Lingvo DSL, Babylon BGL, openZIM; wudict markdown (`.wudict.md`: standard CommonMark, read by `internal/format/wmd` and written by `wudict dump -format md`). Dual-backend: a dictionary is searched through its own format ("preview", D15) until it is **prepared** into a library folder — `<db dir>/<name>/{text.db, media.db, info.txt}` (D20) — which is the primary mode. Preparation is automatic and cheap (headwords only, `AUTO_INDEX`); *full-text* is a per-dictionary switch, and media packing a second (D24). Search modes are exact · prefix · full-text · wildcard (D16, D167 — "fuzzy" and "contains" are retired, D170).
 
@@ -29,6 +29,7 @@ This repository is the whole project (`github.com/wuweidict/wudict`); there is n
 - `internal/server` — registry, HTTP API (`web/openapi.yaml`, kept honest by `make api-test`), embedded UI (`web/index.html`, `web/setup.html`, `web/frame.js`).
 - `internal/search` — the per-dictionary query and the streaming fan-out; `internal/ftsq` full-text query plans; `internal/wildcard`.
 - `internal/htmlref` — article HTML: resource-reference rewriting and sanitising. `internal/resource` — resource-name matching inside containers.
+- `internal/basedir` — where the user's files live (`~/.wudict`, or the XDG base dirs on Linux/BSD) and the one-time move between them.
 - `internal/intake` — archive/URL/folder → candidate dictionaries → installed. `internal/config` — flag > env > toml layering.
 - `internal/lang`, `internal/morph`, `internal/lemmas` — language attribution and lemmatisation (D82, D88).
 - `internal/gomdict` — inlined MDX/MDD parser. `internal/speex` — in-process .spx decoder (D18).

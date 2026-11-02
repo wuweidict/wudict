@@ -409,7 +409,7 @@ To exclude a dictionary from *All dictionaries* searches, just untick its checkm
 | `wudict dump -format md -o <folder> <file>` | export a dictionary as [wudict markdown](<entry://wudict markdown>) |
 | `wudict token` | print the link that carries the access key |
 
-A setting is a flag, an environment variable or a line in `~/.wudict/wudict.toml`; a flag wins over the environment, the environment over the file.
+A setting is a flag, an environment variable or a line in `wudict.toml` (`~/.wudict`, or `~/.config/wudict` on Linux); a flag wins over the environment, the environment over the file.
 
 <details>
 <summary>Safety limits (advanced)</summary>

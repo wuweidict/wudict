@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/wuweidict/wudict/internal/basedir"
 	"github.com/wuweidict/wudict/internal/fsx"
 	"github.com/wuweidict/wudict/internal/limits"
 )
@@ -188,7 +189,7 @@ func defaults() Config {
 		MemoryLimit:   memoryLimitDefault(),
 		SearchMemory:  searchMemoryDefault(),
 		MorphCache:    morphCacheDefault(),
-		LemmaDir:      filepath.Join(home, ".wudict", "lemmas"),
+		LemmaDir:      join(dirs().Data, "lemmas"),
 		// off by default: see the field comment - loopback deletes regardless,
 		// so this only ever opens the LAN case, and that is opt-in.
 		AllowRemoteDelete: false,
@@ -448,17 +449,34 @@ var (
 	}
 )
 
-// HomeConfig is the only file wudict ever creates: ~/.wudict/wudict.toml,
-// beside the library that directory already holds.
-func HomeConfig() string {
-	if h := homeDir(); h != "" {
-		return filepath.Join(h, ".wudict", Name)
+// dirs is the user's layout (internal/basedir): ~/.wudict, or on a free Unix
+// desktop the XDG base directories.
+func dirs() basedir.Dirs { return basedir.Resolve(goos, homeDir(), os.Getenv) }
+
+// goos is runtime.GOOS; tests set it to see another platform's layout.
+var goos = runtime.GOOS
+
+// join is filepath.Join that keeps "no such folder" empty.
+func join(dir, name string) string {
+	if dir == "" {
+		return ""
 	}
-	return ""
+	return filepath.Join(dir, name)
 }
 
+// HomeConfig is the only file wudict ever creates: wudict.toml in the user's
+// config folder - ~/.wudict, or $XDG_CONFIG_HOME/wudict.
+func HomeConfig() string { return join(dirs().Config, Name) }
+
+// TokenPath is where the access key lives (token.go): the state folder,
+// because the key belongs to this machine and is not a setting to copy.
+// Empty when there is no home directory, in which case a key can still be
+// supplied by AUTH_TOKEN.
+func TokenPath() string { return join(dirs().State, "token") }
+
 // candidates returns the search order: next to the executable (portable mode,
-// see EnsureConfigFile), then the user's own directory, then the machine's.
+// see EnsureConfigFile), then the user's own directory, then the machine's -
+// $XDG_CONFIG_DIRS where that spec applies, and /etc/wudict.
 func candidates() []string {
 	var out []string
 	if d := exeDir(); d != "" {
@@ -466,6 +484,11 @@ func candidates() []string {
 	}
 	if p := HomeConfig(); p != "" {
 		out = append(out, p)
+	}
+	if basedir.XDG(goos) {
+		for _, d := range basedir.SystemConfigDirs(os.Getenv) {
+			out = append(out, filepath.Join(d, Name))
+		}
 	}
 	return append(out, filepath.Join(systemDir, Name))
 }
@@ -659,8 +682,8 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 `
 
 // EnsureConfigFile makes sure a config file exists, generating the fully
-// commented template on first run. It writes exactly one place -
-// ~/.wudict/wudict.toml - and never beside the executable.
+// commented template on first run. It writes exactly one place - HomeConfig -
+// and never beside the executable.
 //
 // Not the executable's directory, even when it is writable: writability does
 // not mean "this directory is ours". `go install` lands in ~/go/bin and
@@ -686,10 +709,23 @@ func EnsureConfigFile() (path string, created bool, err error) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return "", false, err
 	}
-	if err := fsx.WriteAtomic(p, []byte(configTemplate), 0o644); err != nil {
+	if err := fsx.WriteAtomic(p, []byte(template(dirs(), homeDir())), 0o644); err != nil {
 		return "", false, err
 	}
 	return p, true, nil
+}
+
+// template is configTemplate naming the folders of layout d, home written
+// as ~. configTemplate is written for the ~/.wudict layout, so there it comes
+// out unchanged.
+func template(d basedir.Dirs, home string) string {
+	short := func(dir, name string) string { return basedir.Short(filepath.Join(dir, name), home) }
+	return strings.NewReplacer(
+		"~/.wudict/wudict.toml", short(d.Config, Name),
+		"~/.wudict/db", short(d.Data, "db"),
+		"~/.wudict/lemmas", short(d.Data, "lemmas"),
+		"~/.wudict/token", short(d.State, "token"),
+	).Replace(configTemplate)
 }
 
 // SaveKey sets key = "value" in the config file at path, uncommenting or

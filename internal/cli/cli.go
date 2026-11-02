@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wuweidict/wudict/internal/basedir"
 	"github.com/wuweidict/wudict/internal/config"
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/fsx"
@@ -226,7 +227,7 @@ SETTINGS
                           (text.db, media.db, info.txt). Must not be a
                           dictionary folder.
                           env: DB_DIR         toml: DB_DIR
-                          default: ~/.wudict/db
+                          default: <data>/db (see FOLDERS)
 
   (env/toml only)
   AUTO_INDEX = "on"       Index each dictionary's headwords in the background on
@@ -288,7 +289,7 @@ SETTINGS
                           env: MORPH_CACHE    toml: MORPH_CACHE
                           default: 2 (Android: 1)
 
-  LEMMA_DIR = "~/.wudict/lemmas"
+  LEMMA_DIR = "<data>/lemmas"
                           Installed lemma data; English is built in. One file
                           per language, named by code or English name: "pl.txt",
                           "pol.tsv", "polish.txt.gz". Each line is a lemma, then
@@ -298,7 +299,7 @@ SETTINGS
                           after each install or removal on the Lemmatization
                           page.
                           env: LEMMA_DIR      toml: LEMMA_DIR
-                          default: ~/.wudict/lemmas
+                          default: <data>/lemmas (see FOLDERS)
 
   LEMMA_URL = "https://…/manifest.json"
                           The lemma data catalogue: languages, sizes, SHA-256
@@ -366,16 +367,16 @@ SETTINGS
                           127.0.0.1); "on": always; "off": never. "off" on a
                           network address gives anyone who can reach the port
                           your library, settings and folder names.
-                          The key is in ~/.wudict/token, readable only by you;
+                          The key is in <state>/token, readable only by you;
                           "wudict token" prints the link that carries it.
                           env: AUTH           toml: AUTH
                           default: auto
 
   AUTH_TOKEN              The access key from elsewhere: a password manager, a
-                          container secret. Overrides ~/.wudict/token and is not
+                          container secret. Overrides <state>/token and is not
                           written to it.
                           env: AUTH_TOKEN     toml: AUTH_TOKEN
-                          default: the contents of ~/.wudict/token
+                          default: the contents of <state>/token
 
   --allow-remote-delete <0|1>
                           Allow clients on other hosts to delete dictionaries.
@@ -453,9 +454,23 @@ CONFIG FILE
   2. wudict.toml next to the executable (portable mode: takes precedence
      and receives the settings saved from the setup page; never created by
      wudict)
-  3. ~/.wudict/wudict.toml (created, commented out, by the first "serve")
-  4. /etc/wudict/wudict.toml
+  3. <config>/wudict.toml (created, commented out, by the first "serve")
+  4. Linux and BSD: wudict/wudict.toml in each of $XDG_CONFIG_DIRS
+     (default /etc/xdg)
+  5. /etc/wudict/wudict.toml
   Each start prints the file in effect.
+
+FOLDERS
+  Where wudict keeps your files:
+                macOS, Windows, Android     Linux, BSD
+  <config>      ~/.wudict                   ~/.config/wudict
+  <data>        ~/.wudict                   ~/.local/share/wudict
+  <state>       ~/.wudict                   ~/.local/state/wudict
+  On Linux and BSD, $XDG_CONFIG_HOME, $XDG_DATA_HOME and $XDG_STATE_HOME
+  replace the defaults. A ~/.wudict from an earlier version moves there on
+  the next "serve". With a portable wudict.toml or --config, the reading
+  state, history, word lists, groups and styles are kept in that file's
+  folder instead.
 
   Priority, highest first: flag, environment variable, wudict.toml, default.
 
@@ -1180,7 +1195,7 @@ func cmdServe(args []string) (err error) {
 	remoteDelete := fs.String("allow-remote-delete", "", "may another machine delete a dictionary: 0 (default) or 1 (env/toml: ALLOW_REMOTE_DELETE)")
 	ip := fs.String("ip", "", "listen IP (env/toml: SERVER_IP)")
 	auth := fs.String("auth", "", "require the access key: auto (default), on, off (env/toml: AUTH)")
-	authToken := fs.String("auth-token", "", "the access key itself, instead of ~/.wudict/token (env/toml: AUTH_TOKEN)")
+	authToken := fs.String("auth-token", "", "the access key itself, instead of the token file (env/toml: AUTH_TOKEN)")
 	port := fs.String("port", "", "listen port (env/toml: SERVER_PORT)")
 	configPath := fs.String("config", "", "path to wudict.toml (env: CONFIG_PATH)")
 	noBrowser := fs.Bool("no-browser", false, "do not open a browser tab (env/toml: NO_BROWSER)")
@@ -1376,6 +1391,19 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		}
 	}
 
+	// ~/.wudict into the XDG base directories, once. Before anything below
+	// reads or writes the user's files, and after the bind, so no wudict on
+	// this configuration is running (moveLegacyDirs).
+	if moveLegacyDirs(cfg, *configPath != "") {
+		if cfg, err = config.Load(*configPath, flagVals); err != nil {
+			return err
+		}
+		limits.Set(cfg.Limits)
+		store.SetDBDir(cfg.DBDir)
+		libDir = store.DefaultDBDir()
+		dict.ExcludeDir(libDir)
+	}
+
 	// An import that was killed - the phone reclaimed the process, the machine
 	// lost power - leaves its half-extracted staging directory behind. It is
 	// hidden, so discovery never saw it, and nothing else would ever remove
@@ -1391,7 +1419,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		}
 	}
 
-	// first run: generate the commented ~/.wudict/wudict.toml containing
+	// first run: generate the commented wudict.toml (config.HomeConfig) with
 	// defaults; an existing file anywhere in the search order wins. cfg.Source
 	// is updated so the startup summary names the file that is now in effect
 	// rather than reporting "none" on the very run that created it.
@@ -1419,15 +1447,15 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		logx.V("parallelism: GOMAXPROCS=%d, search fan-out=%d", n, n)
 	}
 
-	// The UI state (which dictionaries are searched, in what order) lives
-	// beside the config file in effect, so a portable install carries both and
-	// --config re-points both. Loaded BEFORE the registry: Warm skips disabled
-	// dictionaries, and it starts inside NewRegistry.
-	user := server.UserDir(userDir(cfgFile))
+	// The UI state (which dictionaries are searched, in what order) lives in
+	// the user's folders (userDir): beside a portable or --config wudict.toml,
+	// so that one folder carries both. Loaded BEFORE the registry: Warm skips
+	// disabled dictionaries, and it starts inside NewRegistry.
+	user := userDir(cfgFile, cfg.Portable || *configPath != "")
 	regOpts := []server.Option{server.WithPrefs(server.LoadPrefs(user.State())),
 		server.WithFailures(user.Failures())}
 	// The wudict howto, the guide the app ships as a dictionary: written
-	// beside the config in effect (rewritten only when this build's guide
+	// to the user's data folder (rewritten only when this build's guide
 	// differs), and listed with the user's dictionaries. Without a place to
 	// write it, the app starts without it.
 	// Once the user removed it, it is not written back until Setup restores it;
@@ -1520,6 +1548,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 		total: reg.Count(), libDir: libDir, url: url, moreURLs: moreURLs, alsoURL: alsoURL,
 		speex:  speexSummary(useExternalSpeex, sxPath, sxSource),
 		keyURL: keyURL(url, token),
+		user:   user,
 	})
 	// No wait for the server: every listener is bound above, so the kernel
 	// queues the browser's connection until Serve accepts it.
@@ -1662,11 +1691,11 @@ func openHeadlessLog() (*os.File, error) {
 		}
 		path = filepath.Join(dir, "wudict", "wudict.log")
 	default:
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
+		dir := basedir.Current().State
+		if dir == "" {
+			return nil, errors.New("no home directory to keep a log in")
 		}
-		path = filepath.Join(home, ".wudict", "wudict.log")
+		path = filepath.Join(dir, "wudict.log")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -1808,22 +1837,20 @@ type startupInfo struct {
 	alsoURL     string   // loopback, "" when url is already loopback
 	speex       string
 	keyURL      string // url carrying the access key, "" when none is required
+	user        server.UserDir
 }
 
-// userDir is the directory the wudict.toml in effect lives in - wudict's own
-// space for everything the user owns but did not put in the config file. When
-// no config file exists at all it falls back to the home location, the same
-// directory EnsureConfigFile would have used, and when even the home directory
-// is unknown it returns "": the caller then keeps its state in memory rather
-// than scattering a file somewhere nobody asked for.
-func userDir(cfgFile string) string {
-	if cfgFile != "" {
-		return filepath.Dir(cfgFile)
+// userDir is where the user's files live besides wudict.toml. A wudict.toml
+// the user placed - beside the executable (portable, D32) or named by
+// --config / CONFIG_PATH - keeps them in its own folder, so one folder carries
+// all of it. Otherwise they go to the user's layout (internal/basedir):
+// ~/.wudict, or the XDG folders. A machine-wide file in /etc is read, never
+// written beside.
+func userDir(cfgFile string, single bool) server.UserDir {
+	if single && cfgFile != "" {
+		return server.FolderUserDir(filepath.Dir(cfgFile))
 	}
-	if p := config.HomeConfig(); p != "" {
-		return filepath.Dir(p)
-	}
-	return ""
+	return server.NewUserDir(basedir.Current())
 }
 
 func printStartup(cfg config.Config, in startupInfo) {
@@ -1879,6 +1906,11 @@ func printStartup(cfg config.Config, in startupInfo) {
 	}
 	for _, p := range cfg.Shadowed {
 		fmt.Fprintf(out, "                %s  (ignored - lower priority)\n", p)
+	}
+	// The enabled set, history and the access key: beside the config in a
+	// single folder; in the XDG layout a folder of their own, named here.
+	if st := filepath.Dir(in.user.State()); st != "." && st != filepath.Dir(cfg.Source) {
+		fmt.Fprintf(out, "  state         %s\n", st)
 	}
 	for _, p := range cfg.Problems {
 		fmt.Fprintf(out, "                ⚠ %s\n", p)
@@ -2306,8 +2338,8 @@ func cmdClean(args []string) error {
 }
 
 // isHowtoSource reports whether src is the built-in guide the server writes
-// beside its config (<config dir>/builtin/<howto file>). Its source comes and
-// goes with the app, not with the user's folders, so it is never an orphan.
+// (<data folder>/builtin/<howto file>, UserDir.Builtin). Its source comes and
+// goes with the app, not with the dictionary folders, so it is never an orphan.
 func isHowtoSource(src string) bool {
 	return filepath.Base(src) == howto.FileName && filepath.Base(filepath.Dir(src)) == "builtin"
 }
@@ -2332,7 +2364,7 @@ func cmdToken(args []string) error {
 		return err
 	}
 	// A key supplied through the environment or the file is not ours to
-	// rotate: the file is where the user put it, and rewriting ~/.wudict/token
+	// rotate: the file is where the user put it, and rewriting the token file
 	// would silently do nothing to the value actually in force.
 	if cfg.AuthToken != "" {
 		if *rotate {

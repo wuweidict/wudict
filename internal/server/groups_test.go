@@ -31,7 +31,7 @@ type groupsResp struct {
 func newGroupsServer(t *testing.T) *Server {
 	t.Helper()
 	s := newTestServer(t)
-	s.User = UserDir(t.TempDir())
+	s.User = FolderUserDir(t.TempDir())
 	return s
 }
 

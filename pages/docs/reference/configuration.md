@@ -19,40 +19,50 @@ wudict reads the first of:
 
 1. `--config` or `CONFIG_PATH`
 2. `wudict.toml` next to the executable ([portable mode](#portable-mode))
-3. `~/.wudict/wudict.toml`
-4. `/etc/wudict/wudict.toml`
+3. `wudict.toml` in the config folder ([Files](#files))
+4. Linux and BSD: `wudict/wudict.toml` in each folder of `$XDG_CONFIG_DIRS`
+   (default `/etc/xdg`)
+5. `/etc/wudict/wudict.toml`
 
-The first `wudict serve` creates `~/.wudict/wudict.toml` with every setting
-commented out. Each start prints the file in effect. An unknown key is reported
+The first `wudict serve` creates `wudict.toml` in the config folder with every
+setting commented out. Each start prints the file in effect. An unknown key is reported
 at startup and on the setup page.
 
 ### Portable mode
 
-A `wudict.toml` next to the executable takes precedence over
-`~/.wudict/wudict.toml` and receives the settings saved from the setup page.
-wudict never creates it.
+A `wudict.toml` next to the executable takes precedence over the one in the
+config folder and receives the settings saved from the setup page. wudict never
+creates it. `state.json`, `groups.ini`, `style/`, the word lists and the howto
+are then kept beside it too.
 
 ## Files
 
-| Platform | Config folder |
+On macOS, Windows and Android wudict keeps its files in one folder:
+
+| Platform | Folder |
 | --- | --- |
-| macOS, Linux | `~/.wudict` |
+| macOS | `~/.wudict` |
 | Windows | `%USERPROFILE%\.wudict` |
 | Android | `Android/data/com.legbehindneck.wudict/files` |
 
-| In the config folder | Contents |
-| --- | --- |
-| `wudict.toml` | settings |
-| `state.json` | dictionary order, enabled dictionaries, display preferences; written by wudict |
-| `groups.ini` | picker groups, once edited |
-| `style/` | custom styles |
-| `token` | the access key |
-| `lemmas/` | installed lemma data ([`LEMMA_DIR`](#lemma_dir)) |
-| `db/` | the library ([`DB_DIR`](#db_dir)) |
+On Linux and BSD the files follow the
+[XDG Base Directory](https://specifications.freedesktop.org/basedir/latest/)
+folders. `$XDG_CONFIG_HOME`, `$XDG_DATA_HOME` and `$XDG_STATE_HOME` replace
+the defaults:
+
+| Folder | Default | Contents |
+| --- | --- | --- |
+| config | `~/.config/wudict` | `wudict.toml` (settings), `groups.ini` (picker groups, once edited), `style/` (custom styles) |
+| data | `~/.local/share/wudict` | `db/` (the library, [`DB_DIR`](#db_dir)), `lemmas/` (installed lemma data, [`LEMMA_DIR`](#lemma_dir)), `favourites.txt`, `builtin/` (the howto) |
+| state | `~/.local/state/wudict` | `state.json` (dictionary order, enabled dictionaries, display preferences), `history.txt`, `token` (the access key), `wudict.log` |
+
+A `~/.wudict` from an earlier version moves to these folders on the next
+`wudict serve`, which lists every moved file. If `DB_DIR` or `LEMMA_DIR` points
+inside `~/.wudict`, that folder stays where it is.
 
 Log when there is no console: macOS `~/Library/Logs/wudict.log`, Linux
-`~/.wudict/wudict.log`, Windows `%LOCALAPPDATA%\wudict\wudict.log`, Android
-logcat.
+`~/.local/state/wudict/wudict.log`, Windows `%LOCALAPPDATA%\wudict\wudict.log`,
+Android logcat.
 
 wudict does not modify dictionary files. Only <kbd>🗑 Remove…</kbd> and
 `wudict rm` delete them.
@@ -73,7 +83,7 @@ wudict --dict-dir ~/Dictionaries --dict-dir /Volumes/Ext/Dicts
 DICT_DIR="~/Dictionaries:/Volumes/Ext/Dicts" wudict     # ";" on Windows
 ```
 
-``` toml title="~/.wudict/wudict.toml"
+``` toml title="wudict.toml"
 DICT_DIR = ["~/Dictionaries", "/Volumes/Ext/Dicts"]
 ```
 
@@ -88,7 +98,7 @@ The library: one library folder per indexed dictionary.
 | | |
 | --- | --- |
 | Flag | `--db-dir <path>` |
-| Default | `~/.wudict/db` |
+| Default | `db/` in the data folder ([Files](#files)) |
 
 Must not be a `DICT_DIR` folder; wudict does not start if it is.
 
@@ -341,7 +351,7 @@ The folder of installed lemma data. English is built in.
 | --- | --- |
 | Flag | none, environment and file only |
 | Values | a folder |
-| Default | `~/.wudict/lemmas` |
+| Default | `lemmas/` in the data folder ([Files](#files)) |
 
 Install languages with <kbd>Lemmatization…</kbd> (dictionary panel → folder
 summary) or [`wudict lemmas download`](cli.md#lemmas). The folder is read at
@@ -448,7 +458,7 @@ Whether a request must carry the access key.
 | Values | `auto`, `on`, `off` |
 | Default | `auto`: required when [`SERVER_IP`](#server_ip-and-server_port) is not `127.0.0.1` |
 
-The key is a random string stored in `~/.wudict/token`, readable only by your
+The key is a random string stored in `token` ([Files](#files)), readable only by your
 user. `wudict token` prints a link that carries it
 (`http://<address>:<port>/?k=<key>`); opening the link once stores the key in
 that browser as a cookie. Scripts send `Authorization: Bearer <key>`.
@@ -464,12 +474,12 @@ your settings and your folder names.
 ### AUTH_TOKEN
 
 The access key itself, when it comes from elsewhere: a password manager, a
-container secret. Overrides `~/.wudict/token` and is never written to it.
+container secret. Overrides the `token` file and is never written to it.
 
 | | |
 | --- | --- |
 | Flag | none, environment and file only |
-| Default | the contents of `~/.wudict/token` |
+| Default | the contents of the `token` file |
 
 ### TRUSTED_HOSTS
 
@@ -665,7 +675,7 @@ A flag and an environment variable only; not a key in `wudict.toml`.
 
 ## Example
 
-``` toml title="~/.wudict/wudict.toml"
+``` toml title="wudict.toml"
 DICT_DIR      = ["~/Dictionaries", "/data/dicts"]
 SERVER_IP     = "0.0.0.0"          # listen on the network: AUTH applies
 SERVER_PORT   = "9000"

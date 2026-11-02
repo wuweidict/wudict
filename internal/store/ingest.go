@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/wuweidict/wudict/internal/artmark"
+	"github.com/wuweidict/wudict/internal/basedir"
 	"github.com/wuweidict/wudict/internal/htmlref"
 
 	"github.com/wuweidict/wudict/internal/dict"
@@ -479,7 +480,8 @@ func SetDBDir(dir string) {
 }
 
 // DefaultDBDir is the library folder for prepared dictionaries (D7): the
-// configured one (SetDBDir), else $WUDICT_DB_DIR, else ~/.wudict/db.
+// configured one (SetDBDir), else $WUDICT_DB_DIR, else db/ in the user's data
+// folder - ~/.wudict/db, or $XDG_DATA_HOME/wudict/db (internal/basedir).
 func DefaultDBDir() string {
 	if dir := dbDir.Load(); dir != nil {
 		return *dir
@@ -487,9 +489,8 @@ func DefaultDBDir() string {
 	if dir := os.Getenv("WUDICT_DB_DIR"); dir != "" {
 		return dir
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".wudict/db"
+	if d := basedir.Current().Data; d != "" {
+		return filepath.Join(d, "db")
 	}
-	return filepath.Join(home, ".wudict", "db")
+	return filepath.Join(basedir.LegacyName, "db")
 }

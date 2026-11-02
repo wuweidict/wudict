@@ -615,9 +615,9 @@ mac-agent-status: ## Show the agent's launchd state (pid, exit status, ...)
 	launchctl print $(GUI)/$(LABEL)
 
 # ---- systemd service (Linux) --------------------------------------------
-# A USER unit (systemctl --user): WuWeiDict reads ~/Dictionaries, writes
-# ~/.wudict and binds 127.0.0.1, so it belongs to the user's session, not to
-# root. Only copying the binary into $(PREFIX)/bin needs sudo.
+# A USER unit (systemctl --user): WuWeiDict reads ~/Dictionaries, writes its
+# XDG folders under $HOME and binds 127.0.0.1, so it belongs to the user's
+# session, not to root. Only copying the binary into $(PREFIX)/bin needs sudo.
 #
 # The unit file *must* be generated - ExecStart must be an absolute
 # path and systemd doesn't do ~ expansion.
@@ -677,10 +677,10 @@ clean: ## Remove binaries, dist/, coverage artifacts
 	rm -rf $(BINARY) $(BUILD_DIR) coverage.out
 
 # The folder comes from tools/dbdir - the app's own resolution - and never
-# from a copy of the default here, which would delete ~/.wudict/db while the
+# from a copy of the default here, which would delete a default db/ while the
 # library the app uses sat in DB_DIR untouched.
 .PHONY: purge
-purge: ## Delete the whole prepared library: DB_DIR as wudict resolves it (env, wudict.toml, else ~/.wudict/db)
+purge: ## Delete the whole prepared library: DB_DIR as wudict resolves it (env, wudict.toml, else db/ in the data folder)
 	@dir=$$(CGO_ENABLED=0 go run -tags purego ./tools/dbdir) || exit 1; \
 	case "$$dir" in ""|/|"$$HOME"|"$$HOME"/) echo "refusing to delete '$$dir'"; exit 2;; esac; \
 	if [ -d "$$dir" ]; then rm -rfv "$$dir"; else echo "no library at $$dir"; fi

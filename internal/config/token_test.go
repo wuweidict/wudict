@@ -43,6 +43,7 @@ func TestAuthRequired(t *testing.T) {
 // owner - the last being the entire point of keeping a secret in a file.
 func TestLoadToken(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", "") // a Linux runner's own must not receive it
 	if runtime.GOOS == "windows" {
 		t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	}

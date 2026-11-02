@@ -2,6 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -11,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/wuweidict/wudict/internal/basedir"
 	"github.com/wuweidict/wudict/internal/facet"
 	"github.com/wuweidict/wudict/internal/fsx"
 	"github.com/wuweidict/wudict/internal/logx"
@@ -733,4 +737,47 @@ func (s *Server) handleSavePrefs(w http.ResponseWriter, r *http.Request) {
 		dicts = []DictPref{} // [] on the wire, as before, never null
 	}
 	writeJSON(w, map[string]any{"exists": true, "dicts": dicts, "ui": s.reg.prefs.UI()})
+}
+
+// RelocatePrefs re-points the records in the state file at path whose
+// dictionary lives under the folder from, which is about to move to to. Only
+// the path changes, never the id, and that is what makes it safe on either
+// side of the move - before it, the id still names the dictionary where it is;
+// after it, the id no longer matches and the path rung of healList re-attaches
+// the record at its new place (and writes the new id back). A library folder
+// needs this, since its entries are all "text.db" and the file-name rung
+// cannot tell them apart.
+//
+// A missing state file is nothing to do; an unreadable or malformed one is an
+// error, and is left as it is.
+func RelocatePrefs(path, from, to string) error {
+	data, err := fsx.ReadBounded(path, maxPrefsBytes)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var f prefsFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	changed := false
+	for i, d := range f.Dicts {
+		if !basedir.Within(d.Path, from) {
+			continue
+		}
+		if rel, err := filepath.Rel(from, d.Path); err == nil {
+			f.Dicts[i].Path = filepath.Join(to, rel)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	out, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return err
+	}
+	return fsx.WriteAtomicExact(path, append(out, '\n'), 0o600)
 }

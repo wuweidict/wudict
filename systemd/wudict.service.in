@@ -4,7 +4,8 @@
 #! ${XDG_CONFIG_HOME:-~/.config}/systemd/user/wudict.service.
 #!
 #! This is a USER unit (systemctl --user), the analogue of the macOS
-#! LaunchAgent: WuWeiDict reads ~/Dictionaries, writes ~/.wudict and binds
+#! LaunchAgent: WuWeiDict reads ~/Dictionaries, writes its XDG folders
+#! (~/.config/wudict, ~/.local/share/wudict, ~/.local/state/wudict) and binds
 #! 127.0.0.1, so it wants the user's own $HOME and session — not root's.
 #! Only installing the binary into @PREFIX@/bin needs sudo.
 #!

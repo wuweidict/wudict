@@ -98,7 +98,7 @@ func callWords(t *testing.T, s *Server, method, target, body string) (wordsResp,
 
 func TestWordsAPI(t *testing.T) {
 	s := newTestServer(t)
-	s.User = UserDir(t.TempDir())
+	s.User = FolderUserDir(t.TempDir())
 	put := func(list, word string, on bool) wordsResp {
 		t.Helper()
 		b, _ := json.Marshal(map[string]any{"list": list, "word": word, "on": on})
@@ -170,7 +170,7 @@ func TestWordsAPI(t *testing.T) {
 
 func TestWordsHistoryCap(t *testing.T) {
 	s := newTestServer(t)
-	s.User = UserDir(t.TempDir())
+	s.User = FolderUserDir(t.TempDir())
 	var list []string
 	for i := range maxHistory + 5 {
 		list = append(list, "w"+strconv.Itoa(i))

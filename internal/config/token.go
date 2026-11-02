@@ -33,16 +33,6 @@ import (
 // --rotate`), which is the same property with the cost moved to the one moment
 // the user actually wants it: after they suspect it leaked.
 
-// TokenPath is where the secret lives: beside wudict.toml, in the directory
-// that already holds the library. Empty when there is no home directory, in
-// which case a token can still be supplied by AUTH_TOKEN.
-func TokenPath() string {
-	if h := homeDir(); h != "" {
-		return filepath.Join(h, ".wudict", "token")
-	}
-	return ""
-}
-
 // NewToken returns 256 bits of crypto/rand, base64url, unpadded: 43 characters
 // that survive a URL, a shell, a cookie and a copy-paste without escaping.
 func NewToken() (string, error) {
