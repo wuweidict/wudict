@@ -64,6 +64,23 @@ func TestFetcherCheck(t *testing.T) {
 	if _, err := (Fetcher{Insecure: true}).Check("http://anywhere.example/a.zip"); err != nil {
 		t.Fatalf("insecure should permit http: %v", err)
 	}
+
+	// The refusal names the setting only where the setting lifts it.
+	for _, c := range []struct {
+		url  string
+		hint bool
+	}{
+		{"http://anywhere.example/a.zip", true},
+		{"ftp://anywhere.example/a.zip", false},
+	} {
+		_, err := (Fetcher{}).Check(c.url)
+		if !errors.Is(err, ErrInsecureURL) {
+			t.Fatalf("Check(%q) err = %v, want ErrInsecureURL", c.url, err)
+		}
+		if got := strings.Contains(err.Error(), "IMPORT_INSECURE=1"); got != c.hint {
+			t.Fatalf("Check(%q) err = %q, hint = %v, want %v", c.url, err, got, c.hint)
+		}
+	}
 }
 
 func TestFetchDownloads(t *testing.T) {

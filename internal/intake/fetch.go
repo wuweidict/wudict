@@ -170,7 +170,9 @@ func (f Fetcher) Check(raw string) (*url.URL, error) {
 	case "https":
 	case "http":
 		if !f.Insecure {
-			return nil, ErrInsecureURL
+			// The hint names the one setting that lifts this; other schemes
+			// get the bare sentinel, because no setting allows them.
+			return nil, fmt.Errorf("%w: set IMPORT_INSECURE=1 to allow http:// links", ErrInsecureURL)
 		}
 	default:
 		return nil, ErrInsecureURL
@@ -595,7 +597,7 @@ func (f Fetcher) buildClient() *http.Client {
 				// This server may be listening on a LAN, where the caller is
 				// somebody else's browser. Without this, "download that for
 				// me" is a way to reach hosts only this machine can see.
-				return errors.New("that address is on the local network")
+				return errors.New("that address is on the local network: set IMPORT_INSECURE=1 to allow it")
 			}
 			return nil
 		}
