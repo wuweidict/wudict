@@ -86,6 +86,15 @@ jobs:
             VERSION="$(git describe --tags --always --abbrev=0 2>/dev/null || echo dev)"
           fi
 
+          # An existing tag is built AT the tag, not at the branch head: the
+          # F-Droid recipe names the tag's commit, and its reproducible build
+          # must match the APK published here. The workflow file itself still
+          # comes from the dispatched branch, so CI fixes apply to old tags.
+          if git rev-parse -q --verify "refs/tags/$VERSION^{commit}" >/dev/null; then
+            git checkout -q --detach "refs/tags/$VERSION"
+            echo "::notice::building tag $VERSION at $(git rev-parse --short HEAD)"
+          fi
+
           # versionCode follows from the tag (tools/release.sh, D183), the
           # same number `make release` writes into app/build.gradle. A RELEASE
           # tag must find its version there - F-Droid reads that file at the
@@ -123,6 +132,9 @@ jobs:
           docker run --rm -e TAG -v "$PWD:/src" -v "$ANDROID_NDK_HOME:/ndk:ro" -w /src debian:trixie sh -euc '
             echo "deb http://deb.debian.org/debian trixie-backports main" > /etc/apt/sources.list.d/backports.list
             apt-get update -qq
+            # ca-certificates: the bare image has none, so module downloads
+            # fail TLS. The F-Droid build VM has them; they change no byte built.
+            apt-get install -y -qq ca-certificates >/dev/null
             apt-get install -y -qq -t trixie-backports make golang-go >/dev/null
             go version
             GOTOOLCHAIN=local make android-go VERSION="$TAG" ANDROID_NDK=/ndk
