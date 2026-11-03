@@ -49,8 +49,8 @@ android {
         // vector adaptive icon needs no PNG fallbacks at 26+.
         minSdk 26
         targetSdk 36
-        versionCode 3070990
-        versionName "3.7.9"
+        versionCode 3071090
+        versionName "3.7.10"
         if (project.hasProperty('versionCode')) versionCode = project.property('versionCode') as int
         if (project.hasProperty('versionName')) versionName = project.property('versionName') as String
     }

@@ -1,0 +1,4 @@
+🚀 Features
+(speak) Read aloud: the ▾ menu lists Other languages, every language with a voice on the device in the script of the selection; a language picked there or with Read as is kept per dictionary
+(speak) A dictionary whose language wudict cannot tell is read in the language of the default voice from the system's text-to-speech settings, not the phone's interface language or English
+(speak) The menu shows the language being read
