@@ -716,9 +716,13 @@ func EnsureConfigFile() (path string, created bool, err error) {
 }
 
 // template is configTemplate naming the folders of layout d, home written
-// as ~. configTemplate is written for the ~/.wudict layout, so there it comes
-// out unchanged.
+// as ~. configTemplate is written for the ~/.wudict layout, which every
+// platform but the XDG ones keeps: there it is used as written (on Windows a
+// rewrite would also turn its slashes into backslashes).
 func template(d basedir.Dirs, home string) string {
+	if !basedir.XDG(goos) {
+		return configTemplate
+	}
 	short := func(dir, name string) string { return basedir.Short(filepath.Join(dir, name), home) }
 	return strings.NewReplacer(
 		"~/.wudict/wudict.toml", short(d.Config, Name),

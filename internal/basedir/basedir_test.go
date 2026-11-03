@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -15,7 +16,16 @@ func env(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
 }
 
+// skipWindows: the XDG layout is Unix-only (POSIX paths, ":" between config
+// dirs); wudict never resolves it on Windows, where a drive letter breaks both.
+func skipWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the XDG layout is not resolved on Windows")
+	}
+}
+
 func TestSplit(t *testing.T) {
+	skipWindows(t)
 	const home = "/home/u"
 	tests := []struct {
 		name string
@@ -45,6 +55,7 @@ func TestSplit(t *testing.T) {
 }
 
 func TestSystemConfigDirs(t *testing.T) {
+	skipWindows(t)
 	tests := []struct {
 		val  string
 		want []string
@@ -117,11 +128,13 @@ func TestWithin(t *testing.T) {
 }
 
 func TestShort(t *testing.T) {
+	// native separators: Short runs on every platform
+	n := filepath.FromSlash
 	for _, tt := range []struct{ p, home, want string }{
-		{"/home/u/.config/wudict", "/home/u", "~/.config/wudict"},
-		{"/home/u", "/home/u", "~"},
-		{"/home/user2/x", "/home/u", "/home/user2/x"},
-		{"/x", "", "/x"},
+		{n("/home/u/.config/wudict"), n("/home/u"), n("~/.config/wudict")},
+		{n("/home/u"), n("/home/u"), "~"},
+		{n("/home/user2/x"), n("/home/u"), n("/home/user2/x")},
+		{n("/x"), "", n("/x")},
 	} {
 		if got := Short(tt.p, tt.home); got != tt.want {
 			t.Errorf("Short(%q, %q) = %q, want %q", tt.p, tt.home, got, tt.want)

@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/wuweidict/wudict/internal/basedir"
 )
 
 func TestLayering(t *testing.T) {
@@ -630,6 +632,12 @@ func TestConfigLocation(t *testing.T) {
 
 func setGOOS(t *testing.T, g string) {
 	t.Helper()
+	// The XDG layout is a Unix one: POSIX paths, ":" between config dirs.
+	// Simulated on Windows, a drive letter breaks both, and wudict never
+	// resolves it there.
+	if basedir.XDG(g) && runtime.GOOS == "windows" {
+		t.Skip("the XDG layout is not simulated on Windows")
+	}
 	old := goos
 	goos = g
 	t.Cleanup(func() { goos = old })
