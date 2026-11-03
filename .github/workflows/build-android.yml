@@ -114,7 +114,19 @@ jobs:
         # VERSION=$TAG: the checkout is the branch head, where the tag being
         # released may not exist yet (the step below creates it), so the
         # Makefile's own `git describe` would name the previous tag.
-        run: make android-go VERSION="$TAG"
+        #
+        # Built in Debian trixie with the same apt line as the F-Droid recipe
+        # (metadata/com.legbehindneck.wudict.yml, `sudo:`), so the Go that
+        # builds the signed APK is the Go F-Droid's reproducible build uses.
+        # setup-go's toolchain would differ from Debian's by version or patch.
+        run: |
+          docker run --rm -e TAG -v "$PWD:/src" -v "$ANDROID_NDK_HOME:/ndk:ro" -w /src debian:trixie sh -euc '
+            echo "deb http://deb.debian.org/debian trixie-backports main" > /etc/apt/sources.list.d/backports.list
+            apt-get update -qq
+            apt-get install -y -qq -t trixie-backports make golang-go >/dev/null
+            go version
+            GOTOOLCHAIN=local make android-go VERSION="$TAG" ANDROID_NDK=/ndk
+            chown -R '"$(id -u):$(id -g)"' android/app/src/main/jniLibs'
 
       - name: Configure signing
         id: signing
@@ -151,9 +163,12 @@ jobs:
           fi
           # versionName is overridden with the release TAG; without it the
           # build would stamp `git describe --dirty`, which is right for a
-          # working tree and wrong for a release.
+          # working tree and wrong for a release. Without the leading "v":
+          # F-Droid builds the same tag from app/build.gradle's "3.7.9", and
+          # its reproducible-build check compares the manifests byte for byte.
+          VERSION_NAME="${{ steps.ver.outputs.version }}"
           ./gradlew --no-daemon "$TASK" assemblePlayDebug \
-            -PversionName="${{ steps.ver.outputs.version }}" \
+            -PversionName="${VERSION_NAME#v}" \
             -PversionCode="${{ steps.ver.outputs.code }}"
 
       - name: Assert the flavour split held

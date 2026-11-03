@@ -246,9 +246,11 @@ android-go: ## Cross-compile the server into the APK's jniLibs (android/arm64, c
 	  echo "  install one: $(ANDROID_SDK)/cmdline-tools/latest/bin/sdkmanager 'ndk;30.0.16248370'"; \
 	  echo "  or set ANDROID_NDK_HOME / ANDROID_NDK"; exit 2; }
 	@mkdir -p $(dir $(ANDROID_LIB))
+	@# -buildvcs=false: the version is stamped by -X; git state (revision,
+	@# "modified") would differ between CI and F-Droid's reproducible build.
 	CC="$(NDK_BIN)/aarch64-linux-android$(ANDROID_API)-clang" \
 	CXX="$(NDK_BIN)/aarch64-linux-android$(ANDROID_API)-clang++" \
-	CGO_ENABLED=1 GOOS=android GOARCH=arm64 go build $(GOFLAGS) \
+	CGO_ENABLED=1 GOOS=android GOARCH=arm64 go build $(GOFLAGS) -buildvcs=false \
 	  -ldflags "$(LDFLAGS) -extldflags '-Wl,-z,max-page-size=16384'" -o $(ANDROID_LIB) $(CMD)
 
 .PHONY: android-go-purego

@@ -104,6 +104,15 @@ android {
             useLegacyPackaging = true
         }
     }
+
+    // AGP otherwise writes an encrypted "Dependency metadata" block into the
+    // APK signing block. F-Droid rejects it, and a reproducible-build check
+    // cannot compare a blob only Google can read. The bundle keeps it: the
+    // AAB goes to Play only, which is the one reader of it.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = true
+    }
 }
 
 // F-Droid's scanner reads every resolvable configuration and flags io.opencensus:*
