@@ -79,7 +79,7 @@ func WriteLinks(dbPath string, parts []resource.Part, links []resource.Link, dic
 		CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
 		CREATE TABLE part(id INTEGER PRIMARY KEY, path TEXT, size INTEGER, mtime INTEGER);
 		CREATE TABLE link(name TEXT PRIMARY KEY, mime TEXT, part INTEGER, off INTEGER, size INTEGER);
-	`, schemaVersion)); err != nil {
+	`, sidecarSchema)); err != nil {
 		return err
 	}
 	tx, err := db.Begin()
@@ -139,7 +139,7 @@ func OpenLinks(dbPath, dictUUID string) (*Links, error) {
 		db.Close()
 		return nil, err
 	}
-	if ver != schemaVersion {
+	if ver != sidecarSchema {
 		db.Close()
 		return nil, fmt.Errorf("%s: not a wudict media locator", dbPath)
 	}

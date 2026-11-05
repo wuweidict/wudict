@@ -34,8 +34,8 @@ func Fingerprint(textDB string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if schema != schemaVersion {
-		return "", fmt.Errorf("%s: schema %d, want %d", textDB, schema, schemaVersion)
+	if !textSchemaOK(schema) {
+		return "", fmt.Errorf("%s: schema %d, want %d to %d", textDB, schema, textSchemaMin, textSchemaMax)
 	}
 	h := sha256.New()
 	field := func(s string) {
@@ -92,7 +92,7 @@ func Fingerprint(textDB string) (string, error) {
 func volatileMeta(k string) bool {
 	switch k {
 	case "dict_uuid", "created", "source_path", "source_size", "source_mtime",
-		"source_sha256_1M", "body_encoding",
+		"source_sha256_1M", "body_encoding", "body_dict_bytes",
 		"ingest_version", "reader_version", "markup_version":
 		return true
 	}

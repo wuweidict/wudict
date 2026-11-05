@@ -643,29 +643,107 @@ func setGOOS(t *testing.T, g string) {
 	t.Cleanup(func() { goos = old })
 }
 
-// A key whose value says "off" must not turn the feature on. NO_COMPRESS used
-// to test "0"/"false" inline and so read "off" as "set, therefore on" (D101).
-func TestNoCompressNegatives(t *testing.T) {
+// COMPRESSION and the key it replaced, NO_COMPRESS (D191): every spelling, the
+// layer that wins, and that nothing invalid is fatal.
+func TestCompressionResolve(t *testing.T) {
+	zstd1 := Compression{Codec: CodecZstd, Level: 1}
+	none := Compression{Codec: CodecNone}
 	for _, tc := range []struct {
-		v    string
-		want bool
+		name     string
+		file     string            // wudict.toml body
+		env      map[string]string // environment
+		flags    map[string]string
+		want     Compression
+		origin   string
+		problem  string // substring of a Problem expected; "" = none
+		problems int    // how many Problems; 0 means 1 when problem is set
 	}{
-		{"", false}, {"0", false}, {"false", false}, {"FALSE", false},
-		{"off", false}, {"no", false}, {"n", false},
-		{"1", true}, {"true", true}, {"yes", true},
+		{name: "unset", want: zstd1, origin: OriginDefault},
+		{name: "zstd", env: map[string]string{"COMPRESSION": "zstd"}, want: zstd1, origin: OriginEnv},
+		{name: "case and space", env: map[string]string{"COMPRESSION": " ZSTD-3 "}, want: Compression{CodecZstd, 3}, origin: OriginEnv},
+		{name: "zstd tier 2", env: map[string]string{"COMPRESSION": "zstd-2"}, want: zstd1, origin: OriginEnv},
+		{name: "zstd tier 5", env: map[string]string{"COMPRESSION": "zstd-5"}, want: Compression{CodecZstd, 3}, origin: OriginEnv},
+		{name: "zstd tier 9", env: map[string]string{"COMPRESSION": "zstd-9"}, want: Compression{CodecZstd, 6}, origin: OriginEnv},
+		{name: "zstd tier 19", env: map[string]string{"COMPRESSION": "zstd-19"}, want: Compression{CodecZstd, 10}, origin: OriginEnv},
+		{name: "deflate bare", env: map[string]string{"COMPRESSION": "deflate"}, want: Compression{CodecDeflate, deflateLevel()}, origin: OriginEnv},
+		{name: "deflate-8", file: `COMPRESSION = "deflate-8"`, want: Compression{CodecDeflate, 8}, origin: OriginFile},
+		{name: "none", flags: map[string]string{"COMPRESSION": "none"}, want: none, origin: OriginFlag},
+		{name: "none with a level", env: map[string]string{"COMPRESSION": "none-3"}, want: zstd1, origin: OriginDefault, problem: "is not a compression"},
+		{name: "deflate-0", env: map[string]string{"COMPRESSION": "deflate-0"}, want: zstd1, origin: OriginDefault, problem: "is not a compression"},
+		{name: "deflate-10", env: map[string]string{"COMPRESSION": "deflate-10"}, want: zstd1, origin: OriginDefault, problem: "is not a compression"},
+		{name: "zstd-23", env: map[string]string{"COMPRESSION": "zstd-23"}, want: zstd1, origin: OriginDefault, problem: "is not a compression"},
+		{name: "typo", env: map[string]string{"COMPRESSION": "zst"}, want: zstd1, origin: OriginDefault, problem: "is not a compression"},
+		{name: "old small", file: `COMPRESSION = "small"`, want: zstd1, origin: OriginFile, problem: "earlier spelling"},
+		{name: "old fast", env: map[string]string{"COMPRESSION": "fast"}, want: zstd1, origin: OriginEnv, problem: "earlier spelling"},
+		{name: "NO_COMPRESS=1", env: map[string]string{"NO_COMPRESS": "1"}, want: none, origin: OriginEnv, problem: "none applies"},
+		{name: "NO_COMPRESS=yes in file", file: `NO_COMPRESS = "yes"`, want: none, origin: OriginFile, problem: "none applies"},
+		{name: "NO_COMPRESS=0", env: map[string]string{"NO_COMPRESS": "0"}, want: zstd1, origin: OriginDefault, problem: "has no effect. Delete it"},
+		{name: "NO_COMPRESS=off", env: map[string]string{"NO_COMPRESS": "off"}, want: zstd1, origin: OriginDefault, problem: "has no effect. Delete it"},
+		{name: "--no-compress", flags: map[string]string{"NO_COMPRESS": "1"}, want: none, origin: OriginFlag, problem: "none applies"},
+		// one layer: a codec beats NO_COMPRESS, which beats fast/small
+		{name: "same layer codec wins", env: map[string]string{"COMPRESSION": "deflate", "NO_COMPRESS": "1"},
+			want: Compression{CodecDeflate, deflateLevel()}, origin: OriginEnv, problem: "has no effect: COMPRESSION"},
+		{name: "same layer beats small", file: "COMPRESSION = \"small\"\nNO_COMPRESS = \"1\"", want: none, origin: OriginFile, problem: "none applies", problems: 2},
+		// a level spelling never beats NO_COMPRESS, whatever the layers
+		{name: "file NO_COMPRESS over env small", file: `NO_COMPRESS = "1"`, env: map[string]string{"COMPRESSION": "small"},
+			want: none, origin: OriginFile, problem: "none applies", problems: 2},
+		{name: "file NO_COMPRESS over flag fast", file: `NO_COMPRESS = "1"`, flags: map[string]string{"COMPRESSION": "fast"},
+			want: none, origin: OriginFile, problem: "none applies", problems: 2},
+		// different layers: the higher one wins
+		{name: "env NO_COMPRESS over file codec", file: `COMPRESSION = "deflate"`, env: map[string]string{"NO_COMPRESS": "1"},
+			want: none, origin: OriginEnv, problem: "none applies"},
+		{name: "env codec over file NO_COMPRESS", file: `NO_COMPRESS = "1"`, env: map[string]string{"COMPRESSION": "zstd-3"},
+			want: Compression{CodecZstd, 3}, origin: OriginEnv, problem: "has no effect: COMPRESSION"},
 	} {
-		t.Run("v="+tc.v, func(t *testing.T) {
-			t.Setenv("NO_COMPRESS", tc.v)
+		t.Run(tc.name, func(t *testing.T) {
+			isolate(t)
+			for _, k := range []string{"COMPRESSION", "NO_COMPRESS"} {
+				t.Setenv(k, tc.env[k])
+			}
 			toml := filepath.Join(t.TempDir(), Name)
-			os.WriteFile(toml, nil, 0o644)
-			cfg, err := Load(toml, nil)
+			os.WriteFile(toml, []byte(tc.file+"\n"), 0o644)
+			cfg, err := Load(toml, tc.flags)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg.NoCompress != tc.want {
-				t.Errorf("NO_COMPRESS=%q -> NoCompress %v, want %v", tc.v, cfg.NoCompress, tc.want)
+			if cfg.Compression != tc.want {
+				t.Errorf("Compression = %v, want %v", cfg.Compression, tc.want)
+			}
+			if o := cfg.Origin("COMPRESSION"); o != tc.origin {
+				t.Errorf("origin = %q, want %q", o, tc.origin)
+			}
+			var got []string
+			for _, p := range cfg.Problems {
+				if strings.Contains(p, "COMPRESS") {
+					got = append(got, p)
+				}
+			}
+			want := tc.problems
+			if want == 0 && tc.problem != "" {
+				want = 1
+			}
+			found := tc.problem == ""
+			for _, p := range got {
+				found = found || strings.Contains(p, tc.problem)
+			}
+			if len(got) != want || !found {
+				t.Errorf("problems %q, want %d, one containing %q", got, want, tc.problem)
 			}
 		})
+	}
+}
+
+// What Effective reports for COMPRESSION must parse back to the same value.
+func TestCompressionRoundTrip(t *testing.T) {
+	for _, v := range []string{"zstd", "zstd-1", "zstd-3", "zstd-6", "zstd-10", "deflate", "deflate-1", "deflate-9", "none"} {
+		c, ok := ParseCompression(v)
+		if !ok {
+			t.Fatalf("%q does not parse", v)
+		}
+		back, ok := ParseCompression(c.String())
+		if !ok || back != c {
+			t.Errorf("%q -> %v -> %v, %v", v, c, back, ok)
+		}
 	}
 }
 
@@ -673,7 +751,7 @@ func TestEffective(t *testing.T) {
 	dir := t.TempDir()
 	toml := filepath.Join(dir, Name)
 	os.WriteFile(toml, []byte("INDEX_WORKERS = \"1\"\nPREVIEW_MEMORY = \"2GB\"\n"), 0o644)
-	t.Setenv("NO_COMPRESS", "1")
+	t.Setenv("COMPRESSION", "deflate-8")
 	cfg, err := Load(toml, map[string]string{"SERVER_PORT": "7000"})
 	if err != nil {
 		t.Fatal(err)
@@ -683,7 +761,7 @@ func TestEffective(t *testing.T) {
 		t.Fatalf("Effective() has %d keys, want %d", len(eff), len(Tunables))
 	}
 	for _, tc := range []struct{ key, value, origin string }{
-		{"NO_COMPRESS", "1", OriginEnv},
+		{"COMPRESSION", "deflate-8", OriginEnv},
 		{"PREVIEW_MEMORY", "2GB", OriginFile},
 		{"INDEX_WORKERS", "1", OriginFile},
 		{"SERVER_PORT", "7000", OriginFlag},
@@ -742,7 +820,6 @@ func TestBooleanKeysAgree(t *testing.T) {
 		"VERBOSE":             func(c Config) bool { return c.Verbose },
 		"USE_CACHED":          func(c Config) bool { return c.UseCached },
 		"ALLOW_REMOTE_DELETE": func(c Config) bool { return c.AllowRemoteDelete },
-		"NO_COMPRESS":         func(c Config) bool { return c.NoCompress },
 		"TRAY":                func(c Config) bool { return c.Tray != nil && *c.Tray },
 	}
 	values := map[string]bool{
@@ -772,37 +849,17 @@ func TestBooleanKeysAgree(t *testing.T) {
 // ("decide from how the app was launched", D74), not false.
 func TestBooleanKeysUnset(t *testing.T) {
 	isolate(t)
-	for _, k := range []string{"NO_BROWSER", "VERBOSE", "USE_CACHED", "ALLOW_REMOTE_DELETE", "NO_COMPRESS", "TRAY"} {
+	for _, k := range []string{"NO_BROWSER", "VERBOSE", "USE_CACHED", "ALLOW_REMOTE_DELETE", "TRAY"} {
 		t.Setenv(k, "")
 	}
 	cfg, err := Load("", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.NoBrowser || cfg.Verbose || cfg.UseCached || cfg.AllowRemoteDelete || cfg.NoCompress {
+	if cfg.NoBrowser || cfg.Verbose || cfg.UseCached || cfg.AllowRemoteDelete {
 		t.Errorf("an unset boolean turned something on: %+v", cfg)
 	}
 	if cfg.Tray != nil {
 		t.Errorf("TRAY unset must stay tri-state nil, got %v", *cfg.Tray)
-	}
-}
-
-// COMPRESSION is "small" only when it says so; anything else is the default.
-func TestCompression(t *testing.T) {
-	for v, want := range map[string]string{
-		"": CompressionFast, "fast": CompressionFast, "small": CompressionSmall,
-		"SMALL": CompressionSmall, " small ": CompressionSmall, "smallest": CompressionFast, "0": CompressionFast,
-	} {
-		t.Run(v, func(t *testing.T) {
-			isolate(t)
-			t.Setenv("COMPRESSION", v)
-			cfg, err := Load("", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cfg.Compression != want {
-				t.Errorf("COMPRESSION=%q -> %q, want %q", v, cfg.Compression, want)
-			}
-		})
 	}
 }

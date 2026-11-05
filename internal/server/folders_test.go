@@ -600,3 +600,80 @@ func TestResourceHandleIsEvictable(t *testing.T) {
 		t.Error("the reopened handle should be weighed again")
 	}
 }
+
+// longReader is fakeReader with articles long enough to be stored with zstd.
+type longReader struct{ fakeReader }
+
+func (r *longReader) Next() (dict.Entry, error) {
+	e, err := r.fakeReader.Next()
+	if err == nil {
+		e.Body = "<p>" + strings.Repeat(e.Headwords[0]+" - a sense, with an example. ", 8) + "</p>"
+	}
+	return e, err
+}
+
+func init() {
+	words := []string{"córazon", "beta", "gamma"}
+	dict.RegisterFormat(".fakelong", func(p string) (dict.Dictionary, error) { return &fakeDict{words: words, path: p}, nil })
+	dict.RegisterReader(".fakelong", func(p string) (dict.Reader, error) {
+		return &longReader{fakeReader{words: words, path: p}}, nil
+	})
+}
+
+// A prepared dictionary's article decoder (D191, about its zstd dictionary's
+// size) is not preview memory: no budget releases it, memory pressure does,
+// and the next article makes it again.
+func TestDecoderReleasedUnderPressure(t *testing.T) {
+	restorePower(t)
+	isolatedDBDir(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "r.fakelong"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := NewRegistry([]string{dir}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := reg.all()[0]
+	if err := e.setFeatures(features{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	d, err := e.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, ok := d.(*upgraded)
+	if !ok {
+		t.Fatalf("a prepared dictionary should be served through upgraded, got %T", d)
+	}
+	read := func() string {
+		t.Helper()
+		res, err := d.Prefix("bet", 5)
+		if err != nil || len(res) == 0 {
+			t.Fatalf("Prefix: %v %v", res, err)
+		}
+		return res[0].Body
+	}
+	want := read()
+	if w, _ := u.DecoderHeld(); w == 0 {
+		t.Fatal("reading an article should make the decoder")
+	}
+	reg.SetPreviewBudget(1)
+	if freed := reg.sweep(); freed != 0 || reg.previewBytes() != 0 {
+		t.Errorf("the decoder is not preview memory: freed %d, preview bytes %d", freed, reg.previewBytes())
+	}
+	memLimit.Store(1) // every heap is over a 1-byte ceiling: pressure
+	if freed := reg.sweep(); freed == 0 {
+		t.Fatal("memory pressure should release the decoder")
+	}
+	if w, _ := u.DecoderHeld(); w != 0 {
+		t.Errorf("decoder still holds %d bytes after the sweep", w)
+	}
+	memLimit.Store(0)
+	if got := read(); got != want {
+		t.Errorf("article after the release differs: %q, want %q", got, want)
+	}
+	if w, _ := u.DecoderHeld(); w == 0 {
+		t.Error("the next article should make the decoder again")
+	}
+}

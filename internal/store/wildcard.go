@@ -781,12 +781,12 @@ func (s *Store) entriesByID(ctx context.Context, ids []int64) ([]dict.Result, er
 		var (
 			id   int64
 			r    dict.Result
-			body []byte // TEXT or a compressed BLOB; decodeBody tells them apart
+			body []byte // TEXT or a compressed BLOB; s.body tells them apart
 		)
 		if err := rows.Scan(&id, &r.Headword, &body); err != nil {
 			return nil, err
 		}
-		r.Body = decodeBody(body)
+		r.Body = s.body.decode(body)
 		byID[id] = r
 	}
 	if err := rows.Err(); err != nil {

@@ -113,6 +113,14 @@ func (u *upgraded) releaseSource() int64 {
 	return w
 }
 
+// decoderHolder is a prepared database whose article decoder can be released
+// (store.Store, D191): about the size of its zstd dictionary each, made again
+// by the next article.
+type decoderHolder interface {
+	DecoderHeld() (bytes, lastUse int64)
+	ReleaseDecoder() int64
+}
+
 // evictableSource is a view that holds a releasable direct backend alongside
 // its prepared database.
 type evictableSource interface {
@@ -457,10 +465,10 @@ func (e *entry) maybeAutoIndex() {
 	// property of the backend, not a name check, so a format that later gains
 	// it inherits the behaviour without another special case. For ZIM it is
 	// also the difference between an idle library and a runaway one:
-	// preparing it EXPANDS the data ~3.5x (the source packs whole clusters
-	// with zstd, a text.db compresses one article at a time with DEFLATE,
-	// D24), so a 123 MB wiktionary would silently become a 431 MB text.db and
-	// an 8 GB wikipedia something no one asked for.
+	// preparing it EXPANDS the data (the source packs whole clusters with
+	// zstd, a text.db compresses one article at a time, D24, D191; measured
+	// with DEFLATE, a 123 MB wiktionary became a 431 MB text.db), and an 8 GB
+	// wikipedia would become something no one asked for.
 	e.dMu.RLock()
 	si, selfIdx := e.d.(selfIndexed)
 	e.dMu.RUnlock()
@@ -1512,6 +1520,24 @@ func (r *Registry) reclaimables() []reclaimable {
 	return out
 }
 
+// decoders lists the article decoders of prepared dictionaries. They are not
+// preview memory and are not held to PREVIEW_MEMORY; sweep releases them only
+// under memory pressure, when every byte that can be made again is shed.
+func (r *Registry) decoders() []reclaimable {
+	var out []reclaimable
+	for _, e := range r.all() {
+		e.dMu.RLock()
+		d := e.d
+		e.dMu.RUnlock()
+		if h, ok := d.(decoderHolder); ok {
+			if w, used := h.DecoderHeld(); w > 0 {
+				out = append(out, reclaimable{used, w, h.ReleaseDecoder, "article decoder"})
+			}
+		}
+	}
+	return out
+}
+
 // previewBytes totals what open direct backends currently hold, including the
 // resource-fallback handles of prepared dictionaries.
 func (r *Registry) previewBytes() int64 {
@@ -1548,6 +1574,12 @@ func (r *Registry) sweep() int64 {
 	for _, c := range r.reclaimables() {
 		total += c.bytes
 		if pressed || c.used < cutoff {
+			idle = append(idle, c)
+		}
+	}
+	if pressed {
+		for _, c := range r.decoders() {
+			total += c.bytes
 			idle = append(idle, c)
 		}
 	}

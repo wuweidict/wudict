@@ -874,38 +874,8 @@ func TestAdoptLooseKeepsExistingFolder(t *testing.T) {
 	}
 }
 
-// Compression is a storage detail: what comes back out must be exactly what
-// went in, and databases written before it existed must keep opening.
-func TestBodyCompressionRoundTrip(t *testing.T) {
-	cases := []string{
-		"",
-		"<p>short</p>", // below the threshold: stored literally
-		strings.Repeat("<p>largo y repetitivo</p>", 40), // compresses well
-		"<p>" + strings.Repeat("ñ", 500) + "</p>",       // multi-byte
-		"<p>" + string([]byte{0x01, 0x02, 0x7f}) + strings.Repeat("x", 200) + "</p>",
-	}
-	for _, want := range cases {
-		for _, on := range []bool{true, false} {
-			SetCompressBodies(on)
-			if got := decodeBody(encodeBody(want)); got != want {
-				t.Fatalf("compress=%v: round trip changed the body (%d bytes in, %d out)", on, len(want), len(got))
-			}
-		}
-	}
-	SetCompressBodies(true)
-	// long, repetitive text must actually shrink - otherwise the whole point
-	big := strings.Repeat("<p>palabra significado ejemplo</p>", 100)
-	if enc := encodeBody(big); len(enc) >= len(big)/2 {
-		t.Errorf("compression barely helped: %d → %d bytes", len(big), len(enc))
-	}
-	// a body stored by an older version (no sentinel) is read verbatim
-	if got := decodeBody([]byte("<p>legacy plain text</p>")); got != "<p>legacy plain text</p>" {
-		t.Errorf("plain body misread: %q", got)
-	}
-}
-
-// End to end: the same dictionary ingested with and without compression must
-// answer every mode identically.
+// End to end: the same dictionary ingested with every codec must answer every
+// mode identically.
 func TestSearchIdenticalWithAndWithoutCompression(t *testing.T) {
 	t.Setenv("WUDICT_DB_DIR", t.TempDir())
 	body := func(w string) string {
@@ -915,9 +885,14 @@ func TestSearchIdenticalWithAndWithoutCompression(t *testing.T) {
 		h("corazón", body("corazón")), h("corazonada", body("corazonada")),
 		h("casa", body("casa")), h("Straße", body("Straße")),
 	}
-	results := map[bool][][]dict.Result{}
-	for _, on := range []bool{true, false} {
-		SetCompressBodies(on)
+	defer SetCodec(codecZstd, 1)
+	codecs := []struct {
+		name  string
+		level int
+	}{{codecZstd, 1}, {codecZstd, 3}, {codecDeflate, 6}, {codecNone, 0}}
+	results := map[int][][]dict.Result{}
+	for ci, c := range codecs {
+		SetCodec(c.name, c.level)
 		p := filepath.Join(t.TempDir(), "text.db")
 		r := &fakeReader{meta: dict.Meta{Name: "C", Format: "mdx", Path: "/x.mdx"}, entries: append([]dict.Entry(nil), entries...)}
 		if _, err := IngestPlan(r, p, Plan{FullText: true}, nil); err != nil {
@@ -941,21 +916,22 @@ func TestSearchIdenticalWithAndWithoutCompression(t *testing.T) {
 			got = append(got, res)
 		}
 		s.Close()
-		results[on] = got
+		results[ci] = got
 	}
-	SetCompressBodies(true)
-	for i := range results[true] {
-		a, b := results[true][i], results[false][i]
-		if len(a) != len(b) {
-			t.Fatalf("query %d: %d results compressed vs %d uncompressed", i, len(a), len(b))
-		}
-		for j := range a {
-			if a[j].Headword != b[j].Headword || a[j].Body != b[j].Body {
-				t.Fatalf("query %d result %d differs between compressed and uncompressed", i, j)
+	for ci := 1; ci < len(codecs); ci++ {
+		for i := range results[0] {
+			a, b := results[0][i], results[ci][i]
+			if len(a) != len(b) {
+				t.Fatalf("query %d: %d results with zstd-1 vs %d with %v", i, len(a), len(b), codecs[ci])
 			}
-		}
-		if len(a) == 0 {
-			t.Errorf("query %d returned nothing - the comparison proves nothing", i)
+			for j := range a {
+				if a[j].Headword != b[j].Headword || a[j].Body != b[j].Body {
+					t.Fatalf("query %d result %d differs between zstd-1 and %v", i, j, codecs[ci])
+				}
+			}
+			if len(a) == 0 {
+				t.Errorf("query %d returned nothing - the comparison proves nothing", i)
+			}
 		}
 	}
 }

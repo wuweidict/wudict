@@ -53,7 +53,8 @@ wudict ~/Dictionaries/Oxford.mdx     # serve that file's folder and open it
 | `--port <port>` | [`SERVER_PORT`](configuration.md#server_ip-and-server_port) |
 | `--no-browser` | [`NO_BROWSER`](configuration.md#no_browser) |
 | `--use-cached` | [`USE_CACHED`](configuration.md#use_cached) |
-| `--no-compress` | [`NO_COMPRESS`](configuration.md#no_compress) |
+| `--compression <codec>` | [`COMPRESSION`](configuration.md#compression) |
+| `--no-compress` | earlier spelling of `--compression none` |
 | `--index-workers <n>` | [`INDEX_WORKERS`](configuration.md#index_workers) |
 | `--allow-remote-delete <0\|1>` | [`ALLOW_REMOTE_DELETE`](configuration.md#allow_remote_delete) |
 | `--speexdec <path>` | [`SPEEXDEC`](configuration.md#speexdec) |
@@ -304,7 +305,8 @@ wudict reindex [-all] [<name|path> …]
 ```
 
 Rebuilds outdated indexes: built by an older version of wudict, from dictionary
-files that changed since, or unreadable. Each dictionary keeps its indexes and
+files that changed since, stored with another compression than `COMPRESSION`, or
+unreadable. Each dictionary keeps its indexes and
 media pack. Names limit the rebuild to those dictionaries; `-all` rebuilds
 current ones too. A dictionary whose files are gone is reported and kept. While
 a server uses the library, `reindex` has the server run the rebuild and shows

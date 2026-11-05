@@ -87,6 +87,7 @@ public class SettingsActivity extends Activity {
     private final CheckBox[] boxes = new CheckBox[keys.length];
     private final EditText[] fields = new EditText[keys.length];
     private final TextView[] hints = new TextView[keys.length];
+    private final TextView[] choices = new TextView[keys.length]; // a CHOICE row's answer
 
     private TextView staleText;
     private Button applyNow;
@@ -147,7 +148,9 @@ public class SettingsActivity extends Activity {
         col.addView(caption(getString(R.string.settings_advanced_hint), SP_2, SP_3));
 
         for (int i = 0; i < keys.length; i++) {
-            col.addView(keys[i].kind == ShellPrefs.BOOL ? switchRow(i) : numberRow(i));
+            int kind = keys[i].kind;
+            col.addView(kind == ShellPrefs.BOOL ? switchRow(i)
+                    : kind == ShellPrefs.CHOICE ? overrideChoiceRow(i) : numberRow(i));
         }
 
         col.addView(restoreButton());
@@ -351,6 +354,53 @@ public class SettingsActivity extends Activity {
         return box;
     }
 
+    /**
+     * A CHOICE override: the {@link #choiceRow} picker, with the row's hint
+     * under it. A pick stores that value, the default included, so it holds
+     * whatever wudict.toml says; Restore defaults withdraws it. Unset, the row
+     * shows what the server resolves the key to.
+     */
+    private View overrideChoiceRow(int i) {
+        ShellPrefs.Override o = keys[i];
+        String[] options = getResources().getStringArray(o.options);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(0, dp(SP_2), 0, dp(SP_2));
+
+        LinearLayout pick = new LinearLayout(this);
+        pick.setOrientation(LinearLayout.VERTICAL);
+        pick.setMinimumHeight(dp(ROW_MIN));
+        pick.setClickable(true);
+        TypedValue bg = new TypedValue();
+        if (getTheme().resolveAttribute(android.R.attr.selectableItemBackground, bg, true)) {
+            pick.setBackgroundResource(bg.resourceId);
+        }
+        TextView title = new TextView(this);
+        title.setText(o.label);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, TEXT_LABEL);
+        TextView value = caption(options[shown(i)], 0, 0);
+        value.setAlpha(1f); // it is the row's answer, not a footnote about it
+        choices[i] = value;
+        pick.addView(title);
+        pick.addView(value);
+        pick.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle(o.label)
+                .setSingleChoiceItems(options, shown(i), (d, w) -> {
+                    d.dismiss(); // a single choice IS the answer; no OK to press
+                    ShellPrefs.setOverride(this, o, o.values[w]);
+                    paintHint(i);
+                    recheck();
+                })
+                .setNegativeButton(R.string.settings_cancel, null)
+                .show());
+        box.addView(pick);
+
+        hints[i] = caption("", 0, SP_4);
+        box.addView(hints[i]);
+        return box;
+    }
+
     /** A numeric override: label and hint on the left, an 89 dp field right. */
     private View numberRow(int i) {
         ShellPrefs.Override o = keys[i];
@@ -444,7 +494,12 @@ public class SettingsActivity extends Activity {
         ShellPrefs.Override o = keys[i];
         String seen = effective[i];
         StringBuilder b = new StringBuilder(getString(o.hint));
-        if (o.kind != ShellPrefs.BOOL) {
+        if (o.kind == ShellPrefs.CHOICE) {
+            // the caution, then what the option shown does
+            int at = shown(i);
+            b.append(' ').append(getResources().getStringArray(o.optionHints)[at]);
+            if (choices[i] != null) choices[i].setText(getResources().getStringArray(o.options)[at]);
+        } else if (o.kind != ShellPrefs.BOOL) {
             b.append(' ').append(getString(R.string.settings_range, o.min, ShellPrefs.maxOf(this, o)));
             if (fields[i] != null) {
                 // The placeholder IS the inherited value, in the field's own
@@ -606,13 +661,36 @@ public class SettingsActivity extends Activity {
         return false;
     }
 
-    /** Value equality in the key's own terms: sizes by bytes, the rest literally. */
+    /**
+     * Value equality in the key's own terms: sizes by bytes, a choice by the
+     * value without the level the server resolved ("zstd" runs as "zstd-1"),
+     * the rest literally.
+     */
     private static boolean same(ShellPrefs.Override o, String a, String b) {
         if (o.kind == ShellPrefs.MEGABYTES) {
             long x = parseSize(a), y = parseSize(b);
             return x >= 0 && x == y;
         }
+        if (o.kind == ShellPrefs.CHOICE) {
+            return withoutLevel(a).equals(withoutLevel(b));
+        }
         return a.equals(b);
+    }
+
+    /**
+     * The option a CHOICE row shows: the stored one, else the one the server
+     * resolves the key to ("zstd-1" is zstd), else the default.
+     */
+    private int shown(int i) {
+        ShellPrefs.Override o = keys[i];
+        int at = o.indexOf(ShellPrefs.override(this, o));
+        if (at < 0 && effective[i] != null) at = o.indexOf(withoutLevel(effective[i]));
+        return Math.max(at, 0);
+    }
+
+    private static String withoutLevel(String v) {
+        int dash = v.indexOf('-');
+        return dash < 0 ? v : v.substring(0, dash);
     }
 
     private void showStale(boolean stale) {

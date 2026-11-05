@@ -1131,8 +1131,9 @@ paths:
       summary: Rebuild every outdated dictionary
       description: >
         Rebuilds each dictionary `/api/dicts` reports as `outdated` - prepared
-        by an older build, from a source edited since, or unreadable by this
-        one - with the indexes it already has. A packed media.db the rebuild
+        by an older build, from a source edited since, with another article
+        compression than COMPRESSION, or unreadable by this one - with the
+        indexes it already has. A packed media.db the rebuild
         leaves unpaired is packed again. Dictionaries that are current are not
         touched, and one whose original files are gone is never outdated,
         since nothing can rebuild it.
@@ -2508,8 +2509,9 @@ components:
           type: boolean
           description: >
             The prepared data no longer matches what this build would prepare
-            from the source: an older build wrote it, the source changed, or it
-            cannot be read. Never set when the source is gone. Reported only;
+            from the source: an older build wrote it, the source changed, its
+            article text is stored with another compression than COMPRESSION,
+            or it cannot be read. Never set when the source is gone. Reported only;
             `POST /api/reindex` rebuilds every such dictionary.
         source: { type: string, description: 'The original file, if still on disk.' }
         mediaSrc:

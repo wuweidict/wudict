@@ -122,9 +122,9 @@ func (d *Dict) PreviewBytes() int64 {
 // at no resident cost, so the server has no reason to prepare it behind the
 // user's back. For ZIM that matters twice over: preparation would also be a
 // disk EXPANSION, because the source packs whole clusters with zstd (~14x)
-// while a prepared text.db compresses one article at a time with DEFLATE
-// (~3.5x, D24) - a 123 MB wiktionary becomes a ~431 MB text.db, and an 8 GB
-// wikipedia something nobody asked for. Preparation stays available on
+// while a prepared text.db compresses one article at a time (D24, D191;
+// measured with DEFLATE, ~3.5x: a 123 MB wiktionary became a ~431 MB
+// text.db), and an 8 GB wikipedia would become something nobody asked for. Preparation stays available on
 // request (the per-dictionary switches, `wudict ingest`); only the automatic
 // path declines.
 func (d *Dict) SelfIndexed() bool { return true }

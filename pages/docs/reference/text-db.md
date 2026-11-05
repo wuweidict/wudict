@@ -21,10 +21,12 @@ programs that read or write them.
 `text.db` alone is a complete dictionary; the other files are optional or
 derived.
 
-`PRAGMA user_version` is **1**; wudict does not open a database with another
-value. Tables have been added without changing it (see
-[Compatibility](#compatibility)), so a reader must check that a table exists
-before using it.
+`PRAGMA user_version` is **1** or **2**. A database written with zstd, the
+default, is 2: its articles can be zstd rows, and it has a `body_dict` table. A
+database written with DEFLATE or without compression is 1. wudict does not open
+a database with another value. Tables have been added without changing the
+value (see [Compatibility](#compatibility)), so a reader must check that a
+table exists before using it.
 
 ## Schema
 
@@ -47,41 +49,67 @@ CREATE VIRTUAL TABLE entry_fts USING fts5(    -- rowid = entry.id
     tokenize='unicode61 remove_diacritics 2');
 ```
 
-`entry` holds the whole dictionary. The other tables are indexes and can be
-rebuilt from it.
+A version-2 database also has the dictionary its zstd rows are compressed with:
+
+``` sql title="text.db, user_version 2"
+CREATE TABLE body_dict(id   INTEGER PRIMARY KEY,  -- 0
+                       data BLOB NOT NULL);       -- a raw zstd dictionary
+```
+
+`entry` and `body_dict` hold the whole dictionary. The other tables are indexes
+and can be rebuilt from it.
 
 ### Reading articles
 
-`entry.m` is **either plain HTML text or a DEFLATE-compressed BLOB**, decided
-per row by its first byte:
+`entry.m` is decided per row by its first byte:
 
 | First byte | What the row holds |
 | --- | --- |
 | `0x00` | raw DEFLATE stream, starting at byte 1 |
+| `0x01` | version 2 only: a zstd frame without its 4-byte magic number `28 B5 2F FD`, starting at byte 1 |
+| `0x02` to `0x08` | version 2 only: reserved; read as an empty article |
 | anything else | the article HTML itself, as text |
 
-Article HTML never begins with NUL. Both forms occur in the same table — short articles (under 120 bytes) and ones that
-did not compress are stored literally — so **a reader must handle both**.
+In a version-1 database, `0x01` to `0x08` are text. Compressed and literal rows
+occur in the same table: short articles, and ones that did not compress, are
+stored literally. **A reader must handle every form.**
 
-``` python title="one row, either form"
+A zstd row is decoded with the database's dictionary: `body_dict.data` where
+`id = 0`, used as **raw content**, not as a zstd dictionary file. The frames
+carry no dictionary ID. A version-2 database without a `body_dict` row has no
+dictionary, and its zstd rows decode without one.
+
+``` python title="every row, every form (Python 3.14)"
 import sqlite3, zlib
+from compression import zstd
 
 db = sqlite3.connect("file:text.db?mode=ro", uri=True)
+version = db.execute("PRAGMA user_version").fetchone()[0]
+raw = db.execute("SELECT data FROM body_dict WHERE id = 0").fetchone() if version >= 2 else None
+zdict = zstd.ZstdDict(raw[0], is_raw=True) if raw else None
+
 for w, m in db.execute("SELECT w, m FROM entry ORDER BY id"):
     blob = m if isinstance(m, bytes) else m.encode()
-    html = zlib.decompress(blob[1:], -15).decode() if blob[:1] == b"\x00" \
-           else blob.decode()
+    if blob[:1] == b"\x00":
+        html = zlib.decompress(blob[1:], -15).decode()
+    elif version >= 2 and blob[:1] == b"\x01":
+        html = zstd.decompress(b"\x28\xb5\x2f\xfd" + blob[1:], zstd_dict=zdict).decode()
+    elif version >= 2 and blob and blob[0] <= 8:
+        html = ""
+    else:
+        html = blob.decode()
     print(w, html[:80])
 ```
 
 `-15` is raw DEFLATE with no zlib or gzip header — `zlib.decompress(blob[1:])`
-without it will fail.
+without it will fail. Before Python 3.14, the `zstandard` package reads the same
+rows: `ZstdDecompressor(dict_data=ZstdCompressionDict(data,
+dict_type=DICT_TYPE_RAWCONTENT))`.
 
-Each row is compressed on its own, without a shared dictionary, so any row can
-be read alone. [`COMPRESSION`](configuration.md#compression) sets how hard
-(level 6, level 1 on Android; `small`: level 8), and
-[`NO_COMPRESS`](configuration.md#no_compress) turns compression off, for
-dictionaries indexed afterwards; reading handles every level and both forms.
+Each row is compressed on its own, so any row can be read alone.
+[`COMPRESSION`](configuration.md#compression) sets the codec for dictionaries
+indexed afterwards: `zstd` (level 1), `deflate` (level 6, level 1 on Android)
+or `none`. Reading handles every codec and level.
 
 ### Headwords, aliases and sub-entries
 
@@ -123,7 +151,8 @@ treated as empty rather than as an error.
 | `entry_count` | Entries excluding sub-entries |
 | `sub_entries` | How many `@`-prefixed fragments there are |
 | `ingest_level` | `text` = article text is indexed, `headwords` = only headwords |
-| `body_encoding` | `deflate` or `plain` — a note for humans; the read path decides per row |
+| `body_encoding` | `zstd-1`, `deflate-6`, `plain` and so on — a note for humans; the read path decides per row |
+| `body_dict_bytes` | Version 2: the size of the zstd dictionary in `body_dict` |
 | `dict_uuid` | 32 hex characters; what pairs this file with its `media.db` |
 | `index_lang`, `contents_lang` | Languages, only when the source declared them |
 | `source_path`, `source_size`, `source_mtime`, `source_sha256_1M` | The dictionary file it was indexed from, for detecting changes |
@@ -150,8 +179,8 @@ in the database. An exporter gets the original names and looks each one up in
 
 ## `media.db`
 
-Written when the media pack is added. Same conventions and `user_version` as
-`text.db`.
+Written when the media pack is added. Same conventions as `text.db`;
+`user_version` is 1 whatever the `text.db` beside it has.
 
 ``` sql title="media.db"
 PRAGMA user_version = 1;
@@ -203,7 +232,8 @@ in the library or in a dictionary folder.
 
 Requirements:
 
-- [x] `PRAGMA user_version = 1`.
+- [x] `PRAGMA user_version = 1`, with DEFLATE or uncompressed bodies. Version 2
+      is for zstd rows and needs `body_dict`.
 - [x] Create `entry`, `alias` **and** `entry_fts` even for a headwords-only
       dictionary; leave `entry_fts.txt` as `''` when you do not index text.
 - [x] Create both indexes exactly as shown, with **`COLLATE NOCASE`**; otherwise
@@ -224,9 +254,11 @@ them.
 
 ## Compatibility
 
-- `user_version` stays at 1. A `text.db` written by an older wudict can also
-  hold an `entry_trigram` table and the `meta` keys `has_trigram` and
-  `fold_version`. wudict no longer reads them.
+- Version 1 is every `text.db` written before zstd, and every one written with
+  `COMPRESSION = "deflate"` or `"none"`; wudict versions before zstd open only
+  version 1. A `text.db` written by an older wudict can also hold an
+  `entry_trigram` table and the `meta` keys `has_trigram` and `fold_version`.
+  wudict no longer reads them.
 - Unknown `meta` keys are ignored, so you can add your own.
 - A database without an optional index opens with fewer search modes.
 - FTS5 is required: an SQLite build without it cannot open a `text.db`.

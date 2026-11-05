@@ -46,12 +46,12 @@ res/        resource overrides (optional)
 are read from the dictionary files, if present. Both are SQLite databases;
 [The text.db format](../reference/text-db.md) documents the schema.
 
-Article text is DEFLATE-compressed, so an indexed dictionary is usually smaller
-than its dictionary files.
-[`COMPRESSION`](../reference/configuration.md#compression) set to `small` makes
-the library 1 % to 2 % smaller, and indexing takes up to 1.5 times as long.
-[`NO_COMPRESS`](../reference/configuration.md#no_compress) stores article text
-uncompressed, about 3 times larger.
+Article text is stored compressed with zstd, so an indexed dictionary is
+usually smaller than its dictionary files.
+[`COMPRESSION`](../reference/configuration.md#compression) chooses DEFLATE
+instead, 1.3 to 3 times as large, for programs and earlier wudict versions that
+read only DEFLATE; `none` stores article text uncompressed, 2 to 7 times as
+large.
 
 ## Move a dictionary to another machine
 
@@ -75,8 +75,10 @@ See [`ingest`](../reference/cli.md#ingest).
 
 ## Outdated indexes
 
-An index is outdated when an older version of wudict built it, or when the
-dictionary files changed since. The dictionary panel then shows *N dictionaries have outdated indexes* and <kbd>Rebuild</kbd>;
+An index is outdated when an older version of wudict built it, when the
+dictionary files changed since, or when its article text is stored with another
+compression than [`COMPRESSION`](../reference/configuration.md#compression) -
+which, after an upgrade, is every dictionary indexed before zstd. The dictionary panel then shows *N dictionaries have outdated indexes* and <kbd>Rebuild</kbd>;
 [`wudict reindex`](../reference/cli.md#reindex) does the same from a terminal.
 A rebuild keeps each dictionary's indexes and media pack. <kbd>Stop</kbd> ends
 it after the current dictionary.

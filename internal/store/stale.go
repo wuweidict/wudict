@@ -7,6 +7,7 @@ package store
 import (
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/fsx"
@@ -54,6 +55,7 @@ const (
 	ReasonIngest Reason = "ingest" // built by an older IngestPlan
 	ReasonReader Reason = "reader" // built by an older Reader for its format
 	ReasonMarkup Reason = "markup" // articles written with an older role markup
+	ReasonCodec  Reason = "codec"  // articles stored with another codec than COMPRESSION (D191)
 	ReasonMedia  Reason = "media"  // media.db unreadable, unpaired or outdated
 )
 
@@ -87,7 +89,27 @@ func Outdated(m map[string]string) []Reason {
 	if MarkupStale(m) {
 		out = append(out, ReasonMarkup)
 	}
+	if codecStale(m) {
+		out = append(out, ReasonCodec)
+	}
 	return out
+}
+
+// codecStale reports that the articles are stored with another codec than
+// new ingests write (COMPRESSION, D191): a DEFLATE database under zstd is
+// offered a rebuild, which runs only when the user asks for one (D151). Only the codec counts, not its level: a level is how hard,
+// not what (D182 Am. 2). A database that recorded no body_encoding is not
+// judged.
+func codecStale(m map[string]string) bool {
+	enc := m["body_encoding"]
+	if enc == "" {
+		return false
+	}
+	codec, _, _ := strings.Cut(enc, "-")
+	if codec == "plain" {
+		codec = codecNone
+	}
+	return codec != codecSetting.name
 }
 
 // Prepared is one prepared database read once. Every question asked about a
@@ -118,7 +140,7 @@ func Inspect(textDB string) Prepared {
 }
 
 // Usable reports that this build can open it: readable, and this schema.
-func (p Prepared) Usable() bool { return p.Meta != nil && p.Schema == schemaVersion }
+func (p Prepared) Usable() bool { return p.Meta != nil && textSchemaOK(p.Schema) }
 
 // Current reports that it is usable and was built from srcPath as the file is
 // now. A missing source is not a change: the prepared data stands on its own.
@@ -219,7 +241,7 @@ func ingestLevel(p Plan) string {
 // older IngestMedia.
 func mediaStale(mediaDB, uuid string) bool {
 	m, schema, err := ReadMetaSchema(mediaDB)
-	if err != nil || schema != schemaVersion {
+	if err != nil || schema != sidecarSchema {
 		return true
 	}
 	return uuid == "" || m["dict_uuid"] != uuid || stampOf(m, "media_version", 1) < MediaVersion
@@ -233,7 +255,7 @@ func mediaStale(mediaDB, uuid string) bool {
 // identity, and its media is repacked by whoever rebuilt it.
 func keptUUID(dbPath, srcPath string) string {
 	m, schema, err := ReadMetaSchema(dbPath)
-	if err != nil || schema != schemaVersion || srcPath == "" {
+	if err != nil || !textSchemaOK(schema) || srcPath == "" {
 		return ""
 	}
 	if !fsx.SamePath(m["source_path"], srcPath) || sourceChangedMeta(m, srcPath) {

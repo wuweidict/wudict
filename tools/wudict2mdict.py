@@ -11,7 +11,8 @@ those are what MDict resolves - the /res/<id>/ form only ever exists at
 serve time, so there is nothing to undo here.
 
 Requires mdict-utils (pip install mdict-utils); --mdict-utils PATH points at a
-source checkout instead.
+source checkout instead. A dictionary stored with zstd (the default since D191)
+also needs Python 3.14 or later, or the zstandard package (pip install zstandard).
 
 Examples:
   tools/wudict2mdict.py ~/.wudict/db/OALD10
@@ -35,8 +36,12 @@ import unicodedata
 import zlib
 from collections import OrderedDict
 
-COMPRESSED_MARK = 0x00          # internal/store/compress.go
-SCHEMA_VERSION = 1              # internal/store/store.go
+# Row markers and schemas, as internal/store/compress.go writes them: 0x00 is raw
+# DEFLATE; in schema 2, 0x01 is a zstd frame without its 4-byte magic, read with
+# the raw dictionary in body_dict (id 0), and 0x02-0x08 are reserved.
+DEFLATE_MARK, ZSTD_MARK, LAST_RESERVED = 0x00, 0x01, 0x08
+ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+SCHEMAS = (1, 2)
 TEXT_DB, MEDIA_DB, RES_DIR = "text.db", "media.db", "res"
 
 # mdict-utils normalises the header encoding to one of these and encodes records
@@ -149,15 +154,50 @@ def as_text(v):
     return str(v)
 
 
-def decode_body(v):
-    """text.db article -> str. A leading 0x00 marks a raw-DEFLATE blob."""
-    if v is None:
-        return ""
-    if isinstance(v, bytes):
-        if v[:1] == b"\x00":
+def zstd_reader(raw_dict):
+    """A function zstd frame -> bytes, using raw_dict (b"" for none)."""
+    try:
+        from compression import zstd            # Python 3.14+
+    except ImportError:
+        zstd = None
+    if zstd is not None:
+        d = zstd.ZstdDict(raw_dict, is_raw=True) if raw_dict else None
+        return lambda frame: zstd.decompress(frame, zstd_dict=d)
+    try:
+        import zstandard
+    except ImportError:
+        die("this dictionary is stored with zstd: use Python 3.14 or later, "
+            "or install zstandard (pip install zstandard)")
+    if raw_dict:
+        d = zstandard.ZstdCompressionDict(raw_dict, dict_type=zstandard.DICT_TYPE_RAWCONTENT)
+        z = zstandard.ZstdDecompressor(dict_data=d)
+    else:
+        z = zstandard.ZstdDecompressor()
+    return z.decompress
+
+
+def body_decoder(conn, schema):
+    """A function text.db article -> str for a database of this schema."""
+    unzstd = None
+
+    def decode(v):
+        nonlocal unzstd
+        if v is None:
+            return ""
+        if not isinstance(v, bytes):
+            return v
+        if v[:1] == bytes([DEFLATE_MARK]):
             return zlib.decompress(v[1:], -15).decode("utf-8", "replace")
+        if schema >= 2 and v and v[0] <= LAST_RESERVED:
+            if v[0] != ZSTD_MARK:
+                return ""                       # reserved: nothing this tool knows
+            if unzstd is None:
+                row = conn.execute("SELECT data FROM body_dict WHERE id = 0").fetchone()
+                unzstd = zstd_reader(row[0] if row else b"")
+            return unzstd(ZSTD_MAGIC + v[1:]).decode("utf-8", "replace")
         return v.decode("utf-8", "replace")
-    return v
+
+    return decode
 
 
 # --------------------------------------------------------------------------- text
@@ -228,7 +268,7 @@ def keep(name, include, exclude):
     return True
 
 
-def stage_articles(conn, stage, args):
+def stage_articles(conn, stage, args, decode_body):
     """Fill mdx(entry, paraphrase, nbytes); return (records, aliases, skipped)."""
     inc, exc = compile_filters(args.include), compile_filters(args.exclude)
     enc = args.py_encoding
@@ -577,8 +617,8 @@ def main(argv=None):
 
     conn = open_ro(text_db)
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
-    if ver != SCHEMA_VERSION:
-        die("%s has user_version %d, expected %d" % (text_db, ver, SCHEMA_VERSION))
+    if ver not in SCHEMAS:
+        die("%s has user_version %d, expected %s" % (text_db, ver, " or ".join(map(str, SCHEMAS))))
     meta = read_meta(conn)
 
     mdx_path, mdd_path = resolve_output(args.output, default_base, args.dry_run)
@@ -608,7 +648,7 @@ def main(argv=None):
         stage.execute("PRAGMA journal_mode=OFF")
         stage.execute("PRAGMA synchronous=OFF")
 
-        n_rec, n_alias, skipped = stage_articles(conn, stage, args)
+        n_rec, n_alias, skipped = stage_articles(conn, stage, args, body_decoder(conn, ver))
         log(args, "articles: %d (+%d alias records, %d skipped)" % (n_rec, n_alias, skipped))
         if n_rec + n_alias == 0:
             die("nothing to export")

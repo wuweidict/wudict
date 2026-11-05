@@ -50,7 +50,7 @@ func (s *Store) EachEntry(fn func(headword string, alts []string, body string) e
 	for entries.Next() {
 		var id int64
 		var w string
-		var body []byte // TEXT or a compressed BLOB; decodeBody tells them apart
+		var body []byte // TEXT or a compressed BLOB; s.body tells them apart
 		if err := entries.Scan(&id, &w, &body); err != nil {
 			return err
 		}
@@ -68,7 +68,7 @@ func (s *Store) EachEntry(fn func(headword string, alts []string, body string) e
 				return err
 			}
 		}
-		if err := fn(w, alts, decodeBody(body)); err != nil {
+		if err := fn(w, alts, s.body.decode(body)); err != nil {
 			return err
 		}
 	}

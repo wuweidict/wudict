@@ -204,20 +204,3 @@ func TestIngestNoRoom(t *testing.T) {
 		t.Errorf("no room: fingerprint %s, want %s", got, want)
 	}
 }
-
-// TestSmallBodies: COMPRESSION = "small" writes article text no larger than
-// the default does, and reads back the same.
-func TestSmallBodies(t *testing.T) {
-	defer SetSmallBodies(false)
-	body := strings.Repeat(`<div class="entry"><span class="pos">n.</span> a word, its senses and examples </div>`, 200)
-	SetSmallBodies(false)
-	fast := encodeBody(body)
-	SetSmallBodies(true)
-	small := encodeBody(body)
-	if decodeBody(fast) != body || decodeBody(small) != body {
-		t.Fatal("a body does not read back")
-	}
-	if len(small) > len(fast) {
-		t.Errorf("small %d bytes, fast %d", len(small), len(fast))
-	}
-}

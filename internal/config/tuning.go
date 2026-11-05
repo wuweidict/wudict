@@ -149,3 +149,14 @@ func memoryLimitDefault() int64 {
 
 // memTotal is physical RAM, 0 when it cannot be read.
 var memTotal = sysmem.Total
+
+// deflateLevel is the level a bare COMPRESSION = "deflate" means: 6, and 1 on
+// Android, where level 1 costs about a tenth of the CPU for a database about a
+// tenth larger (D64). zstd needs no such default: zstd-1 already costs less
+// CPU than DEFLATE level 1 (D191).
+func deflateLevel() int {
+	if runtime.GOOS == "android" {
+		return 1
+	}
+	return 6
+}

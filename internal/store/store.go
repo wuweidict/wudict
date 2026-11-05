@@ -45,8 +45,6 @@ func init() {
 // maxLimit clamps any caller-supplied result limit (FTS-audit #7).
 const maxLimit = 500
 
-const schemaVersion = 1
-
 var _ dict.Searcher = (*Store)(nil)
 
 // Store is one opened .text.db. Safe for concurrent readers.
@@ -56,6 +54,7 @@ type Store struct {
 	ftsOK   bool   // article text indexed (ingest_level != "headwords")
 	srcPath string // source_path recorded at ingest ("" if unknown)
 	uuid    string // dict_uuid: what a sibling media.db must match
+	body    *bodyDecoder
 
 	// The sibling media.db is opened on the first resource that asks for one,
 	// not at open. Most opens never serve a resource at all - a search touches
@@ -134,10 +133,11 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if ver != schemaVersion {
+	if !textSchemaOK(ver) {
 		db.Close()
-		return nil, fmt.Errorf("%s: not a wudict database (user_version=%d, want %d)", path, ver, schemaVersion)
+		return nil, fmt.Errorf("%s: not a wudict database (user_version=%d, want %d to %d)", path, ver, textSchemaMin, textSchemaMax)
 	}
+	s.body = newBodyDecoder(ver, db)
 	m, err := readMeta(db)
 	if err != nil {
 		db.Close()
@@ -251,6 +251,15 @@ func (s *Store) Caps() dict.Caps {
 	return dict.Caps{Exact: true, Prefix: true, FTS: s.ftsOK, Wildcard: true}
 }
 
+// DecoderHeld reports what the article decoder holds - 0 until a zstd
+// article is read, and after a release - and when it last decoded one
+// (UnixNano).
+func (s *Store) DecoderHeld() (bytes, lastUse int64) { return s.body.held() }
+
+// ReleaseDecoder drops the article decoder and reports what it held; the next
+// zstd article makes it again (about 1-2 ms).
+func (s *Store) ReleaseDecoder() int64 { return s.body.release() }
+
 func (s *Store) Close() error {
 	s.mediaMu.Lock()
 	md := s.media
@@ -259,6 +268,7 @@ func (s *Store) Close() error {
 	if md != nil {
 		md.Close()
 	}
+	s.body.close()
 	return s.db.Close()
 }
 
@@ -287,11 +297,11 @@ func (s *Store) collect(rows *sql.Rows, err error) ([]dict.Result, error) {
 	var out []dict.Result
 	for rows.Next() {
 		var r dict.Result
-		var body []byte // TEXT or a compressed BLOB; decodeBody tells them apart
+		var body []byte // TEXT or a compressed BLOB; s.body tells them apart
 		if err := rows.Scan(&r.Headword, &body); err != nil {
 			return nil, err
 		}
-		r.Body = decodeBody(body)
+		r.Body = s.body.decode(body)
 		out = append(out, r)
 	}
 	return out, rows.Err()

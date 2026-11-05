@@ -313,18 +313,12 @@ SETTINGS
                           env: MEMORY_LIMIT   toml: MEMORY_LIMIT
                           default: none (Android: 1/16 of RAM, 192-384 MiB)
 
-  --no-compress           Store article text uncompressed: the library is about
-                          3 times larger; reads are slightly faster.
-                          env: NO_COMPRESS    toml: NO_COMPRESS
-                          default: off (article text is DEFLATE-compressed)
-
-  COMPRESSION = "small"   How hard article text is compressed when a dictionary
-                          is indexed. "fast": the quickest indexing. "small": a
-                          library 1-2%% smaller; indexing takes up to 1.5 times
-                          as long. Applies to dictionaries indexed after the
-                          change. NO_COMPRESS takes precedence.
+  --compression zstd      How article text is stored in dictionaries indexed
+                          after the change: zstd, deflate (1.3 to 3 times as
+                          large) or none (2 to 7 times). A level may follow:
+                          zstd-3, deflate-6. Reading handles every form.
                           env: COMPRESSION    toml: COMPRESSION
-                          default: fast
+                          default: zstd (zstd-1)
 
   --use-cached            Also list indexed dictionaries whose dictionary files
                           are gone. "Use these dictionaries" on the setup page
@@ -1187,7 +1181,8 @@ func cmdServe(args []string) (err error) {
 	fs.Var(&dictDirs, "dict-dir", "folder with dictionaries; repeat for several (env/toml: DICT_DIR)")
 	dbDir := fs.String("db-dir", "", "library dir for cached dictionaries (env/toml: DB_DIR)")
 	useCached := fs.Bool("use-cached", false, "also serve previously imported dictionaries from the library (env/toml: USE_CACHED)")
-	noCompress := fs.Bool("no-compress", false, "store article text uncompressed - larger databases (env/toml: NO_COMPRESS)")
+	compression := fs.String("compression", "", "how article text is stored: zstd (default), deflate or none, optionally with a level (env/toml: COMPRESSION)")
+	noCompress := fs.Bool("no-compress", false, "earlier spelling of --compression none")
 	indexWorkers := fs.String("index-workers", "", "dictionaries to prepare at once; \"auto\" = every core (env/toml: INDEX_WORKERS)")
 	// A string, not a Bool: "" has to mean "unset, defer to env and toml",
 	// which a bool flag cannot express - it would override a file that says
@@ -1223,6 +1218,9 @@ func cmdServe(args []string) (err error) {
 	}
 	if *useCached {
 		flagVals["USE_CACHED"] = "1"
+	}
+	if *compression != "" {
+		flagVals["COMPRESSION"] = *compression
 	}
 	if *noCompress {
 		flagVals["NO_COMPRESS"] = "1"
@@ -1474,8 +1472,7 @@ Hint: pick another port with --port, e.g.:  wudict --port %s
 	// follows (D182), the lane. From here on a preparation is urgent only where
 	// the server marks it so.
 	server.SetIndexWorkers(cfg.IndexWorkers)
-	store.SetCompressBodies(!cfg.NoCompress)
-	store.SetSmallBodies(cfg.Compression == config.CompressionSmall)
+	store.SetCodec(cfg.Compression.Codec, cfg.Compression.Level)
 	if cfg.MemoryLimit > 0 {
 		// A soft ceiling: Go collects harder instead of growing past it. Set it
 		// through the server rather than debug directly, because a ceiling on
@@ -1712,8 +1709,7 @@ func applyLibrarySettings() {
 		return // a broken config must not stop a local command
 	}
 	store.SetDBDir(cfg.DBDir)
-	store.SetCompressBodies(!cfg.NoCompress)
-	store.SetSmallBodies(cfg.Compression == config.CompressionSmall)
+	store.SetCodec(cfg.Compression.Codec, cfg.Compression.Level)
 	if cfg.Verbose {
 		logx.Enabled = true
 	}

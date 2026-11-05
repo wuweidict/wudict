@@ -8,9 +8,9 @@ import (
 	"database/sql"
 	"errors"
 	"io"
-	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/sysmem"
@@ -25,6 +25,13 @@ import (
 // preparation. The two switch at batch boundaries, either way, and exactly
 // one goroutine calls r.Next at any time. Both write the same rows in the
 // same order, so the prepared content is the same.
+//
+// With zstd (D191) the dictionary is cut from the first bodies, so until it
+// exists encodeEntry keeps each body's text and the writer holds the rows, in
+// order, on the ingest's own account (writer.hold); the producer's batches are
+// released as before, so it is never held up by the window. Once the writer
+// has cut the dictionary it encodes and writes what it held, and from then on
+// the encoders compress. Progress pauses while the window fills.
 
 // bulkRows is how many rows one INSERT statement writes.
 const bulkRows = 256
@@ -41,14 +48,16 @@ var urgentAt = dict.Urgent
 type record struct {
 	hw      string
 	aliases []string
-	body    []byte // encodeBody of the article's HTML
+	body    []byte // what is stored for the article (bodyEncoder.encode)
+	raw     string // the article's HTML, while pending
+	pending bool   // body not encoded yet: no encoder existed (writer.put encodes)
 	txt     string // its text for full-text search, "" without
 	link    string // a redirect's target
 }
 
 // encodeEntry is the work before the write; ok is false for an entry that is
 // not written (no headword).
-func encodeEntry(e dict.Entry, plan Plan) (rec record, ok bool, err error) {
+func encodeEntry(e dict.Entry, plan Plan, codec *bodyCodec) (rec record, ok bool, err error) {
 	if len(e.Headwords) == 0 {
 		return record{}, false, nil
 	}
@@ -63,7 +72,11 @@ func encodeEntry(e dict.Entry, plan Plan) (rec record, ok bool, err error) {
 	if err != nil {
 		return record{}, false, err
 	}
-	rec = record{hw: hw, body: encodeBody(body)}
+	if enc := codec.enc.Load(); enc != nil {
+		rec = record{hw: hw, body: enc.encode(body)}
+	} else {
+		rec = record{hw: hw, raw: body, pending: true}
+	}
 	if plan.FullText {
 		rec.txt = StripHTML(body)
 	}
@@ -142,9 +155,21 @@ type writer struct {
 	total                   int
 	id, subEntries          int64
 	linkCount               int64
+
+	tx    *sql.Tx
+	src   string          // whose urgency decides how the window is encoded
+	codec *bodyCodec      // how bodies are stored
+	acct  *sysmem.Account // the ingest's account: the window and the encoders
+
+	// The window (zstd only): every record since the start, in order, until
+	// the dictionary is cut.
+	held                 []record
+	heldText, heldCharge int64
+	heldArticles         int
+	dictBytes            int // the dictionary's size, once cut
 }
 
-func newWriter(tx *sql.Tx, progress Progress, total int) *writer {
+func newWriter(tx *sql.Tx, progress Progress, total int, src string, codec *bodyCodec, acct *sysmem.Account) *writer {
 	return &writer{
 		entry:    newBulk(tx, "INSERT INTO entry(id, w, m) VALUES", 3),
 		fts:      newBulk(tx, "INSERT INTO entry_fts(rowid, w, txt) VALUES", 3),
@@ -152,10 +177,124 @@ func newWriter(tx *sql.Tx, progress Progress, total int) *writer {
 		link:     newBulk(tx, "INSERT INTO plink(w, target, lt) VALUES", 3),
 		progress: progress,
 		total:    total,
+		tx:       tx,
+		src:      src,
+		codec:    codec,
+		acct:     acct,
 	}
 }
 
+// write takes one record in reader order: held while the dictionary is not
+// cut, written otherwise.
 func (w *writer) write(rec record) error {
+	if w.codec.enc.Load() == nil {
+		return w.hold(rec)
+	}
+	return w.put(rec)
+}
+
+// hold keeps an article in the window, charging its strings twice over for
+// the collector's headroom, plus the record itself. A redirect is written at
+// once: it is never encoded and takes no entry id, so holding it would only
+// keep a dictionary of redirects in memory until its end. The window is cut
+// once it holds dictWindow of article text, or as soon as the budget refuses
+// more - after at least one record, so a preparation the budget has no room
+// for still gets a dictionary.
+func (w *writer) hold(rec record) error {
+	if rec.link != "" {
+		return w.put(rec)
+	}
+	n := 2*int64(len(rec.raw)+len(rec.txt)+len(rec.hw)) + recordOverhead
+	for _, a := range rec.aliases {
+		n += 2 * int64(len(a))
+	}
+	if !w.acct.TryAcquire(n) {
+		if len(w.held) > 0 {
+			if err := w.cut(false); err != nil {
+				return err
+			}
+			return w.put(rec)
+		}
+		n = 0
+	}
+	w.heldCharge += n
+	w.held = append(w.held, rec)
+	w.heldText += int64(len(rec.raw))
+	w.heldArticles++
+	if w.heldText >= dictWindow {
+		return w.cut(false)
+	}
+	return nil
+}
+
+// recordOverhead is what one held record costs besides its strings: the
+// struct, its slot in held and the alias slice header.
+const recordOverhead = 192
+
+// cut makes the dictionary from the window's articles, starts the encoder,
+// stores the dictionary, and writes the window in order. eof says the source
+// ended inside the window, so its text is known exactly.
+func (w *writer) cut(eof bool) error {
+	bodies := make([]string, 0, w.heldArticles)
+	for _, r := range w.held {
+		bodies = append(bodies, r.raw)
+	}
+	d := sampleDict(bodies, dictSize(w.codec.level, w.heldText, w.heldArticles, w.total, eof), dictSliceLen)
+	enc, err := w.codec.start(d, w.acct)
+	if err != nil {
+		return err
+	}
+	if len(d) > 0 {
+		if _, err := w.tx.Exec("INSERT INTO body_dict(id, data) VALUES(0, ?)", d); err != nil {
+			return err
+		}
+	}
+	w.dictBytes = len(d)
+	encodeHeld(w.held, enc, w.src)
+	for _, r := range w.held {
+		if err := w.put(r); err != nil {
+			return err
+		}
+	}
+	w.held = nil
+	w.acct.Release(w.heldCharge)
+	w.heldCharge = 0
+	return nil
+}
+
+// encodeHeld encodes the window's articles: on the encoders' count of
+// goroutines while the preparation is urgent, on this one otherwise.
+func encodeHeld(held []record, enc *bodyEncoder, src string) {
+	n := 1
+	if urgentAt(src) {
+		n = encoders()
+	}
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				i := int(next.Add(1) - 1)
+				if i >= len(held) {
+					return
+				}
+				if held[i].pending {
+					held[i].body, held[i].raw, held[i].pending = enc.encode(held[i].raw), "", false
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// put writes one record, encoding it first if it left an encoder before the
+// encoder existed.
+func (w *writer) put(rec record) error {
+	if rec.pending {
+		rec.body, rec.raw, rec.pending = w.codec.enc.Load().encode(rec.raw), "", false
+	}
 	if rec.link != "" {
 		w.linkCount++
 		return w.link.add(rec.hw, rec.link, strings.ToLower(rec.link))
@@ -181,8 +320,15 @@ func (w *writer) write(rec record) error {
 	return nil
 }
 
-// flush writes every row still held, before anything reads the tables.
+// flush writes every row still held, before anything reads the tables. A
+// window still open means the source ended inside it: the dictionary is cut
+// from all of it.
 func (w *writer) flush() error {
+	if w.codec.enc.Load() == nil {
+		if err := w.cut(true); err != nil {
+			return err
+		}
+	}
 	for _, b := range []*bulk{w.entry, w.fts, w.alias, w.link} {
 		if err := b.flush(); err != nil {
 			return err
@@ -201,6 +347,7 @@ func (w *writer) close() {
 // at each batch boundary. It returns only once no goroutine it started is
 // left, so the caller may close r.
 func fill(r dict.Reader, src, path string, plan Plan, w *writer) error {
+	codec := w.codec
 	for n := 0; ; n++ {
 		if n%bulkRows == 0 && urgentAt(src) {
 			eof, err := pipe(r, src, path, plan, w)
@@ -218,7 +365,7 @@ func fill(r dict.Reader, src, path string, plan Plan, w *writer) error {
 		if err != nil {
 			return err
 		}
-		rec, ok, err := encodeEntry(e, plan)
+		rec, ok, err := encodeEntry(e, plan, codec)
 		if err != nil {
 			return err
 		}
@@ -250,9 +397,9 @@ type batch struct {
 func pipe(r dict.Reader, src, path string, plan Plan, w *writer) (eof bool, err error) {
 	var acct sysmem.Account
 	defer acct.Close()
-	encoders := min(max(runtime.GOMAXPROCS(0)-1, 1), 8)
-	order := make(chan *batch, 2*encoders+2) // every batch, in reader order
-	jobs := make(chan *batch, 2*encoders+2)  // the batches with entries to encode
+	workers := encoders()
+	order := make(chan *batch, 2*workers+2) // every batch, in reader order
+	jobs := make(chan *batch, 2*workers+2)  // the batches with entries to encode
 	stop := make(chan struct{})
 	released := make(chan struct{}, 1) // the writer gave weight back
 	var wg sync.WaitGroup
@@ -330,12 +477,12 @@ func pipe(r dict.Reader, src, path string, plan Plan, w *writer) (eof bool, err 
 		}
 	}()
 
-	for range encoders {
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for b := range jobs {
-				encodeBatch(b, plan, path)
+				encodeBatch(b, plan, path, w.codec)
 				close(b.done)
 			}
 		}()
@@ -347,7 +494,7 @@ func pipe(r dict.Reader, src, path string, plan Plan, w *writer) (eof bool, err 
 			return false, b.err
 		}
 		if b.inline {
-			encodeBatch(b, plan, path)
+			encodeBatch(b, plan, path, w.codec)
 			if b.err != nil {
 				return false, b.err
 			}
@@ -398,7 +545,7 @@ func safeNext(r dict.Reader, path string) (e dict.Entry, err error) {
 }
 
 // encodeBatch fills b.recs, or b.err.
-func encodeBatch(b *batch, plan Plan, path string) {
+func encodeBatch(b *batch, plan Plan, path string, codec *bodyCodec) {
 	defer func() {
 		if p := recover(); p != nil {
 			b.recs, b.err = nil, dict.PanicError(path, p)
@@ -406,7 +553,7 @@ func encodeBatch(b *batch, plan Plan, path string) {
 	}()
 	b.recs = make([]record, 0, len(b.entries))
 	for _, e := range b.entries {
-		rec, ok, err := encodeEntry(e, plan)
+		rec, ok, err := encodeEntry(e, plan, codec)
 		if err != nil {
 			b.err = err
 			return

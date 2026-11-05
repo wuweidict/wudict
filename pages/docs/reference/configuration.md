@@ -274,38 +274,42 @@ A soft memory limit for the whole process.
 Near the limit, the Go runtime collects garbage more often and wudict drops its
 caches; the process can still exceed it.
 
-### NO_COMPRESS
-
-Store article text uncompressed.
-
-| | |
-| --- | --- |
-| Flag | `--no-compress` |
-| Default | off: article text is DEFLATE-compressed |
-
-The library becomes about 3 times larger; reads are slightly faster.
-
 ### COMPRESSION
 
-How hard article text is compressed when a dictionary is indexed.
+How article text is stored when a dictionary is indexed.
 
 | | |
 | --- | --- |
-| Flag | none, environment and file only |
-| Values | `fast`, `small` |
-| Default | `fast` |
+| Flag | `--compression` (`serve` only; `ingest` and `reindex` read the environment and the file) |
+| Values | `zstd`, `deflate` or `none`, optionally with a level: `zstd-1` to `zstd-22`, `deflate-1` to `deflate-9` |
+| Default | `zstd` (level 1) |
 
-- `fast`: the quickest indexing.
-- `small`: the library is 1 % to 2 % smaller, and indexing takes up to 1.5 times
-  as long.
+- `zstd`: the smallest dictionaries. Each dictionary stores one zstd dictionary
+  made from its own articles, and every article is compressed with it.
+- `deflate`: dictionaries 1.3 to 3 times as large as with `zstd`. Use it for a
+  program that reads only DEFLATE, or for a wudict version before zstd, which
+  does not open a `zstd` dictionary.
+- `none`: dictionaries 2 to 7 times as large as with `zstd`.
 
-The setting applies to dictionaries indexed after the change; dictionaries
-already indexed keep their size. On Android, `fast` compresses less than on a
-desktop, to use less battery. With [`NO_COMPRESS`](#no_compress) set to `1`,
-article text is not compressed and `COMPRESSION` has no effect.
+A bare `deflate` is level 6, and level 1 on Android. zstd has four levels:
+`zstd-1` and `zstd-2` are level 1, `zstd-3` to `zstd-5` are level 3, `zstd-6`
+to `zstd-9` are level 6, and `zstd-10` and above are level 10. Levels above 1
+make dictionaries a few per cent smaller and take up to twice as long to index.
+
+The setting applies to dictionaries indexed after the change. A dictionary
+already indexed with another codec keeps working and is shown as
+[outdated](../dictionaries/library.md#outdated-indexes): <kbd>Rebuild</kbd>, or
+`wudict reindex`, converts it. A different level of the same codec is not
+outdated. Reading handles
+every codec and level. A value that is not one of these is reported at start-up
+and on the setup page, and the default applies.
+
+`NO_COMPRESS = "1"` and `--no-compress` are earlier spellings of
+`COMPRESSION = "none"`, and `COMPRESSION = "fast"` and `"small"` are earlier
+spellings of `"zstd"`. wudict still reads them and reports the new spelling.
 
 ```toml
-COMPRESSION = "small"
+COMPRESSION = "deflate"
 ```
 
 ## Lemmatization

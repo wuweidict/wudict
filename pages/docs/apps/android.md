@@ -146,7 +146,7 @@ Long-press the app icon → **Settings**.
 | Look up in the full app | per source: text selection menu, share menu, a reading app's dictionary button, links and automation |
 | Screen | what fills the screen edges (margin colour), which system bars hide while you read |
 | Access | *Only this app may change your dictionaries*: other apps on the phone can look words up but not import, index, remove or change settings |
-| Advanced | uncompressed storage, memory one search may use, memory for dictionaries not indexed, dictionaries indexed at once, server port; FOSS build: *Reachable from other devices (testing only)* |
+| Advanced | article compression, memory one search may use, memory for dictionaries not indexed, dictionaries indexed at once, server port; FOSS build: *Reachable from other devices (testing only)* |
 
 ## Files
 

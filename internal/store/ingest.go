@@ -105,6 +105,10 @@ func ingestPlan(r dict.Reader, dbPath, src string, plan Plan, progress Progress)
 		return rep, err
 	}
 
+	// The codec decides the schema before anything is written: a zstd
+	// database is schema 2 and holds its dictionary (compress.go).
+	codec := newBodyCodec()
+	defer codec.close()
 	if _, err = db.Exec(fmt.Sprintf(`
 		PRAGMA user_version = %d;
 		CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
@@ -113,8 +117,13 @@ func ingestPlan(r dict.Reader, dbPath, src string, plan Plan, progress Progress)
 		CREATE VIRTUAL TABLE entry_fts USING fts5(
 			w, txt, content='', columnsize=0,
 			tokenize='unicode61 remove_diacritics 2');
-	`, schemaVersion)); err != nil {
+	`, codec.schema())); err != nil {
 		return rep, err
+	}
+	if codec.name == codecZstd {
+		if _, err = db.Exec("CREATE TABLE body_dict(id INTEGER PRIMARY KEY, data BLOB NOT NULL)"); err != nil {
+			return rep, err
+		}
 	}
 
 	var acct sysmem.Account
@@ -161,7 +170,7 @@ func ingestPlan(r dict.Reader, dbPath, src string, plan Plan, progress Progress)
 		return rep, err
 	}
 	total := srcMeta.EntryCount
-	w := newWriter(tx, progress, total)
+	w := newWriter(tx, progress, total, src, codec, &acct)
 	defer w.close()
 	if err = fill(r, src, srcMeta.Path, plan, w); err != nil {
 		return rep, err
@@ -220,7 +229,7 @@ func ingestPlan(r dict.Reader, dbPath, src string, plan Plan, progress Progress)
 		"ingest_level":     ingestLevel(plan),
 		"markup_version":   fmt.Sprint(artmark.Version), // which role markup the articles were written with
 		"ingest_version":   fmt.Sprint(IngestVersion),   // which IngestPlan wrote this (stale.go)
-		"body_encoding":    bodyEncoding(),
+		"body_encoding":    codec.label(),
 		"created":          time.Now().UTC().Format(time.RFC3339),
 		"source_sha256_1M": sourceHash(srcMeta.Path),
 	}
@@ -228,6 +237,9 @@ func ingestPlan(r dict.Reader, dbPath, src string, plan Plan, progress Progress)
 	// records none, and Outdated has no opinion about it
 	if rv := dict.ReaderVersion(srcMeta.Format); rv > 0 {
 		metaKV["reader_version"] = fmt.Sprint(rv)
+	}
+	if codec.name == codecZstd {
+		metaKV["body_dict_bytes"] = fmt.Sprint(w.dictBytes)
 	}
 	// Only what the SOURCE DICTIONARY declared. A language worked out from the
 	// file name or a parent folder is deliberately not recorded: those are
@@ -376,15 +388,6 @@ func resolveLinks(tx *sql.Tx, total int64, done func(int)) (int, error) {
 // isSubEntry reports an MDict-style expandable section stored as a headword
 // ("@examples_woman"). See notSubEntry in store.go for why they are hidden.
 func isSubEntry(hw string) bool { return len(hw) > 1 && hw[0] == '@' }
-
-// bodyEncoding records how bodies were written, for humans reading the meta;
-// the read path detects the form per row and does not consult this.
-func bodyEncoding() string {
-	if compressBodies {
-		return "deflate"
-	}
-	return "plain"
-}
 
 // syncFile flushes a finished ingest temp to disk. dsnIngest runs with
 // synchronous=OFF for speed, so pages may linger in the OS cache; fsyncing

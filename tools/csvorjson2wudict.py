@@ -109,7 +109,7 @@ import tempfile
 import zlib
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 1   # store/store.go:43
+SCHEMA_VERSION = 1   # a schema-1 text.db: DEFLATE and literal rows, read by every wudict (internal/store/compress.go)
 MARKUP_VERSION = 2   # artmark/artmark.go:83
 COMPRESS_MARK = 0x00  # store/compress.go:31
 COMPRESS_MIN = 120    # store/compress.go:73 - shorter than deflate's overhead

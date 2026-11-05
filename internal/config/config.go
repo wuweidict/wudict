@@ -88,17 +88,16 @@ type Config struct {
 	// machine has proved nothing, and the one irreversible operation is the
 	// wrong place to be generous. Set it to "1" when the server is bound to a
 	// network address and the LAN is trusted with deletions.
-	AllowRemoteDelete bool   // ALLOW_REMOTE_DELETE
-	NoCompress        bool   // NO_COMPRESS=1: store article text verbatim (bigger databases)
-	Compression       string // COMPRESSION: fast (default) or small - how hard article text is compressed
-	IndexWorkers      int    // INDEX_WORKERS: how many dictionaries may be indexed at once
-	MemoryLimit       int64  // MEMORY_LIMIT: soft heap ceiling in bytes (0 = none)
-	PreviewMemory     int64  // PREVIEW_MEMORY: cap on RAM held by unprepared dictionaries (0 = unlimited)
-	SearchMemory      int64  // SEARCH_MEMORY: cap on RAM ONE search may materialise (0 = uncapped)
-	MorphCache        int    // MORPH_CACHE: how many lemma packs stay resident (0 = no lemmatization)
-	LemmaDir          string // LEMMA_DIR: folder of installed lemma files (adds/overrides languages)
-	LemmaURL          string // LEMMA_URL: manifest `wudict lemmas` installs languages from
-	Source            string // path of the wudict.toml that was loaded ("" if none)
+	AllowRemoteDelete bool        // ALLOW_REMOTE_DELETE
+	Compression       Compression // COMPRESSION: how article text is stored when a dictionary is indexed (D191)
+	IndexWorkers      int         // INDEX_WORKERS: how many dictionaries may be indexed at once
+	MemoryLimit       int64       // MEMORY_LIMIT: soft heap ceiling in bytes (0 = none)
+	PreviewMemory     int64       // PREVIEW_MEMORY: cap on RAM held by unprepared dictionaries (0 = unlimited)
+	SearchMemory      int64       // SEARCH_MEMORY: cap on RAM ONE search may materialise (0 = uncapped)
+	MorphCache        int         // MORPH_CACHE: how many lemma packs stay resident (0 = no lemmatization)
+	LemmaDir          string      // LEMMA_DIR: folder of installed lemma files (adds/overrides languages)
+	LemmaURL          string      // LEMMA_URL: manifest `wudict lemmas` installs languages from
+	Source            string      // path of the wudict.toml that was loaded ("" if none)
 
 	// BrowserExtensions (BROWSER_EXTENSIONS) pins which browser-extension
 	// origins may read /api/dicts, /api/search and /res/ cross-origin. Empty =
@@ -195,7 +194,7 @@ func defaults() Config {
 		AllowRemoteDelete: false,
 		LemmaURL:          DefaultLemmaURL,
 		Limits:            limits.Default,
-		Compression:       CompressionFast,
+		Compression:       DefaultCompression(),
 	}
 }
 
@@ -347,12 +346,7 @@ func Load(configPath string, flags map[string]string) (Config, error) {
 	if v := get("ALLOW_REMOTE_DELETE"); v != "" {
 		cfg.AllowRemoteDelete = !isOff(v)
 	}
-	if v := get("NO_COMPRESS"); v != "" {
-		cfg.NoCompress = !isOff(v)
-	}
-	if v := get("COMPRESSION"); v != "" {
-		cfg.Compression = normalizeCompression(v)
-	}
+	resolveCompression(&cfg, get)
 	if v := get("INDEX_WORKERS"); v != "" {
 		cfg.IndexWorkers = ParseWorkers(v)
 	}
@@ -613,13 +607,9 @@ const configTemplate = `# wudict configuration  (~/.wudict/wudict.toml)
 # MEMORY_LIMIT  = "0"                 # soft ceiling, e.g. "4GB": Go collects harder - and sheds its
 #                                     # caches - rather than growing past it. "0" = no ceiling.
 #                                     # Android defaults to a fraction of the device's RAM.
-# NO_COMPRESS = "0"                   # "1" = store article text uncompressed (databases roughly 3x larger,
-#                                     #       marginally faster reads; only worth it with disk to spare)
-# COMPRESSION = "fast"                # how hard article text is compressed when a dictionary is indexed.
-#                                     # "fast" = the quickest indexing. "small" = a library 1-2% smaller;
-#                                     # indexing takes up to 1.5 times as long. It applies to dictionaries
-#                                     # indexed after the change. On Android "fast" compresses less, to use
-#                                     # less battery. NO_COMPRESS = "1" turns compression off altogether.
+# COMPRESSION = "zstd"                # how article text is stored in dictionaries indexed after the change:
+#                                     # "zstd", "deflate" (1.3 to 3 times as large) or "none" (2 to 7 times);
+#                                     # a level may follow: "zstd-3", "deflate-6"
 # ALLOW_REMOTE_DELETE = "0"           # may a browser on ANOTHER machine delete a dictionary?
 #                                     # Deleting from this machine is always allowed. "1" = a browser
 #                                     # on the LAN may too; only meaningful when SERVER_IP is not
@@ -943,10 +933,12 @@ func decodeArray(s string) ([]string, bool) {
 // already split, so no caller has to reconstruct one from text. An array whose
 // bracket closes on a later line is gathered rather than ignored.
 // knownKeys are the settings wudict reads: every key configTemplate
-// documents (a test holds Load to that), and AUTH_TOKEN, which is meant for
-// the environment and so is kept out of the template.
+// documents (a test holds Load to that), AUTH_TOKEN, which is meant for the
+// environment and so is kept out of the template, and NO_COMPRESS, which
+// COMPRESSION replaced (D191) and which is still read so that resolveCompression
+// can report it.
 var knownKeys = func() map[string]bool {
-	keys := map[string]bool{"AUTH_TOKEN": true}
+	keys := map[string]bool{"AUTH_TOKEN": true, "NO_COMPRESS": true}
 	for _, line := range strings.Split(configTemplate, "\n") {
 		k, _, ok := strings.Cut(strings.TrimLeft(line, "# "), "=")
 		if k = strings.TrimSpace(k); ok && k != "" && strings.ToUpper(k) == k && !strings.ContainsAny(k, " ()") {
@@ -1131,20 +1123,151 @@ const (
 	AutoIndexOff = "off"
 )
 
-// COMPRESSION values: how hard article text is compressed when a dictionary
-// is indexed (D182).
+// COMPRESSION codecs (D191): how article text is stored when a dictionary is
+// indexed. Reading understands every codec and level whatever the setting.
 const (
-	CompressionFast  = "fast"
-	CompressionSmall = "small"
+	CodecZstd    = "zstd"
+	CodecDeflate = "deflate"
+	CodecNone    = "none"
 )
 
-// normalizeCompression reads COMPRESSION. Anything but "small" means the
-// default, "fast".
-func normalizeCompression(v string) string {
-	if strings.EqualFold(strings.TrimSpace(v), CompressionSmall) {
-		return CompressionSmall
+// Compression is a resolved COMPRESSION: a codec and its own level, which is 0
+// only for CodecNone.
+type Compression struct {
+	Codec string
+	Level int
+}
+
+// String is the spelling COMPRESSION accepts back: "zstd-1", "deflate-6",
+// "none".
+func (c Compression) String() string {
+	if c.Codec == CodecNone {
+		return CodecNone
 	}
-	return CompressionFast
+	return c.Codec + "-" + strconv.Itoa(c.Level)
+}
+
+// DefaultCompression is what an unset COMPRESSION means: zstd at its fastest
+// level, on every platform (D191).
+func DefaultCompression() Compression { return Compression{Codec: CodecZstd, Level: 1} }
+
+// ParseCompression reads a COMPRESSION value: a codec, optionally followed by
+// "-" and the codec's own level. A bare codec takes its default level: zstd 1,
+// deflate the platform's (deflateLevel). A zstd level resolves to the tier the
+// encoder actually has (1-2, 3-5, 6-9, 10 and up), so String names what runs.
+// ok is false for anything else, the level spellings "fast" and "small"
+// included: resolveCompression reports those.
+func ParseCompression(v string) (Compression, bool) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	codec, lvl, hasLevel := strings.Cut(v, "-")
+	level := 0
+	if hasLevel {
+		n, err := strconv.Atoi(lvl)
+		if err != nil {
+			return Compression{}, false
+		}
+		level = n
+	}
+	switch codec {
+	case CodecNone:
+		if hasLevel {
+			return Compression{}, false
+		}
+		return Compression{Codec: CodecNone}, true
+	case CodecDeflate:
+		if !hasLevel {
+			level = deflateLevel()
+		}
+		if level < 1 || level > 9 {
+			return Compression{}, false
+		}
+		return Compression{Codec: CodecDeflate, Level: level}, true
+	case CodecZstd:
+		if !hasLevel {
+			level = 1
+		}
+		if level < 1 || level > 22 {
+			return Compression{}, false
+		}
+		switch {
+		case level < 3:
+			level = 1
+		case level < 6:
+			level = 3
+		case level < 10:
+			level = 6
+		default:
+			level = 10
+		}
+		return Compression{Codec: CodecZstd, Level: level}, true
+	}
+	return Compression{}, false
+}
+
+// originRank orders the layers: a higher layer wins.
+func originRank(o string) int {
+	switch o {
+	case OriginFlag:
+		return 3
+	case OriginEnv:
+		return 2
+	case OriginFile:
+		return 1
+	}
+	return 0
+}
+
+// resolveCompression reads COMPRESSION and NO_COMPRESS, the key it replaced.
+// Between a codec and NO_COMPRESS = "1" the higher layer wins, and at one
+// layer the codec does. The level spellings "fast" and "small" never beat
+// NO_COMPRESS = "1", at any layer: they named how hard to compress, and
+// NO_COMPRESS took precedence over them, so a configuration that set both
+// keeps storing text uncompressed. Every earlier spelling, and a value
+// that is not a compression, is a Problem: the setting is reported, never
+// fatal, because a mistyped value must not stop the server (on Android it
+// arrives from the settings screen).
+func resolveCompression(cfg *Config, get func(string) string) {
+	cv := get("COMPRESSION")
+	co := cfg.Origins["COMPRESSION"]
+	nv := get("NO_COMPRESS")
+	no := cfg.Origins["NO_COMPRESS"]
+	def := DefaultCompression()
+
+	have, legacy := false, false
+	cat := fmt.Sprintf("COMPRESSION = %q (%s)", cv, co)
+	if cv != "" {
+		switch l := strings.ToLower(strings.TrimSpace(cv)); l {
+		case "fast", "small":
+			cfg.Compression, have, legacy = def, true, true
+		default:
+			if c, ok := ParseCompression(cv); ok {
+				cfg.Compression, have = c, true
+			} else {
+				cfg.Origins["COMPRESSION"] = OriginDefault
+				cfg.Problems = append(cfg.Problems, fmt.Sprintf("%s is not a compression: the default %s applies. Write zstd, deflate or none, optionally with a level: zstd-3, deflate-6", cat, def))
+			}
+		}
+	}
+	nat := fmt.Sprintf("NO_COMPRESS = %q (%s)", nv, no)
+	noWins := nv != "" && !isOff(nv) && (!have || legacy || originRank(no) > originRank(co))
+	if legacy {
+		if noWins {
+			cfg.Problems = append(cfg.Problems, fmt.Sprintf("%s is an earlier spelling and has no effect: %s applies", cat, nat))
+		} else {
+			cfg.Problems = append(cfg.Problems, fmt.Sprintf("%s is an earlier spelling: %s applies. Write COMPRESSION = %q", cat, def, def.Codec))
+		}
+	}
+	switch {
+	case nv == "":
+	case isOff(nv):
+		cfg.Problems = append(cfg.Problems, nat+" is an earlier setting and has no effect. Delete it")
+	case noWins:
+		cfg.Compression = Compression{Codec: CodecNone}
+		cfg.Origins["COMPRESSION"] = no
+		cfg.Problems = append(cfg.Problems, nat+` is an earlier setting: none applies. Write COMPRESSION = "none"`)
+	default:
+		cfg.Problems = append(cfg.Problems, fmt.Sprintf("%s is an earlier setting and has no effect: %s applies", nat, cat))
+	}
 }
 
 // IMPORT_KEEP values: what becomes of the archive an import came from.
@@ -1296,7 +1419,7 @@ type Setting struct {
 // actually in effect - including the defaults this package computes from the
 // device itself (tuning.go), which nothing outside Go should ever recompute.
 var Tunables = []string{
-	"NO_COMPRESS",
+	"COMPRESSION",
 	"SEARCH_MEMORY",
 	"PREVIEW_MEMORY",
 	"MEMORY_LIMIT",
@@ -1313,11 +1436,8 @@ func (c Config) Effective() map[string]Setting {
 	out := make(map[string]Setting, len(Tunables))
 	val := func(key string) string {
 		switch key {
-		case "NO_COMPRESS":
-			if c.NoCompress {
-				return "1"
-			}
-			return "0"
+		case "COMPRESSION":
+			return c.Compression.String()
 		case "SEARCH_MEMORY":
 			return FormatSize(c.SearchMemory)
 		case "PREVIEW_MEMORY":

@@ -258,12 +258,12 @@ Speex `.spx` audio auto-converted for browser playback. A folder named after a l
 
 - <kbd>media</kbd> packs a dictionary's pictures and sounds into its index, so it keeps working if you delete the original files, and also makes access faster to assets such as images and audio.
 - <kbd>Full-text for every dictionary…</kbd> in the ![](cog.svg) row will generate full-text indexes for all dictionaries — IMPORTANT: depending on the size of your dictionary collection this can take GB of space and take hours.
-- ⟳ on a switch, or a **Rebuild** line: an outdated index, made by an older wudict or before the dictionary files changed; one click rebuilds it.
+- ⟳ on a switch, or a **Rebuild** line: an outdated index, made by an older wudict, before the dictionary files changed, or with another compression; one click rebuilds it.
 - DSL, Babylon and wudict markdown are indexed as soon as they are opened; ZIM only when you ask, since this format already has its own index and wudict can use it.
 
 An index usually takes less space than the dictionary file.
 
-To make the library 1 % to 2 % smaller, set `COMPRESSION = "small"` in `wudict.toml` ([settings](<entry://wudict command line>)). Indexing then takes up to 1.5 times as long, and the setting applies to dictionaries indexed after the change.
+Article text is stored with zstd. To store it with DEFLATE instead, for a program that reads only DEFLATE, set `COMPRESSION = "deflate"` in `wudict.toml` ([settings](<entry://wudict command line>)); `"none"` stores it uncompressed. Dictionaries indexed before the change are then shown as outdated, and **Rebuild** converts them.
 
 ***
 

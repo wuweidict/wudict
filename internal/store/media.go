@@ -37,7 +37,7 @@ func OpenMedia(path string) (*Media, error) {
 		db.Close()
 		return nil, err
 	}
-	if ver != schemaVersion {
+	if ver != sidecarSchema {
 		db.Close()
 		return nil, fmt.Errorf("%s: not a wudict media database", path)
 	}
@@ -118,6 +118,12 @@ func ReferencedAssets(textDB string) ([]string, error) {
 		return nil, err
 	}
 	defer db.Close()
+	var ver int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&ver); err != nil {
+		return nil, err
+	}
+	body := newBodyDecoder(ver, db)
+	defer body.close()
 	rows, err := db.Query("SELECT m FROM entry")
 	if err != nil {
 		return nil, err
@@ -133,7 +139,7 @@ func ReferencedAssets(textDB string) ([]string, error) {
 		if err := rows.Scan(&raw); err != nil {
 			return out, err
 		}
-		for _, ref := range walker.Refs(decodeBody(raw)) {
+		for _, ref := range walker.Refs(body.decode(raw)) {
 			name := ref.URL
 			if !isRelativeAsset(name) || seen[name] {
 				continue
@@ -222,7 +228,7 @@ func IngestMedia(d dict.Dictionary, names []string, dbPath, dictUUID string, pro
 		PRAGMA user_version = %d;
 		CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
 		CREATE TABLE resource(name TEXT PRIMARY KEY, mime TEXT, data BLOB);
-	`, schemaVersion)); err != nil {
+	`, sidecarSchema)); err != nil {
 		return err
 	}
 	tx, err := db.Begin()

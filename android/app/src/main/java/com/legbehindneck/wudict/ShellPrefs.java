@@ -168,6 +168,9 @@ final class ShellPrefs {
         return p;
     }
 
+    /** A stored NO_COMPRESS override, which migrate() maps to the COMPRESSION picker (D191). */
+    private static final String OLD_NO_COMPRESS = "override_NO_COMPRESS";
+
     /**
      * Brings a preference file written by an older version up to date, once per
      * process.
@@ -199,6 +202,16 @@ final class ShellPrefs {
             int v = p.getBoolean(IMMERSIVE, false) ? BARS_BOTH : BARS_OFF;
             if (e == null) e = p.edit();
             e.putInt(BARS, v);
+        }
+
+        // A NO_COMPRESS override is the COMPRESSION picker's "none" when it was
+        // ticked; unticked, it stored nothing (D191).
+        if (p.contains(OLD_NO_COMPRESS)) {
+            if (e == null) e = p.edit();
+            if ("1".equals(p.getString(OLD_NO_COMPRESS, null)) && !p.contains("override_COMPRESSION")) {
+                e.putString("override_COMPRESSION", "none");
+            }
+            e.remove(OLD_NO_COMPRESS);
         }
 
         if (e != null) e.apply();
@@ -405,6 +418,11 @@ final class ShellPrefs {
     static final int COUNT = 1;
     /** Megabytes: stored as a bare number, emitted with the "MB" suffix. */
     static final int MEGABYTES = 2;
+    /**
+     * One of {@link Override#values}: stored and emitted verbatim. Unset leaves
+     * the key to the config; the first option is the config's own default.
+     */
+    static final int CHOICE = 3;
 
     // Bounds that only the device can answer. Resolved by maxOf().
     private static final int MAX_RAM_MB = -1;
@@ -413,8 +431,7 @@ final class ShellPrefs {
     /**
      * One overridable config key. Everything the settings screen draws and
      * everything ServerProcess emits comes from this table, so a second
-     * override is one entry and two strings - which is the point of D101;
-     * NO_COMPRESS is merely its first instance.
+     * override is one entry and two strings - which is the point of D101.
      */
     static final class Override {
         final String key;      // the wudict config key
@@ -424,6 +441,9 @@ final class ShellPrefs {
         final String offValue; // BOOL: what "off" means, for display only - never emitted
         final int min, max;    // COUNT/MEGABYTES, inclusive; negative = ask the device
         final int label, hint;
+        final String[] values; // CHOICE: the config values, index 0 being the default
+        final int options;     // CHOICE: string-array of the option labels
+        final int optionHints; // CHOICE: string-array of one hint per option
 
         // Package-private, not private: the per-flavour Net (D62) builds the
         // listen-address rows, and only the flavour that HAS one compiles it.
@@ -438,6 +458,35 @@ final class ShellPrefs {
             this.max = max;
             this.label = label;
             this.hint = hint;
+            this.values = null;
+            this.options = 0;
+            this.optionHints = 0;
+        }
+
+        /** A CHOICE override, delivered through the environment. */
+        Override(String key, String[] values, int options, int optionHints, int label, int hint) {
+            this.key = key;
+            this.flag = null;
+            this.kind = CHOICE;
+            this.onValue = null;
+            this.offValue = null;
+            this.min = 0;
+            this.max = 0;
+            this.label = label;
+            this.hint = hint;
+            this.values = values;
+            this.options = options;
+            this.optionHints = optionHints;
+        }
+
+        /** The option a value names, or -1 for none or an unknown one. */
+        int indexOf(String v) {
+            if (v != null) {
+                for (int i = 0; i < values.length; i++) {
+                    if (values[i].equals(v)) return i;
+                }
+            }
+            return -1;
         }
 
         String pref() {
@@ -471,8 +520,10 @@ final class ShellPrefs {
 
     private static Override[] table() {
         Override[] head = {
-                new Override("NO_COMPRESS", null, BOOL, "1", "0", 0, 0,
-                        R.string.settings_no_compress, R.string.settings_no_compress_hint),
+                // D191: index 0 is zstd, the config's default.
+                new Override("COMPRESSION", new String[]{"zstd", "deflate", "none"},
+                        R.array.settings_compression_modes, R.array.settings_compression_hints,
+                        R.string.settings_compression, R.string.settings_compression_hint),
                 new Override("SEARCH_MEMORY", null, MEGABYTES, null, null, 0, MAX_RAM_MB,
                         R.string.settings_search_memory, R.string.settings_search_memory_hint),
                 new Override("PREVIEW_MEMORY", null, MEGABYTES, null, null, 0, MAX_RAM_MB,

@@ -1,4 +1,11 @@
+Unreleased
 
+🚀 Features
+(config) COMPRESSION = "zstd" | "deflate" | "none", optionally with a level ("zstd-3", "deflate-6"); --compression on serve. NO_COMPRESS and "fast"/"small" are still read and reported with the new spelling
+(android) Settings → Advanced: Article compression (zstd, DEFLATE or none) replaces the "uncompressed" switch; a ticked switch becomes "none"
+
+⚡ Performance
+(prepare) Article text is stored with zstd and a dictionary made from each dictionary's own articles: indexed dictionaries are about 28% smaller than with DEFLATE, articles decompress about 4 times faster, and compressing uses less CPU. Earlier dictionaries keep working and are shown as outdated: Rebuild (or wudict reindex) converts them. A dictionary indexed this way does not open in earlier wudict versions: COMPRESSION = "deflate" keeps the old form
 
 v3.7.10
 
