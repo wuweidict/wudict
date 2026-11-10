@@ -142,45 +142,6 @@
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
 
-            <!-- Links to the sites that distribute these dictionaries (D139).
-                 An ORDINARY browsable filter, with NO android:autoVerify: an
-                 App Link would need /.well-known/assetlinks.json served from
-                 those domains naming our package and signing certificate, and
-                 we do not run them. Without it Android simply treats wuDict as
-                 one more candidate for these URLs, which is all that is wanted
-                 - the same shape AuroraStore uses for play.google.com links.
-
-                 What that is worth depends on the Android version, and the
-                 difference is worth knowing before this looks broken:
-
-                 * Android 11 and below - wuDict joins the chooser, or can be
-                   made the default handler for these hosts.
-                 * Android 12 and above - an unapproved web filter gets
-                   NOTHING; the link goes straight to the browser. The user
-                   turns it on per-domain in Settings > Apps > wuDict > Open
-                   by default > Add link. The filter is what makes that switch
-                   exist at all, so it is still the price of admission.
-
-                 Hosts, not paths: a forum thread and a download link are the
-                 same URL shape on these sites, and pathPattern cannot tell
-                 them apart (no backtracking, and a query string carries the
-                 file). A tapped link that turns out to be a page is refused by
-                 the server in a sentence - ErrNotArchive - which is the same
-                 bargain the octet-stream filter above makes. -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="http" />
-                <data android:scheme="https" />
-                <data android:host="freemdict.com" />
-                <data android:host="www.freemdict.com" />
-                <data android:host="downloads.freemdict.com" />
-                <data android:host="pkemb.com" />
-                <data android:host="www.pkemb.com" />
-                <data android:host="mdx.mdict.org" />
-            </intent-filter>
-
             <!-- wuDict's own share link: https://legbehindneck.com/wudict#<link>
                  opens here, whatever the link after "#" is - a dictionary, a
                  web folder of them, or a list (internal/intake/collection.go).
@@ -190,8 +151,8 @@
                  with no setting to find. Exact paths, never a prefix: the rest
                  of the site is a website and must keep opening in the browser.
                  A filter of its own, because <data> elements in one filter
-                 combine, and these paths would otherwise apply to the hosts
-                 above as well. -->
+                 combine, and these paths would otherwise apply to the
+                 distribution-site hosts in src/foss as well. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
