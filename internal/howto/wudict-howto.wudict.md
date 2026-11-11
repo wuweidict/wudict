@@ -314,6 +314,8 @@ Both lists are text files next to `wudict.toml`, one word per line: `history.txt
 
 **Press ![](full.svg) at the right of a dictionary's header to show its examples**; press again to hide them. Lingvo DSL dictionaries mark examples, sub-entry links and other secondary text, and an article opens with it hidden: the dotted line in the icon is the hidden text. Shown, it is grey. The next result opens the way you left the last one. A [full-text](<entry://wudict full-text>) match inside secondary text shows it for that result. 💻 <kbd>Ctrl</kbd>+<kbd>\*</kbd> switches the section you are reading.
 
+In other dictionaries the same button opens every collapsed block of the articles, such as <kbd>More examples</kbd>, and closes them all when none is closed. A block still opens and closes by its own title. With the button on, the next result opens with all its blocks open; with it off, as the dictionary has them.
+
 ***
 
 - [index](/browse?dict=wudict-howto)

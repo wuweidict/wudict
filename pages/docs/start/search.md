@@ -163,6 +163,11 @@ the examples, often the links to sub-entries. It is hidden when an article
 opens. The button at the right end of a dictionary's header shows it; its icon
 draws the hidden line dotted. Shown, secondary text is grey.
 
+Other dictionaries fold the same kind of text into collapsed blocks, such as
+**More examples**. There the button opens every block of the section, and
+closes them all when none is closed; a block still opens and closes by its own
+title. With the button off, a result opens as its dictionary has it.
+
 - The next result opens the way you left the last one. The choice is stored
   with your other settings, so every browser and the Android app that use the
   same wudict share it.

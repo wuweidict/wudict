@@ -337,7 +337,8 @@ summary .mbtn:active{color:var(--accent)}
 summary .mpos{font-size:11px;color:var(--fg-faint);min-width:2.8em;text-align:center;
   font-variant-numeric:tabular-nums}
 /* Brief and full view (fullSet): the toggle for Lingvo's secondary zone, DSL
-   [*], which the article carries as wu-sec. It sits LAST in the row because
+   [*], which the article carries as wu-sec, and for the <details> blocks of
+   every other format. It sits LAST in the row because
    that is the one place nothing else moves it - the match walker comes and
    goes, the count changes width - and the one a right thumb reaches without
    looking. The glyph is the article in miniature: two sense lines and an
@@ -3749,6 +3750,9 @@ addEventListener("message",e=>{
     // Coalesced, because this message arrives once per frame and again on
     // every reflow inside it.
     if(f&&navDet&&navDet.contains(f)){clearTimeout(navTimer);navTimer=setTimeout(navRefresh,200)}
+    // ...and so do its <details> blocks, which give the section its switch;
+    // the line a press of that switch is holding is put back (fullSettle).
+    if(f){fullInit(f.closest("details.dict"));fullSettle(f)}
   }else if(d.t==="ref"&&d.w){
     // d.xdict is set when the author pointed at ANOTHER dictionary by name.
     searchFor(d.w,{scope:d.xdict?dictIDByName(d.xdict):d.dict,frag:d.frag});
@@ -3830,7 +3834,7 @@ addEventListener("message",e=>{
     if(!speakOn)return;
     const f=document.querySelector('iframe[data-fid="'+CSS.escape(d.fid)+'"]');
     if(!f||e.source!==f.contentWindow)return;
-    const go=()=>window.wuSpeak.frame(f,String(d.s||""),d.r,d.p,d.u,d.l,d.n===true,typeof d.sp==="string"?d.sp:"");
+    const go=()=>window.wuSpeak.frame(f,d);
     if(window.wuSpeak)go();
     else if(d.s&&speakCan())speakWake().then(go,err=>console.warn("wudict:",err.message));
   }else if((d.t==="say"||d.t==="hush"||d.t==="nonext")&&d.fid){
@@ -4734,9 +4738,23 @@ function anchorTarget(root,frag){
    reader did not choose - a full-text match or a #fragment inside the zone -
    opens full without changing that choice.
 
-   Only shadow-DOM articles take part: wu-sec is written by the DSL reader
-   alone, and DSL escapes `<`, so an article carrying it never has a script
-   and never renders in a frame. */
+   wu-sec is written by the DSL reader alone, and DSL escapes `<`, so an
+   article carrying it never has a script, never renders in a frame and never
+   holds a <details>.
+
+   Every other format folds the same kind of text - more examples, related
+   words, one block per source - into <details>, and the same switch serves
+   them (D193). A section holds a zone or blocks, never both, so `det.wuFold`
+   names which. Blocks differ from the zone in one way: each has a state of
+   its own, set by the dictionary (`open`) and by the reader's press on its
+   <summary>. So the switch is read from the article, not stored: pressed
+   means no block is closed, a press opens them all while any is closed and
+   closes them all otherwise. `fullOn` keeps its meaning - brief is the
+   article as its dictionary ships it, full is everything shown - so a brief
+   section arrives untouched and a full one with every block open; a block is
+   given that arrival state once (`foldSeen`), which is what lets a frame
+   report its height many times without reopening what the reader closed.
+   Both article shapes take part: a frame's document is read directly. */
 const FULL_SVG='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false">'+
   '<path d="M2 3.5h12M2 12.5h12"/><path class="brief" d="M5.5 8h8.5" stroke-dasharray="0 2.8"/><path class="full" d="M5.5 8h8.5"/></svg>';
 function fullRoots(det){
@@ -4744,18 +4762,81 @@ function fullRoots(det){
   for(const host of det.querySelectorAll(".article"))if(host.shadowRoot)out.push(host);
   return out;
 }
-/* A freshly filled section (or one a sub-entry was just added to): give it
-   the switch if it now holds a zone, and its articles the section's state. */
+/* Every article of a section with the tree it is read through: its shadow
+   root, or its frame's document (about:blank, so empty, until it parses). */
+function foldRoots(det){
+  const out=[];
+  for(const host of det.querySelectorAll(".article")){
+    const root=host.shadowRoot||host.contentDocument;
+    if(root)out.push({host,root});
+  }
+  return out;
+}
+function foldList(det,sel){
+  const out=[];
+  for(const a of foldRoots(det))out.push(...a.root.querySelectorAll(sel));
+  return out;
+}
+/* The outermost block whose folded part holds this text node; with `shut`,
+   only a closed block counts - the text is not on the page. A block's own
+   <summary> is not its folded part. */
+function foldOf(t,shut){
+  const p=t.parentElement;
+  if(!p)return null; // a line straight under the shadow root
+  const s=p.closest("summary");
+  let out=null;
+  for(let d=p.closest("details");d;d=d.parentElement&&d.parentElement.closest("details"))
+    if(!(s&&s.parentElement===d)&&!(shut&&d.open))out=d;
+  return out;
+}
+/* Open the closed blocks an element is folded away in; true if any was. */
+function foldOpen(el){
+  const s=el.closest("summary");
+  let did=false;
+  for(let d=el.parentElement&&el.parentElement.closest("details");d;d=d.parentElement&&d.parentElement.closest("details"))
+    if(!d.open&&!(s&&s.parentElement===d)){d.open=true;did=true}
+  return did;
+}
+const foldSeen=new WeakSet(),  // blocks already given their arrival state
+      foldHeard=new WeakSet(); // article trees whose toggles are listened to
+/* What the switch shows: for blocks, read from the articles. */
+function fullShown(det){
+  return det.wuFold?!foldList(det,"details:not([open])").length:det.wuFull;
+}
+function fullMark(det){
+  det.querySelector(":scope>summary .fbtn")?.setAttribute("aria-pressed",fullShown(det)?"true":"false");
+}
+/* A freshly filled section, one a sub-entry was just added to, or one a
+   frame has just parsed in: give it the switch if it now holds a zone or a
+   block, and its articles the section's state. */
 function fullInit(det){
   if(!det)return;
   const hosts=fullRoots(det);
-  if(!hosts.some(h=>h.shadowRoot.querySelector(".wu-sec")))return;
+  const zone=hosts.some(h=>h.shadowRoot.querySelector(".wu-sec"));
+  const arts=zone?[]:foldRoots(det).filter(a=>a.root.querySelector("details"));
+  if(!zone&&!arts.length)return;
   if(det.wuFull===undefined)det.wuFull=fullOn;
-  for(const h of hosts)h.toggleAttribute("data-brief",!det.wuFull);
+  det.wuFold=!zone;
+  if(zone)for(const h of hosts)h.toggleAttribute("data-brief",!det.wuFull);
+  for(const a of arts){
+    if(!foldHeard.has(a.root)){
+      foldHeard.add(a.root);
+      // `toggle` does not bubble; capturing at the tree's root hears them all
+      a.root.addEventListener("toggle",()=>{
+        fullMark(det);
+        // a mark inside a block appears or goes
+        if(det===navDet){clearTimeout(navTimer);navTimer=setTimeout(navRefresh,200)}
+      },true);
+    }
+    for(const d of a.root.querySelectorAll("details")){
+      if(foldSeen.has(d))continue;
+      foldSeen.add(d);
+      if(det.wuFull)d.open=true;
+    }
+  }
   const sum=det.querySelector(":scope>summary");
-  let b=sum&&sum.querySelector(".fbtn");
-  if(sum&&!b){
-    b=document.createElement("span");
+  if(sum&&!sum.querySelector(".fbtn")){
+    const b=document.createElement("span");
     b.className="fbtn";b.setAttribute("role","button");b.tabIndex=0;
     b.setAttribute("aria-label","Show examples and other secondary text");
     b.title="Show examples and other secondary text (Ctrl+*)";
@@ -4763,65 +4844,108 @@ function fullInit(det){
     const hit=e=>{
       // inside a <summary>: the default action would fold the section
       e.preventDefault();e.stopPropagation();
-      fullSet(det,!det.wuFull,true);
+      fullSet(det,!fullShown(det),true);
     };
     b.addEventListener("click",hit);
     b.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")hit(e)});
     b.addEventListener("pointerdown",freezeBar); // the row must not slide away mid-tap
     sum.appendChild(b);
   }
-  if(b)b.setAttribute("aria-pressed",det.wuFull?"true":"false");
+  fullMark(det);
   // A full-text match inside the zone is the reason this article is here.
-  if(!det.wuFull&&hosts.some(h=>h.shadowRoot.querySelector(".wu-sec .wu-hl")))fullSet(det,true,false);
+  if(zone&&!det.wuFull&&hosts.some(h=>h.shadowRoot.querySelector(".wu-sec .wu-hl")))fullSet(det,true,false);
 }
 /* Switch one section. `chosen` is the reader's own press, which also becomes
    the state the next section opens in. */
+let fullKeep=null; // the line a press is still holding while frames resize (fullSettle)
 function fullSet(det,full,chosen){
   if(chosen&&fullOn!==full){fullOn=full;savePrefs()}
-  if(!det||det.wuFull===undefined||det.wuFull===full)return;
+  if(!det||det.wuFull===undefined)return;
+  // A zone has the one state; blocks each have their own, so `wuFull` says
+  // only how the next block to arrive opens.
+  if(!det.wuFold&&det.wuFull===full)return;
   const keep=fullAnchor(det,full);
   det.wuFull=full;
-  for(const h of fullRoots(det))h.toggleAttribute("data-brief",!full);
-  det.querySelector(":scope>summary .fbtn")?.setAttribute("aria-pressed",full?"true":"false");
+  if(det.wuFold)for(const d of foldList(det,"details"))d.open=full;
+  else for(const h of fullRoots(det))h.toggleAttribute("data-brief",!full);
+  fullMark(det);
+  fullKeep=null;
   if(keep){
-    const top=fullTop(keep.node),d=top===null?0:top-keep.top;
-    if(d){freezeBar();scrollBy(0,d)}
+    fullHold(keep);
+    if(det.wuFold&&det.querySelector("iframe.article")){
+      keep.det=det;keep.until=performance.now()+800;fullKeep=keep;
+    }
   }
-  if(det===navDet)navRefresh(); // a mark inside the zone appears or goes
+  if(det===navDet)navRefresh(); // a mark inside the zone or a block appears or goes
 }
-/* A target inside the zone: show the zone before scrolling to it. */
+/* Put the kept line back where it was measured. */
+function fullHold(keep){
+  const top=fullTop(keep),d=top===null?0:top-keep.top;
+  if(d){freezeBar();scrollBy(0,d)}
+  keep.sy=scrollY;
+}
+/* A frame's text reflows at once, but its height follows by message, and
+   everything below it moves only then. Until the frames of the switched
+   section have reported, each report puts the kept line back - unless the
+   page has been scrolled since, by the reader or by the browser's own scroll
+   anchoring, and the line is no longer ours to place. */
+function fullSettle(f){
+  const k=fullKeep;
+  if(!k||!k.det.contains(f))return;
+  if(performance.now()>k.until||!k.node.isConnected||Math.abs(scrollY-k.sy)>1){fullKeep=null;return}
+  fullHold(k);
+}
+/* A target inside the zone or a closed block: show it before scrolling to it. */
 function fullReveal(det,el){
   if(det&&det.wuFull===false&&el.closest(".wu-sec"))fullSet(det,true,false);
+  foldOpen(el);
 }
-/* Keeping the place being read. Showing or hiding a zone above the line
-   being read would push that line off screen, so the first line of text at
-   or below the sticky header that survives the switch is measured before and
+/* Keeping the place being read. Showing or hiding text above the line being
+   read would push that line off screen, so the first line of text at or
+   below the sticky header that survives the switch is measured before and
    put back after. Text nodes are walked rather than hit-tested: a DSL line
    with no paragraph of its own is a bare text node of the shadow root, which
    elementFromPoint answers with the host. Measured, not left to CSS scroll
-   anchoring, which Android WebViews of different ages do differently. */
+   anchoring, which Android WebViews of different ages do differently.
+
+   Closing blocks, a line inside one does not survive: the block's own
+   <summary> is kept instead, brought under the header if it was above it, so
+   the reader is left looking at the block they were in. Text inside a closed
+   block is skipped in both directions - Chromium still answers it with a
+   plausible box (see revealFirstMark). */
 function fullAnchor(det,full){
   const sum=det.querySelector(":scope>summary");
   if(!sum)return null;
   const y=sum.getBoundingClientRect().bottom+4;
   if(det.getBoundingClientRect().top>=y)return null; // starts below the line: nothing above it moves
-  for(const host of fullRoots(det)){
+  for(const {host,root} of foldRoots(det)){
     if(host.getBoundingClientRect().bottom<y)continue;
-    const w=document.createTreeWalker(host.shadowRoot,NodeFilter.SHOW_TEXT);
+    const w=(root.ownerDocument||root).createTreeWalker(root.body||root,NodeFilter.SHOW_TEXT);
     for(let t=w.nextNode();t;t=w.nextNode()){
       if(!t.data.trim()||t.parentNode.nodeName==="STYLE")continue;
+      if(det.wuFold){if(foldOf(t,true))continue} // not on the page
       // parentElement is null for a line straight under the shadow root
-      if(!full&&t.parentElement?.closest(".wu-sec"))continue; // about to hide
-      const top=fullTop(t);
-      if(top!==null&&top>=y)return{node:t,top};
+      else if(!full&&t.parentElement?.closest(".wu-sec"))continue; // about to hide
+      const k={node:t,host},top=fullTop(k);
+      if(top===null||top<y)continue;
+      const d=det.wuFold&&!full?foldOf(t,false):null;
+      if(!d){k.top=top;return k}
+      k.node=d.querySelector(":scope>summary")||d;
+      const st=fullTop(k);
+      k.top=st===null?y:Math.max(y,st);
+      return k;
     }
   }
   return null;
 }
-function fullTop(node){
-  const rg=document.createRange();rg.selectNodeContents(node);
+/* Where a kept node is now, in page viewport coordinates: a frame's own are
+   offset by the frame. */
+function fullTop(k){
+  const n=k.node,off=k.host.shadowRoot?0:k.host.getBoundingClientRect().top;
+  if(n.nodeType===1)return n.getClientRects().length?n.getBoundingClientRect().top+off:null;
+  const rg=n.ownerDocument.createRange();rg.selectNodeContents(n);
   const rs=rg.getClientRects();
-  return rs.length?rs[0].top:null;
+  return rs.length?rs[0].top+off:null;
 }
 /* Ctrl+*: the section under the line being read, else the first one on
    screen that has the switch. */
@@ -4835,7 +4959,7 @@ function fullKey(){
     if(!pick&&r.bottom>0&&r.top<innerHeight)pick=det;
   }
   if(!pick)return false;
-  fullSet(pick,!pick.wuFull,true);
+  fullSet(pick,!fullShown(pick),true);
   return true;
 }
 
@@ -4967,9 +5091,17 @@ function revealFirstMark(det){
          purpose: contentVisibilityAuto:true would also reject the marks inside
          OUR OWN content-visibility:auto result list, which are precisely the
          off-screen ones worth scrolling to. */
+      const marks=root.querySelectorAll(".wu-hl");
       let el=null;
-      for(const m of root.querySelectorAll(".wu-hl"))
+      for(const m of marks)
         if(!m.checkVisibility||m.checkVisibility()){el=m;break}
+      /* Every match of this article is folded away: the blocks around the
+         first one that sits in a closed block are opened, and nothing else
+         (D193). Only then - an article with a match on the page keeps its
+         blocks as they are, which is what leaves a wiki's collapsed table of
+         contents alone. */
+      if(!el)for(const m of marks)
+        if(foldOpen(m)){if(!m.checkVisibility||m.checkVisibility())el=m;break}
       if(!el)continue; // no match in this article, or none of them is rendered
       const top=el.getBoundingClientRect().top+
         (host.shadowRoot?0:host.getBoundingClientRect().top);
@@ -5122,7 +5254,7 @@ window.wuTapUnits&&wuTapUnits({
     return path.some(el=>el.matches&&el.matches("details.dict>dl>dt"))?document:null;
   },
   enabled(){return speakOn&&speakCan()},
-  mark(u,e,touch){tapMark(u,touch)},
+  mark:tapMark,
   toggle(){if(window.wuSpeak)wuSpeak.toggle()},
   stop(){if(window.wuSpeak)wuSpeak.hush()}
 });
