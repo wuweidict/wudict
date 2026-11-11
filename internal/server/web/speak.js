@@ -241,6 +241,7 @@ function stop() {
   sess++;
   waiting = false;
   paused = false;
+  reading = null;
   clearInterval(poll);
   live.clear();
   try { S() && S().cancel() } catch (_) { }
@@ -309,9 +310,16 @@ function pause() {
   setBusy(true);
 }
 
+// say() stops first, which forgets `reading`: taken apart before the call.
 function resume() {
   if (!paused || !reading) return;
-  say(reading.text, reading.L, reading.voice, reading.at);
+  const { text, L, voice, at } = reading;
+  say(text, L, voice, at);
+}
+function restart() {
+  if (!busy || !reading) return;
+  const { text, L, voice } = reading;
+  say(text, L, voice, 0);
 }
 
 // natural: the text was read to its end - not stopped, not cut off by the
@@ -319,12 +327,12 @@ function resume() {
 function done(natural) {
   clearInterval(poll);
   setBusy(false);
-  if (natural && keepOn() && stash && stash.tap && stash.next) { advance(false); return }
+  if (natural && keepOn() && stash && stash.tap && stash.next && advance(false)) return;
   if (!selLive) hide();
 }
 
 // ------------------------------------------------------- reading on (D192)
-// ⏭ marks the next unit of the same kind and reads it; Keep reading does the
+// ⏭ marks the next unit in reading order and reads it; Keep reading does the
 // same at the end of every unit. Off by default and kept per device: it is
 // how this device is listened to, not a reading habit.
 const KEEP_KEY = "wudict_keepreading";
@@ -339,11 +347,22 @@ function setKeep(v) { try { v ? localStorage.setItem(KEEP_KEY, "1") : localStora
 const ASKED = 2000;
 let pendingRead = 0, pendingForce = false, readStart = 0, userScroll = 0;
 
+// Asks for the next unit; false when there is none to come.
 function advance(force) {
-  if (!stash || !ctx || !ctx.step) return;
+  if (!stash || !ctx || !ctx.step) return false;
   pendingRead = Date.now();
   pendingForce = force;
-  if (ctx.step(stash) === false) pendingRead = 0;
+  if (ctx.step(stash) !== false) return true;
+  pendingRead = 0;
+  return false;
+}
+// ⏭, from its button or a media key.
+function skip() {
+  if (!stash || !stash.tap || !stash.next) return;
+  closeMenu();
+  readStart = Date.now();
+  halt();
+  advance(true);
 }
 function arrived() {
   const asked = pendingRead && Date.now() - pendingRead < ASKED;
@@ -368,10 +387,7 @@ function reveal(force) {
   try { scrollBy({ top: dy, behavior: "smooth" }) } catch (_) { scrollBy(0, dy) }
 }
 function onUserScroll() { userScroll = Date.now() }
-function onScrollKey(e) {
-  if (spaceIsOurs(e)) return; // taken for pause: it scrolls nothing
-  if (/^(PageUp|PageDown|ArrowUp|ArrowDown|Home|End| )$/.test(e.key)) userScroll = Date.now();
-}
+const SCROLL_KEY = /^(PageUp|PageDown|ArrowUp|ArrowDown|Home|End| )$/;
 
 // Space is read aloud's while something is read or paused: it pauses and
 // resumes. Not in a field, where it types, nor on a control reached by Tab,
@@ -387,12 +403,6 @@ function spaceIsOurs(e) {
     if (t.matches("a[href],button,summary,[role=button],[tabindex]") && t.matches(":focus-visible")) return false;
   } catch (_) { }
   return true;
-}
-function onSpace(e) {
-  if (!spaceIsOurs(e)) return;
-  e.preventDefault();
-  e.stopPropagation();
-  if (!e.repeat) space();
 }
 function space() {
   if (paused) resume();
@@ -470,11 +480,8 @@ function mediaAction(a) {
   if (a === "play") { if (paused) resume(); else if (!busy && stash) toggle() }
   else if (a === "pause") pause();
   else if (a === "stop") halt();
-  else if (a === "nexttrack") {
-    if (stash && stash.tap && stash.next) { closeMenu(); readStart = Date.now(); halt(); advance(true) }
-  } else if (a === "previoustrack") {
-    if (busy && reading) say(reading.text, reading.L, reading.voice, 0);
-  }
+  else if (a === "nexttrack") skip();
+  else if (a === "previoustrack") restart();
 }
 function mediaHandlers(v) {
   const ms = MS();
@@ -482,19 +489,11 @@ function mediaHandlers(v) {
   for (const a of ["play", "pause", "stop", "nexttrack", "previoustrack"])
     try { ms.setActionHandler(a, v ? () => mediaAction(a) : null) } catch (_) { }
 }
-// Where a media key arrives as a keydown instead (a WebView, a desktop whose
-// browser leaves them to pages): the same actions, while there is a mark.
+// the same actions for media keys that arrive as keydowns (onKey)
 const MEDIA_KEYS = {
   MediaPlayPause: "playpause", MediaPlay: "play", MediaPause: "pause", MediaStop: "stop",
   MediaTrackNext: "nexttrack", MediaTrackPrevious: "previoustrack"
 };
-function onMediaKey(e) {
-  const a = MEDIA_KEYS[e.key];
-  if (!a || !stash) return;
-  e.preventDefault();
-  e.stopPropagation();
-  if (!e.repeat) mediaAction(a);
-}
 
 function fail(er, L) {
   clearInterval(poll);
@@ -656,12 +655,7 @@ function build() {
   // Chrome require before they will speak.
   for (const el of [ui, menu]) el.addEventListener("pointerdown", e => e.preventDefault());
   mainBtn.addEventListener("click", toggle);
-  nextBtn.addEventListener("click", () => {
-    closeMenu();
-    readStart = Date.now();
-    halt();
-    advance(true);
-  });
+  nextBtn.addEventListener("click", skip);
   closeBtn.addEventListener("click", dismiss);
   moreBtn.addEventListener("click", e => {
     if (!menu.hidden) { closeMenu(); return }
@@ -902,7 +896,7 @@ function readShadow() {
   }
   if (range.collapsed || range.commonAncestorContainer.getRootNode() !== root) return null;
   const text = ((sel && String(sel)) || range.toString()).trim();
-  return text ? { kind: "shadow", text, say: spokenOf(range), range, dict: host.dataset.dict || "", ptr } : null;
+  return text ? { kind: "shadow", text, range, dict: host.dataset.dict || "", ptr } : null;
 }
 
 // The headword: a <dt> in the page's own DOM, beside the article's shadow
@@ -922,7 +916,7 @@ function readHead() {
     range.setEnd(head, head.childNodes.length);
   }
   const text = range.toString().trim();
-  return text ? { kind: "head", text, say: spokenOf(range), range, dict: (dd && dd.dataset.dict) || "", ptr } : null;
+  return text ? { kind: "head", text, range, dict: (dd && dd.dataset.dict) || "", ptr } : null;
 }
 
 // Chrome ends the document range of a triple click and of a drag into the
@@ -974,12 +968,14 @@ function settle() {
     if (!selLive) { selLive = true; show() }
     return;
   }
-  if (st) { setStash(st); return }
+  if (st) {
+    // what it is read as (pick.js): worked out only for a selection that is news
+    if (window.wuSpoken) st.say = window.wuSpoken(st.range);
+    setStash(st);
+    return;
+  }
   if (stash && stash.kind !== "frame") { selLive = false; hide() }
 }
-
-// A selection's spoken text, from pick.js where it is loaded.
-const spokenOf = r => (window.wuSpoken ? window.wuSpoken(r) : "");
 
 // Ranges in different trees cannot be compared, and are not the same.
 function sameRange(a, b) {
@@ -1011,10 +1007,26 @@ function onUp(e) {
 // Android's selection handles deliver nothing to the page while they are
 // dragged; a selection that has stopped changing is the only signal there is.
 function onSel() { schedule(ptr === "touch" ? 350 : 200) }
+// One listener for every key read aloud answers: Escape, Space (pause), the
+// media keys where they arrive as keydowns (a WebView, a desktop whose browser
+// leaves them to pages) while there is a mark, and the keys that scroll.
 function onKey(e) {
-  if (e.key !== "Escape") return;
-  if (menu && !menu.hidden) { closeMenu(); return }
-  if (busy) { stop(); if (!selLive) hide() }
+  const k = e.key;
+  if (k === "Escape") {
+    if (menu && !menu.hidden) closeMenu();
+    else halt();
+    return;
+  }
+  const a = spaceIsOurs(e) ? "space" : stash ? MEDIA_KEYS[k] : "";
+  if (a) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.repeat) return;
+    if (a === "space") space();
+    else mediaAction(a);
+    return;
+  }
+  if (SCROLL_KEY.test(k)) userScroll = Date.now();
 }
 function onScroll() { track() }
 
@@ -1028,9 +1040,6 @@ function enable(v) {
   d("pointerdown", onDown, true);
   d("pointerup", onUp, true);
   d("keydown", onKey, true);
-  d("keydown", onSpace, true);
-  d("keydown", onMediaKey, true);
-  d("keydown", onScrollKey, true);
   f("wheel", onUserScroll, { capture: true, passive: true });
   f("touchmove", onUserScroll, { capture: true, passive: true });
   f("scroll", onScroll, { capture: true, passive: true });
@@ -1047,12 +1056,14 @@ window.wuSpeak = {
     enable(!!v);
     if (v && seed) { root = seed.root || root; ptr = seed.ptr || ptr; schedule(0) }
   },
-  // A selection inside a sandboxed (iframe) article, reported by frame.js;
-  // u, l and n are a tap-marked unit's kind, declared language and whether a
-  // next unit exists (D192).
-  frame(f, text, r, p, u, l, n, sp) {
-    if (!on || !f) return;
-    text = String(text || "");
+  // A selection inside a sandboxed (iframe) article, as frame.js reports it:
+  // d = {s: its text, r: where it ends, p: the pointer, sp: what it is read
+  // as}, and for a unit a tap marked (D192) u: its kind, l: its declared
+  // language, n: whether a next unit exists. Another document's data: every
+  // field is checked here or in setStash.
+  frame(f, d) {
+    if (!on || !f || !d) return;
+    const text = String(d.s || ""), r = d.r, u = d.u;
     if (!text.trim()) {
       if (stash && stash.kind === "frame" && stash.frame === f) { selLive = false; hide() }
       return;
@@ -1066,14 +1077,14 @@ window.wuSpeak = {
     const auto = fresh && arrived();
     if (fresh && busy) halt();
     setStash({
-      kind: "frame", frame: f, rect, text, dict: f.dataset.dict || "", ptr: p === "touch" ? "touch" : "mouse",
-      tap, unit: u, hint: l, next: n === true, say: typeof sp === "string" ? sp : ""
+      kind: "frame", frame: f, rect, text, dict: f.dataset.dict || "", ptr: d.p === "touch" ? "touch" : "mouse",
+      tap, unit: u, hint: d.l, next: d.n === true, say: typeof d.sp === "string" ? d.sp : ""
     });
     if (auto) { reveal(pendingForce); read() }
   },
   // A unit a tap marked in a shadow-DOM article or a headword (pick.js, D192):
-  // st = {kind: "shadow"|"head", text, range, dict, ptr, unit, hint}. Shown at
-  // once, without waiting for the selection to settle.
+  // st = {kind: "shadow"|"head", text, say, range, dict, ptr, unit, hint,
+  // next}. Shown at once, without waiting for the selection to settle.
   unit(st, r) {
     if (!on || !st || !clean(st.text)) return;
     const auto = arrived();
@@ -1086,7 +1097,7 @@ window.wuSpeak = {
     if (auto) { reveal(pendingForce); read() }
   },
   // An article frame found no next unit: nothing is coming.
-  noNext() { pendingRead = 0 },
+  noNext() { pendingRead = 0; if (!busy && !selLive) hide() },
   // The second tap on a mark: read it, or stop reading it.
   toggle,
   // The same, from an article frame: only for the stash that frame owns.
@@ -1094,8 +1105,8 @@ window.wuSpeak = {
   // Escape inside an article frame.
   hush() { halt() },
   // Space inside an article frame (frame.js hands every one over): true when
-  // it was read aloud's to take -
-  // something is read or paused - and the page must not scroll for it.
+  // it was read aloud's to take - something is read or paused - and the page
+  // must not scroll for it.
   space(repeat) {
     if (!busy) return false;
     if (!repeat) space();

@@ -54,6 +54,14 @@
 	// sense from the next - cut a sentence always; a semicolon only a long one,
 	// since in a definition it joins near-synonyms worth hearing together.
 	var HARD = /[|◊•]|\s[—–]\s/g, SOFT = /;/g;
+	// a letter or a digit: what makes text worth marking and saying
+	var WORDCH = /[\p{L}\p{N}]/u;
+	// what may open a sentence before its first letter
+	var OPEN = /[(\[{"'«‹“‘„¿¡]/;
+	// text nodes a search for the next one may pass
+	var LIMIT = 20000;
+
+	function norm(s) { return String(s || "").replace(/\s+/g, " ").trim(); }
 
 	function target(e) {
 		var t = e.composedPath ? e.composedPath()[0] : e.target;
@@ -76,10 +84,16 @@
 		return null;
 	}
 
+	// One per language and granularity: making one loads break rules, and
+	// reading on asks for the same two at every unit. A handful per page.
+	var segmenters = {};
 	function segmenter(lang, granularity) {
+		var key = granularity + "|" + (lang || ""), seg = segmenters[key];
+		if (seg) return seg;
 		// a dictionary's lang="en_US" is not a BCP 47 tag, and the constructor throws
-		try { return new Intl.Segmenter(lang || undefined, { granularity: granularity }); }
-		catch (_) { return new Intl.Segmenter(undefined, { granularity: granularity }); }
+		try { seg = new Intl.Segmenter(lang || undefined, { granularity: granularity }); }
+		catch (_) { seg = new Intl.Segmenter(undefined, { granularity: granularity }); }
+		return (segmenters[key] = seg);
 	}
 
 	function textAt(e, root) {
@@ -167,7 +181,7 @@
 
 		return {
 			text: text, at: at, base: base, segs: segs, chain: chain, spans: spans, runs: runs,
-			block: block, lang: lang, seglang: seglang, view: view, doc: doc
+			block: block, bs: bs, lang: lang, seglang: seglang, view: view, doc: doc
 		};
 	}
 
@@ -231,11 +245,11 @@
 	// ------------------------------------------------------- what is said
 	// Pronunciation is never read aloud: a voice cannot say IPA, it spells it.
 	// By class token, wudict's own (.wu-ipa, .wu-trs) and the common ones.
-	var PRON = /^(?:wu-)?(?:ipa|pron|pronunciation|phon|phonetics?|transcr|transcription|trs)$/i;
+	var PRON = /(?:^|\s)(?:wu-)?(?:ipa|pron|pronunciation|phon|phonetics?|transcr|transcription|trs)(?:\s|$)/i;
 	function isPron(el) {
 		for (; el; el = el.parentElement) {
 			var c = el.getAttribute("class");
-			if (c && c.split(/\s+/).some(function (t) { return PRON.test(t); })) return true;
+			if (c && PRON.test(c)) return true;
 		}
 		return false;
 	}
@@ -263,19 +277,25 @@
 		var top = r.commonAncestorContainer;
 		if (top.nodeType === 3) top = top.parentNode;
 		var doc = top.ownerDocument || document, view = doc.defaultView || window;
-		var w = doc.createTreeWalker(top, NodeFilter.SHOW_TEXT), out = "", lastAb = null, lastBlock = null;
+		var w = doc.createTreeWalker(top, NodeFilter.SHOW_TEXT), out = "", lastAb = null, lastBlock = null, lastP = null;
 		var blockOf = function (el) {
 			for (; el && el !== top; el = el.parentElement)
 				if (!/^(inline|contents)/.test(view.getComputedStyle(el).display)) return el;
 			return top;
 		};
+		var skipP = false;
 		for (var n = w.nextNode(); n; n = w.nextNode()) {
 			if (!r.intersectsNode(n)) { if (r.comparePoint(n, 0) > 0) break; continue; }
 			var p = n.parentElement;
-			if (!p || p.closest("script,style,noscript,template") || isPron(p)) continue;
-			var b = blockOf(p);
-			if (lastBlock && b !== lastBlock) out += " ";
-			lastBlock = b;
+			if (p === lastP) { if (skipP) continue; }
+			else {
+				lastP = p;
+				skipP = !p || !!p.closest("script,style,noscript,template") || isPron(p);
+				if (skipP) continue;
+				var b = blockOf(p);
+				if (lastBlock && b !== lastBlock) out += " ";
+				lastBlock = b;
+			}
 			var ab = p.closest("abbr"), ex = ab && expansion(ab);
 			if (ex) {
 				if (ab !== lastAb) { out += " " + ex + " "; lastAb = ab; }
@@ -289,17 +309,23 @@
 	// A label is its own unit (D192 Am. 6): a run drawn apart from its block -
 	// "Arquitectura; Llenguatge administratiu" in grey before a definition, a
 	// register note after it - that opens or closes the sentence is cut off
-	// it, unless the tap is in the run, which then is the unit itself. Only at
-	// the ends: a coloured word inside a sentence stays in it.
+	// it; with the tap in the run, the run is the unit, one word or many. Only
+	// at the ends: a coloured word inside a sentence stays in it.
 	function unlabel(x, lo, hi) {
 		for (var guard = 0; guard < 8; guard++) {
 			var a = lo + MARK.exec(x.text.slice(lo, hi))[0].length, z = hi, cut = false;
 			while (z > a && /\s/.test(x.text.charAt(z - 1))) z--;
 			for (var i = 0; i < x.runs.length && !cut; i++) {
 				var rs = x.runs[i].s - x.base, re = x.runs[i].e - x.base;
-				if (rs < 0 || (x.at >= rs && x.at < re)) continue;
-				if (rs <= a && re > a && re < z && WORDCH.test(x.text.slice(re, z))) { lo = re; cut = true }
-				else if (rs > a && rs < z && re >= z && WORDCH.test(x.text.slice(a, rs))) { hi = rs; cut = true }
+				if (rs < 0) continue;
+				var mine = x.at >= rs && x.at < re;
+				if (rs <= a && re > a && re < z && WORDCH.test(x.text.slice(re, z))) {
+					if (mine) return [a, re];
+					lo = re; cut = true;
+				} else if (rs > a && rs < z && re >= z && WORDCH.test(x.text.slice(a, rs))) {
+					if (mine) return [rs, z];
+					hi = rs; cut = true;
+				}
 			}
 			if (!cut) break;
 		}
@@ -345,11 +371,7 @@
 	// The unit at x.at, as unitAt describes it.
 	function unitIn(x) {
 		var words = segmenter(x.seglang, "word"), lo = -1, hi = -1, kind = "s", r;
-
-		// Inherited properties cross into a shadow root from its host, so the
-		// host is the reference for text at a shadow root's top level.
-		var b = x.block.nodeType === 1 ? x.block : x.block.host;
-		var bs = b ? x.view.getComputedStyle(b) : null;
+		var bs = x.bs;
 		for (var k = 0; bs && k < x.chain.length; k++) {
 			var sp = x.spans[k];
 			if (!sp || sp.s < x.base) break; // cut by the walk: longer than any unit
@@ -407,8 +429,6 @@
 	}
 
 	// ------------------------------------------------------------ the next unit
-	var WORDCH = /[\p{L}\p{N}]/u, OPEN = /[(\[{"'«‹“‘„¿¡]/, LIMIT = 20000;
-
 	// On screen in principle: rendered, and not inside a closed <details>
 	// (bar its summary). Chrome lays out a closed <details>' content and
 	// reports boxes for it, but it is hidden, and no selection can go there.
@@ -457,7 +477,8 @@
 		var n = u.range.startContainer, el = n.nodeType === 1 ? n : n.parentElement;
 		var dt = el && el.closest(HEAD), dd = dt && dt.nextElementSibling;
 		var host = dd && dd.querySelector(":scope > .article"), root = host && host.shadowRoot;
-		var t = root && textAfter(root, root);
+		if (!root) return null;
+		var t = textAfter(root, root);
 		var v = t ? nextFrom(root, t, 0, false) : null;
 		// The article's own header - the headword again, with its
 		// pronunciation, level badges and speakers - was just read as the
@@ -513,14 +534,18 @@
 			}
 			var p = point(x, x.base + j, false);
 			if (!p) return null;
-			var y = textAtNode(p[0], p[1], root), v = y && unitIn(y);
+			// the walk just made serves when the letter is in the node it was made for
+			var y = x;
+			if (p[0] === node) x.at = j; else y = textAtNode(p[0], p[1], root);
+			var v = y && unitIn(y);
 			if (!v) { node = p[0]; offset = p[1] + 1; continue; }
 			if (from && v.range.comparePoint(from[0], from[1]) === 0) {
 				var a = p[1];
 				while (a > 0 && OPEN.test(p[0].data.charAt(a - 1))) a--;
 				v.range.setStart(p[0], a);
 			}
-			if (inControl(v.range) || !WORDCH.test(spoken(v.range))) { // a link, or only pronunciation
+			if (!inControl(v.range)) v.say = spoken(v.range);
+			if (!v.say || !WORDCH.test(v.say)) { // a link, or only pronunciation
 				node = v.range.endContainer; offset = v.range.endOffset;
 				if (node.nodeType !== 3) return null;
 				from = [node, offset];
@@ -532,8 +557,6 @@
 	}
 
 	// ------------------------------------------------------------ the tap
-	var norm = function (s) { return String(s || "").replace(/\s+/g, " ").trim(); };
-
 	// Chrome selects inside a shadow root only through the root's own
 	// (non-standard) selection; the standard one takes shadow nodes where the
 	// browser follows the newer Selection spec.
@@ -567,17 +590,18 @@
 		return "";
 	}
 
-	// The unit marked last in this window: {range, root, sel, kind, lang, el,
+	// The unit marked last in this window: {range, root, sel, kind, lang, say,
 	// next}, sel being the selection's text as the browser renders it,
-	// normalised, and next whether a next unit exists (the ⏭ shows for it).
+	// normalised, say what it is read as, and next whether a next unit exists
+	// (the ⏭ shows for it).
 	var unit = null;
 
 	function hasNext(u) {
 		try { return !!nextOf(u); } catch (_) { return false; }
 	}
 	function make(v, root, sel) {
-		var u = { range: v.range, root: root, sel: sel, kind: v.kind, lang: v.lang || "", next: false, say: "" };
-		try { u.say = spoken(v.range); } catch (_) { }
+		var u = { range: v.range, root: root, sel: sel, kind: v.kind, lang: v.lang || "", next: false, say: v.say || "" };
+		if (!u.say) try { u.say = spoken(v.range); } catch (_) { }
 		u.next = hasNext(u);
 		return u;
 	}
@@ -592,7 +616,7 @@
 
 	// opt: { root(e) -> the article root under the event, or null;
 	//        enabled() -> read aloud is on;
-	//        mark(unit, e, touch) -> hand the marked unit to read aloud;
+	//        mark(unit, touch) -> hand the marked unit to read aloud;
 	//        toggle() -> read it, or stop reading;
 	//        stop() -> stop reading: Escape, or a tap on nothing }
 	function tapUnits(opt) {
@@ -604,9 +628,9 @@
 		addEventListener("pointerdown", function (e) {
 			cancel();
 			down = null;
-			if (!e.isPrimary) return;
+			if (!e.isPrimary || !opt.enabled()) return;
 			var root = opt.root(e);
-			if (!root || !opt.enabled()) return;
+			if (!root) return;
 			var d = { x: e.clientX, y: e.clientY, t: Date.now(), root: root,
 				touch: e.pointerType !== "mouse", free: true, over: false, inUnit: false };
 			var cur = "";
@@ -634,8 +658,9 @@
 		addEventListener("dblclick", cancel, true);
 
 		addEventListener("keydown", function (e) {
-			if (e.key !== "Escape" || !unit) return;
-			cancel();
+			if (e.key !== "Escape") return;
+			cancel(); // a mark still waiting out its window never appears
+			if (!unit) return;
 			clearMark();
 			opt.stop();
 		}, true);
@@ -684,7 +709,7 @@
 			try {
 				x = unitAt(e, d.root);
 				// pronunciation alone, or a symbol: nothing a voice can say
-				if (x && !WORDCH.test(spoken(x.range))) x = null;
+				if (x && !WORDCH.test(x.say = spoken(x.range))) x = null;
 			} catch (_) { x = null; }
 			if (!x) { unit = null; return; }
 			timer = setTimeout(function () {
@@ -692,7 +717,7 @@
 				var sel = x.range.startContainer.isConnected ? select(x.range, d.root) : "";
 				if (!sel) { unit = null; return; }
 				unit = make(x, d.root, sel);
-				opt.mark(unit, e, d.touch);
+				opt.mark(unit, d.touch);
 			}, wait);
 		});
 	}
@@ -730,16 +755,17 @@
 	// the mark is put back where it was - a failed select collapses it.
 	window.wuTapNext = function () {
 		if (!unit) return null;
-		var cur = unit;
+		var cur = unit, tried = false;
 		for (var tries = 0; tries < 8; tries++) {
 			var v = null;
 			try { v = nextOf(cur); } catch (_) { }
 			if (!v) break;
+			tried = true;
 			var root = v.root || cur.root, sel = select(v.range, root);
 			if (sel) { unit = make(v, root, sel); return unit; }
 			cur = { range: v.range, root: root, kind: v.kind };
 		}
-		select(unit.range, unit.root);
+		if (tried) select(unit.range, unit.root);
 		return null;
 	};
 	// ✕ on the speaker: the mark goes

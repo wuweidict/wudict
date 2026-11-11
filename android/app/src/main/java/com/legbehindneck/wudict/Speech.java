@@ -196,6 +196,11 @@ final class Speech {
      * end of the whole reading, so it does not carry on at the next sentence.
      */
     void stop() {
+        // Nor does a paused one wait for a headset button behind another app:
+        // the session is the page's again when it next reads. Main thread.
+        if (session != null) {
+            session.setActive(false);
+        }
         synchronized (lock) {
             if (tts == null || !ok) return;
             try { tts.stop(); } catch (RuntimeException ignored) { }

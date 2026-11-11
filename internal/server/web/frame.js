@@ -404,6 +404,13 @@
 			}
 		}
 		if (!el) return;
+		// A target folded away in a closed <details> has no place on the page
+		// until the blocks around it are open (index.html foldOpen). A block's
+		// own <summary> is not folded.
+		var sum = el.closest ? el.closest("summary") : null;
+		for (var d = el.parentElement; d; d = d.parentElement) {
+			if (d.tagName === "DETAILS" && !d.open && !(sum && sum.parentElement === d)) d.open = true;
+		}
 		HOST.postMessage({
 			t: "anchor", fid: fid,
 			y: el.getBoundingClientRect().top + (window.pageYOffset || 0)
@@ -651,7 +658,7 @@
 	if (window.wuTapUnits) window.wuTapUnits({
 		root: function () { return document.body || null; },
 		enabled: function () { return speakOn; },
-		mark: function (u, e, touch) {
+		mark: function (u, touch) {
 			ptrType = touch ? "touch" : "mouse";
 			noteUnit(u);
 		},
