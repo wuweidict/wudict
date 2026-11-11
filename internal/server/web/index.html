@@ -1732,7 +1732,26 @@ const speakCtx={
     const g=d&&(d.groups||[]).find(g=>g.f==="lang");
     return {a:(d&&d.articleLang)||"",h:(g&&g.v)||""};
   },
-  top(){return $("bar").getBoundingClientRect().bottom}
+  top(){return $("bar").getBoundingClientRect().bottom},
+  // the dictionary's name, for the OS's now-playing panel
+  name(id){const d=dicts.find(x=>x.id===id);return d?dictLabel(d):""},
+  // ⏭ and Keep reading (D192): mark the unit after a tapped one. A frame
+  // finds its own and reports it as a selection; false when there is none.
+  step(st){
+    if(st.kind==="frame"){
+      try{st.frame.contentWindow.postMessage({t:"next"},"*")}catch(_){return false}
+      return true;
+    }
+    const u=window.wuTapNext&&wuTapNext();
+    if(!u)return false;
+    tapMark(u,st.ptr==="touch");
+    return true;
+  },
+  // ✕: the mark goes
+  clear(st){
+    if(st.kind==="frame"){try{st.frame.contentWindow.postMessage({t:"unsel"},"*")}catch(_){}}
+    else if(window.wuTapClear)wuTapClear();
+  }
 };
 function speakDown(e){
   speakPtr=e.pointerType||"mouse";
@@ -3771,6 +3790,14 @@ addEventListener("message",e=>{
       return;
     }
     if(d.k==="full"){fullKey();return} // Ctrl+* pressed inside a frame
+    // Space inside a frame: pause or resume read aloud; else what Space does
+    // on a page - a screen down, Shift+Space up (D192 Am. 4)
+    if(d.k==="space"){
+      if(!d.up&&window.wuSpeak&&wuSpeak.space(!!d.r))return;
+      const h=innerHeight-$("bar").getBoundingClientRect().bottom;
+      scrollBy({top:(d.up?-1:1)*Math.max(40,h*0.875),behavior:"smooth"});
+      return;
+    }
 
     const qi=$("q");
     if(qi.disabled)return;
@@ -3803,9 +3830,16 @@ addEventListener("message",e=>{
     if(!speakOn)return;
     const f=document.querySelector('iframe[data-fid="'+CSS.escape(d.fid)+'"]');
     if(!f||e.source!==f.contentWindow)return;
-    const go=()=>window.wuSpeak.frame(f,String(d.s||""),d.r,d.p);
+    const go=()=>window.wuSpeak.frame(f,String(d.s||""),d.r,d.p,d.u,d.l,d.n===true,typeof d.sp==="string"?d.sp:"");
     if(window.wuSpeak)go();
     else if(d.s&&speakCan())speakWake().then(go,err=>console.warn("wudict:",err.message));
+  }else if((d.t==="say"||d.t==="hush"||d.t==="nonext")&&d.fid){
+    // A second tap on a mark inside a sandboxed article, Escape or a tap on
+    // nothing there, or no next unit to read (D192).
+    if(!speakOn||!window.wuSpeak)return;
+    const f=document.querySelector('iframe[data-fid="'+CSS.escape(d.fid)+'"]');
+    if(!f||e.source!==f.contentWindow)return;
+    if(d.t==="say")wuSpeak.frameToggle(f);else if(d.t==="hush")wuSpeak.hush();else wuSpeak.noNext();
   }else if(d.t==="anchor"&&d.fid){
     // an in-article jump inside a sandboxed iframe. The iframe is sized to its
     // content and never scrolls itself, so the position it reports is relative
@@ -5050,9 +5084,47 @@ document.addEventListener("dblclick",e=>{
   const root=path.find(el=>el instanceof ShadowRoot);
   let sel="";
   try{sel=(root&&root.getSelection?root.getSelection():document.getSelection()).toString().trim()}catch(_){ }
-  // a double TAP selects nothing on Android: the word under it (pick.js)
-  if(!sel&&root&&window.wuWordAt)sel=wuWordAt(e,root);
+  // A double tap leaves a tapped mark selected (D192): the lookup is the
+  // word under it, never the whole mark.
+  const u=window.wuTapUnit&&wuTapUnit();
+  if(u&&sel.replace(/\s+/g," ")===u.sel)sel="";
+  // a double TAP selects nothing on Android: the word under it, selected as
+  // a desktop browser selects it, so the reader sees what was looked up (pick.js)
+  if(!sel&&root)sel=window.wuSelectWordAt?wuSelectWordAt(e,root):window.wuWordAt?wuWordAt(e,root):"";
   if(sel)lookupSelection(sel);
+});
+
+/* Tap to mark, tap again to read (D192). A single tap on article text or a
+   headword selects the unit it most likely means (pick.js), so read aloud
+   offers it like any selection; a second tap on the mark reads it. Registered
+   after the article and audio handlers, whose clicks are theirs. */
+function tapMark(u,touch){
+  const r=u.range,top=r.startContainer.getRootNode();
+  const host=top instanceof ShadowRoot?top.host:null;
+  let dict="";
+  if(host)dict=host.dataset.dict||"";
+  else{
+    const n=r.startContainer,el=n.nodeType===1?n:n.parentElement;
+    const dt=el&&el.closest("details.dict>dl>dt"),dd=dt&&dt.nextElementSibling;
+    if(!dt)return;
+    dict=(dd&&dd.dataset.dict)||"";
+  }
+  const st={kind:host?"shadow":"head",text:u.sel,say:u.say,range:r,dict,ptr:touch?"touch":"mouse",unit:u.kind,hint:u.lang,next:u.next};
+  const go=()=>window.wuSpeak.unit(st,host&&host.shadowRoot);
+  if(window.wuSpeak)go();
+  else speakWake().then(go,err=>console.warn("wudict:",err.message));
+}
+window.wuTapUnits&&wuTapUnits({
+  root(e){
+    const path=e.composedPath();
+    const host=path.find(el=>el.classList&&el.classList.contains("article"));
+    if(host)return host.shadowRoot||null; // an iframe article runs its own (frame.js)
+    return path.some(el=>el.matches&&el.matches("details.dict>dl>dt"))?document:null;
+  },
+  enabled(){return speakOn&&speakCan()},
+  mark(u,e,touch){tapMark(u,touch)},
+  toggle(){if(window.wuSpeak)wuSpeak.toggle()},
+  stop(){if(window.wuSpeak)wuSpeak.hush()}
 });
 
 /* Audio, in the CAPTURE phase and owned outright — the click never reaches the

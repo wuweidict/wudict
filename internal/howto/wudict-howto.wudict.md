@@ -170,7 +170,7 @@ Each language is a small download (33 kB to 2.5 MB) and is used only for diction
 In <kbd>☰</kbd> → ![](cog.svg):
 
 - ![](highlight.svg) <kbd>Highlight matches</kbd>: mark the words a [full-text](<entry://wudict full-text>) search found.
-- ![](speak.svg) <kbd>Read aloud</kbd>: select text in an article or its headword to speak it using the OS's Text-to-speech engine. Use the chevron next to the speaker icon to pick a voice or another language, see more details under [wudict Text-to-speech](<entry://wudict Text-to-speech>)
+- ![](speak.svg) <kbd>Read aloud</kbd>: click a sentence in an article or a headword, then click it again (📱 tap, tap again) to hear it in the OS's Text-to-speech voice; any other text: select it and press the speaker icon. Use the chevron next to the speaker icon to pick a voice or another language, see more details under [wudict Text-to-speech](<entry://wudict Text-to-speech>)
 - <kbd>Keep history</kbd>, <kbd>Clear history</kbd>: see [wudict history](<entry://wudict history>).
 - **Open**: see [wudict welcome](<entry://wudict welcome>).
 - **Group by**: which groups the dictionary picker offers (language, language pair, content, publisher). [Edit groups](/groups) changes them or adds your own: one line per group, `MyGroup = text, other text`, and a dictionary joins it when one of the texts is anywhere in its title or file name. Between backticks, a regular expression: `` MyGroup = `^the\b` ``.
@@ -324,9 +324,9 @@ Both lists are text files next to `wudict.toml`, one word per line: `history.txt
 ## wudict TTS
 ## wudict Text-to-speech
 
-**Select text in an article or its headword and press the speaker icon that appears to hear it** in a system voice for its language. If wudict does not know the dictionary's language, it uses the language of the system's default voice when that language uses the script of the selection. The chevron next to the speaker icon offers the dictionary's other language, the voices for the language, and <kbd>Other languages…</kbd>; a language picked there is kept for that dictionary. The TTS feature can be disabled via the ![](speak.svg) <kbd>Read aloud</kbd> in <kbd>☰</kbd> → ![](cog.svg). A dictionary's own recordings play with a click on their speaker icon.
+**Click a sentence in an article, or a headword, then click it again to hear it** (📱 tap, tap again) in a system voice for its language. The first click marks what will be read — the example or the sentence you clicked, or the headword — and the speaker icon appears; click somewhere else to mark something else, or the mark again while it is read to stop. The ⏭ next to the speaker icon reads on: the next sentence or example, or after a headword, its article. Turn on <kbd>Keep reading</kbd> in the chevron menu to go on by itself to the end of the article. To put the mark away, click an empty spot (📱 or tap the ✕). With a keyboard, <kbd>Space</kbd> pauses and resumes the reading; when nothing is being read, it scrolls as usual. The media keys of a keyboard or a headset work too: play/pause, next (⏭), and previous to hear the unit again from its start. Abbreviations are read in full and phonetic transcriptions are skipped. To hear any other text, select it and press the speaker icon. If wudict does not know the dictionary's language, it uses the language of the system's default voice when that language uses the script of the selection. The chevron next to the speaker icon offers the dictionary's other language, the voices for the language, and <kbd>Other languages…</kbd>; a language picked there is kept for that dictionary. The TTS feature can be disabled via the ![](speak.svg) <kbd>Read aloud</kbd> in <kbd>☰</kbd> → ![](cog.svg). A dictionary's own recordings play with a click on their speaker icon.
 
-To see in action, select the text below, and then click the speaker icon to hear it read aloud by the system Text-to-speech engine:
+To see it in action, click the text below, then click it again:
 
 > For a moment, nothing happened. Then, after a second or so, nothing continued to happen.
 

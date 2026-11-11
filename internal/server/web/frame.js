@@ -294,6 +294,15 @@
 			requestAnimationFrame(post);
 		} else if (e.data.t === "speak") {
 			speakOn = !!e.data.on;
+		} else if (e.data.t === "next" && e.source === HOST) {
+			// ⏭ or Keep reading in the app (D192): mark the next unit here
+			var u = tapNext && tapNext();
+			if (u) noteUnit(u);
+			else HOST.postMessage({ t: "nonext", fid: fid }, "*");
+		} else if (e.data.t === "unsel" && e.source === HOST) {
+			// ✕ in the app: the mark goes
+			if (tapClear) tapClear();
+			unitSel = "";
 		}
 	});
 
@@ -305,6 +314,9 @@
 	// the page while they are dragged — and never while a mouse button is
 	// still down on a drag.
 	var ptrType = "mouse", btnDown = false, selT = 0, selShown = false;
+	// the unit a tap marked (pick.js, D192): its selection's text, its kind,
+	// the language the article declares around it, and whether one follows it
+	var unitSel = "", unitKind = "", unitLang = "", unitNext = false, unitSay = "";
 	function reportSel() {
 		if (!speakOn || btnDown) return;
 		var sel = document.getSelection();
@@ -317,7 +329,10 @@
 			var b = rs.length ? rs[rs.length - 1] : sel.getRangeAt(0).getBoundingClientRect();
 			r = { x: b.left, y: b.top, w: b.width, h: b.height };
 		}
-		HOST.postMessage({ t: "sel", fid: fid, s: text.slice(0, 8000), r: r, p: ptrType }, "*");
+		var m = { t: "sel", fid: fid, s: text.slice(0, 8000), r: r, p: ptrType };
+		if (unitSel && text.replace(/\s+/g, " ") === unitSel) { m.u = unitKind; m.l = unitLang; m.n = unitNext; m.sp = unitSay; }
+		else if (text && window.wuSpoken && sel.rangeCount) m.sp = window.wuSpoken(sel.getRangeAt(0)).slice(0, 8000);
+		HOST.postMessage(m, "*");
 	}
 	addEventListener("pointerdown", function (e) {
 		ptrType = e.pointerType || "mouse";
@@ -611,11 +626,41 @@
 	// TAP selects nothing on Android, so the word under it stands in (pick.js,
 	// loaded just before this file - taken now, while the window is still
 	// ours and not yet the article's scripts').
-	var wordAt = window.wuWordAt;
+	var wordAt = window.wuWordAt, selectWordAt = window.wuSelectWordAt;
+	var tapUnit = window.wuTapUnit, tapNext = window.wuTapNext, tapClear = window.wuTapClear;
 	document.addEventListener("dblclick", function (e) {
 		var sel = String(document.getSelection() || "").trim();
-		if (!sel && wordAt) sel = wordAt(e, document.body);
+		// A double tap leaves a tapped mark selected (Android selects nothing
+		// itself): the lookup is the word under it, never the whole mark.
+		var u = tapUnit && tapUnit();
+		if (u && sel.replace(/\s+/g, " ") === u.sel) sel = "";
+		// selected as a desktop browser selects it: the reader sees what was looked up
+		if (!sel) sel = selectWordAt ? selectWordAt(e, document.body) : wordAt ? wordAt(e, document.body) : "";
 		if (sel) HOST.postMessage({ t: "pick", w: sel }, "*");
+	});
+
+	// A marked unit goes to the app at once, as the selection it is.
+	function noteUnit(u) {
+		unitSel = u.sel; unitKind = u.kind; unitLang = u.lang || ""; unitNext = !!u.next; unitSay = u.say || "";
+		clearTimeout(selT);
+		reportSel();
+	}
+
+	// A tap marks a unit for read aloud; a second tap on it reads it (D192).
+	// The host owns the speech: the reading toggles there.
+	if (window.wuTapUnits) window.wuTapUnits({
+		root: function () { return document.body || null; },
+		enabled: function () { return speakOn; },
+		mark: function (u, e, touch) {
+			ptrType = touch ? "touch" : "mouse";
+			noteUnit(u);
+		},
+		toggle: function () {
+			try { HOST.postMessage({ t: "say", fid: fid }, "*"); } catch (err) { /* the app is gone */ }
+		},
+		stop: function () {
+			try { HOST.postMessage({ t: "hush", fid: fid }, "*"); } catch (err) { /* the app is gone */ }
+		}
 	});
 
 	// --- keys belong to the app, not to the article -----------------------
@@ -628,7 +673,7 @@
 	// document boundary, so the character travels with the message and the
 	// app inserts it.
 	// An editable target inside the article keeps its keys: a dictionary is
-	// allowed to ship a form, and Space stays a scroll key for reading.
+	// allowed to ship a form. Space travels too, as a key of its own (below).
 	document.addEventListener("keydown", function (e) {
 		// Ctrl+* switches the brief and full view of the section being read
 		// (index.html fullKey) - the app's chord, so it travels like the others.
@@ -644,6 +689,18 @@
 		if (t && (t.isContentEditable ||
 			/^(input|textarea|select)$/i.test(t.tagName || ""))) return;
 		var k = e.key || "";
+		// Space goes to the app (D192 Am. 4): it pauses and resumes read aloud
+		// while the app reads or is paused, and otherwise scrolls the page a
+		// screen, Shift+Space back. This frame is sized to its content and
+		// never scrolls, and the browser does not pass the key on to the page,
+		// so here Space would do nothing at all. A control reached by Tab
+		// keeps it: Space presses that.
+		if (k === " ") {
+			try { if (t && t.matches && t.matches("a[href],button,summary,[role=button],[tabindex]") && t.matches(":focus-visible")) return; } catch (err) { }
+			e.preventDefault();
+			try { HOST.postMessage({ t: "key", k: "space", r: !!e.repeat, up: !!e.shiftKey }, "*"); } catch (err) { }
+			return;
+		}
 		// The two match-navigation arrows travel the same route, for the same
 		// reason: once the reader has clicked into an article, every key is
 		// delivered to THIS document and the app's own keyboard is dead. They

@@ -207,6 +207,11 @@ function pickVoice(L) {
 
 // ---------------------------------------------------------------- speech
 let sess = 0, busy = false, poll = 0, waiting = false;
+// Space pauses (D192 Am. 4). No engine pauses reliably - Android's has only
+// stop, Chrome's network voices lose their place - so a pause is a stop that
+// remembers the chunk being said (a sentence, at most CHUNK characters), and
+// resuming says it again from its start. `reading` is what say() is saying.
+let paused = false, reading = null;
 const live = new Set(); // Chrome collects an unreferenced utterance and its `end` never comes
 
 function chunks(text, L) {
@@ -235,21 +240,24 @@ function chunks(text, L) {
 function stop() {
   sess++;
   waiting = false;
+  paused = false;
   clearInterval(poll);
   live.clear();
   try { S() && S().cancel() } catch (_) { }
   setBusy(false);
 }
 
-function say(text, L, voice) {
+function say(text, L, voice, from = 0) {
   const syn = S(), U = window.SpeechSynthesisUtterance;
   if (!syn || !U || !text) return;
   stop();
-  const tok = sess, parts = chunks(text, L);
-  let i = 0, cur = null, idle = 0;
+  const tok = sess, parts = chunks(text, L), r = { text, L, voice, at: from };
+  reading = r;
+  let i = from, cur = null, idle = 0;
   const next = () => {
     if (tok !== sess) return;
-    if (i >= parts.length) { done(); return }
+    if (i >= parts.length) { done(true); return }
+    r.at = i;
     const u = new U(parts[i++]);
     let ended = false;
     const end = () => {
@@ -290,10 +298,202 @@ function say(text, L, voice) {
   next();
 }
 
-function done() {
+function pause() {
+  if (!busy || paused) return;
+  if (waiting || !reading) { halt(); return } // nothing said yet: nothing to come back to
+  sess++; // the cancel's own "interrupted" belongs to no session now
+  clearInterval(poll);
+  live.clear();
+  try { S() && S().cancel() } catch (_) { }
+  paused = true;
+  setBusy(true);
+}
+
+function resume() {
+  if (!paused || !reading) return;
+  say(reading.text, reading.L, reading.voice, reading.at);
+}
+
+// natural: the text was read to its end - not stopped, not cut off by the
+// system - which is when Keep reading carries on to the next unit.
+function done(natural) {
   clearInterval(poll);
   setBusy(false);
+  if (natural && keepOn() && stash && stash.tap && stash.next) { advance(false); return }
   if (!selLive) hide();
+}
+
+// ------------------------------------------------------- reading on (D192)
+// ⏭ marks the next unit of the same kind and reads it; Keep reading does the
+// same at the end of every unit. Off by default and kept per device: it is
+// how this device is listened to, not a reading habit.
+const KEEP_KEY = "wudict_keepreading";
+function keepOn() { try { return localStorage.getItem(KEEP_KEY) === "1" } catch (_) { return false } }
+function setKeep(v) { try { v ? localStorage.setItem(KEEP_KEY, "1") : localStorage.removeItem(KEEP_KEY) } catch (_) { } }
+
+// The next unit arrives as a unit() call, or from an article frame as a
+// frame() report a message later; it is read when it comes within this
+// window of asking. readStart is when the reader last started a reading,
+// userScroll when they last scrolled: a page they scrolled since is left
+// where they put it.
+const ASKED = 2000;
+let pendingRead = 0, pendingForce = false, readStart = 0, userScroll = 0;
+
+function advance(force) {
+  if (!stash || !ctx || !ctx.step) return;
+  pendingRead = Date.now();
+  pendingForce = force;
+  if (ctx.step(stash) === false) pendingRead = 0;
+}
+function arrived() {
+  const asked = pendingRead && Date.now() - pendingRead < ASKED;
+  pendingRead = 0;
+  return asked;
+}
+
+// The unit being read is brought into view when it is not, a quarter down
+// the room between the bar and the docked speaker - unless the reader has
+// scrolled since the reading began. ⏭ always brings it: it was asked for.
+function reveal(force) {
+  if (!force && userScroll > readStart) return;
+  let b = null;
+  if (stash.kind === "frame") b = anchorRect();
+  else if (stash.range) b = stash.range.getBoundingClientRect();
+  if (!b || !(b.width || b.height)) return;
+  const top = (ctx && ctx.top ? ctx.top() : 0) + 8;
+  let bottom = innerHeight - 8;
+  if (touch && ui && !ui.hidden) bottom = Math.min(bottom, ui.getBoundingClientRect().top - 8);
+  if (b.top >= top && b.bottom <= bottom) return;
+  const dy = b.top - (top + (bottom - top) * 0.25);
+  try { scrollBy({ top: dy, behavior: "smooth" }) } catch (_) { scrollBy(0, dy) }
+}
+function onUserScroll() { userScroll = Date.now() }
+function onScrollKey(e) {
+  if (spaceIsOurs(e)) return; // taken for pause: it scrolls nothing
+  if (/^(PageUp|PageDown|ArrowUp|ArrowDown|Home|End| )$/.test(e.key)) userScroll = Date.now();
+}
+
+// Space is read aloud's while something is read or paused: it pauses and
+// resumes. Not in a field, where it types, nor on a control reached by Tab,
+// which Space presses; a button merely clicked earlier keeps no claim on it.
+// A Space keydown comes only from a keyboard - the on-screen one types only
+// into fields - so the event itself is all the keyboard detection there is.
+function spaceIsOurs(e) {
+  if (e.key !== " " || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || !busy) return false;
+  const t = e.composedPath ? e.composedPath()[0] : e.target;
+  if (!t || t.nodeType !== 1) return true;
+  if (t.isContentEditable || /^(input|textarea|select)$/i.test(t.localName)) return false;
+  try {
+    if (t.matches("a[href],button,summary,[role=button],[tabindex]") && t.matches(":focus-visible")) return false;
+  } catch (_) { }
+  return true;
+}
+function onSpace(e) {
+  if (!spaceIsOurs(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (!e.repeat) space();
+}
+function space() {
+  if (paused) resume();
+  else if (busy) pause();
+}
+
+// ------------------------------------------------------- media keys (D192)
+// Media buttons - a keyboard's, a headset's, the OS's now-playing panel -
+// reach a page through navigator.mediaSession, and a browser gives a session
+// only to a page whose media element plays: speech is none. So while read
+// aloud reads or is paused, a silent clip plays on a loop and holds the
+// session, the standard's own route. Five seconds, since Firefox leaves
+// shorter media out of its media controls. The Android shell backs
+// navigator.mediaSession with a platform MediaSession (Speech.java) and
+// needs no clip.
+const MS = () => ("mediaSession" in navigator ? navigator.mediaSession : null);
+const shellMedia = () => !!(window.__wdSpeech && window.__wdSpeech.media);
+let mediaState = "none", mediaOffT = 0, metaText = "", keepAlive = null, keepURL = "";
+
+function silence() {
+  if (keepURL) return keepURL;
+  const rate = 8000, n = rate * 5, b = new Uint8Array(44 + n), v = new DataView(b.buffer);
+  const tag = (o, t) => { for (let i = 0; i < t.length; i++) b[o + i] = t.charCodeAt(i) };
+  tag(0, "RIFF"); v.setUint32(4, 36 + n, true); tag(8, "WAVE");
+  tag(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  tag(36, "data"); v.setUint32(40, n, true);
+  b.fill(128, 44); // 8-bit PCM is unsigned: 128 is silence
+  return (keepURL = URL.createObjectURL(new Blob([b], { type: "audio/wav" })));
+}
+
+// The session follows the reading: playing, paused, or - a moment after it
+// ends - none. The moment is the gap between two units of Keep reading,
+// where a session given up would hand the media keys to another app.
+function mediaSync() {
+  const want = paused ? "paused" : busy ? "playing" : "none";
+  const ms = MS();
+  if (want !== "none") {
+    clearTimeout(mediaOffT);
+    if (ms && stash && stash.text !== metaText) {
+      metaText = stash.text;
+      try {
+        if (window.MediaMetadata) ms.metadata = new MediaMetadata({
+          title: metaText.length > 120 ? metaText.slice(0, 119) + "…" : metaText,
+          artist: (ctx && ctx.name ? ctx.name(stash.dict) : "") || "", album: "wudict"
+        });
+      } catch (_) { }
+    }
+  }
+  if (want === mediaState) return;
+  if (want === "none") { clearTimeout(mediaOffT); mediaOffT = setTimeout(mediaOff, 1500); return }
+  mediaState = want;
+  if (ms) try { ms.playbackState = want } catch (_) { }
+  if (shellMedia()) return;
+  if (want === "playing") {
+    if (!keepAlive) { keepAlive = new Audio(silence()); keepAlive.loop = true }
+    try { const pr = keepAlive.play(); if (pr && pr.catch) pr.catch(() => { }) } catch (_) { }
+  } else if (keepAlive) keepAlive.pause();
+}
+function mediaOff() {
+  clearTimeout(mediaOffT);
+  if (busy) return;
+  mediaState = "none";
+  metaText = "";
+  const ms = MS();
+  if (ms) try { ms.playbackState = "none"; ms.metadata = null } catch (_) { }
+  if (keepAlive) keepAlive.pause();
+}
+
+// One meaning per button, from the session or from a keydown: play resumes,
+// or reads the mark; previous says the unit again from its start; next is ⏭.
+function mediaAction(a) {
+  if (!on) return;
+  if (a === "playpause") a = busy && !paused ? "pause" : "play";
+  if (a === "play") { if (paused) resume(); else if (!busy && stash) toggle() }
+  else if (a === "pause") pause();
+  else if (a === "stop") halt();
+  else if (a === "nexttrack") {
+    if (stash && stash.tap && stash.next) { closeMenu(); readStart = Date.now(); halt(); advance(true) }
+  } else if (a === "previoustrack") {
+    if (busy && reading) say(reading.text, reading.L, reading.voice, 0);
+  }
+}
+function mediaHandlers(v) {
+  const ms = MS();
+  if (!ms) return;
+  for (const a of ["play", "pause", "stop", "nexttrack", "previoustrack"])
+    try { ms.setActionHandler(a, v ? () => mediaAction(a) : null) } catch (_) { }
+}
+// Where a media key arrives as a keydown instead (a WebView, a desktop whose
+// browser leaves them to pages): the same actions, while there is a mark.
+const MEDIA_KEYS = {
+  MediaPlayPause: "playpause", MediaPlay: "play", MediaPause: "pause", MediaStop: "stop",
+  MediaTrackNext: "nexttrack", MediaTrackPrevious: "previoustrack"
+};
+function onMediaKey(e) {
+  const a = MEDIA_KEYS[e.key];
+  if (!a || !stash) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (!e.repeat) mediaAction(a);
 }
 
 function fail(er, L) {
@@ -311,13 +511,23 @@ const noVoice = L => "No voice for " + langName(L) + " on this device";
 // selection: the tap on the icon may itself collapse the selection (Android
 // does), and the text has to survive it.
 let stash = null, selLive = false, ctx = null;
+const clean = s => String(s || "").replace(/\s+/g, " ").trim().slice(0, MAX);
 
 function setStash(st) {
   const L = ctx && ctx.langs ? ctx.langs(st.dict) : {};
   st.a = norm(L.a);
   st.h = norm(L.h);
-  st.text = st.text.replace(/\s+/g, " ").trim().slice(0, MAX);
-  st.sc = scriptOf(st.text);
+  st.text = clean(st.text);
+  // what the voice gets: abbreviations in full, no pronunciation (pick.js)
+  st.say = clean(st.say) || st.text;
+  st.sc = scriptOf(st.say);
+  // A unit marked by a tap (pick.js, D192): its kind, and a lang= the article
+  // declares around it. Both arrive from article frames too: checked here.
+  st.tap = st.tap === true;
+  st.next = st.next === true;
+  st.unit = st.unit === "x" ? "x" : "";
+  const hint = norm(st.hint);
+  st.hint = /^[a-z]{2,3}$/.test(hint) ? hint : "";
   relang(st);
   stash = st;
   selLive = true;
@@ -333,8 +543,11 @@ function setStash(st) {
 function relang(st) {
   // A headword is in the headword language whatever its script shares with
   // the articles: it settles the Latin/Latin pairs the script cannot split.
-  const [p, q] = st.kind === "head" ? [st.h, st.a] : [st.a, st.h];
-  st.auto = decide(st.sc, p, q, ttsLang);
+  // So, by the lexicographer's convention, is an example (D192): de→en
+  // examples are German. A lang= the article declares around the unit
+  // outranks both, when it fits the script.
+  const [p, q] = st.kind === "head" || st.unit === "x" ? [st.h, st.a] : [st.a, st.h];
+  st.auto = (st.hint && fits(st.hint, st.sc) && st.hint) || decide(st.sc, p, q, ttsLang);
   st.lang = st.pick || storedLang(st) || st.auto;
   const plain = decide(st.sc, p, q, "");
   st.alts = [...new Set([st.auto, plain, st.a, st.h, inherited(st)])]
@@ -345,16 +558,18 @@ function relang(st) {
 // dictionary may want German for its Latin text and still Russian for its
 // Cyrillic. Headwords keep their own: an en→fr pick of French for the articles
 // is not one for them. In a dictionary whose languages are both unknown they
-// follow the articles' pick until they are given their own.
-const langKey = (st, head = st.kind === "head") => st.dict && st.sc ?
-  LANG_KEY + (head ? "h" : "") + st.sc + "_" + st.dict : "";
+// follow the articles' pick until they are given their own. Examples marked
+// by a tap ("x") are kept apart the same way: they lean the other way.
+const keyKind = st => st.kind === "head" ? "h" : st.unit === "x" ? "x" : "";
+const langKey = (st, kind = keyKind(st)) => st.dict && st.sc ?
+  LANG_KEY + kind + st.sc + "_" + st.dict : "";
 
 function readLang(st, k) {
   let v = null;
   if (k) try { v = localStorage.getItem(k) } catch (_) { }
   return v && /^[a-z]{2,3}$/.test(v) && fits(v, st.sc) ? v : "";
 }
-const inherited = st => st.kind === "head" && !st.a && !st.h ? readLang(st, langKey(st, false)) : "";
+const inherited = st => keyKind(st) && !st.a && !st.h ? readLang(st, langKey(st, "")) : "";
 const storedLang = st => readLang(st, langKey(st)) || inherited(st);
 
 function choose(L) {
@@ -379,7 +594,10 @@ function others() {
 const SVG = 'viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"';
 const ICON_SPEAK = '<svg ' + SVG + '><path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z"/><path d="M11 5.8a3 3 0 0 1 0 4.4"/><path d="M12.9 3.9a5.8 5.8 0 0 1 0 8.2"/></svg>';
 const ICON_STOP = '<svg ' + SVG + '><rect x="4" y="4" width="8" height="8" rx="1.3" fill="currentColor"/></svg>';
+const ICON_PLAY = '<svg ' + SVG + '><path d="M5 3.5l7 4.5-7 4.5z"/></svg>';
 const ICON_MORE = '<svg ' + SVG + '><path d="M4.5 6.5l3.5 3.5 3.5-3.5"/></svg>';
+const ICON_NEXT = '<svg ' + SVG + '><path d="M4 3.5l6 4.5-6 4.5z"/><path d="M12.5 3.5v9"/></svg>';
+const ICON_CLOSE = '<svg ' + SVG + '><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>';
 const CSS =
   ".wd-speak{position:fixed;z-index:150;display:flex;background:var(--bg-card,#fff);color:var(--fg,#222);" +
   "border:1px solid var(--line,#ddd);border-radius:999px;box-shadow:var(--shadow,0 2px 8px rgba(0,0,0,.2));overflow:hidden;" +
@@ -388,8 +606,11 @@ const CSS =
   ".wd-speak button{all:unset;display:flex;align-items:center;justify-content:center;cursor:pointer;" +
   "color:inherit;-webkit-tap-highlight-color:transparent;width:30px;height:30px}" +
   ".wd-speak .wd-sp-more{width:18px;border-left:1px solid var(--line-soft,#eee)}" +
+  ".wd-speak .wd-sp-next{border-left:1px solid var(--line-soft,#eee)}" +
+  ".wd-speak .wd-sp-close{color:var(--fg-faint,#999);border-right:1px solid var(--line-soft,#eee)}" +
   ".wd-speak svg{width:16px;height:16px}.wd-speak .wd-sp-more svg{width:12px;height:12px}" +
   ".wd-speak.touch button{width:48px;height:48px}.wd-speak.touch .wd-sp-more{width:30px}" +
+  ".wd-speak.touch .wd-sp-close{width:40px}.wd-speak.touch .wd-sp-close svg{width:16px;height:16px}" +
   ".wd-speak.touch svg{width:22px;height:22px}.wd-speak.touch .wd-sp-more svg{width:14px;height:14px}" +
   ".wd-speak.busy .wd-sp-main{color:var(--accent,#e08600)}" +
   ".wd-speak button:hover{background:var(--accent-soft,#fff3e0)}" +
@@ -406,7 +627,8 @@ const CSS =
   ".wd-sp-menu .note{padding:9px 12px;color:var(--fg-soft,#666)}" +
   ".wd-sp-menu hr{border:0;border-top:1px solid var(--line-soft,#eee);margin:4px 0}";
 
-let ui = null, mainBtn = null, moreBtn = null, menu = null, menuNote = "", menuOther = false;
+let ui = null, mainBtn = null, moreBtn = null, nextBtn = null, closeBtn = null;
+let menu = null, menuNote = "", menuOther = false;
 let touch = false, raf = 0;
 
 function build() {
@@ -417,11 +639,14 @@ function build() {
   ui = document.createElement("div");
   ui.className = "wd-speak";
   ui.hidden = true;
-  ui.innerHTML = '<button type="button" class="wd-sp-main"></button>' +
+  // ✕ first, farthest from the thumb that docks this to the right: putting
+  // the mark away is the one button here a stray touch should not find.
+  ui.innerHTML = '<button type="button" class="wd-sp-close" aria-label="Close" title="Close">' + ICON_CLOSE + "</button>" +
+    '<button type="button" class="wd-sp-main"></button>' +
+    '<button type="button" class="wd-sp-next" aria-label="Next" title="Next">' + ICON_NEXT + "</button>" +
     '<button type="button" class="wd-sp-more" aria-haspopup="menu" aria-expanded="false" ' +
     'aria-label="Voice" title="Voice">' + ICON_MORE + "</button>";
-  mainBtn = ui.firstChild;
-  moreBtn = ui.lastChild;
+  [closeBtn, mainBtn, nextBtn, moreBtn] = ui.children;
   menu = document.createElement("div");
   menu.className = "wd-sp-menu";
   menu.setAttribute("role", "menu");
@@ -430,11 +655,14 @@ function build() {
   // article; the action happens on click, which is the gesture Safari and
   // Chrome require before they will speak.
   for (const el of [ui, menu]) el.addEventListener("pointerdown", e => e.preventDefault());
-  mainBtn.addEventListener("click", () => {
+  mainBtn.addEventListener("click", toggle);
+  nextBtn.addEventListener("click", () => {
     closeMenu();
-    if (busy) { stop(); if (!selLive) hide(); return }
-    if (stash) go(stash.lang, null);
+    readStart = Date.now();
+    halt();
+    advance(true);
   });
+  closeBtn.addEventListener("click", dismiss);
   moreBtn.addEventListener("click", e => {
     if (!menu.hidden) { closeMenu(); return }
     openMenu("", e.detail === 0);
@@ -445,10 +673,11 @@ function build() {
 
 function setBusy(v) {
   busy = v;
+  mediaSync();
   if (!mainBtn) return;
   ui.classList.toggle("busy", v);
-  mainBtn.innerHTML = v ? ICON_STOP : ICON_SPEAK;
-  const label = v ? "Stop reading" : "Read aloud";
+  mainBtn.innerHTML = paused ? ICON_PLAY : v ? ICON_STOP : ICON_SPEAK;
+  const label = paused ? "Resume reading" : v ? "Stop reading" : "Read aloud";
   mainBtn.setAttribute("aria-label", label);
   mainBtn.title = label;
 }
@@ -460,14 +689,29 @@ function go(L, voice) {
   if (!voicesDone) { waiting = true; setBusy(true); return }
   const v = voice || pickVoice(L);
   if (!v && voicesDone) { openMenu(noVoice(L)); return }
-  say(stash.text, L, v);
+  say(stash.say, L, v);
 }
 
-// The ▾ is worth its room only when it has a choice to offer.
+// The ▾ is worth its room only when it has a choice to offer: a tapped unit
+// always has one, Keep reading. ⏭ shows when there is a next unit; ✕ on touch
+// only, where there is no Escape and no margin a finger finds reliably.
 function syncMore() {
   if (!moreBtn || !stash) return;
-  moreBtn.hidden = !(stash.alts.length || voicesFor(stash.lang).length > 1 ||
+  moreBtn.hidden = !(stash.tap || stash.alts.length || voicesFor(stash.lang).length > 1 ||
     (voicesDone && !voicesFor(stash.lang).length) || settings() || others().length);
+  nextBtn.hidden = !(stash.tap && stash.next && ctx && ctx.step);
+  closeBtn.hidden = !touch;
+}
+
+// ✕: the reading ends and the mark goes.
+function dismiss() {
+  closeMenu();
+  pendingRead = 0;
+  stop();
+  if (stash && ctx && ctx.clear) ctx.clear(stash);
+  stash = null;
+  selLive = false;
+  if (ui) ui.hidden = true;
 }
 
 const settings = () => window.__wdSpeech && typeof window.__wdSpeech.settings === "function";
@@ -559,6 +803,12 @@ function openMenu(note, focusFirst) {
     add("Read as " + langName(cur), "", () => choose(cur), true);
     for (const l of stash.alts) add("Read as " + langName(l), "", () => choose(l), false);
   }
+  if (stash.tap) {
+    rule();
+    const k = keepOn();
+    add("Keep reading", "", () => setKeep(!k), k);
+    menu.lastChild.setAttribute("role", "menuitemcheckbox");
+  }
   const L = stash.lang, vs = voicesFor(L);
   if (vs.length) {
     rule();
@@ -566,7 +816,7 @@ function openMenu(note, focusFirst) {
     for (const v of vs.slice().sort((a, b) => String(a.label || a.name).localeCompare(String(b.label || b.name))))
       add(v.label || v.name, v.lang, () => {
         try { localStorage.setItem(VOICE_KEY + L, v.voiceURI) } catch (_) { }
-        say(stash.text, L, v); // choosing IS the preview
+        say(stash.say, L, v); // choosing IS the preview
       }, v === cur);
   }
   // Built only when asked for: a device can have voices in sixty languages.
@@ -652,7 +902,7 @@ function readShadow() {
   }
   if (range.collapsed || range.commonAncestorContainer.getRootNode() !== root) return null;
   const text = ((sel && String(sel)) || range.toString()).trim();
-  return text ? { kind: "shadow", text, range, dict: host.dataset.dict || "", ptr } : null;
+  return text ? { kind: "shadow", text, say: spokenOf(range), range, dict: host.dataset.dict || "", ptr } : null;
 }
 
 // The headword: a <dt> in the page's own DOM, beside the article's shadow
@@ -672,7 +922,7 @@ function readHead() {
     range.setEnd(head, head.childNodes.length);
   }
   const text = range.toString().trim();
-  return text ? { kind: "head", text, range, dict: (dd && dd.dataset.dict) || "", ptr } : null;
+  return text ? { kind: "head", text, say: spokenOf(range), range, dict: (dd && dd.dataset.dict) || "", ptr } : null;
 }
 
 // Chrome ends the document range of a triple click and of a drag into the
@@ -717,8 +967,27 @@ function seesText(r) {
 function settle() {
   if (btn) return; // the drag is still going; pointerup settles it
   const st = readShadow() || readHead();
+  // The selection a tap marked, settling: the stash already has it, with what
+  // only the tap knew - its kind and its declared language.
+  if (st && stash && stash.tap && stash.kind === st.kind &&
+    (stash.text === clean(st.text) || sameRange(stash.range, st.range))) {
+    if (!selLive) { selLive = true; show() }
+    return;
+  }
   if (st) { setStash(st); return }
   if (stash && stash.kind !== "frame") { selLive = false; hide() }
+}
+
+// A selection's spoken text, from pick.js where it is loaded.
+const spokenOf = r => (window.wuSpoken ? window.wuSpoken(r) : "");
+
+// Ranges in different trees cannot be compared, and are not the same.
+function sameRange(a, b) {
+  if (!a || !b) return false;
+  try {
+    return a.compareBoundaryPoints(Range.START_TO_START, b) === 0 &&
+      a.compareBoundaryPoints(Range.END_TO_END, b) === 0;
+  } catch (_) { return false }
 }
 
 function schedule(ms) { clearTimeout(settleT); settleT = setTimeout(settle, ms) }
@@ -726,6 +995,7 @@ function schedule(ms) { clearTimeout(settleT); settleT = setTimeout(settle, ms) 
 function onDown(e) {
   if (ui && (ui.contains(e.target) || menu.contains(e.target))) return;
   closeMenu();
+  pendingRead = 0;
   // A frame keeps its selection when the host is clicked, and reports nothing.
   if (stash && stash.kind === "frame") { selLive = false; hide() }
   ptr = e.pointerType || "mouse";
@@ -758,9 +1028,15 @@ function enable(v) {
   d("pointerdown", onDown, true);
   d("pointerup", onUp, true);
   d("keydown", onKey, true);
+  d("keydown", onSpace, true);
+  d("keydown", onMediaKey, true);
+  d("keydown", onScrollKey, true);
+  f("wheel", onUserScroll, { capture: true, passive: true });
+  f("touchmove", onUserScroll, { capture: true, passive: true });
   f("scroll", onScroll, { capture: true, passive: true });
   f("resize", onScroll, { passive: true });
-  if (!v) { stop(); selLive = false; stash = null; hide() }
+  mediaHandlers(v);
+  if (!v) { stop(); selLive = false; stash = null; hide(); mediaOff() }
 }
 
 window.wuSpeak = {
@@ -771,8 +1047,10 @@ window.wuSpeak = {
     enable(!!v);
     if (v && seed) { root = seed.root || root; ptr = seed.ptr || ptr; schedule(0) }
   },
-  // A selection inside a sandboxed (iframe) article, reported by frame.js.
-  frame(f, text, r, p) {
+  // A selection inside a sandboxed (iframe) article, reported by frame.js;
+  // u, l and n are a tap-marked unit's kind, declared language and whether a
+  // next unit exists (D192).
+  frame(f, text, r, p, u, l, n, sp) {
     if (!on || !f) return;
     text = String(text || "");
     if (!text.trim()) {
@@ -781,7 +1059,72 @@ window.wuSpeak = {
     }
     const rect = r && isFinite(r.x) && isFinite(r.y) && isFinite(r.w) && isFinite(r.h) ?
       { x: +r.x, y: +r.y, w: +r.w, h: +r.h } : null;
-    setStash({ kind: "frame", frame: f, rect, text, dict: f.dataset.dict || "", ptr: p === "touch" ? "touch" : "mouse" });
+    const tap = typeof u === "string" && u !== "";
+    // A new mark ends the reading; the same one, reported again as its
+    // selection settles, must not - nor may it pass for the next unit asked for.
+    const fresh = tap && !(stash && stash.frame === f && stash.text === clean(text));
+    const auto = fresh && arrived();
+    if (fresh && busy) halt();
+    setStash({
+      kind: "frame", frame: f, rect, text, dict: f.dataset.dict || "", ptr: p === "touch" ? "touch" : "mouse",
+      tap, unit: u, hint: l, next: n === true, say: typeof sp === "string" ? sp : ""
+    });
+    if (auto) { reveal(pendingForce); read() }
+  },
+  // A unit a tap marked in a shadow-DOM article or a headword (pick.js, D192):
+  // st = {kind: "shadow"|"head", text, range, dict, ptr, unit, hint}. Shown at
+  // once, without waiting for the selection to settle.
+  unit(st, r) {
+    if (!on || !st || !clean(st.text)) return;
+    const auto = arrived();
+    halt();
+    if (r) root = r;
+    ptr = st.ptr === "touch" ? "touch" : "mouse";
+    st.tap = true;
+    st.ptr = ptr;
+    setStash(st);
+    if (auto) { reveal(pendingForce); read() }
+  },
+  // An article frame found no next unit: nothing is coming.
+  noNext() { pendingRead = 0 },
+  // The second tap on a mark: read it, or stop reading it.
+  toggle,
+  // The same, from an article frame: only for the stash that frame owns.
+  frameToggle(f) { if (stash && stash.kind === "frame" && stash.frame === f) toggle() },
+  // Escape inside an article frame.
+  hush() { halt() },
+  // Space inside an article frame (frame.js hands every one over): true when
+  // it was read aloud's to take -
+  // something is read or paused - and the page must not scroll for it.
+  space(repeat) {
+    if (!busy) return false;
+    if (!repeat) space();
+    return true;
   }
 };
+
+function halt() {
+  if (!busy) return;
+  stop();
+  if (!selLive) hide();
+}
+
+function toggle() {
+  if (!on || !stash) return;
+  if (paused) { resume(); return }
+  if (busy) { halt(); return }
+  readStart = Date.now();
+  read();
+  // Text the docked speaker covers is brought clear of it now, when reading
+  // starts - never at the mark, under the finger that just made it.
+  reveal(false);
+}
+
+function read() {
+  closeMenu();
+  // the tap restored the mark's selection; settle confirms it, or hides
+  selLive = true;
+  show();
+  go(stash.lang, null);
+}
 })();

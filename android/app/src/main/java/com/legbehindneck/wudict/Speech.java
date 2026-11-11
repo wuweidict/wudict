@@ -23,6 +23,9 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.media.AudioAttributes;
+import android.media.session.MediaController;
+import android.media.session.MediaSession;
+import android.media.session.PlaybackState;
 import android.net.Uri;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
@@ -105,10 +108,21 @@ final class Speech {
           + "dispatchEvent:function(){return true}};"
           + "Object.defineProperty(S,'speaking',{get:function(){return!!cur}});"
           + "Object.defineProperty(S,'pending',{get:function(){return q.length>0||stopping>0}});"
+          // navigator.mediaSession, backed by a platform MediaSession (D192 Am. 5):
+          // WebView exposes the API with nothing behind it, so headset and
+          // keyboard media buttons never reach the page. The page sets
+          // playbackState; the buttons come back as its action handlers.
+          + "var H={},ms='none',M={metadata:null,"
+          + "setActionHandler:function(a,f){H[a]=typeof f==='function'?f:null},"
+          + "setPositionState:function(){},setMicrophoneActive:function(){},setCameraActive:function(){}};"
+          + "Object.defineProperty(M,'playbackState',{get:function(){return ms},set:function(v){"
+          + "v=String(v);if(v!=='playing'&&v!=='paused')v='none';if(v===ms)return;ms=v;get('media?state='+v)}});"
+          + "try{Object.defineProperty(navigator,'mediaSession',{value:M,configurable:true})}catch(e){}"
           + "try{Object.defineProperty(window,'speechSynthesis',{value:S,configurable:true,writable:true});"
           + "Object.defineProperty(window,'SpeechSynthesisUtterance',{value:U,configurable:true,writable:true})"
           + "}catch(e){return}"
-          + "window.__wdSpeech={done:done,settings:function(){get('settings?n='+(++seq))}}})()";
+          + "window.__wdSpeech={done:done,settings:function(){get('settings?n='+(++seq))},"
+          + "media:true,action:function(a){var f=H[a];if(f)try{f({action:a})}catch(_){}}}})()";
 
     private final Activity activity;
     private final WebView web;
@@ -118,6 +132,7 @@ final class Speech {
     private CountDownLatch init;      // guarded by lock; set once, on first use
     private boolean configured;       // guarded by lock
     private long stopGen;             // guarded by lock
+    private MediaSession session;     // main thread only; made by the first reading
     private List<Locale> probed;      // guarded by lock; see fallbackVoices
     private volatile boolean ok;      // onInit reported SUCCESS
     private volatile boolean dead;    // shutdown() ran
@@ -134,6 +149,16 @@ final class Speech {
         // Our pages only. The shim reaches this class, and a page from
         // anywhere else has no business making the device talk.
         if (url == null || !url.startsWith(Shell.origin(activity) + "/")) return;
+        // A new document counts its cancels from 0 again. The last one's count
+        // must not outrank it: every speak it sent would be taken for one
+        // cancelled on its way and dropped, unanswered, and the page would
+        // stay "speaking" in silence for as long as it lives. What the last
+        // document was saying ends with it.
+        synchronized (lock) {
+            stopGen = 0;
+            if (tts != null && ok) try { tts.stop(); } catch (RuntimeException ignored) { }
+        }
+        media("none"); // the new document is reading nothing yet
         view.evaluateJavascript(JS, null);
     }
 
@@ -151,6 +176,7 @@ final class Speech {
                 case "speak": speak(u); break;
                 case "stop": stop(num(u.getQueryParameter("g"))); break;
                 case "settings": activity.runOnUiThread(this::openSettings); break;
+                case "media": media(u.getQueryParameter("state")); break;
                 default: break;
             }
         } catch (RuntimeException e) {
@@ -184,6 +210,7 @@ final class Speech {
             t = tts;
             tts = null;
         }
+        if (session != null) { session.release(); session = null; }
         if (t == null) return;
         try {
             t.stop();
@@ -272,6 +299,49 @@ final class Speech {
         activity.runOnUiThread(() -> {
             if (!dead) web.evaluateJavascript(js, null);
         });
+    }
+
+    // ── media buttons ────────────────────────────────────────────────────
+
+    /**
+     * The page's navigator.mediaSession.playbackState: "playing", "paused" or
+     * "none" (D192 Am. 5). A playing or paused session is active, so the
+     * system routes media buttons - a headset's, a Bluetooth keyboard's - to
+     * it; the Activity's media controller sends it the ones pressed while
+     * wuDict is in front. The session is made by the first reading: a reader
+     * who never listens has none.
+     */
+    private void media(String state) {
+        if (state == null) return;
+        activity.runOnUiThread(() -> {
+            if (dead) return;
+            int s = "playing".equals(state) ? PlaybackState.STATE_PLAYING
+                    : "paused".equals(state) ? PlaybackState.STATE_PAUSED : PlaybackState.STATE_NONE;
+            if (session == null) {
+                if (s == PlaybackState.STATE_NONE) return;
+                session = new MediaSession(activity, "wudict read aloud");
+                session.setCallback(new MediaSession.Callback() {
+                    @Override public void onPlay() { action("play"); }
+                    @Override public void onPause() { action("pause"); }
+                    @Override public void onStop() { action("stop"); }
+                    @Override public void onSkipToNext() { action("nexttrack"); }
+                    @Override public void onSkipToPrevious() { action("previoustrack"); }
+                });
+                activity.setMediaController(new MediaController(activity, session.getSessionToken()));
+            }
+            session.setPlaybackState(new PlaybackState.Builder()
+                    .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE
+                            | PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_STOP
+                            | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS)
+                    .setState(s, PlaybackState.PLAYBACK_POSITION_UNKNOWN, s == PlaybackState.STATE_PLAYING ? 1f : 0f)
+                    .build());
+            session.setActive(s != PlaybackState.STATE_NONE);
+        });
+    }
+
+    /** A media button, to the page's action handler; main thread. `a` is one of ours. */
+    private void action(String a) {
+        if (!dead) web.evaluateJavascript("window.__wdSpeech&&__wdSpeech.action&&__wdSpeech.action('" + a + "')", null);
     }
 
     // ── requests ─────────────────────────────────────────────────────────
