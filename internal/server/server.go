@@ -26,6 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wuweidict/wudict/internal/artmark"
 	"github.com/wuweidict/wudict/internal/config"
@@ -1248,6 +1249,11 @@ func queryFlag(q url.Values, name string) (on, sent bool) {
 	return true, true
 }
 
+// maxFindRunes bounds the `mark` parameter: a find field holds a word or a
+// short phrase, and every token of it is a pattern each text node is tested
+// against.
+const maxFindRunes = 200
+
 // marker returns the per-hit highlighter for one request.
 //
 // The marks are compiled from the query's OWN lowering, not from the raw
@@ -1341,6 +1347,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// word they are already looking at, on every line it appears (D102).
 	hl, _ := queryFlag(r.URL.Query(), "hl")
 	marks := marker(mode == search.FullText && hl)
+	// Find in the articles (D198): `mark` names the words to mark in place of
+	// the query's own, in every mode. It is the same answer with other marks -
+	// what is searched for is still `q` - so the reader's place in a section
+	// can be repainted with the words they are looking for inside it.
+	if find := strings.TrimSpace(r.URL.Query().Get("mark")); find != "" {
+		if utf8.RuneCountInString(find) > maxFindRunes {
+			httpErr(w, 400, "mark is longer than %d characters", maxFindRunes)
+			return
+		}
+		t := hilite.CompilePhrase(find)
+		marks = func(string, string, []hilite.Phrase) *hilite.Terms { return t }
+	}
 	// Capped like the store's own maxLimit: the store clamps at its boundary,
 	// but a direct backend treats the limit as a stop sign only, and would
 	// materialize every match - article bodies included - before stopping.

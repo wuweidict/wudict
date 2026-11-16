@@ -353,6 +353,30 @@ summary .fbtn:hover{color:var(--fg);background:var(--bg)}
 summary .fbtn[aria-pressed="true"]{color:var(--accent)}
 summary .fbtn[aria-pressed="true"] .brief,summary .fbtn[aria-pressed="false"] .full{display:none}
 @media (pointer:coarse){summary .fbtn{padding:14px 12px;margin:-14px -8px -14px 0}}
+/* Find in the section you are reading (findOpen, D198). The button is in the
+   header for the reason the match walker is: it is the one surface still on
+   screen halfway down an article, and a control inside the section needs no
+   label saying which section it searches. Only the OPEN section shows it - a
+   closed one has no articles to find in. Pressed, the field takes the place of
+   the name and the count, so the row keeps its one line at any width; the
+   walker and the full-view switch stay where they are. */
+summary .sbtn{flex:0 0 auto;display:none;cursor:pointer;color:var(--fg-soft);
+  padding:9px 7px;margin:-9px 0;border-radius:5px;user-select:none;
+  -webkit-tap-highlight-color:transparent}
+details.dict[open]>summary .sbtn{display:inline-flex}
+summary .sbtn svg{width:16px;height:16px;display:block}
+summary .sbtn:hover{color:var(--fg);background:var(--bg)}
+@media (pointer:coarse){summary .sbtn{padding:14px 10px;margin:-14px 0}}
+details.dict.finding>summary>:is(.dname,.count,.more,.sbtn){display:none}
+summary .find{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:2px;
+  margin:-2px 0;font-weight:400}
+summary .find input{flex:1 1 auto;min-width:0;width:100%;font:inherit;color:var(--fg);
+  background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;outline:0}
+summary .find input:focus{border-color:var(--focus)}
+/* nothing found: said by the field itself, where the eye already is */
+summary .find.none input{color:var(--danger);border-color:var(--danger-line)}
+/* below 16px a touch browser zooms the page into a focused field */
+@media (pointer:coarse){summary .find input{font-size:16px}}
 /* a dictionary's own script threw; the article is intact but inert */
 summary .jserr{margin-left:6px;font-weight:400;color:var(--accent);font-size:12px;cursor:help}
 /* A deferred dictionary's hint (renderSlot, h.deferred). Link-coloured because
@@ -4175,7 +4199,10 @@ function renderSlot(box,h,mode,q,perDict,group){
   // is a floor.
   const rung=mode==="fts"&&/\s/.test(q||"")&&(h.rung==="near"||h.rung==="words")
     ?`<span class="rung">phrase not found${h.partial?" in the best matches":""} · ${h.rung==="near"?"words proximity":"words anywhere"} · </span>`:"";
-  det.innerHTML=`<summary>${esc(hitName(h))}<span class="count">${rung}${h.results.length}${more||h.more?"+":""} result${h.results.length===1?"":"s"}</span>${more}</summary>`;
+  det.innerHTML=`<summary><span class="dname">${esc(hitName(h))}</span><span class="count">${rung}${h.results.length}${more||h.more?"+":""} result${h.results.length===1?"":"s"}</span>${more}</summary>`;
+  // the question this section answers, for asking it again with marks (findRun)
+  det.wuAsk={q,mode,dict:h.dict,per:perDict};
+  det.firstElementChild.appendChild(findButton(det));
   const anchor=anchorOnce&&anchorOnce.dict===h.dict?anchorOnce:null;
   if(anchor)anchorOnce=null;
   det.wuFill=()=>{
@@ -4196,7 +4223,7 @@ function renderSlot(box,h,mode,q,perDict,group){
       if(el){det.open=true;fullReveal(det,el);revealAt(el.getBoundingClientRect().top,det)}
     });
   };
-  det.addEventListener("toggle",()=>{if(det.open)fillSection(det)});
+  det.addEventListener("toggle",()=>{if(det.open)fillSection(det);else if(det===findDet)findClose()});
   det.open=expandAll;
   box.appendChild(det);
   if(det.open||anchor)fillSection(det);
@@ -5001,13 +5028,13 @@ function fullKey(){
    Hidden below two matches: with one there is nowhere to go, and a control
    that cannot act is furniture (D102). */
 let navEl=null,navDet=null,navList=null,navIdx=0,navTimer=0,markedAnswer=false;
-function markList(det){
+function markList(det,all){
   const out=[];
   for(const host of det.querySelectorAll(".article")){
     const root=host.shadowRoot||host.contentDocument;
     if(!root)continue;
     for(const m of root.querySelectorAll(".wu-hl"))
-      if(!m.checkVisibility||m.checkVisibility())out.push({host,el:m});
+      if(all||!m.checkVisibility||m.checkVisibility())out.push({host,el:m});
   }
   return out; // DOM order across articles is reading order
 }
@@ -5059,6 +5086,7 @@ function navRefresh(){
   navIdx=at<0?0:at;
   navEl.hidden=navList.length<2;
   navPos();
+  findNote();
 }
 function navPos(){
   const p=navEl&&navEl.querySelector(".mpos");
@@ -5083,6 +5111,150 @@ function navGo(step){
   // glide over 18000px of text is not orientation, it is waiting.
   revealAt(top,navDet,Math.abs(top)>innerHeight*2);
   navPos();
+}
+/* Find in the open section (D198): a word or a phrase, looked for inside the
+   articles already on screen.
+
+   Nothing here matches text. The section is asked for again with `mark=`, and
+   the server paints the words in the pass that already rewrites every article
+   (internal/hilite) - so a find is a full-text answer's marks on any answer,
+   and everything that serves those serves this: the walk above, the jump to
+   the first match, the blocks and zones that open around one, the cap. The
+   words are one phrase, the last one open, whole words before it.
+
+   One repaint per Enter, none per keystroke: an article that came with
+   scripts is an iframe, and repainting it restarts them. Enter on words
+   already found is the walk's next step, Shift-Enter its previous one.
+
+   Closing takes the marks out of the articles in place - they are the only
+   thing the find added - so leaving costs no second repaint. */
+const FIND_SVG='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.6 3.6"/></svg>';
+let findEl=null,findDet=null,findText="",findAC=null,findNoneT=0;
+function findButton(det){
+  const b=document.createElement("span");
+  b.className="sbtn";b.setAttribute("role","button");b.tabIndex=0;
+  b.setAttribute("aria-label","Find in these articles");
+  b.title="Find in these articles";
+  b.innerHTML=FIND_SVG;
+  const hit=e=>{
+    // inside a <summary>: the default action would fold the section
+    e.preventDefault();e.stopPropagation();
+    findOpen(det);
+  };
+  b.addEventListener("click",hit);
+  b.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")hit(e)});
+  b.addEventListener("pointerdown",freezeBar); // the row must not slide away mid-tap
+  return b;
+}
+function findBuild(){
+  if(findEl)return findEl;
+  findEl=document.createElement("form");
+  findEl.className="find";findEl.setAttribute("role","search");
+  // type=text: a search field draws its own ✕, which empties it, beside ours, which closes it
+  findEl.innerHTML=
+    '<input type="text" maxlength="200" placeholder="\u2192 word or phrase" enterkeyhint="search" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Find in these articles">'+
+    '<span class="mbtn" role="button" tabindex="0" aria-label="Close">\u2715</span>';
+  const go=e=>{e.preventDefault();e.stopPropagation();findRun(e.shiftKey?-1:1)};
+  // The keyboard's own Search key submits without a keydown on some IMEs;
+  // a hardware Enter is taken below, where Shift is still known.
+  findEl.addEventListener("submit",go);
+  findEl.addEventListener("keydown",e=>{
+    const x=e.target.closest(".mbtn");
+    if(e.key==="Escape"||(x&&(e.key==="Enter"||e.key===" "))){
+      // Escape is spent here: the page's own would also take focus to the search box
+      e.preventDefault();e.stopPropagation();findClose();
+    }else if(e.key==="Enter"&&!x&&!e.isComposing)go(e);
+  });
+  // Every event that lands on the row is spent on it: the field is inside a
+  // <summary>, whose default action - a click, or a space released over it -
+  // folds the very section being searched.
+  findEl.addEventListener("keyup",e=>{if(e.key===" ")e.preventDefault()});
+  findEl.addEventListener("click",e=>{
+    e.preventDefault();e.stopPropagation();
+    if(e.target.closest(".mbtn"))findClose();
+  });
+  findEl.addEventListener("input",()=>{clearTimeout(findNoneT);findEl.classList.remove("none")});
+  findEl.addEventListener("pointerdown",freezeBar);
+  return findEl;
+}
+function findOpen(det){
+  if(findDet&&findDet!==det)findClose(); // one field: it follows the section being read
+  const sum=det&&det.isConnected&&det.querySelector(":scope>summary");
+  if(!sum)return;
+  const el=findBuild();
+  findDet=det;det.classList.add("finding");
+  sum.prepend(el);
+  el.firstElementChild.focus({preventScroll:true});
+}
+/* The marks a find painted, taken out of the articles where they stand. */
+function findStrip(det){
+  for(const m of markList(det,true)){
+    const p=m.el.parentNode;
+    m.el.replaceWith(...m.el.childNodes);
+    if(p)p.normalize();
+  }
+  if(det===navDet)navDetach();
+}
+function findClose(){
+  const det=findDet,found=findText;
+  if(findAC){findAC.abort();findAC=null}
+  clearTimeout(findNoneT);
+  findDet=null;findText="";
+  if(findEl){findEl.remove();findEl.classList.remove("none");findEl.firstElementChild.value=""}
+  if(!det||!det.isConnected)return; // a new answer took the section with it
+  det.classList.remove("finding");
+  if(found)findStrip(det);
+  if(det.open)det.querySelector(":scope>summary .sbtn")?.focus({preventScroll:true});
+}
+/* "Nothing found", said by the field. Late, because an article in a frame has
+   no marks to count until it has parsed, and a field that turned red and back
+   on every find would be crying wolf. */
+function findNote(){
+  clearTimeout(findNoneT);
+  if(!findEl)return;
+  if(!findText||!findDet||navDet!==findDet||(navList&&navList.length)){findEl.classList.remove("none");return}
+  findNoneT=setTimeout(()=>{if(findEl&&findText)findEl.classList.add("none")},400);
+}
+function findRun(step){
+  const det=findDet;
+  if(!det||!det.isConnected)return findClose();
+  const input=findEl.firstElementChild,text=input.value.trim();
+  if(text===findText){
+    // the same words again: the next match, as every find bar reads a second Enter
+    if(text&&navDet===det&&navWalkable())navGo(step);
+    return;
+  }
+  if(findAC){findAC.abort();findAC=null}
+  if(!text){ // the field was emptied: the marks go, the field stays
+    findText="";findStrip(det);findNote();
+    return;
+  }
+  const ask=det.wuAsk,box=det.parentElement;
+  if(!ask||!box)return;
+  const ac=findAC=new AbortController();
+  fetchStream("/api/search?q="+encodeURIComponent(ask.q)+"&mode="+ask.mode+
+      "&dict="+encodeURIComponent(ask.dict)+"&n="+Math.min(ask.per,100)+"&mark="+encodeURIComponent(text),msg=>{
+    // An empty hit is the first wave of an answer the lemma wave gave: it is
+    // not this section. And only the section still being searched is repainted.
+    if(msg.t!=="hit"||!msg.results?.length||findDet!==det||!box.isConnected)return;
+    const typing=document.activeElement===input;
+    // The page keeps its length while the section is rebuilt; without the
+    // floor the document would shrink under the reader and the scroll
+    // position would be clamped to somewhere they never were.
+    box.style.minHeight=box.offsetHeight+"px";
+    setTimeout(()=>{box.style.minHeight=""},1500);
+    renderSlot(box,msg,ask.mode,ask.q,ask.per);
+    const nd=box.querySelector("details.dict");
+    if(!nd){findClose();return}
+    nd.open=true;fillSection(nd);
+    findDet=nd;findText=text;nd.classList.add("finding");
+    nd.querySelector(":scope>summary").prepend(findEl);
+    // On a touch screen the keyboard has done its work and covers half of
+    // what was found; with a real one the next Enter belongs to the field.
+    if(typing&&!TAPS)input.focus({preventScroll:true});
+    navAttach(nd);
+    revealFirstMark(nd);
+  },ac.signal).catch(()=>{}).finally(()=>{if(findAC===ac)findAC=null});
 }
 let markSettle=null;
 function revealFirstMark(det){

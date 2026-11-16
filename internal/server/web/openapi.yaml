@@ -158,6 +158,23 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: mark
+          in: query
+          description: |
+            Words to mark inside each article body in place of the query's own,
+            wrapped in `<mark class="wu-hl">`. Read in every mode and without
+            `hl`: the answer is still the one `q` gives, and only what is
+            marked in it changes. wudict's own UI uses it to find a word
+            inside the articles of a section that is already open.
+
+            The words are one phrase: adjacent and in order, every word whole
+            but the last, which matches as a prefix. Case and diacritics are
+            ignored, and a phrase is followed across inline markup. A single
+            letter of a spaced script marks nothing. The 500-mark cap of `hl`
+            applies. Longer than 200 characters is a 400.
+          schema:
+            type: string
+            maxLength: 200
         - name: format
           in: query
           description: |

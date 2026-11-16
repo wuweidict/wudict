@@ -193,6 +193,31 @@ func TestMaxPhrases(t *testing.T) {
 	}
 }
 
+// A find field's text is one phrase with its last word open (D198): the words
+// adjacent and in order, never each word on its own.
+func TestCompilePhrase(t *testing.T) {
+	for _, tc := range []struct {
+		name, find, in, want string
+	}{
+		{"one word is a prefix", "viv", "una vivienda", "una " + o + "vivienda" + c},
+		{"it does not match inside a word", "enda", "una vivienda", "una vivienda"},
+		{"words are one adjacent span", "take of", "to take off now", "to " + o + "take off" + c + " now"},
+		{"an earlier word must match whole", "tak off", "to take off", "to take off"},
+		{"the words apart are not marked", "take off", "take it off", "take it off"},
+		{"case and diacritics fold", "RUN", "to rún", "to " + o + "rún" + c},
+		{"trailing punctuation keeps the last word open", "take of !", "take off", o + "take off" + c},
+		{"a lone letter marks nothing", "a", "a cat and a dog", "a cat and a dog"},
+		{"punctuation alone marks nothing", "?!", "what?!", "what?!"},
+		{"an empty field marks nothing", "  ", "nothing", "nothing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CompilePhrase(tc.find).Mark(tc.in); got != tc.want {
+				t.Errorf("CompilePhrase(%q).Mark(%q)\n got %q\nwant %q", tc.find, tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCompileDeduplicates(t *testing.T) {
 	if n := len(Compile("run RUN rún run").phrases); n != 1 {
 		t.Errorf("terms = %d, want 1", n)

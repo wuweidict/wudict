@@ -5,6 +5,7 @@
 package server
 
 import (
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -74,6 +75,54 @@ func TestSearchHighlight(t *testing.T) {
 		if strings.Contains(got, "wu-hl") {
 			t.Errorf("%s marked anyway: %s", q, got)
 		}
+	}
+}
+
+// `mark` paints other words than the query's, in every mode (D198): the answer
+// is the one `q` gives, and what is marked in it is what the reader is looking
+// for inside it.
+func TestSearchMarkParam(t *testing.T) {
+	s, id := newHLServer(t)
+
+	for _, tc := range []struct {
+		name, query string
+		marks       []string
+		unmarked    []string
+	}{
+		{"a headword lookup is marked", "q=vivienda&mode=exact&mark=cas",
+			[]string{`<mark class="wu-hl">casa</mark>`}, []string{`<mark class="wu-hl">vivienda`}},
+		{"the words are one phrase", "q=vivienda&mode=exact&mark=" + url.QueryEscape("es una"),
+			[]string{`<mark class="wu-hl">es una</mark>`}, nil},
+		{"it replaces the full-text marks", "q=vivi&mode=fts&hl=1&mark=casa",
+			[]string{`<mark class="wu-hl">casa</mark>`}, []string{`<mark class="wu-hl">vivienda`}},
+		{"it does not need hl", "q=vivi&mode=fts&mark=casa",
+			[]string{`<mark class="wu-hl">casa</mark>`}, nil},
+		{"blank is absent", "q=vivienda&mode=exact&mark=" + url.QueryEscape("  "),
+			nil, []string{"wu-hl"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := bodies(searchStream(t, s, "/api/search?"+tc.query+"&dict="+id))
+			if !strings.Contains(got, "casa") {
+				t.Fatalf("no body came back - the case would pass vacuously: %q", got)
+			}
+			for _, m := range tc.marks {
+				if !strings.Contains(got, m) {
+					t.Errorf("missing %s in %s", m, got)
+				}
+			}
+			for _, m := range tc.unmarked {
+				if strings.Contains(got, m) {
+					t.Errorf("unexpected %s in %s", m, got)
+				}
+			}
+		})
+	}
+
+	req := newRequest("GET", "/api/search?q=vivienda&mode=exact&dict="+id+"&mark="+strings.Repeat("a", maxFindRunes+1), nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != 400 {
+		t.Errorf("an over-long mark answered %d, want 400", rec.Code)
 	}
 }
 

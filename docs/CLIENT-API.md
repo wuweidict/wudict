@@ -147,6 +147,7 @@ The only endpoint a lookup needs.
 | `n` | max results **per dictionary** | default **20**, capped at 500 — too many for hover; send it explicitly |
 | `format` | `raw`, `clean`, `text` | default `raw`; see §8 |
 | `hl` | `1` to mark the query's words in each article | read only with `mode=fts`; default off; see §8 |
+| `mark` | words to mark in each article in place of the query's | every mode, no `hl` needed; one phrase, last word a prefix; at most 200 characters |
 
 A search is cut off after **30 s**, or after 5 minutes when it covers exactly
 one dictionary.

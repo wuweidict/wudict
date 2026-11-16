@@ -154,6 +154,25 @@ func Compile(query string) *Terms {
 	return NewPhrases(ps)
 }
 
+// CompilePhrase folds a word sequence into ONE phrase: the words adjacent and
+// in order, the last one left open. It is the reading of a find field - `take
+// of` finds "take off" and "takes of" does not - where Compile's is the
+// reading of a bag of search terms.
+//
+// Every term is handed over open; NewPhrases keeps the star on the last token
+// that survives folding, so trailing punctuation cannot close the phrase.
+func CompilePhrase(text string) *Terms {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return nil
+	}
+	p := make(Phrase, len(fields))
+	for i, f := range fields {
+		p[i] = Term{Text: f, Prefix: true}
+	}
+	return NewPhrases([]Phrase{p})
+}
+
 // Mark marks one text node that stands alone: Marker.Mark with no article
 // around it.
 func (t *Terms) Mark(s string) string {
