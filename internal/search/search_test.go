@@ -301,3 +301,59 @@ func TestParseMode(t *testing.T) {
 		}
 	}
 }
+
+// keyed is a prepared backend that can list its keys (dict.Keyer). Its keys
+// are marked, so a test can tell which of the two paths answered.
+type keyed struct{ fake }
+
+func (k *keyed) keys(rs []dict.Result, err error) ([]string, error) {
+	var out []string
+	for _, r := range rs {
+		out = append(out, r.Headword+"!")
+	}
+	return out, err
+}
+func (k *keyed) PrefixKeys(ctx context.Context, w string, n int) ([]string, error) {
+	return k.keys(k.PrefixContext(ctx, w, n))
+}
+func (k *keyed) WildcardKeys(ctx context.Context, p string, n int) ([]string, error) {
+	return k.keys(k.WildcardContext(ctx, p, n))
+}
+
+// StreamKeys answers with headwords and no article: from the keys of a
+// backend that lists them, and from the ordinary query of one that does not.
+func TestStreamKeys(t *testing.T) {
+	words := []string{"casa", "casar", "cosa"}
+	openers := []Opener{
+		func() (dict.Dictionary, error) { return &keyed{fake{name: "K", words: words, hasWildcard: true}}, nil },
+		func() (dict.Dictionary, error) { return &fake{name: "F", words: words}, nil },
+	}
+	for _, tc := range []struct {
+		mode Mode
+		term string
+		want [2][]string
+		skip bool // the second backend has no wildcard search
+	}{
+		{Prefix, "cas", [2][]string{{"casa!", "casar!"}, {"casa", "casar"}}, false},
+		{Wildcard, "c?sa", [2][]string{{"casa!", "cosa!"}, nil}, true},
+		{Exact, "cosa", [2][]string{{"cosa"}, {"cosa"}}, false},
+	} {
+		hits := make([]Hit, 2)
+		StreamKeys(context.Background(), openers, tc.mode, tc.term, 10, func(i int, h Hit) { hits[i] = h })
+		for i, h := range hits {
+			var got []string
+			for _, r := range h.Results {
+				if r.Body != "" {
+					t.Errorf("%v %q: %q came with an article", tc.mode, tc.term, r.Headword)
+				}
+				got = append(got, r.Headword)
+			}
+			if h.Err != nil || strings.Join(got, ",") != strings.Join(tc.want[i], ",") {
+				t.Errorf("%v %q, backend %d = %v, %v, want %v", tc.mode, tc.term, i, got, h.Err, tc.want[i])
+			}
+		}
+		if hits[1].Skipped != tc.skip {
+			t.Errorf("%v %q: skipped = %v, want %v", tc.mode, tc.term, hits[1].Skipped, tc.skip)
+		}
+	}
+}

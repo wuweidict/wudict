@@ -198,9 +198,10 @@ input[type=search]::placeholder{color:var(--fg-soft);opacity:1}
 .qbox.hasq .qstar{visibility:visible}
 .qstar:hover,.qstar[aria-pressed="true"]{color:var(--accent)}
 .qstar[aria-pressed="true"] path{fill:currentColor}
-/* Favourites, then history, under the EMPTY box, on a click or ↓ - never by
-   itself, never while typing (live search is already the completion). An
-   overlay: opening it moves nothing below. */
+/* Under the EMPTY box, on a click or ↓: favourites, then history. Under a box
+   with text: the headwords that match it (D199) - on ↓, or by itself while
+   typing when the reader chose "List headwords". An overlay: opening it moves
+   nothing below. */
 #recall{position:absolute;top:calc(100% + 4px);left:0;right:0;min-width:12em;
   max-height:min(60vh,24em);overflow-y:auto;margin:0;padding:.25em 0;list-style:none;
   background:var(--bg-card);border:1px solid var(--line);border-radius:8px;
@@ -1200,7 +1201,8 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
      submits under the HTML spec's no-submit-button clause and the submit
      listener below runs unchanged — and anything two characters or longer
      never waits for a keypress at all, because the input handler searches
-     as you type. A button would be a magnifier next to a magnifier. -->
+     as you type. Under "List headwords" (D199) a row of the list is the
+     click target. A button would be a magnifier next to a magnifier. -->
 <button type="button" class="btn tools themeBtn" title="Theme" aria-label="Toggle theme">◐</button>
 <button type="button" class="btn" id="wideBtn" title="Toggle wide layout" aria-label="Toggle wide layout">⇔</button>
 <button type="button" class="btn" id="expandBtn" title="Open all results" aria-label="Open all results" aria-pressed="false">⊞</button>
@@ -1284,6 +1286,17 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
          All, with no limit: the reader may trade speed for it. A larger number
          set by hand in state.json is shown as its own choice. Wording in
          ASD-STE100. -->
+    <!-- What typing does (D199). A closed set of two, so a native <select>
+         like "Open" below: the default searches what is typed, the other
+         lists the headwords that match and leaves the search to Enter or a
+         picked row. -->
+    <label class="seg">
+      <span>While you type</span>
+      <select id="typeSel" title="Search as you type, or list the matching headwords under the search box and search on Enter.">
+        <option value="live">Search</option>
+        <option value="list">List headwords</option>
+      </select>
+    </label>
     <label class="seg">
       <span>Open</span>
       <select id="openSel" title="These dictionaries open automatically, in the sequence of your list. Many open dictionaries can make the page slow.">
@@ -1491,7 +1504,7 @@ async function loadPrefs(){
     const st=await r.json(),rows=st.dicts||[];
     // Read before the exists branch below returns: on a first run there is no
     // ui record, but there is also nothing here that can go wrong.
-    if(st.ui){applyFS(st.ui.fontSize,false);applyHL(!st.ui.hlOff,false);applySpeak(!st.ui.speakOff,false);applyOpen(st.ui.fastFirst?"fast":st.ui.openAll?"all":String(st.ui.openN||1),false);applyGroupsOff(st.ui.groupsOff,false);fullOn=!!st.ui.full;modePref=st.ui.mode||"prefix";setMode(modePref);applyHist(!st.ui.historyOff,false)}
+    if(st.ui){applyFS(st.ui.fontSize,false);applyHL(!st.ui.hlOff,false);applySpeak(!st.ui.speakOff,false);applyOpen(st.ui.fastFirst?"fast":st.ui.openAll?"all":String(st.ui.openN||1),false);applyGroupsOff(st.ui.groupsOff,false);fullOn=!!st.ui.full;modePref=st.ui.mode||"prefix";setMode(modePref);applyHist(!st.ui.historyOff,false);applyType(st.ui.listWords,false)}
     uiBase=uiNow();
     dictsBase=rows.map(prefRow);
     // Last, so that a page whose baselines are not both in hand never saves:
@@ -1523,7 +1536,7 @@ let uiBase=null;
    drive) and this page cannot speak for them. */
 let dictsBase=null;
 function uiNow(){
-  return{fontSize:articleFS,hlOff:!hlOn,speakOff:!speakOn,fastFirst:!orderFirst,openN:openN>1?openN:0,openAll,groupsOff:[...groupsOff].sort(),full:fullOn,mode:modePref==="prefix"?"":modePref,historyOff:!histOn};
+  return{fontSize:articleFS,hlOff:!hlOn,speakOff:!speakOn,fastFirst:!orderFirst,openN:openN>1?openN:0,openAll,groupsOff:[...groupsOff].sort(),full:fullOn,mode:modePref==="prefix"?"":modePref,historyOff:!histOn,listWords};
 }
 /* One dictionary's record as it is sent and compared: pin only when set, as
    the server stores it. The title always, "" for none: a record without the
@@ -1615,6 +1628,13 @@ function groupIds(sel){
   // The whole value compared, never split: ids are the names a user wrote in
   // groups.ini (D162), and a name may contain ":" itself.
   return orderedDicts().filter(d=>!disabled.has(d.id)&&(d.groups||[]).some(g=>"g:"+g.f+":"+g.v===sel)).map(d=>d.id);
+}
+/* The picker's choice as a `dict` parameter: one id, or the enabled
+   dictionaries of "All dictionaries" or of a group, in the user's order. ""
+   when that list is empty. */
+function pickedDicts(){
+  const v=$("dict").value||"all";
+  return v==="all"?enabledOrderedIds().join(","):v.startsWith("g:")?groupIds(v).join(","):v;
 }
 /* The label a group is shown under, for a message that has to name it. */
 function groupLabel(sel){
@@ -1855,6 +1875,17 @@ function applyOpen(v,save){
   if(save&&moved)savePrefs();
   return moved;
 }
+/* What typing in the search box does (D199): a search of what is typed, the
+   default, or the list of headwords that match it under the box, with the
+   search left to Enter or a row of that list. Server state like the ones
+   above: a habit of the person, not a property of this browser. */
+let listWords=false;
+function applyType(on,save){
+  const v=!!on,moved=v!==listWords;
+  listWords=v;
+  $("typeSel").value=v?"list":"live";
+  if(save&&moved)savePrefs();
+}
 /* Which picker sections are hidden, by facet id (D149). Server state like the
    pins, because it describes how this person reads the library, not the
    device. Hiding never drops the group in force: that one option stays in the
@@ -1908,6 +1939,7 @@ $("openSel").addEventListener("change",e=>{
   if(applyOpen(e.target.value,true)&&$("q").value.trim())doSearch();
 });
 applyOpen("1",false);
+$("typeSel").addEventListener("change",e=>applyType(e.target.value==="list",true));
 for(const [id,step] of [["fsDown",-1],["fsUp",1],["fsVal",0]])
   $(id).addEventListener("click",()=>applyFS(step?articleFS+step:FS_DEF,true));
 applyFS(FS_DEF,false);   // paints --wd-fs and the .lim state before any load
@@ -4529,10 +4561,13 @@ document.addEventListener("click",e=>{
   }).catch(()=>{more.textContent="more…"});
 });
 
-/* live search: debounce while typing */
+/* live search: debounce while typing. Not under "List headwords" (D199):
+   there typing fills the list under the box, and Enter or a picked row
+   searches. */
 let debounce=null;
 $("q").addEventListener("input",()=>{
   clearTimeout(debounce);
+  if(listWords)return;
   const v=$("q").value.trim();
   if(v.length<2)return;
   debounce=setTimeout(doSearch,300);
@@ -4635,7 +4670,7 @@ function searchFor(term,opts){
   const t=String(term||"").trim();
   if(!t)return;
   $("q").value=t;                       // verbatim: no trimming, ever
-  if(notForWords($("mode").value))$("mode").value="prefix";
+  if(!opts?.keepMode&&notForWords($("mode").value))$("mode").value="prefix";
   const scope=opts?.scope||null,frag=opts?.frag||"";
   scopeOnce=scope;
   // the fragment addresses a place in the SCOPED article; renderSlot matches
@@ -5679,6 +5714,7 @@ $("frm").removeEventListener("submit",_doSearch);
    input has none. */
 $("q").addEventListener("keydown",e=>{
   if(e.key!=="Enter"||e.isComposing||e.ctrlKey||e.metaKey||e.altKey)return;
+  if(!recall.hidden&&recallSel>=0)return; // Enter picks the highlighted row
   if(!navWalkable()||$("q").value.trim()!==lastQuery)return;
   e.preventDefault();navGo(e.shiftKey?-1:1);
 });
@@ -5691,6 +5727,7 @@ $("frm").addEventListener("submit",e=>{
      nothing is covering anything and refining the term is the next thing a
      mouse user does. */
   if(!matchMedia("(hover:hover)").matches)$("q").blur();
+  closeRecall(); // and a list still open, or on its way, would cover the answer
   commitOnce=true; // the one moment the query is finished: this search may scroll
   return doSearch(e);
 });
@@ -5791,12 +5828,36 @@ $("histClear").addEventListener("click",()=>{
 });
 $("qstar").addEventListener("click",toggleFav);
 
-/* The list under the empty box. Built when it opens - at most 2×RECALL_MAX
-   rows - and thrown away when it closes; nothing about it runs while it is
-   shut. */
+/* The list under the box. Built when it opens - at most 2×RECALL_MAX rows -
+   and thrown away when it closes; nothing about it runs while it is shut.
+   Under the empty box it is the favourites and the history. Under a box with
+   text it is the headwords that match the text (D199, /api/suggest): by
+   itself while typing under "List headwords", and on ↓ otherwise. `sug` says
+   which of the two is open: a headword row is picked like any row, and is
+   never forgotten like a history row. */
 const recall=$("recall");
-let recallSel=-1;
+let recallSel=-1,sug=false;
 const recallRows=()=>recall.querySelectorAll("li[data-w]");
+/* rows: [word, class] pairs. None closes the list: "no headword starts like
+   this" is not "nothing will be found", since the search also lemmatizes. */
+function fillRecall(rows,isSug){
+  if(!rows.length){closeRecall();return}
+  const f=document.createDocumentFragment();
+  rows.forEach(([w,cls],n)=>{
+    const li=document.createElement("li");
+    li.id="rc"+n;li.dataset.w=w;li.textContent=w;
+    li.setAttribute("role","option");
+    if(cls)li.className=cls;
+    f.appendChild(li);
+  });
+  recall.replaceChildren(f);
+  recall.scrollTop=0;
+  recallSel=-1;sug=isSug;
+  recall.setAttribute("aria-label",isSug?"Matching headwords":"Favourites and history");
+  recall.hidden=false;
+  $("q").setAttribute("aria-expanded","true");
+  $("q").removeAttribute("aria-activedescendant");
+}
 function openRecall(){
   if($("q").value.trim()||$("q").disabled)return;
   // "Keep history" off hides the list too: a switch drawn off that still
@@ -5804,27 +5865,14 @@ function openRecall(){
   // it back on brings them back; Clear history is the deletion.
   const rest=histOn?hist.filter(w=>!favSet.has(wordKey(w))).slice(0,RECALL_MAX):[];
   if(!favs.length&&!rest.length)return;
-  const f=document.createDocumentFragment();
-  let n=0;
-  const row=(w,cls)=>{
-    const li=document.createElement("li");
-    li.id="rc"+n++;li.dataset.w=w;li.textContent=w;
-    li.setAttribute("role","option");
-    if(cls)li.className=cls;
-    f.appendChild(li);
-  };
-  for(const w of favs.slice(0,RECALL_MAX))row(w,"fav");
-  for(const w of rest)row(w);
-  recall.replaceChildren(f);
-  recallSel=-1;
-  recall.hidden=false;
-  $("q").setAttribute("aria-expanded","true");
+  fillRecall([...favs.slice(0,RECALL_MAX).map(w=>[w,"fav"]),...rest.map(w=>[w,""])],false);
 }
 function closeRecall(){
+  sugCancel(); // also a list that is still on its way
   if(recall.hidden)return;
   recall.hidden=true;
   recall.replaceChildren();
-  recallSel=-1;
+  recallSel=-1;sug=false;
   $("q").setAttribute("aria-expanded","false");
   $("q").removeAttribute("aria-activedescendant");
 }
@@ -5839,20 +5887,83 @@ function moveRecall(d){
   li.scrollIntoView({block:"nearest"});
   $("q").setAttribute("aria-activedescendant",li.id);
 }
+/* The headwords that match the text in the box. Asked SUG_MS after the last
+   key: shorter than the search's 300 ms, because the answer is a glance at a
+   few words and no article is read for it. Each request cancels the one
+   before; an answer is shown only to the text it was asked for, and only
+   while the box still has the caret. */
+const SUG_MS=150,SUG_MIN=2;
+let sugTimer=0,sugAC=null,sugSeq=0;
+/* The mode the list is asked in, or "" for a text that gets none: under
+   SUG_MIN characters, as the search itself; and in full-text mode, where a
+   match is not a headword. Exact lists by prefix, since a word still being
+   typed matches nothing exactly. */
+function sugMode(v){
+  if(v.length<SUG_MIN||$("q").disabled)return "";
+  const m=$("mode").value;
+  return m==="fts"?"":m==="wildcard"?"wildcard":"prefix";
+}
+function sugCancel(){
+  clearTimeout(sugTimer);
+  sugSeq++;
+  if(sugAC){sugAC.abort();sugAC=null}
+}
+function sugSoon(){sugCancel();sugTimer=setTimeout(sugFetch,SUG_MS)}
+async function sugFetch(){
+  sugCancel();
+  const seq=sugSeq,v=$("q").value.trim(),m=sugMode(v),ds=pickedDicts();
+  if(!m||!ds){closeRecall();return}
+  // Wildcard mode matches whole headwords, so a text without a wildcard
+  // character lists what it starts: the pattern `text*`.
+  const ask=m==="wildcard"&&!/[*?]/.test(v)?v+"*":v;
+  const ac=sugAC=new AbortController();
+  let words=[];
+  try{
+    const r=await fetch("/api/suggest?q="+encodeURIComponent(ask)+"&mode="+m+"&dict="+encodeURIComponent(ds),{signal:ac.signal});
+    if(r.ok)words=(await r.json()).words||[];
+  }catch(_){}
+  if(seq!==sugSeq||document.activeElement!==$("q")||$("q").value.trim()!==v)return;
+  fillRecall(words.map(w=>[w,""]),true);
+}
 /* A pick is a submit: on a touch device the soft keyboard is standing over the
-   answer, so the box lets go of it, as the form's submit does. */
+   answer, so the box lets go of it, as the form's submit does. A headword
+   listed for a wildcard pattern is looked up in that mode, as itself, where
+   searchFor would move the mode to prefix - unless it holds a wildcard
+   character, which that mode would read as a pattern. */
 function pickRecall(w){
+  const keepMode=sug&&$("mode").value==="wildcard"&&!/[*?]/.test(w);
   closeRecall();
   if(!matchMedia("(hover:hover)").matches)$("q").blur();
-  searchFor(w);
+  searchFor(w,{keepMode});
 }
-$("q").addEventListener("click",()=>{if(recall.hidden)openRecall()});
+/* A click in the box opens the list the box has: the favourites and history
+   when it is empty, and under "List headwords" the headwords for its text. */
+$("q").addEventListener("click",()=>{
+  if(!recall.hidden)return;
+  if(!$("q").value.trim())openRecall();
+  else if(listWords)sugFetch();
+});
 $("q").addEventListener("blur",closeRecall);
-$("q").addEventListener("input",()=>{if($("q").value)closeRecall();syncStar()});
+/* Typing. Under "List headwords" the list follows the text: the favourites
+   and history go at the first character, and headword rows stay, with nothing
+   highlighted, until the next ones replace them - so the list does not blink
+   between two keys. Otherwise typing closes the list, since the search
+   answers it. */
+$("q").addEventListener("input",()=>{
+  if(listWords&&sugMode($("q").value.trim())){
+    if(sug&&recallSel>=0)moveRecall(-recallSel-1);
+    else if(!sug)closeRecall();
+    sugSoon();
+  }else if($("q").value||sug)closeRecall();
+  syncStar();
+});
 $("q").addEventListener("keydown",e=>{
   if(e.isComposing||e.ctrlKey||e.metaKey||e.altKey)return;
   if(recall.hidden){
-    if(e.key==="ArrowDown"&&!$("q").value){e.preventDefault();openRecall()}
+    // ↓ opens the list the box has; with text, in either typing mode
+    if(e.key!=="ArrowDown")return;
+    if(!$("q").value){e.preventDefault();openRecall()}
+    else if(sugMode($("q").value.trim())){e.preventDefault();sugFetch()}
     return;
   }
   const rows=recallRows();
@@ -5867,7 +5978,7 @@ $("q").addEventListener("keydown",e=>{
   case "Delete":
     // Shift+Delete forgets the selected history word, as a browser's own
     // address-bar suggestions do; a favourite is unstarred with the star.
-    if(e.shiftKey&&recallSel>=0&&!rows[recallSel].classList.contains("fav")){
+    if(e.shiftKey&&!sug&&recallSel>=0&&!rows[recallSel].classList.contains("fav")){
       e.preventDefault();
       const w=rows[recallSel].dataset.w;
       const at=recallSel;
@@ -5898,7 +6009,7 @@ recall.addEventListener("pointerdown",e=>{
   e.preventDefault();
   held=false;
   dropHold();
-  const li=e.pointerType!=="mouse"&&e.target.closest("li[data-w]:not(.fav)");
+  const li=!sug&&e.pointerType!=="mouse"&&e.target.closest("li[data-w]:not(.fav)");
   if(!li)return;
   holdAt={x:e.clientX,y:e.clientY};
   holdTimer=setTimeout(()=>{

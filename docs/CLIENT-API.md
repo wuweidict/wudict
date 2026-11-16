@@ -13,7 +13,7 @@ will move without notice.
   a supported way to hand a lookup to a browser tab (§9). Its HTML is not.
 - **Private — do not depend on:** every other route, for example `/api/prefs`,
   `/api/config`, `/api/ingest`, `/api/setup`, `/api/library`, `/api/rescan`,
-  `/api/reveal`, `/api/about`, `/api/browse`, `/api/groups`, `/api/lemmas`,
+  `/api/reveal`, `/api/about`, `/api/browse`, `/api/suggest`, `/api/groups`, `/api/lemmas`,
   `/api/intake`, `/api/reindex`, `/setup`, `/browse`, `/assets/…`
 
 Default origin `http://127.0.0.1:6888`. Both parts are user-configurable

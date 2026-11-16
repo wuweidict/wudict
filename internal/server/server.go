@@ -1372,23 +1372,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	dictParam := r.URL.Query().Get("dict")
-	var entries []*entry
-	if dictParam == "" || dictParam == "all" {
-		entries = s.reg.all()
-	} else {
-		for _, id := range strings.Split(dictParam, ",") {
-			if id = strings.TrimSpace(id); id == "" {
-				continue
-			}
-			if e, err := s.reg.get(id); err == nil {
-				entries = append(entries, e)
-			}
-		}
-		if len(entries) == 0 { // none of the requested ids resolved
-			httpErr(w, 404, "unknown dictionary id %q", dictParam)
-			return
-		}
+	entries, ok := s.searchEntries(w, r.URL.Query().Get("dict"))
+	if !ok {
+		return
 	}
 
 	st, ok := newStream(w, "application/x-ndjson; charset=utf-8")
@@ -1403,49 +1389,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// (cold MDX ~180ms, cold SLOB ~1s) is deferred into the workers below, so
 	// time-to-first-byte is one open at most, never the sum of all of them.
 	begin := make([]streamSlot, len(entries))
-	openers := make([]search.Opener, len(entries))
-	// One budget for this query: what the fan-out may newly materialise before
-	// it starts declining dictionaries instead of opening them (see fanout).
-	// Nil when uncapped, which is the desktop default.
-	//
-	// A query naming ONE dictionary has no fan-out to cap, and is never capped.
-	// The budget bounds the multiplication - N dictionaries materialised at
-	// once by a single `all` query - and a search of one is bounded by that one
-	// dictionary. It is also, always, a direct demand: the user picked it in
-	// the selector, asked for `more…`, or opened a deferred section. Declining
-	// it would leave the dictionary unreachable through EVERY path the app has,
-	// which is worse than the memory by a wide margin - and the steady state is
-	// still held by PREVIEW_MEMORY, the janitor and the relax valve, none of
-	// which this bypasses.
-	fan := s.reg.fanout()
-	demand := len(entries) == 1
-	if demand {
-		fan = nil
-	}
 	for i, e := range entries {
-		e := e
 		begin[i] = streamSlot{Dict: e.ID, Name: e.ID}
-		openers[i] = func() (dict.Dictionary, error) {
-			if demand && dict.SelfPrepares(e.Path) {
-				// A search of this one dictionary waits on its open, which
-				// for this format may be its preparation (D182).
-				defer dict.MarkUrgent(e.Path)()
-			}
-			d, err := e.openWithin(fan)
-			if err == nil && s.AutoIndex {
-				// A search of one dictionary is a demand for that dictionary,
-				// so its index jumps the background queue (demandIndex); a
-				// dictionary that merely happened to be in a wide search takes
-				// its turn (maybeAutoIndex). Both prepare the same thing.
-				if demand {
-					e.demandIndex()
-				} else {
-					e.maybeAutoIndex()
-				}
-			}
-			return d, err
-		}
 	}
+	demand := len(entries) == 1
+	openers := s.searchOpeners(entries)
 	writeLine(streamMsg{T: "begin", Slots: begin})
 
 	// renderHit turns one dictionary's answer into its NDJSON line. Extracted
@@ -1558,6 +1506,79 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		s.lemmaWave(ctx, writeLine, renderHit, entries, metas, missed, openers, mode, q, n)
 	}
 	writeLine(streamMsg{T: "end"})
+}
+
+// searchEntries resolves a `dict` parameter - "all" or nothing, one id, or a
+// comma-separated list in the caller's order - to the dictionaries it names.
+// Unknown ids in a list are skipped; when none resolves it has answered 404
+// and reports false.
+func (s *Server) searchEntries(w http.ResponseWriter, dictParam string) ([]*entry, bool) {
+	if dictParam == "" || dictParam == "all" {
+		return s.reg.all(), true
+	}
+	var entries []*entry
+	for _, id := range strings.Split(dictParam, ",") {
+		if id = strings.TrimSpace(id); id == "" {
+			continue
+		}
+		if e, err := s.reg.get(id); err == nil {
+			entries = append(entries, e)
+		}
+	}
+	if len(entries) == 0 {
+		httpErr(w, 404, "unknown dictionary id %q", dictParam)
+		return nil, false
+	}
+	return entries, true
+}
+
+// searchOpeners makes the fan-out's opener for each dictionary of one query:
+// the search itself and the list of matching words (suggest.go) open, cap and
+// index a dictionary by the same rules.
+func (s *Server) searchOpeners(entries []*entry) []search.Opener {
+	openers := make([]search.Opener, len(entries))
+	// One budget for this query: what the fan-out may newly materialise before
+	// it starts declining dictionaries instead of opening them (see fanout).
+	// Nil when uncapped, which is the desktop default.
+	//
+	// A query naming ONE dictionary has no fan-out to cap, and is never capped.
+	// The budget bounds the multiplication - N dictionaries materialised at
+	// once by a single `all` query - and a search of one is bounded by that one
+	// dictionary. It is also, always, a direct demand: the user picked it in
+	// the selector, asked for `more…`, or opened a deferred section. Declining
+	// it would leave the dictionary unreachable through EVERY path the app has,
+	// which is worse than the memory by a wide margin - and the steady state is
+	// still held by PREVIEW_MEMORY, the janitor and the relax valve, none of
+	// which this bypasses.
+	fan := s.reg.fanout()
+	demand := len(entries) == 1
+	if demand {
+		fan = nil
+	}
+	for i, e := range entries {
+		e := e
+		openers[i] = func() (dict.Dictionary, error) {
+			if demand && dict.SelfPrepares(e.Path) {
+				// A search of this one dictionary waits on its open, which
+				// for this format may be its preparation (D182).
+				defer dict.MarkUrgent(e.Path)()
+			}
+			d, err := e.openWithin(fan)
+			if err == nil && s.AutoIndex {
+				// A search of one dictionary is a demand for that dictionary,
+				// so its index jumps the background queue (demandIndex); a
+				// dictionary that merely happened to be in a wide search takes
+				// its turn (maybeAutoIndex). Both prepare the same thing.
+				if demand {
+					e.demandIndex()
+				} else {
+					e.maybeAutoIndex()
+				}
+			}
+			return d, err
+		}
+	}
+	return openers
 }
 
 // lemmaWave is the second and last pass: for each dictionary that searched and

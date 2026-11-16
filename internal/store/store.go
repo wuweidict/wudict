@@ -46,6 +46,7 @@ func init() {
 const maxLimit = 500
 
 var _ dict.Searcher = (*Store)(nil)
+var _ dict.Keyer = (*Store)(nil)
 
 // Store is one opened .text.db. Safe for concurrent readers.
 type Store struct {
@@ -396,6 +397,17 @@ func (s *Store) PrefixContext(ctx context.Context, word string, limit int) ([]di
 		return nil, nil
 	}
 	return s.ranked(ctx, wildcard.Literal(word, true), limit, scope{aliases: true})
+}
+
+// PrefixKeys implements dict.Keyer: the key each entry PrefixContext returns
+// was found by - its headword, or the alias typed - in its order. No article
+// is read.
+func (s *Store) PrefixKeys(ctx context.Context, word string, limit int) ([]string, error) {
+	word = strings.TrimSpace(word)
+	if word == "" {
+		return nil, nil
+	}
+	return s.keys(ctx, wildcard.Literal(word, true), limit, scope{aliases: true})
 }
 
 // FullTextContext searches headwords and article text, ordered by BM25 rank,

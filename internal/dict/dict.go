@@ -208,6 +208,16 @@ type Searcher interface {
 	WildcardContext(ctx context.Context, pattern string, limit int) ([]Result, error)
 }
 
+// Keyer lists the keys a prepared database would answer a query with, without
+// reading an article: what the list of matching words under the search box is
+// made of (D199). One key for each entry the Searcher method of the same name
+// returns, in the same order - the headword, or for a prefix the alias that
+// was typed. Both read the headword index only.
+type Keyer interface {
+	PrefixKeys(ctx context.Context, word string, limit int) ([]string, error)
+	WildcardKeys(ctx context.Context, pattern string, limit int) ([]string, error)
+}
+
 // Letter is one chip of the browse strip: a run of headwords sharing an
 // initial, and where that run begins in browse order.
 //

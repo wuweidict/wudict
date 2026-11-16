@@ -33,6 +33,10 @@ import (
 //
 // ß is a letter of its own, not ss (O2): Maß sorts after Masse and Mast.
 
+// Collate is collCompare for a list made of several dictionaries' keys: the
+// order each of them returns its own in.
+func Collate(a, b string) int { return collCompare(a, b) }
+
 // collCompare orders two keys in dictionary order, then by their bytes.
 func collCompare(a, b string) int {
 	if c := compareRunes(primary(a), primary(b)); c != 0 {

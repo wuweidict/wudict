@@ -150,6 +150,26 @@ A search of several dictionaries shows up to 5 results per dictionary; a search
 of one dictionary, up to 25. <kbd>more…</kbd> in a section header shows up to
 100 results from that dictionary.
 
+## Headword list
+
+wudict searches as you type. To see the matching headwords first, set
+<kbd>While you type</kbd> to <kbd>List headwords</kbd> in the dictionary panel.
+The headwords of all the dictionaries in the search then show in one list
+under the search box, and the results change only when you select one.
+
+- <kbd>↓</kbd> and <kbd>↑</kbd> move through the list. <kbd>Enter</kbd> looks
+  up the highlighted headword. A click or a tap on a headword does the same.
+- <kbd>Enter</kbd> with no headword highlighted searches for the text as typed.
+- <kbd>Esc</kbd> closes the list.
+
+With <kbd>While you type</kbd> set to <kbd>Search</kbd>, the default,
+<kbd>↓</kbd> opens the same list for the text in the search box.
+
+The list starts at 2 characters and holds at most 20 headwords. A headword
+shows once, whatever its capitals. In wildcard mode the list holds the
+headwords that fit the pattern. Full-text mode has no list: <kbd>Enter</kbd>
+starts the search.
+
 ## Cross-references
 
 A link in an article is looked up in the same dictionary first. If that
@@ -181,7 +201,9 @@ title. With the button off, a result opens as its dictionary has it.
 | Key or button | Action |
 | --- | --- |
 | <kbd>/</kbd> | focus the search box |
-| <kbd>Esc</kbd> | close the dictionary panel |
+| <kbd>Esc</kbd> | close the dictionary panel, or the list under the search box |
+| <kbd>↓</kbd> in the search box | open the list under it: favourites and history when the box is empty, the matching headwords when it has text |
+| <kbd>↓</kbd> <kbd>↑</kbd>, then <kbd>Enter</kbd> | select a word in that list and look it up |
 | double-click a word in an article | search for it |
 | <kbd>⊞</kbd> / <kbd>⊟</kbd> | expand / collapse all results |
 | <kbd>⇔</kbd> | wide layout on or off |
@@ -199,6 +221,7 @@ title. With the button off, a result opens as its dictionary has it.
 | <kbd>Highlight matches</kbd> | mark the query's words in articles (full-text only); on by default |
 | <kbd>Read aloud</kbd> | offer to read selected article text aloud; on by default |
 | **Open first**: *My order*, *Fastest* | which result section opens first |
+| **While you type**: <kbd>Search</kbd>, <kbd>List headwords</kbd> | search as you type (default), or list the matching headwords under the search box and search on <kbd>Enter</kbd> |
 | **Group by** | the groups the picker offers |
 | folder summary <kbd>⚙ 2 folders · 105 dictionaries</kbd> | folders, library and config file in effect; <kbd>Edit folders…</kbd>, <kbd>Rescan folders</kbd>, <kbd>Lemmatization…</kbd>, <kbd>Browse A–Z…</kbd>, <kbd>Edit groups…</kbd>, <kbd>Custom styles…</kbd>, <kbd>Full-text for every dictionary…</kbd> |
 

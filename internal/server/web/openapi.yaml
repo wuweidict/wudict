@@ -1991,6 +1991,77 @@ paths:
                   indexing: { type: boolean, description: "Preparation is running right now." }
         '500':
           $ref: '#/components/responses/ServerError'
+  /api/suggest:
+    get:
+      tags: [internal]
+      operationId: suggest
+      x-internal: true
+      summary: The headwords a search would match, as one list
+      description: >
+        What wudict's own page lists under the search box while a word is
+        typed: the headwords of all the dictionaries asked, merged into one
+        list. No article is read or returned. An indexed dictionary answers
+        from its headword index; one that is not indexed is searched through
+        its own format, as `/api/search` does.
+
+
+        The list is in dictionary order - case and accents ignored, the word
+        typed in full before the words it starts - and holds a word once
+        whatever its capitals. It is at most 20 words long. A dictionary that
+        has not answered within 2 seconds is left out of the list.
+
+
+        Same-origin only, as `/api/browse`: it is not part of the client API a
+        browser extension reaches (D69).
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: The text typed. Blank is a 400.
+          schema: { type: string }
+          example: banan
+        - name: mode
+          in: query
+          description: >
+            `prefix` lists the headwords, and the other spellings an entry
+            lists, that start with `q`. `wildcard` lists the headwords the
+            pattern `q` matches, in indexed dictionaries only. Any other mode
+            is a 400: nothing matches a half-typed word exactly, and a
+            full-text match is not a headword.
+          schema:
+            type: string
+            enum: [prefix, wildcard]
+            default: prefix
+        - name: dict
+          in: query
+          description: >
+            `all`, one dictionary id, or a comma-separated list of ids, as in
+            `/api/search`. A list where no id resolves is a 404.
+          schema: { type: string, default: all }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s 'http://127.0.0.1:6888/api/suggest?q=banan'
+      responses:
+        '200':
+          description: The list. Empty when nothing matches.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [words]
+                properties:
+                  words:
+                    type: array
+                    maxItems: 20
+                    items: { type: string }
+              example:
+                words: [banana, banana boat, banana republic, bananas]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/reveal:
     get:
       tags: [internal]
@@ -2812,6 +2883,14 @@ components:
             Stops recording looked-up words in history.txt. Absent keeps
             history. The server reads it too: while it is set, adding to
             history through /api/words does nothing.
+        listWords:
+          type: boolean
+          description: >
+            Typing in the search box lists the matching headwords under it
+            (`/api/suggest`), and the search waits for Enter or a word picked
+            from that list. Absent is the default: a search of what is typed,
+            as it is typed. Remembered state for wudict's own UI - the search
+            endpoint never reads it.
 
     Words:
       type: object

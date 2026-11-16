@@ -156,6 +156,12 @@ func allKeys(t *testing.T, s *Store, subs bool) []bkey {
 	return out
 }
 
+// rankIDs is rank as the brute force states it: the entries, in order.
+func rankIDs(s *Store, p wildcard.Pattern, n int, sc scope) ([]int64, error) {
+	hits, err := s.rank(bg, p, n, sc)
+	return entryIDs(hits), err
+}
+
 // bruteRank is rank by its definition (D181), over every key: the class of
 // each key, then dictionary order by the key (collCompare), a headword before an alias with
 // the same NOCASE key, each entry once. An alias is read only NOCASE-equal
@@ -276,7 +282,7 @@ func TestWildcardAgainstBruteForce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := s.rank(bg, p, n, scope{})
+			got, err := rankIDs(s, p, n, scope{})
 			if err != nil {
 				t.Fatalf("%q: %v", pat, err)
 			}
@@ -416,7 +422,7 @@ func rankAgainstBruteForce(t *testing.T, s *Store) {
 				if prefix {
 					keys = browse
 				}
-				got, err := s.rank(bg, p, n, sc)
+				got, err := rankIDs(s, p, n, sc)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -430,7 +436,7 @@ func rankAgainstBruteForce(t *testing.T, s *Store) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := s.rank(bg, p, n, scope{})
+			got, err := rankIDs(s, p, n, scope{})
 			if err != nil {
 				t.Fatal(err)
 			}

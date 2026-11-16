@@ -32,6 +32,20 @@ func (s *Store) WildcardContext(ctx context.Context, pattern string, limit int) 
 	return s.ranked(ctx, p, limit, scope{})
 }
 
+// WildcardKeys implements dict.Keyer: the headword of each entry
+// WildcardContext returns, in its order. No article is read.
+func (s *Store) WildcardKeys(ctx context.Context, pattern string, limit int) ([]string, error) {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil, nil
+	}
+	p, err := wildcard.Parse(pattern)
+	if err != nil {
+		return nil, err
+	}
+	return s.keys(ctx, p, limit, scope{})
+}
+
 // scope is what a search reads besides the entry headwords.
 type scope struct {
 	aliases bool // the other spellings an entry lists: exact and prefix search
@@ -40,14 +54,37 @@ type scope struct {
 
 // ranked runs rank and reads the articles of what it found.
 func (s *Store) ranked(ctx context.Context, p wildcard.Pattern, limit int, sc scope) ([]dict.Result, error) {
-	ids, err := s.rank(ctx, p, clamp(limit), sc)
-	if err != nil || len(ids) == 0 {
+	hits, err := s.rank(ctx, p, clamp(limit), sc)
+	if err != nil || len(hits) == 0 {
 		return nil, err
 	}
-	return s.entriesByID(ctx, ids)
+	return s.entriesByID(ctx, entryIDs(hits))
 }
 
-// rank returns the first n entries a pattern matches, best first (D181).
+// keys runs rank and returns the key each entry was found by: its headword,
+// or the alias that reached it. The index is all it reads.
+func (s *Store) keys(ctx context.Context, p wildcard.Pattern, limit int, sc scope) ([]string, error) {
+	hits, err := s.rank(ctx, p, clamp(limit), sc)
+	if err != nil || len(hits) == 0 {
+		return nil, err
+	}
+	out := make([]string, len(hits))
+	for i, h := range hits {
+		out[i] = h.key
+	}
+	return out, nil
+}
+
+func entryIDs(hits []hit) []int64 {
+	ids := make([]int64, len(hits))
+	for i, h := range hits {
+		ids[i] = h.id
+	}
+	return ids
+}
+
+// rank returns the first n entries a pattern matches, best first (D181),
+// each with the key that matched.
 // Case and accents rank, they never exclude. The order is by reading, in
 // Tiers order - as typed first when a capital was typed, accents kept first
 // when one was - and within one reading:
@@ -76,7 +113,7 @@ func (s *Store) ranked(ctx context.Context, p wildcard.Pattern, limit int, sc sc
 // Aliases (exact and prefix) go through SQLite's own NOCASE comparison and
 // GLOB only, never the folded reading: folding every alias in a range is
 // what D174 measured 2-80x slower.
-func (s *Store) rank(ctx context.Context, p wildcard.Pattern, n int, sc scope) ([]int64, error) {
+func (s *Store) rank(ctx context.Context, p wildcard.Pattern, n int, sc scope) ([]hit, error) {
 	spelled, ok := p, p.Literal()
 	if !ok {
 		spelled, ok = p.Spelled()
@@ -259,16 +296,16 @@ func (r *ranker) file(h hit, c, stop int) bool {
 // keeps every entry once,
 // at its best place: an entry its headword and an alias both match is one
 // article.
-func merge(n int, ent, al [][]hit) []int64 {
+func merge(n int, ent, al [][]hit) []hit {
 	seen := map[int64]struct{}{}
-	var ids []int64
+	var out []hit
 	for c := range ent {
 		x := ent[c]
 		var y []hit
 		if al != nil {
 			y = al[c]
 		}
-		for len(x)+len(y) > 0 && len(ids) < n {
+		for len(x)+len(y) > 0 && len(out) < n {
 			var h hit
 			if len(y) == 0 || (len(x) > 0 && collCompare(x[0].key, y[0].key) <= 0) {
 				h, x = x[0], x[1:]
@@ -277,11 +314,11 @@ func merge(n int, ent, al [][]hit) []int64 {
 			}
 			if _, ok := seen[h.id]; !ok {
 				seen[h.id] = struct{}{}
-				ids = append(ids, h.id)
+				out = append(out, h)
 			}
 		}
 	}
-	return ids
+	return out
 }
 
 // keyRange is a slice of a NOCASE index (idx_entry_w, idx_alias_w): lo

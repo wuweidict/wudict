@@ -1369,3 +1369,32 @@ func TestRedirectResolutionRule(t *testing.T) {
 		t.Errorf("unresolved redirect stored %d alias rows (%v)", n, err)
 	}
 }
+
+// The keys are the entries PrefixContext and WildcardContext return, in
+// their order, each as what was matched: an alias stands for its entry.
+func TestKeys(t *testing.T) {
+	s := testStore(t)
+	got, err := s.PrefixKeys(bg, "pregunta", 10)
+	if err != nil || !slices.Equal(got, []string{"pregunta", "preguntar"}) {
+		t.Fatalf("PrefixKeys(pregunta) = %v, %v", got, err)
+	}
+	got, err = s.PrefixKeys(bg, "cuestiona", 10)
+	if err != nil || len(got) != 1 || !strings.HasPrefix(got[0], "cuestiona") {
+		t.Fatalf("PrefixKeys(cuestiona) = %v, %v, want the alias typed", got, err)
+	}
+	got, err = s.WildcardKeys(bg, "pregunt*", 10)
+	if err != nil || !slices.Equal(got, []string{"pregunta", "preguntar"}) {
+		t.Fatalf("WildcardKeys(pregunt*) = %v, %v", got, err)
+	}
+	if got, err := s.WildcardKeys(bg, "cuestiona*", 10); err != nil || len(got) != 0 {
+		t.Fatalf("WildcardKeys(cuestiona*) = %v, %v: a pattern reads headwords only", got, err)
+	}
+	for _, blank := range []string{"", "  "} {
+		if got, err := s.PrefixKeys(bg, blank, 10); got != nil || err != nil {
+			t.Errorf("PrefixKeys(%q) = %v, %v", blank, got, err)
+		}
+		if got, err := s.WildcardKeys(bg, blank, 10); got != nil || err != nil {
+			t.Errorf("WildcardKeys(%q) = %v, %v", blank, got, err)
+		}
+	}
+}

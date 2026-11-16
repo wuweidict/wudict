@@ -54,7 +54,7 @@ func ParseMode(s string) (Mode, error) {
 // members - the same plan, the same ladder, the same capability rules - so a
 // command-line lookup and the app cannot answer the same question differently.
 func Query(ctx context.Context, d dict.Dictionary, mode Mode, term string, limit int) Hit {
-	return query(ctx, d, mode, term, planFor(mode, term), limit)
+	return query(ctx, d, mode, term, planFor(mode, term), limit, false)
 }
 
 // Hit is the result of one dictionary. Order of hits mirrors the input
@@ -137,6 +137,19 @@ type Opener func() (dict.Dictionary, error)
 // serialized (safe for a shared response) but arrive in completion order; i
 // is the input index, so the caller places each result in its slot.
 func StreamOpen(ctx context.Context, openers []Opener, mode Mode, term string, perDict int, emit func(i int, h Hit)) {
+	stream(ctx, openers, mode, term, perDict, false, emit)
+}
+
+// StreamKeys is StreamOpen for the list of matching words (D199): the same
+// fan-out, and every Result is a Headword with no Body. A prepared database
+// reads its headword index only (dict.Keyer); any other backend runs its
+// ordinary query and the articles are dropped. For Exact, Prefix and
+// Wildcard: a full-text match is not a headword.
+func StreamKeys(ctx context.Context, openers []Opener, mode Mode, term string, perDict int, emit func(i int, h Hit)) {
+	stream(ctx, openers, mode, term, perDict, true, emit)
+}
+
+func stream(ctx context.Context, openers []Opener, mode Mode, term string, perDict int, keys bool, emit func(i int, h Hit)) {
 	plan := planFor(mode, term)
 	sem := make(chan struct{}, Workers())
 	var wg sync.WaitGroup
@@ -208,7 +221,7 @@ func StreamOpen(ctx context.Context, openers []Opener, mode Mode, term string, p
 				send(i, Hit{Err: err})
 				return
 			}
-			send(i, runQuery(ctx, d, mode, term, plan, perDict))
+			send(i, runQuery(ctx, d, mode, term, plan, perDict, keys))
 		}(i, open)
 	}
 	wg.Wait()
@@ -225,9 +238,9 @@ func StreamOpen(ctx context.Context, openers []Opener, mode Mode, term string, p
 // which the janitor eventually closes underneath it; the buffered send means
 // the abandoned goroutine also ends without blocking whenever its query
 // finally does.
-func runQuery(ctx context.Context, d dict.Dictionary, mode Mode, term string, plan []ftsq.Rung, perDict int) Hit {
+func runQuery(ctx context.Context, d dict.Dictionary, mode Mode, term string, plan []ftsq.Rung, perDict int, keys bool) Hit {
 	done := make(chan Hit, 1)
-	go func() { done <- query(ctx, d, mode, term, plan, perDict) }()
+	go func() { done <- query(ctx, d, mode, term, plan, perDict, keys) }()
 	select {
 	case h := <-done:
 		return h
@@ -278,7 +291,9 @@ func planFor(mode Mode, term string) []ftsq.Rung {
 // the HTTP handler did not create - so Go's rule that a panic can only be
 // recovered on its own goroutine means the handler's recover cannot see it and
 // the process dies. One bad file must cost one row, not the server.
-func query(ctx context.Context, d dict.Dictionary, mode Mode, term string, plan []ftsq.Rung, perDict int) (h Hit) {
+//
+// With keys the answer is headwords only (StreamKeys).
+func query(ctx context.Context, d dict.Dictionary, mode Mode, term string, plan []ftsq.Rung, perDict int, keys bool) (h Hit) {
 	defer func() {
 		if r := recover(); r != nil {
 			h.Err = dict.PanicError(h.Meta.Path, r)
@@ -290,6 +305,8 @@ func query(ctx context.Context, d dict.Dictionary, mode Mode, term string, plan 
 	// A prepared database answers every mode through its context-aware
 	// surface; a direct backend has only Exact and Prefix, and no way to stop.
 	s, indexed := d.(dict.Searcher)
+	k, keyed := d.(dict.Keyer)
+	keyed = keyed && keys
 	switch mode {
 	case Exact:
 		if !caps.Exact {
@@ -306,9 +323,12 @@ func query(ctx context.Context, d dict.Dictionary, mode Mode, term string, plan 
 			h.Skipped = true
 			return h
 		}
-		if indexed {
+		switch {
+		case keyed:
+			h.Results, h.Err = headwords(k.PrefixKeys(ctx, term, perDict))
+		case indexed:
 			h.Results, h.Err = s.PrefixContext(ctx, term, perDict)
-		} else {
+		default:
 			h.Results, h.Err = d.Prefix(term, perDict)
 		}
 	case FullText:
@@ -343,9 +363,30 @@ func query(ctx context.Context, d dict.Dictionary, mode Mode, term string, plan 
 			h.Skipped = true
 			return h
 		}
-		h.Results, h.Err = s.WildcardContext(ctx, term, perDict)
+		if keyed {
+			h.Results, h.Err = headwords(k.WildcardKeys(ctx, term, perDict))
+		} else {
+			h.Results, h.Err = s.WildcardContext(ctx, term, perDict)
+		}
+	}
+	if keys {
+		for i := range h.Results {
+			h.Results[i].Body = ""
+		}
 	}
 	return h
+}
+
+// headwords is a list of keys as results without articles.
+func headwords(ws []string, err error) ([]dict.Result, error) {
+	if err != nil || len(ws) == 0 {
+		return nil, err
+	}
+	out := make([]dict.Result, len(ws))
+	for i, w := range ws {
+		out[i].Headword = w
+	}
+	return out, nil
 }
 
 // runPlan walks the relaxation ladder and stops at the FIRST rung that returns
