@@ -88,15 +88,27 @@ func TestReconcile(t *testing.T) {
 	if out = run(Target{Rebuild: IfOutdated}); out.Changed() {
 		t.Errorf("retired trigram, IfOutdated: %+v, want nothing done", out)
 	}
+	// Full text is an index beside the text, built from the text: nothing is
+	// read from the source and the text is not written again (D195).
+	reads = 0
 	out = run(Target{FullText: &yes})
-	if !out.Rebuilt || out.Plan != (Plan{FullText: true}) {
-		t.Errorf("-fulltext: %+v", out)
-	}
-	if hasTable(t, out.TextDB, "entry_trigram") {
-		t.Error("the rebuild kept the retired trigram table")
+	if out.Rebuilt || !out.FullTextBuilt || reads != 0 || out.Plan != (Plan{FullText: true}) ||
+		!fsx.FileExists(FullTextSibling(out.TextDB)) || !hasTable(t, out.TextDB, "entry_trigram") {
+		t.Errorf("-fulltext: %+v, %d reads", out, reads)
 	}
 	if out = run(Target{}); out.Changed() || out.Plan != (Plan{FullText: true}) {
 		t.Errorf("full text left out: %+v, want it kept", out)
+	}
+	no := false
+	out = run(Target{FullText: &no})
+	if out.Rebuilt || !out.FullTextRemoved || reads != 0 || out.Plan != (Plan{}) || fsx.FileExists(FullTextSibling(out.TextDB)) {
+		t.Errorf("-fulltext=false: %+v, %d reads", out, reads)
+	}
+	if out = run(Target{FullText: &no}); out.Changed() {
+		t.Errorf("-fulltext=false again: %+v, want nothing done", out)
+	}
+	if out = run(Target{FullText: &yes}); !out.FullTextBuilt {
+		t.Errorf("-fulltext once more: %+v", out)
 	}
 
 	// Outdated data is rebuilt only for a caller that asks (D151).
@@ -108,6 +120,9 @@ func TestReconcile(t *testing.T) {
 	out = run(Target{Rebuild: IfOutdated})
 	if !out.Rebuilt || !slices.Contains(out.Why, ReasonIngest) || out.Plan != (Plan{FullText: true}) {
 		t.Errorf("outdated, asked: %+v, want rebuilt on the plan it had", out)
+	}
+	if hasTable(t, out.TextDB, "entry_trigram") || !Inspect(out.TextDB).Plan.FullText {
+		t.Error("the rebuild kept the retired trigram table, or lost the full-text index")
 	}
 	if out = run(Target{Rebuild: Always}); !out.Rebuilt {
 		t.Error("Always must rebuild current data")

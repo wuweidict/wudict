@@ -96,7 +96,7 @@ wudict keeps the mode that you select. A word from a link or from a different ap
 ## wudict fts
 ## wudict full-text syntax
 
-**Several words are a phrase; quotes make it exact**. `no pun intended` finds the phrase, then, only if nothing matches, the words in proximity, then the words anywhere, and the section header indicates which stage answered. Full-text searches only dictionaries whose full-text [index](<entry://wudict index>) is on. Dictionaries without a FTS are offered for indexing.
+**Several words are a phrase; quotes make it exact**. `no pun intended` finds the phrase, then, only if nothing matches, the words in proximity, then the words anywhere, and the section header indicates which stage answered. Full-text searches only dictionaries whose full-text [index](<entry://wudict index>) is on. Dictionaries without a FTS are offered for indexing. A ZIM archive that carries its own full-text index needs none: wudict searches it at once, and there a word also finds its other forms (`walks` finds *walked*).
 
 | You type | You get |
 | --- | --- |

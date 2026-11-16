@@ -28,8 +28,19 @@ func init() {
 	for _, ext := range []string{".zim", ".zimaa"} {
 		dict.RegisterFormat(ext, func(path string) (dict.Dictionary, error) { return Open(path) })
 		dict.RegisterReader(ext, func(path string) (dict.Reader, error) { return NewReader(path) })
+		dict.RegisterOwnText(ext, ownText)
 	}
 	dict.RegisterReaderVersion("zim", ReaderVersion)
+}
+
+// ownText is dict.OwnText for an archive.
+func ownText(path string) bool {
+	d, err := Open(path)
+	if err != nil {
+		return false
+	}
+	defer d.Close()
+	return d.textIndex() != nil
 }
 
 // Dict is one opened .zim (direct backend).
@@ -52,6 +63,8 @@ type Dict struct {
 	lo, hi int
 
 	titles *titleIndex // nil when the file has no usable title order
+
+	text textIndexOnce // the archive's own full-text index (fulltext.go)
 }
 
 func Open(path string) (*Dict, error) {
@@ -102,12 +115,14 @@ var headerKeys = []string{
 func (d *Dict) Meta() dict.Meta { return d.meta }
 func (d *Dict) Close() error    { return d.c.Close() }
 
-// Caps is exact and prefix only, and stays that way in preview on purpose.
-// Accent-folded, substring and full-text matching all need an index keyed on
-// something other than raw byte order - which is exactly the resident map this
-// backend exists to avoid building. They arrive with preparation, as for every
-// other format.
-func (d *Dict) Caps() dict.Caps { return dict.Caps{Exact: true, Prefix: true} }
+// Caps is exact and prefix, and full text when the archive carries an index
+// of its own (fulltext.go). Accent-folded and wildcard matching need an index
+// keyed on something other than raw byte order - which is exactly the
+// resident map this backend exists to avoid building. They arrive with
+// preparation, as for every other format.
+func (d *Dict) Caps() dict.Caps {
+	return dict.Caps{Exact: true, Prefix: true, FTS: d.textIndex() != nil}
+}
 
 // PreviewBytes reports what this backend actually keeps resident, so the
 // server's headword-count estimate (previewWeight) does not charge it for an

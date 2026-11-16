@@ -142,6 +142,11 @@ type Rewriter struct {
 	// two would rewrite what the article says.
 	Text func(raw string) string
 
+	// TextIn is Text for a hook that reads on: rest is the document after
+	// the text node, as raw source bytes. It is called in place of Text.
+	// internal/hilite marks a phrase that markup splits with it.
+	TextIn func(raw, rest string) string
+
 	// PlayLinks turns a speaker icon only GoldenDict can show into one a
 	// browser can. LDOCE6 (StarDict) writes every pronunciation as
 	//
@@ -344,8 +349,11 @@ func (rw Rewriter) Rewrite(doc string) string {
 	var pa *pendingAudio // non-nil while PlayLinks holds an <audio> back
 	inAnchor := false    // an <a> is open (PlayLinks only); a new <a> closes the old one in the parser
 	raw := ""            // the raw-text element we are inside, "" when in markup
+	pos := 0             // bytes of doc the tokenizer has yielded
 	for {
-		switch z.Next() {
+		tt := z.Next()
+		pos += len(z.Raw())
+		switch tt {
 		case html.ErrorToken:
 			// io.EOF, or markup the tokenizer cannot continue past. Emit
 			// whatever it did not consume: a rewriter must never silently
@@ -442,6 +450,10 @@ func (rw Rewriter) Rewrite(doc string) string {
 				out.WriteString(rewriteCSS(string(z.Raw()), func(u string) string {
 					return rw.URL(Ref{Site: SiteCSS, Tag: "style", URL: u})
 				}))
+			case raw == "" && rw.TextIn != nil:
+				// The tokenizer yields the document's bytes in order, each
+				// token its own, so what it has yielded is where it stands.
+				out.WriteString(rw.TextIn(string(z.Raw()), doc[min(pos, len(doc)):]))
 			case raw == "" && rw.Text != nil:
 				// Raw() is only valid until the next Next(); the hook is
 				// called and its result written before that happens.

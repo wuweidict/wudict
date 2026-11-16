@@ -862,6 +862,7 @@ func dictFiles(arg string) []dictFile {
 		}
 		add("prepared", abs) // loose <name>.text.db, copied out of its folder
 		add("prepared", store.MediaSibling(abs))
+		add("prepared", store.FullTextSibling(abs))
 		return out
 	}
 	for _, p := range dict.SourceFiles(abs) {
@@ -1044,6 +1045,9 @@ func cmdIngest(args []string) error {
 			// ingest that could take minutes, not after it
 			return fmt.Errorf("-full packs media beside the text, so -o must end in .text.db (or be a text.db)")
 		}
+		if ft != nil && *ft && store.FullTextSibling(*out) == "" {
+			return fmt.Errorf("-fulltext indexes article text beside the text, so -o must end in .text.db (or be a text.db)")
+		}
 		return ingestOne(srcs[0], *out, *full, ft)
 	}
 	if err := refuseUnderServer("use its dictionary panel"); err != nil {
@@ -1114,6 +1118,10 @@ func ingestOne(srcPath, out string, full bool, fullText *bool) error {
 			fmt.Printf("%s%s pointed at headwords not present in the source (skipped)\n",
 				logx.Dict(name), logx.Plural(res.Report.UnresolvedLinks, "redirect", "redirects"))
 		}
+	case res.FullTextBuilt:
+		fmt.Printf("%sfull-text index built in %.1fs → %s\n", logx.Dict(name), res.TextTime.Seconds(), dir)
+	case res.FullTextRemoved:
+		fmt.Printf("%sfull-text index removed → %s\n", logx.Dict(name), dir)
 	case err == nil:
 		fmt.Printf("%salready prepared in %s - skipped\n", logx.Dict(name), dir)
 	}

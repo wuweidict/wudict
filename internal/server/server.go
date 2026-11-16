@@ -698,6 +698,11 @@ type dictInfo struct {
 	// set for a dictionary whose source is gone, which nothing can rebuild.
 	Outdated bool `json:"outdated,omitempty"`
 
+	// OwnText: full text is answered from an index the dictionary's own file
+	// carries (D194), so Caps.FTS is set with no full-text index of ours and
+	// there is none to build or remove.
+	OwnText bool `json:"ownText,omitempty"`
+
 	// TooLarge: Error is that the dictionary is too large to open on this
 	// system (dict.ErrTooLarge) - its text unpacks past its reader's bound, or
 	// past the free space to hold it. The page warns about it once, where an
@@ -732,6 +737,7 @@ type dictInfo struct {
 	Folder   string   `json:"folder,omitempty"`    // library folder holding them (the transferable unit)
 	DBSize   int64    `json:"dbSize,omitempty"`    // bytes of text.db - what the indexes actually cost
 	MediaSz  int64    `json:"mediaSize,omitempty"` // bytes of media.db
+	FTSSize  int64    `json:"ftsSize,omitempty"`   // bytes of fulltext.db; absent when the index is inside text.db
 	HasMedia bool     `json:"hasMedia,omitempty"`  // packable binary resources exist (drives "pack media")
 
 	// Builtin: shipped with the app (the wudict howto), not added by the user.
@@ -974,9 +980,12 @@ func (s *Server) baseDictInfo(e *entry) dictInfo {
 	if p, ok := preparedInfo(e.Path); ok && p.Meta != nil {
 		meta := p.Meta
 		ec, _ := strconv.Atoi(meta["entry_count"])
+		// Full text without an index of ours is the source file's own (D194).
+		own := !p.Plan.FullText && dict.OwnText(e.Path)
 		info := dictInfo{
 			ID: e.ID, Path: e.Path, Name: meta["name"], Format: meta["format"], Entries: ec,
-			Caps:     dict.Caps{Exact: true, Prefix: true, FTS: p.Plan.FullText, Wildcard: true},
+			Caps:     dict.Caps{Exact: true, Prefix: true, FTS: p.Plan.FullText || own, Wildcard: true},
+			OwnText:  own,
 			DBPath:   p.TextDB,
 			Outdated: rebuildable(e.Path) && len(p.Stale(e.Path)) > 0,
 		}
@@ -1012,6 +1021,8 @@ func (s *Server) baseDictInfo(e *entry) dictInfo {
 	}
 	m := d.Meta()
 	info.Name, info.Format, info.Entries, info.Caps = m.Name, m.Format, m.EntryCount, d.Caps()
+	_, prepared := d.(dict.Searcher)
+	info.OwnText = info.Caps.FTS && !prepared
 	s.langFacts(&info, m.Name, m.IndexLang, m.ContentsLang)
 	if textDB, ok := validPrepared(e.Path); ok {
 		info.DBPath = textDB
@@ -1102,6 +1113,11 @@ func addProvenance(info *dictInfo, entryPath string) {
 		if fi, err := os.Stat(textDB); err == nil {
 			info.DBSize = fi.Size()
 		}
+		if info.Caps.FTS && !info.OwnText {
+			if fi, err := os.Stat(store.FullTextSibling(textDB)); err == nil {
+				info.FTSSize = fi.Size()
+			}
+		}
 		if mediaDB := store.MediaSibling(textDB); fsx.FileExists(mediaDB) {
 			info.MediaDB = mediaDB
 			if fi, err := os.Stat(mediaDB); err == nil {
@@ -1173,6 +1189,17 @@ type streamMsg struct {
 	// the precise reading needs no announcement (D102).
 	Rung string `json:"rung,omitempty"`
 
+	// Partial: a reading stricter than Rung was given up on with candidates
+	// unread - an archive's own index has no positions, so a phrase is
+	// looked for in the text of its best-ranked candidates only (D194). The
+	// UI then says the phrase was not found among those, not that it is
+	// absent.
+	Partial bool `json:"partial,omitempty"`
+
+	// More: the reading that answered was itself cut short the same way, so
+	// there may be results beyond these.
+	More bool `json:"more,omitempty"`
+
 	// Deferred: this dictionary was not searched because the fan-out cap
 	// declined to materialise it (see fanout). It is NOT an error and must not
 	// be reported as one: the dictionary is fine, the query was wide, and
@@ -1240,14 +1267,18 @@ func queryFlag(q url.Values, name string) (on, sent bool) {
 // on=false returns a function that always yields nil, which every caller may
 // pass straight to Mark: an API client that did not ask for marks gets the
 // article's own bytes, unchanged.
-func marker(on bool) func(term, rung string) *hilite.Terms {
+func marker(on bool) func(term, rung string, own []hilite.Phrase) *hilite.Terms {
 	if !on {
-		return func(string, string) *hilite.Terms { return nil }
+		return func(string, string, []hilite.Phrase) *hilite.Terms { return nil }
 	}
 	cache := map[string]*hilite.Terms{}
-	return func(term, rung string) *hilite.Terms {
+	return func(term, rung string, own []hilite.Phrase) *hilite.Terms {
 		if rung == "" {
 			return nil
+		}
+		if own != nil {
+			// One dictionary's own answer (search.Hit.Marks): not shared.
+			return hilite.NewPhrases(own)
 		}
 		key := rung + "\x00" + term
 		if t, ok := cache[key]; ok {
@@ -1417,7 +1448,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		// dictionary's internal ref into /res/{dict}/…, and `clean` then
 		// absolutises exactly those. Reducing first would throw away the
 		// references before they had been named.
-		hl := marks(h.Term, h.Rung)
+		hl := marks(h.Term, h.Rung, h.Marks)
 		for j := range h.Results {
 			h.Results[j].Body = RewriteEntryHTMLMarked(h.Results[j].Body, id, hl)
 		}
@@ -1432,7 +1463,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		for j := range h.Results {
 			h.Results[j].Body = applyFormat(h.Results[j].Body, format, origin, st)
 		}
-		m := streamMsg{T: "hit", I: i, Dict: id, Name: name, Results: h.Results, Skipped: h.Skipped, Rung: h.Rung}
+		m := streamMsg{T: "hit", I: i, Dict: id, Name: name, Results: h.Results, Skipped: h.Skipped, Rung: h.Rung, Partial: h.Partial, More: h.More}
 		var heavy tooHeavy
 		switch {
 		case errors.As(h.Err, &heavy):

@@ -228,6 +228,32 @@ func matchKey[T any](m map[string]T, path string) (T, bool) {
 	return val, true
 }
 
+var ownText = map[string]func(path string) bool{}
+
+// RegisterOwnText wires a file extension to the question OwnText asks.
+func RegisterOwnText(ext string, fn func(path string) bool) {
+	ownText[strings.ToLower(ext)] = fn
+}
+
+// OwnText reports whether the dictionary file at path carries a full-text
+// index of its own that its backend searches (D194): full text is then
+// answered without an index of ours, and none is offered. It opens the file
+// for the formats that can have one and costs nothing for the rest.
+func OwnText(path string) (own bool) {
+	fn, ok := matchKey(ownText, path)
+	if !ok {
+		return false
+	}
+	var err error
+	defer func() {
+		if err != nil {
+			own = false
+		}
+	}()
+	defer recoverOpen(path, &err)
+	return fn(path)
+}
+
 // prober reads lightweight metadata (name, format, entry count) without
 // building a format's full in-memory index.
 type prober func(path string) (Meta, error)

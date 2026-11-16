@@ -2764,9 +2764,9 @@ function renderPanel(){
        full-text and media each cost real disk, so each is a switch.
        Switching is offered only while the SOURCE is on disk — that is what
        makes it reversible, and why none of this needs a confirmation. */
-    const canToggle=!!d.source;
+    const hasSource=!!d.source;
     const feats=[
-      ["fts","full-text",d.caps?.FTS,0],
+      ["fts","full-text",d.caps?.FTS,d.ftsSize||0],
       ["media","media",!!d.mediaDB,d.mediaSize||0],
     ];
     /* The index itself, first in the run of chips. Two states, because the
@@ -2785,9 +2785,9 @@ function renderPanel(){
        that starts that says so first; D99 is the decision that the size be
        shown before it is spent, not after.
 
-       The estimate is calibrated on the user's own corpus, exactly as
-       ftsAddedBytes is, and for the same reason: bytes-per-entry runs from 107
-       to 94 k across real dictionaries, so no hard-coded multiplier is honest.
+       The estimate is calibrated on the user's own corpus, because
+       bytes-per-entry runs from 107 to 94 k across real dictionaries, so no
+       hard-coded multiplier is honest.
        With nothing to calibrate against it says nothing rather than inventing
        a number.
 
@@ -2798,16 +2798,28 @@ function renderPanel(){
     const est=indexed?0:baseIndexBytes(d);
     let caps=indexed
       ? `<span class="feat on locked" title="Indexed: ${mb(d.dbSize)} on disk">${mb(d.dbSize)}</span>`
-      : canToggle
+      : hasSource
         ? `<span class="feat" data-feat="base" title="Not indexed: searched through its own format, slower and with more memory. Click to index${est?` (about ${mb(est)}, estimated from your indexed dictionaries)`:""}.">🚀 index${est?` · est. ~${mb(est)}`:""}</span>`
         : "";
     for(const[key,label,on,bytes]of feats){
       if(key==="media"&&!on&&!d.hasMedia)continue; // nothing to pack
       const size=on&&bytes?" "+mb(bytes):"";
       const what=FEAT_NAME[key];
-      const tip=!canToggle?"Locked: the dictionary files are gone, and this is the only copy":
-        (on?"Remove the ":"Add the ")+what;
-      caps+=`<span class="feat${on?" on":""}${canToggle?"":" locked"}"`+
+      /* An archive that carries its own full-text index is searched through
+         it (D194): a fact, not a switch - there is nothing of ours to build
+         or remove. */
+      const own=key==="fts"&&d.ownText;
+      /* Without its original files a dictionary's full-text index can still
+         be added and removed: it is built from the prepared text and is a
+         file of its own (D195). One that lies inside an older text.db
+         cannot be taken out, and media needs the files it was packed from. */
+      const canToggle=!!d.source||(key==="fts"&&!!d.dbSize&&(!on||!!d.ftsSize));
+      // What adding it would cost, said before it is spent (D99).
+      const cost=key==="fts"&&!on&&canToggle?ftsAddedBytes([d]):0;
+      const tip=own?"Full-text search uses the index this archive carries":
+        !canToggle?"Locked: the dictionary files are gone, and this is the only copy":
+        (on?"Remove the ":"Add the ")+what+(cost?` (about ${mb(cost)})`:"");
+      caps+=`<span class="feat${on?" on":""}${canToggle&&!own?"":" locked"}"`+
         ` data-feat="${key}" data-on="${on?1:0}"`+
         ` title="${tip}">${label}${size}</span>`;
     }
@@ -3088,23 +3100,28 @@ $("folderBody").addEventListener("click",e=>{
    full-text search that meets a dictionary lacking the index offers to add
    just that one, in context and motivated. */
 function ftsCandidates(){
-  // a dictionary whose source file is gone cannot be re-indexed at all — the
-  // prepared data is the only copy (same rule the per-card chips enforce, and
-  // which "index all" ignored: it queued dictionaries guaranteed to fail)
-  return dicts.filter(d=>!d.error&&!d.caps?.FTS&&d.source);
+  // the index is built from the prepared text, so a dictionary whose source
+  // file is gone can have one too; an unprepared one needs its source
+  return dicts.filter(d=>!d.error&&!d.caps?.FTS&&(d.source||d.dbSize));
 }
-/* Size estimate calibrated on the user's OWN corpus: bytes-per-entry observed
-   across the dictionaries that already have full text. Article length varies
-   far too much between dictionaries for a hard-coded multiplier to be honest,
-   and when there is nothing to calibrate against this says nothing rather
-   than inventing a number — the exact figures below carry the warning fine. */
+/* What full text adds: a share of the text.db it indexes. The index lies in
+   its own file (ftsSize), so the share is read off the user's OWN library -
+   the median over the dictionaries that have one - and until three do, it is
+   the median measured over 45 real dictionaries of five formats (0.78; their
+   shares run 0.14-1.66, and the estimate lands within a factor of two on 43
+   of them, with a median error of 13%). Bytes per entry, which this used to
+   be, missed by a median 108% on the same 45: article length varies far more
+   between dictionaries than the index does against the text it is built of.
+   A dictionary with no index yet has no text.db to take a share of; its own
+   estimate stands in (baseIndexBytes). */
+const FTS_SHARE=0.78;
+let ftsShare=FTS_SHARE,ftsShareFor=null; // memoised on the list, as baseRate is
 function ftsAddedBytes(todo){
-  let bytes=0,entries=0;
-  for(const d of dicts)if(d.caps?.FTS&&d.dbSize&&d.entries){bytes+=d.dbSize;entries+=d.entries}
-  const want=todo.reduce((n,d)=>n+(d.entries||0),0);
-  if(!entries||!want)return 0;
-  const grown=want*(bytes/entries),have=todo.reduce((n,d)=>n+(d.dbSize||0),0);
-  return grown>have?grown-have:0;
+  if(ftsShareFor!==dicts){
+    const shares=dicts.filter(d=>d.ftsSize&&d.dbSize).map(d=>d.ftsSize/d.dbSize).sort((x,y)=>x-y);
+    ftsShare=shares.length>=3?shares[shares.length>>1]:FTS_SHARE;ftsShareFor=dicts;
+  }
+  return Math.round(ftsShare*todo.reduce((n,d)=>n+(d.dbSize||baseIndexBytes(d)),0));
 }
 /* The same calibration as ftsAddedBytes, for the index that has not been built
    yet: bytes per entry across the dictionaries that DO have one, restricted to
@@ -3123,7 +3140,7 @@ function baseIndexBytes(d){
      same list does not. */
   if(baseRateFor!==dicts){
     let bytes=0,entries=0;
-    for(const o of dicts)if(o.dbSize&&o.entries&&!o.caps?.FTS){bytes+=o.dbSize;entries+=o.entries}
+    for(const o of dicts)if(o.dbSize&&o.entries&&(!o.caps?.FTS||o.ownText||o.ftsSize)){bytes+=o.dbSize;entries+=o.entries}
     baseRate=entries?bytes/entries:0;baseRateFor=dicts;
   }
   return baseRate?Math.round(d.entries*baseRate):0;
@@ -3138,7 +3155,7 @@ function openFtsAll(){
     box.innerHTML="<p>Every dictionary that can be indexed already has the full-text index.</p>";
   }else{
     const entries=todo.reduce((n,d)=>n+(d.entries||0),0);
-    const now=dicts.reduce((n,d)=>n+(d.dbSize||0),0),added=ftsAddedBytes(todo);
+    const now=dicts.reduce((n,d)=>n+(d.dbSize||0)+(d.ftsSize||0),0),added=ftsAddedBytes(todo);
     box.innerHTML=
       `<p class="cost">Add full-text index, for searching in article text, to <b>${todo.length}</b> ${plural(todo.length)}`+
         (entries?` (${entries.toLocaleString()} entries)`:"")+
@@ -4152,10 +4169,13 @@ function renderSlot(box,h,mode,q,perDict,group){
   const det=document.createElement("details");det.className="dict";
   const more=h.results.length>=perDict?`<span class="more" data-id="${h.dict}">more…</span>`:"";
   // Only for a multi-word full-text query: a single word has no phrase to fail
-  // at, and every other mode has no ladder at all.
+  // at, and every other mode has no ladder at all. h.partial: the phrase was
+  // looked for in the best matches only (an archive's own index, D194), so
+  // "not found" is said of those. h.more: so was this answer, and the count
+  // is a floor.
   const rung=mode==="fts"&&/\s/.test(q||"")&&(h.rung==="near"||h.rung==="words")
-    ?`<span class="rung">phrase not found · ${h.rung==="near"?"words proximity":"words anywhere"} · </span>`:"";
-  det.innerHTML=`<summary>${esc(hitName(h))}<span class="count">${rung}${h.results.length}${more?"+":""} result${h.results.length===1?"":"s"}</span>${more}</summary>`;
+    ?`<span class="rung">phrase not found${h.partial?" in the best matches":""} · ${h.rung==="near"?"words proximity":"words anywhere"} · </span>`:"";
+  det.innerHTML=`<summary>${esc(hitName(h))}<span class="count">${rung}${h.results.length}${more||h.more?"+":""} result${h.results.length===1?"":"s"}</span>${more}</summary>`;
   const anchor=anchorOnce&&anchorOnce.dict===h.dict?anchorOnce:null;
   if(anchor)anchorOnce=null;
   det.wuFill=()=>{

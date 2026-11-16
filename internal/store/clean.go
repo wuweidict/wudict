@@ -100,6 +100,8 @@ func judgeFolder(dir string) []Leftover {
 		reason := "incomplete dictionary folder (no text.db)"
 		if _, err := os.Stat(MediaDBPath(dir)); err == nil {
 			reason = "media.db with no dictionary to pair with"
+		} else if _, err := os.Stat(FullTextDBPath(dir)); err == nil {
+			reason = "fulltext.db with no dictionary to pair with"
 		}
 		return []Leftover{{Path: dir, Size: dirSize(dir), Reason: reason, IsDir: true}}
 	}

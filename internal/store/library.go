@@ -466,6 +466,7 @@ func Library() ([]LibEntry, error) {
 			}
 			name = dict.DisplayText(meta["name"]) // as store.Open: repair an over-escaped title without a re-ingest
 		}
+		// The receipt spells what planOf found when it was written (WriteInfo).
 		plan := PlanFromMeta(meta)
 		e := LibEntry{
 			Dir:      dir,
@@ -594,7 +595,7 @@ func writeInfo(dir, source string) error {
 	fmt.Fprintf(&b, "entries = %s\n", meta["entry_count"])
 	// Machine-read as well as human-read: the library listing takes this file
 	// as its fast source, so the level is spelled both ways here.
-	plan := PlanFromMeta(meta)
+	plan := planOf(TextDBPath(dir), meta)
 	level := "headwords only (exact · prefix · wildcard)"
 	if plan.FullText {
 		level = "full text (exact · prefix · wildcard · full-text)"
@@ -616,6 +617,9 @@ func writeInfo(dir, source string) error {
 	}
 	fmt.Fprintf(&b, "\n# origin: %s\n", src)
 	fmt.Fprintf(&b, "# files: %s (articles + search index)", TextDBName)
+	if plan.FullText && fsx.FileExists(FullTextDBPath(dir)) {
+		fmt.Fprintf(&b, ", %s (full-text index)", FullTextDBName)
+	}
 	if _, err := os.Stat(MediaDBPath(dir)); err == nil {
 		fmt.Fprintf(&b, ", %s (images/audio)", MediaDBName)
 	}

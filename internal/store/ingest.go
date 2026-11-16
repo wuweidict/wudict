@@ -23,6 +23,7 @@ import (
 	"github.com/wuweidict/wudict/internal/htmlref"
 
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/logx"
 	"github.com/wuweidict/wudict/internal/sysmem"
 )
 
@@ -84,6 +85,21 @@ func ingestPlan(r dict.Reader, dbPath, src string, plan Plan, progress Progress)
 			_ = os.Remove(tmp)
 		}
 	}()
+	// Full text is written to its own file, beside the text (fulltext.go).
+	ftDB, ftTmp := FullTextSibling(dbPath), ""
+	if plan.FullText {
+		if ftDB == "" {
+			return rep, fmt.Errorf("full text is indexed beside the text, so %s must be a text.db or end in .text.db", dbPath)
+		}
+		ftTmp = tempDBName(ftDB)
+		_ = os.Remove(ftTmp)
+		defer func() {
+			if err != nil {
+				_ = os.Remove(ftTmp)
+			}
+		}()
+	}
+	created := time.Now().UTC().Format(time.RFC3339)
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return rep, err
 	}
@@ -114,11 +130,21 @@ func ingestPlan(r dict.Reader, dbPath, src string, plan Plan, progress Progress)
 		CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
 		CREATE TABLE entry(id INTEGER PRIMARY KEY, w TEXT NOT NULL, m TEXT NOT NULL);
 		CREATE TABLE alias(w TEXT NOT NULL, entry_id INTEGER NOT NULL REFERENCES entry(id));
-		CREATE VIRTUAL TABLE entry_fts USING fts5(
-			w, txt, content='', columnsize=0,
-			tokenize='unicode61 remove_diacritics 2');
 	`, codec.schema())); err != nil {
 		return rep, err
+	}
+	if plan.FullText {
+		// Attached, so the one pass that reads the source fills both files.
+		// The connection is the only one (above), so it is the one attached.
+		if _, err = db.Exec("ATTACH DATABASE ? AS ft", ftTmp); err != nil {
+			return rep, err
+		}
+		if _, err = db.Exec("PRAGMA ft.journal_mode = OFF; PRAGMA ft.synchronous = OFF"); err != nil {
+			return rep, err
+		}
+		if err = fullTextSchema(db, "ft.", uuid, created); err != nil {
+			return rep, err
+		}
 	}
 	if codec.name == codecZstd {
 		if _, err = db.Exec("CREATE TABLE body_dict(id INTEGER PRIMARY KEY, data BLOB NOT NULL)"); err != nil {
@@ -170,7 +196,7 @@ func ingestPlan(r dict.Reader, dbPath, src string, plan Plan, progress Progress)
 		return rep, err
 	}
 	total := srcMeta.EntryCount
-	w := newWriter(tx, progress, total, src, codec, &acct)
+	w := newWriter(tx, progress, total, src, codec, &acct, plan.FullText)
 	defer w.close()
 	if err = fill(r, src, srcMeta.Path, plan, w); err != nil {
 		return rep, err
@@ -225,12 +251,12 @@ func ingestPlan(r dict.Reader, dbPath, src string, plan Plan, progress Progress)
 		"source_path":      srcMeta.Path,
 		"description":      srcMeta.Description,
 		"entry_count":      fmt.Sprint(id - int64(subEntries)),
-		"sub_entries":      fmt.Sprint(subEntries), // @-prefixed, hidden from browsing
-		"ingest_level":     ingestLevel(plan),
+		"sub_entries":      fmt.Sprint(subEntries),      // @-prefixed, hidden from browsing
+		"ingest_level":     levelHeadwords,              // full text is the paired fulltext.db (planOf)
 		"markup_version":   fmt.Sprint(artmark.Version), // which role markup the articles were written with
 		"ingest_version":   fmt.Sprint(IngestVersion),   // which IngestPlan wrote this (stale.go)
 		"body_encoding":    codec.label(),
-		"created":          time.Now().UTC().Format(time.RFC3339),
+		"created":          created,
 		"source_sha256_1M": sourceHash(srcMeta.Path),
 	}
 	// which Reader produced the entries; a format that registered no version
@@ -292,8 +318,10 @@ func ingestPlan(r dict.Reader, dbPath, src string, plan Plan, progress Progress)
 	if err = tx.Commit(); err != nil {
 		return rep, err
 	}
-	if _, err = db.Exec("INSERT INTO entry_fts(entry_fts) VALUES('optimize')"); err != nil {
-		return rep, err
+	if plan.FullText {
+		if _, err = db.Exec("INSERT INTO ft.entry_fts(entry_fts) VALUES('optimize')"); err != nil {
+			return rep, err
+		}
 	}
 	if _, err = db.Exec("ANALYZE; PRAGMA optimize;"); err != nil {
 		return rep, err
@@ -310,6 +338,17 @@ func ingestPlan(r dict.Reader, dbPath, src string, plan Plan, progress Progress)
 	syncFile(tmp)
 	if err = os.Rename(tmp, dbPath); err != nil {
 		return rep, err
+	}
+	// The index of the text just replaced does not pair with this one.
+	if plan.FullText {
+		syncFile(ftTmp)
+		if err = os.Rename(ftTmp, ftDB); err != nil {
+			return rep, err
+		}
+	} else if ftDB != "" {
+		if rmErr := os.Remove(ftDB); rmErr != nil && !os.IsNotExist(rmErr) {
+			logx.Warn("could not remove %s: %v", ftDB, rmErr)
+		}
 	}
 	// refresh the folder receipt (derived from the meta just written; a
 	// failure here must not fail an otherwise complete ingest).

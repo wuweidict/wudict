@@ -2436,6 +2436,20 @@ components:
             response may answer on different rungs. Absent outside `fts`. Show
             it: a result on `near` or `words` means the phrase itself was not
             found.
+        partial:
+          type: boolean
+          description: >
+            Only beside rung, and only from a dictionary searched through a
+            full-text index its own file carries (`ownText`): a stricter
+            reading than `rung` was looked for in the best-ranked candidate
+            articles only, so it was not found among those rather than not
+            found.
+        more:
+          type: boolean
+          description: >
+            Only beside rung, from the same dictionaries: this reading was
+            itself answered from the best-ranked candidates only, so there
+            may be results beyond these.
         error:
           type: string
           description: This dictionary failed. The others still answered.
@@ -2513,6 +2527,18 @@ components:
             article text is stored with another compression than COMPRESSION,
             or it cannot be read. Never set when the source is gone. Reported only;
             `POST /api/reindex` rebuilds every such dictionary.
+        ftsSize:
+          type: integer
+          description: >
+            Bytes of the full-text index, a `fulltext.db` beside the text.
+            Absent without one, and for a dictionary prepared before that
+            file existed, whose index is part of `dbSize`.
+        ownText:
+          type: boolean
+          description: >
+            Full text is answered from an index the dictionary's own file
+            carries (a ZIM archive's), so `caps.FTS` is set with no full-text
+            index built, and there is none to build or remove.
         source: { type: string, description: 'The original file, if still on disk.' }
         mediaSrc:
           type: array

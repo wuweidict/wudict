@@ -110,11 +110,11 @@ func NewPhrases(ps []Phrase) *Terms {
 	for _, p := range ps {
 		var c []pat
 		for _, term := range p {
-			r := foldTerm(term.Text)
-			if len(r) == 0 {
-				continue
+			// A term the tokenizer cuts in several - medium-to-large,
+			// don't - is that many adjacent tokens, as it is in the index.
+			for _, r := range foldTerm(term.Text) {
+				c = append(c, pat{runes: r, prefix: term.Prefix})
 			}
-			c = append(c, pat{runes: r, prefix: term.Prefix})
 		}
 		if len(c) == 0 {
 			continue
@@ -154,23 +154,72 @@ func Compile(query string) *Terms {
 	return NewPhrases(ps)
 }
 
-// Mark returns s with every matching span wrapped in <mark class="wu-hl">.
-//
-// s is ONE HTML text node, handed over as the raw source bytes. Everything
-// outside a match is copied byte for byte - entities, encoding and all - so
-// marking cannot alter what the article says, only what is wrapped around it.
-// When nothing matches, the input string is returned and nothing is allocated.
-//
-// A phrase is therefore matched WITHIN one text node. A phrase the dictionary
-// broke across markup - `<b>Физика</b> в конспектах` - is not marked, which
-// under-marks rather than mis-marks: the alternative is a <mark> that opens in
-// one element and closes in another, which is not HTML.
+// Mark marks one text node that stands alone: Marker.Mark with no article
+// around it.
 func (t *Terms) Mark(s string) string {
 	if t == nil || s == "" {
 		return s
 	}
+	m := Marker{t: t}
+	return m.Mark(s, "")
+}
+
+// Marker marks the text nodes of ONE article, in document order. It is what
+// carries a phrase across the markup that splits it: the zero value is not
+// usable, and a Marker is not shared between articles or goroutines.
+type Marker struct {
+	t     *Terms
+	marks int
+	// pending are the tokens that complete a phrase begun in an earlier
+	// node, which the nodes that follow open with (lookahead).
+	pending []pat
+}
+
+// Marker returns a marker for one article; nil for nil Terms.
+func (t *Terms) Marker() *Marker {
+	if t == nil {
+		return nil
+	}
+	return &Marker{t: t}
+}
+
+// maxLook bounds how far past a text node the rest of a phrase is looked
+// for: the markup between two words of a phrase is a few tags.
+const maxLook = 2048
+
+// Mark returns s with every matching span wrapped in <mark class="wu-hl">.
+//
+// s is ONE HTML text node, handed over as the raw source bytes, and rest is
+// the document after it. Everything outside a match is copied byte for byte -
+// entities, encoding and all - so marking cannot alter what the article says,
+// only what is wrapped around it. When nothing matches, the input string is
+// returned and nothing is allocated.
+//
+// The index reads an article with its tags taken out, so a phrase the
+// dictionary broke across markup - `<b>Физика</b> в конспектах` - matches
+// there, and is marked here: each stretch of it in its own text node gets its
+// own <mark>, because one that opened in one element and closed in another
+// would not be HTML. rest is read only when a phrase has begun and the node
+// has ended, and only maxLook bytes of it.
+func (m *Marker) Mark(s, rest string) string {
+	if m == nil || s == "" {
+		return s
+	}
+	t := m.t
 	var b strings.Builder
-	last, marks, i := 0, 0, 0
+	last, i := 0, 0
+	if len(m.pending) > 0 {
+		if start, end := m.resume(s); end > 0 {
+			b.Grow(len(s) + len(s)/8)
+			b.WriteString(s[:start])
+			b.WriteString(openTag)
+			b.WriteString(s[start:end])
+			b.WriteString(closeTag)
+			last, i = end, end
+			m.marks++
+		}
+	}
+	marks := m.marks
 	for i < len(s) && marks < MaxMarks {
 		// An entity is never a token and never part of one. Without this,
 		// a query for "n" would emit "&<mark>nbsp</mark>;" - which renders as
@@ -189,7 +238,18 @@ func (t *Terms) Mark(s string) string {
 		start := i
 		tokEnd, hit := t.firstToken(s, i)
 		i = tokEnd
-		if end := t.longestMatch(s, tokEnd, hit); end > start {
+		if hit == 0 {
+			continue
+		}
+		end, open := t.longestMatch(s, tokEnd, hit)
+		if end == 0 && open.phrase >= 0 && rest != "" {
+			// The node ended inside a phrase: marked when what follows the
+			// markup completes it, and the following nodes are told.
+			if tail := t.phrases[open.phrase][open.matched:]; lookahead(rest, tail) {
+				end, m.pending = open.end, tail
+			}
+		}
+		if end > start {
 			if b.Cap() == 0 {
 				b.Grow(len(s) + len(s)/8)
 			}
@@ -200,11 +260,159 @@ func (t *Terms) Mark(s string) string {
 			last, marks, i = end, marks+1, end
 		}
 	}
-	if marks == 0 {
+	if marks == m.marks && last == 0 {
 		return s
 	}
+	m.marks = marks
 	b.WriteString(s[last:])
 	return b.String()
+}
+
+// resume marks the tokens this node opens with that complete a phrase begun
+// in an earlier one, and returns their span; end is 0 when the node has no
+// token, or does not continue the phrase after all.
+func (m *Marker) resume(s string) (start, end int) {
+	start = -1
+	for i := 0; len(m.pending) > 0; {
+		at := nextTokenStart(s, i)
+		if at < 0 {
+			break // the phrase goes on in a later node
+		}
+		tokEnd, ok := matchTokenAt(s, at, m.pending[0])
+		if !ok {
+			m.pending = nil
+			return 0, 0
+		}
+		if start < 0 {
+			start = at
+		}
+		end, i = tokEnd, tokEnd
+		m.pending = m.pending[1:]
+	}
+	return start, end
+}
+
+// lookahead reports whether the document after a text node opens - past its
+// markup - with tokens that match pats, in order. It reads text the way Mark
+// does and steps over tags, comments and the contents of raw-text elements,
+// which no text node is made of.
+func lookahead(rest string, pats []pat) bool {
+	if len(rest) > maxLook {
+		rest = rest[:maxLook]
+	}
+	for i := 0; i < len(rest); {
+		switch c := rest[i]; {
+		case c == '<':
+			j := tagEnd(rest, i)
+			if j < 0 {
+				return false
+			}
+			i = j
+		case c == '&':
+			if j := entityEnd(rest, i); j > i {
+				i = j
+			} else {
+				i++
+			}
+		default:
+			r, sz := utf8.DecodeRuneInString(rest[i:])
+			if !isTokenRune(r) {
+				i += sz
+				continue
+			}
+			end, ok := matchTokenAt(rest, i, pats[0])
+			if !ok {
+				return false
+			}
+			if pats = pats[1:]; len(pats) == 0 {
+				return true
+			}
+			i = end
+		}
+	}
+	return false
+}
+
+// tagEnd returns the byte past the markup that starts at s[i] ('<'): a tag, a
+// comment, or a raw-text element with its contents. A '<' that starts none of
+// these is text and is stepped over alone; -1 means the markup does not end
+// in s.
+func tagEnd(s string, i int) int {
+	if i+1 >= len(s) {
+		return -1
+	}
+	switch c := s[i+1]; {
+	case c == '!' && strings.HasPrefix(s[i:], "<!--"):
+		if j := strings.Index(s[i+4:], "-->"); j >= 0 {
+			return i + 4 + j + 3
+		}
+		return -1
+	case c == '!' || c == '?':
+		if j := strings.IndexByte(s[i:], '>'); j >= 0 {
+			return i + j + 1
+		}
+		return -1
+	case c == '/' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z':
+	default:
+		return i + 1
+	}
+	// The tag's name, then its attributes: a '>' inside a quoted value does
+	// not close it.
+	n := i + 1
+	if s[n] == '/' {
+		n++
+	}
+	nameEnd := n
+	for nameEnd < len(s) && s[nameEnd] != '>' && s[nameEnd] != '/' && s[nameEnd] > ' ' {
+		nameEnd++
+	}
+	j := nameEnd
+	for quote := byte(0); ; j++ {
+		if j >= len(s) {
+			return -1
+		}
+		switch c := s[j]; {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '>':
+			if s[i+1] != '/' && rawText(s[n:nameEnd]) {
+				return rawEnd(s, j+1, s[n:nameEnd])
+			}
+			return j + 1
+		}
+	}
+}
+
+// rawText is the tokenizer's list of elements whose content is not markup
+// (x/net/html readStartTag; htmlref.rawTextTag is the same list).
+func rawText(name string) bool {
+	switch strings.ToLower(name) {
+	case "script", "style", "title", "textarea", "iframe", "noscript", "noembed", "noframes", "xmp", "plaintext":
+		return true
+	}
+	return false
+}
+
+// rawEnd returns the byte past the end tag that closes the raw-text element
+// name, whose content starts at i.
+func rawEnd(s string, i int, name string) int {
+	for {
+		j := strings.Index(s[i:], "</")
+		if j < 0 {
+			return -1
+		}
+		i += j + 2
+		if len(s)-i >= len(name) && strings.EqualFold(s[i:i+len(name)], name) {
+			if k := strings.IndexByte(s[i:], '>'); k >= 0 {
+				return i + k + 1
+			}
+			return -1
+		}
+	}
 }
 
 // firstToken scans the token starting at i and reports where it ends, together
@@ -245,18 +453,31 @@ func (t *Terms) firstToken(s string, i int) (end int, hit uint64) {
 	return i, hit
 }
 
+// openPhrase is a phrase the text ran out under: its first matched tokens
+// are the last tokens of the node, ending at end.
+type openPhrase struct {
+	phrase  int // -1 for none
+	matched int
+	end     int
+}
+
 // longestMatch extends each candidate phrase over the tokens after the first
 // and returns the end of the longest one that completes, or 0 for none. The
 // longest wins so that a phrase is never shadowed by one of its own words.
-func (t *Terms) longestMatch(s string, afterFirst int, hit uint64) int {
-	best := 0
+// open is the longest phrase that did not complete only because the node
+// ended first.
+func (t *Terms) longestMatch(s string, afterFirst int, hit uint64) (best int, open openPhrase) {
+	open.phrase = -1
 	for m := hit; m != 0; {
 		j := bits.TrailingZeros64(m)
 		m &^= 1 << uint(j)
 		end, ok := afterFirst, true
-		for _, want := range t.phrases[j][1:] {
+		for k, want := range t.phrases[j][1:] {
 			start := nextTokenStart(s, end)
 			if start < 0 {
+				if k+1 > open.matched {
+					open = openPhrase{phrase: j, matched: k + 1, end: end}
+				}
 				ok = false
 				break
 			}
@@ -268,7 +489,7 @@ func (t *Terms) longestMatch(s string, afterFirst int, hit uint64) int {
 			best = end
 		}
 	}
-	return best
+	return best, open
 }
 
 // retire removes from the live set every phrase whose first pattern is fully
@@ -439,28 +660,32 @@ func foldRune(r rune) (rune, bool) {
 	return f, true
 }
 
-// foldTerm reduces one query word to its FIRST token run, folded.
+// foldTerm reduces one query word to its token runs, folded.
 //
-// The scan only ever compares a term against a token, so a term that is not a
-// token cannot match and must not occupy one of the 64 slots: "!!!" yields
-// nothing, and "-run" yields "run" rather than being thrown away for its
-// leading dash. A word that spans a separator is cut at it - "don't" becomes
-// "don" - which marks less than the query asked for and never more. Marking
-// both halves independently would light up every stray "t" in the article.
-func foldTerm(s string) []rune {
-	out := make([]rune, 0, len(s))
+// The scan only ever compares a pattern against a token, so a term that is
+// not a token cannot match and must not occupy one of the 64 slots: "!!!"
+// yields nothing, and "-run" yields "run" rather than being thrown away for
+// its leading dash. A word that spans a separator is the tokens on either
+// side of it, adjacent - "don't" is don then t, as the index holds it - so it
+// marks "don't" and no stray "t".
+func foldTerm(s string) [][]rune {
+	var runs [][]rune
+	var cur []rune
 	for _, r := range s {
 		if !isTokenRune(r) {
-			if len(out) > 0 {
-				break // end of the first run
+			if len(cur) > 0 {
+				runs, cur = append(runs, cur), nil
 			}
-			continue // still skipping leading separators
+			continue
 		}
 		if f, keep := foldRune(r); keep {
-			out = append(out, f)
+			cur = append(cur, f)
 		}
 	}
-	return out
+	if len(cur) > 0 {
+		runs = append(runs, cur)
+	}
+	return runs
 }
 
 // entityEnd returns the byte just past the character reference starting at

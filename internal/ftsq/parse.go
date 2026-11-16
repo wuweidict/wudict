@@ -19,6 +19,7 @@ import (
 type node interface {
 	match() string
 	marks() []hilite.Phrase
+	expr() *Expr
 }
 
 // phraseNode is a quoted phrase or a bare word (a one-term phrase).
@@ -37,6 +38,8 @@ func (p phraseNode) match() string {
 }
 
 func (p phraseNode) marks() []hilite.Phrase { return []hilite.Phrase{hilite.Phrase(p.terms)} }
+
+func (p phraseNode) expr() *Expr { return &Expr{Op: OpPhrase, Terms: p.terms} }
 
 // nearNode is NEAR(a b c, n): the phrases within n tokens of one another, in
 // any order. Each is marked on its own - proximity is a condition on the hit,
@@ -62,6 +65,14 @@ func (o nearNode) marks() []hilite.Phrase {
 	return m
 }
 
+func (o nearNode) expr() *Expr {
+	e := &Expr{Op: OpNear, Near: o.n, Args: make([]*Expr, len(o.ps))}
+	for i, p := range o.ps {
+		e.Args[i] = p.expr()
+	}
+	return e
+}
+
 // binNode is AND, OR or NOT. The rendering is fully parenthesised because this
 // tree's shape, not FTS5's precedence table, is what was parsed; re-deriving
 // the grouping from precedence on the way out is how the two drift apart.
@@ -81,6 +92,17 @@ func (b binNode) marks() []hilite.Phrase {
 		return m
 	}
 	return append(m, b.r.marks()...)
+}
+
+func (b binNode) expr() *Expr {
+	op := OpAnd
+	switch b.op {
+	case "OR":
+		op = OpOr
+	case "NOT":
+		op = OpNot
+	}
+	return &Expr{Op: op, Args: []*Expr{b.l.expr(), b.r.expr()}}
 }
 
 // --- lexer ---

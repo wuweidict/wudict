@@ -108,6 +108,11 @@ func adoptOne(textDB string) (string, error) {
 			return dir, err
 		}
 	}
+	if ft := FullTextSibling(textDB); fsx.FileExists(ft) {
+		if err := os.Rename(ft, FullTextDBPath(dir)); err != nil {
+			return dir, err
+		}
+	}
 	_ = WriteInfo(dir) // receipt is derived; a failure must not undo the move
 	return dir, nil
 }

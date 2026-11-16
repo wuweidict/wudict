@@ -61,7 +61,7 @@ func (e *NoRoomError) Is(target error) bool { return target == ErrTooLarge }
 type Caps struct {
 	Exact    bool
 	Prefix   bool // starts-with (accent-insensitive on ingested backends)
-	FTS      bool // FTS5 over headwords + article text - Searcher only
+	FTS      bool // full text: FTS5 over headwords + article text (Searcher), or the file's own index (D194)
 	Wildcard bool // `?` and `*` over headwords (D167) - Searcher only
 }
 

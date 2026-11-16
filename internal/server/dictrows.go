@@ -151,6 +151,9 @@ func rowKey(e *entry, global string) string {
 		if m := store.MediaSibling(textDB); m != "" {
 			sig(m)
 		}
+		if ft := store.FullTextSibling(textDB); ft != "" {
+			sig(ft)
+		}
 	}
 	return b.String()
 }

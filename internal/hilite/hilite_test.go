@@ -44,7 +44,10 @@ func TestMark(t *testing.T) {
 		{"angle brackets in prose survive", "bo", "a < bo", "a < " + o + "bo" + c},
 
 		{"punctuation splits tokens", "bo", "ax-bo-cx", "ax-" + o + "bo" + c + "-cx"},
-		{"a term is cut at its first separator", "don't", "don't", o + "don" + c + "'t"},
+		// A term the tokenizer cuts is the tokens either side, adjacent - what
+		// the index matched - and not its first half wherever that occurs.
+		{"a term with a separator is its tokens together", "don't", "don't don", o + "don't" + c + " don"},
+		{"a hyphenated term", "medium-to-large", "a medium-to-large dog, medium", "a " + o + "medium-to-large" + c + " dog, medium"},
 		{"leading punctuation is skipped, not fatal", "-run", "a run", "a " + o + "run" + c},
 		{"repeated term marks every token", "ax", "ax ax ax", o + "ax" + c + " " + o + "ax" + c + " " + o + "ax" + c},
 		// One rune in a spaced script is a wildcard, not a word (worthMarking).
@@ -215,5 +218,113 @@ func BenchmarkMarkNoMatch(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = t.Mark(text)
+	}
+}
+
+// markDoc marks a document the way the server does: its text nodes in order,
+// each with what follows it. Tags are found the simple way, which the
+// documents below allow.
+func markDoc(t *Terms, doc string) string {
+	m := t.Marker()
+	var b strings.Builder
+	for i := 0; i < len(doc); {
+		if doc[i] == '<' {
+			j := tagEnd(doc, i)
+			if j < 0 {
+				j = len(doc)
+			}
+			b.WriteString(doc[i:j])
+			i = j
+			continue
+		}
+		j := strings.IndexByte(doc[i:], '<')
+		if j < 0 {
+			j = len(doc) - i
+		}
+		b.WriteString(m.Mark(doc[i:i+j], doc[i+j:]))
+		i += j
+	}
+	return b.String()
+}
+
+// The index reads an article with its tags taken out, so a phrase matches
+// across them; it is marked there too, a stretch in each text node.
+func TestMarkAcrossMarkup(t *testing.T) {
+	const o, c = openTag, closeTag
+	phrase := func(words ...string) *Terms {
+		p := make(Phrase, len(words))
+		for i, w := range words {
+			p[i] = Term{Text: w}
+		}
+		return NewPhrases([]Phrase{p})
+	}
+	for _, tc := range []struct {
+		name string
+		t    *Terms
+		in   string
+		want string
+	}{
+		{"split by one tag", phrase("физика", "в", "конспектах"),
+			"<b>Физика</b> в конспектах.",
+			"<b>" + o + "Физика" + c + "</b> " + o + "в конспектах" + c + "."},
+		{"a word in each element", phrase("one", "two", "three"),
+			"<i>one</i> <b>two</b> <u>three</u> four",
+			"<i>" + o + "one" + c + "</i> <b>" + o + "two" + c + "</b> <u>" + o + "three" + c + "</u> four"},
+		{"across nested markup, a comment and space", phrase("jazz", "clarinet"),
+			`<a href="x>y">jazz</a><!-- <b> --><span> <a title='>'>clarinet</a></span>`,
+			`<a href="x>y">` + o + "jazz" + c + `</a><!-- <b> --><span> <a title='>'>` + o + "clarinet" + c + "</a></span>"},
+		{"a word the markup cuts is the tokens it is cut into", phrase("abbrevi", "ā", "re"),
+			"<i>abbrevi<font>ā</font>re</i>",
+			"<i>" + o + "abbrevi" + c + "<font>" + o + "ā" + c + "</font>" + o + "re" + c + "</i>"},
+		{"the open last word", NewPhrases([]Phrase{{{Text: "old"}, {Text: "hou", Prefix: true}}}),
+			"old <b>houses</b>", o + "old" + c + " <b>" + o + "houses" + c + "</b>"},
+		{"not completed after the markup: nothing is marked", phrase("one", "two"),
+			"<b>one</b> three two", "<b>one</b> three two"},
+		{"the text of a script is not text", phrase("one", "two"),
+			"one <script>var x = '</b>';</script> two", o + "one" + c + " <script>var x = '</b>';</script> " + o + "two" + c},
+		{"nor completed inside one", phrase("one", "two"),
+			"one <script>two</script>", "one <script>two</script>"},
+		{"a phrase whole in one node is one mark, as before", phrase("one", "two"),
+			"<p>one two</p> one", "<p>" + o + "one two" + c + "</p> one"},
+		{"the tail does not hide a later match", phrase("one", "two"),
+			"<b>one</b> two one two", "<b>" + o + "one" + c + "</b> " + o + "two" + c + " " + o + "one two" + c},
+		{"an entity between the words", phrase("one", "two"),
+			"<b>one</b>&nbsp;<i>two</i>", "<b>" + o + "one" + c + "</b>&nbsp;<i>" + o + "two" + c + "</i>"},
+		{"markup the document ends inside", phrase("one", "two"),
+			"one <b title=\"two", "one <b title=\"two"},
+	} {
+		if got := markDoc(tc.t, tc.in); got != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
+		}
+	}
+	// The rest of a phrase is looked for close by, not through the document.
+	far := "<b>one</b>" + strings.Repeat("<i></i>", maxLook/7+1) + "two"
+	if got := markDoc(phrase("one", "two"), far); got != far {
+		t.Errorf("a phrase was completed %d bytes of markup away", len(far))
+	}
+	// The cap is the article's, whichever nodes the marks fall in.
+	many := strings.Repeat("<p>ax</p>", MaxMarks+50)
+	if n := strings.Count(markDoc(Compile("ax"), many), openTag); n != MaxMarks {
+		t.Errorf("%d marks in one article, want the cap of %d", n, MaxMarks)
+	}
+}
+
+func BenchmarkMarkArticle(b *testing.B) {
+	doc := strings.Repeat("<p>The <b>quick</b> brown <i>fox</i> jumps over the lazy dog.</p>\n", 150)
+	for _, bc := range []struct {
+		name string
+		t    *Terms
+	}{
+		{"words", Compile("quick dog")},
+		{"phrase across markup", NewPhrases([]Phrase{{{Text: "the"}, {Text: "quick"}, {Text: "brown"}}})},
+		{"no match", Compile("zebra")},
+	} {
+		b.Run(bc.name, func(b *testing.B) {
+			b.SetBytes(int64(len(doc)))
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = markDoc(bc.t, doc)
+			}
+		})
 	}
 }

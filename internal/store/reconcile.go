@@ -5,9 +5,13 @@
 package store
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -104,10 +108,14 @@ type Outcome struct {
 	TextDB string
 	Plan   Plan // what the text is built with now
 
-	Rebuilt  bool          // the text was (re)written
-	Why      []Reason      // why an existing database was rebuilt; nil for a first build
-	Report   Report        // of the ingest, when Rebuilt
-	TextTime time.Duration // of the ingest, when Rebuilt
+	Rebuilt bool // the text was (re)written
+	// The full-text index alone was written, from the text as it stands, or
+	// deleted: the text was current and only the plan differed (fulltext.go).
+	FullTextBuilt   bool
+	FullTextRemoved bool
+	Why             []Reason      // why an existing database was rebuilt; nil for a first build
+	Report          Report        // of the ingest, when Rebuilt
+	TextTime        time.Duration // of the ingest, when Rebuilt
 
 	Packed       int           // media files packed
 	Beside       int           // of those, files packed from beside the source, not from its own container
@@ -118,7 +126,9 @@ type Outcome struct {
 }
 
 // Changed reports that anything on disk changed.
-func (o Outcome) Changed() bool { return o.Rebuilt || o.Packed > 0 || o.MediaRemoved }
+func (o Outcome) Changed() bool {
+	return o.Rebuilt || o.FullTextBuilt || o.FullTextRemoved || o.Packed > 0 || o.MediaRemoved
+}
 
 // textLocks serialises the text phase of Reconcile per dictionary. The
 // server's switches and lanes, and a self-preparing format's open (DSL, BGL,
@@ -198,10 +208,89 @@ func Reconcile(src string, t Target, h Hooks) (out Outcome, err error) {
 	return out, nil
 }
 
+// ErrNoSource reports a change to prepared data that only its source could
+// make, asked of a dictionary that is its prepared data alone.
+var ErrNoSource = errors.New("the dictionary's original files are gone, and this is the only copy")
+
+// reconcilePrepared is Reconcile for a dictionary that is a text.db with no
+// source: nothing of it can be written again, so the one change it takes is
+// the one made from the text itself - its full-text index, built or deleted
+// (D195 Am. 1). Media, and an index that lies inside the text, stay as they
+// are.
+func reconcilePrepared(textDB string, t Target, h Hooks, out *Outcome) (p Prepared, dir string, err error) {
+	out.TextDB = textDB
+	if strings.EqualFold(filepath.Base(textDB), TextDBName) {
+		dir = filepath.Dir(textDB)
+	}
+	p = Inspect(textDB)
+	if !p.Usable() {
+		return p, dir, fmt.Errorf("%s is not a database this build reads", textDB)
+	}
+	out.Plan = p.Plan
+	if t.Media != MediaLeave {
+		return p, dir, fmt.Errorf("packed media cannot be changed: %w", ErrNoSource)
+	}
+	if t.FullText == nil || *t.FullText == p.Plan.FullText {
+		return p, dir, nil
+	}
+	done, err := reconcileFullText(textDB, textDB, dir, p, *t.FullText, h, out)
+	if err != nil {
+		return p, dir, err
+	}
+	if !done {
+		return p, dir, fmt.Errorf("the full-text index is part of the text and cannot be removed: %w", ErrNoSource)
+	}
+	out.Plan.FullText = *t.FullText
+	return p, dir, nil
+}
+
+// reconcileFullText brings the full-text index of a text that is current to
+// the plan, without touching the text, and reports whether it could: the
+// index is a file beside the text (fulltext.go), built from the articles the
+// text holds and removed by deleting it. A text.db that carries its index
+// inside itself can only lose it by being written again.
+func reconcileFullText(src, textDB, dir string, p Prepared, want bool, h Hooks, out *Outcome) (bool, error) {
+	if FullTextSibling(textDB) == "" || (!want && PlanFromMeta(p.Meta).FullText) {
+		return false, nil
+	}
+	if h.Release != nil {
+		h.Release(textDB) // the index file is replaced or deleted
+	}
+	if !want {
+		removed, err := removeFullText(textDB)
+		if err != nil {
+			return true, err
+		}
+		out.FullTextRemoved = removed
+	} else {
+		defer dict.ClearActivity(src)
+		total, _ := strconv.Atoi(p.Meta["entry_count"])
+		dict.SetActivity(src, dict.Activity{Phase: dict.PhaseIndexing, Total: int64(total)})
+		start := time.Now()
+		err := buildFullText(context.Background(), textDB, func(done, total int) {
+			dict.SetActivity(src, dict.Activity{Phase: dict.PhaseIndexing, Done: int64(done), Total: int64(total)})
+			if h.Progress != nil {
+				h.Progress(done, total)
+			}
+		})
+		if err != nil {
+			return true, err
+		}
+		out.FullTextBuilt, out.TextTime = true, time.Since(start)
+	}
+	if dir != "" {
+		_ = WriteInfo(dir)
+	}
+	return true, nil
+}
+
 // reconcileText resolves the database to work on and (re)builds the text when
 // the target asks for it. It returns what was there before any rebuild: the
 // media decision depends on whether a media.db existed then.
 func reconcileText(src string, t Target, h Hooks, out *Outcome) (p Prepared, dir string, err error) {
+	if IsTextDB(src) && t.Out == "" {
+		return reconcilePrepared(src, t, h, out)
+	}
 	textDB, dir := t.Out, t.Dir
 	if textDB == "" {
 		if dir == "" {
@@ -229,11 +318,19 @@ func reconcileText(src string, t Target, h Hooks, out *Outcome) (p Prepared, dir
 	// The reasons are read only when they can matter: a usable, current
 	// database on the wanted plan is rebuilt only if Rebuild says so, and this
 	// runs on every open of a self-preparing format.
-	need := t.Out != "" || !p.Current(src) || plan != p.Plan
+	need := t.Out != "" || !p.Current(src)
 	var why []Reason
 	if !need && t.Rebuild != nil {
 		why = p.TextStale(src)
 		need = t.Rebuild(why)
+	}
+	if !need && plan != p.Plan {
+		// The text stays: only its full-text index is wanted or unwanted.
+		done, err := reconcileFullText(src, textDB, dir, p, plan.FullText, h, out)
+		if done || err != nil {
+			return p, dir, err
+		}
+		need = true
 	}
 	if !need {
 		return p, dir, nil

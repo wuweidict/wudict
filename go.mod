@@ -12,6 +12,7 @@ require (
 	github.com/aaaton/golem/v4 v4.0.2
 	github.com/aaaton/golem/v4/dicts/en v1.0.1
 	github.com/anchore/go-lzo v0.1.1
+	github.com/blevesearch/snowballstem v0.9.0
 	github.com/bodgit/sevenzip v1.6.5
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gogpu/systray v0.3.0

@@ -51,7 +51,7 @@ var _ dict.Searcher = (*Store)(nil)
 type Store struct {
 	db      *sql.DB
 	meta    dict.Meta
-	ftsOK   bool   // article text indexed (ingest_level != "headwords")
+	ftsOK   bool   // article text indexed: inside this file, or in ftPath
 	srcPath string // source_path recorded at ingest ("" if unknown)
 	uuid    string // dict_uuid: what a sibling media.db must match
 	body    *bodyDecoder
@@ -63,6 +63,15 @@ type Store struct {
 	// a second page cache and a second set of descriptors per dictionary, held
 	// for the life of the process, on the chance that an article referenced an
 	// image. (D64)
+	// The full-text index beside the text (fulltext.go), opened on the first
+	// full-text search for the same reason. "" when the index is inside this
+	// file - a text.db written before fulltext.db - or there is none.
+	ftPath     string
+	subEntries int // sub-entries in the dictionary (meta sub_entries)
+	ftMu       sync.Mutex
+	ft         *sql.DB
+	ftTried    bool
+
 	mediaPath  string // "" when this dictionary has no packed media
 	mediaMu    sync.Mutex
 	media      *Media
@@ -156,7 +165,12 @@ func Open(path string) (*Store, error) {
 		ContentsLang: m["contents_lang"], // DSL and BGL only, and absent from older libraries
 		Header:       headerOf(m),
 	}
-	s.ftsOK = PlanFromMeta(m).FullText
+	if s.ftsOK = PlanFromMeta(m).FullText; !s.ftsOK {
+		if sib := FullTextSibling(path); fullTextPaired(sib, m) {
+			s.ftsOK, s.ftPath = true, sib
+			s.subEntries = max(stampOf(m, "sub_entries", 0), 0)
+		}
+	}
 	s.srcPath = m["source_path"]
 	fmt.Sscanf(m["entry_count"], "%d", &s.meta.EntryCount)
 	// standalone use: note the sibling media.db so a copied folder works
@@ -267,6 +281,13 @@ func (s *Store) Close() error {
 	s.mediaMu.Unlock()
 	if md != nil {
 		md.Close()
+	}
+	s.ftMu.Lock()
+	ft := s.ft
+	s.ft, s.ftTried = nil, true
+	s.ftMu.Unlock()
+	if ft != nil {
+		ft.Close()
 	}
 	s.body.close()
 	return s.db.Close()
@@ -399,9 +420,107 @@ func (s *Store) FullTextMatch(ctx context.Context, match string, limit int) ([]d
 	if match == "" {
 		return nil, nil
 	}
-	return s.collect(s.db.QueryContext(ctx, `
-		SELECT e.w, e.m FROM entry_fts f JOIN entry e ON e.id = f.rowid
-		WHERE entry_fts MATCH ?1`+subEntryFilter("e.w")+`ORDER BY f.rank LIMIT ?2`, match, clamp(limit)))
+	if s.ftPath == "" {
+		return s.collect(s.db.QueryContext(ctx, `
+			SELECT e.w, e.m FROM entry_fts f JOIN entry e ON e.id = f.rowid
+			WHERE entry_fts MATCH ?1`+subEntryFilter("e.w")+`ORDER BY f.rank LIMIT ?2`, match, clamp(limit)))
+	}
+	// The index is another file: it ranks the entry ids, and the entries are
+	// read from this one in that order. A sub-entry is indexed and never
+	// returned (notSubEntry), so as many more ids are asked for as the
+	// dictionary has sub-entries: the limit is then met whenever it can be.
+	ft, err := s.fullTextDB()
+	if err != nil {
+		return nil, err
+	}
+	limit = clamp(limit)
+	ids, err := queryIDs(ft.QueryContext(ctx,
+		"SELECT rowid FROM entry_fts WHERE entry_fts MATCH ?1 ORDER BY rank LIMIT ?2", match, limit+s.subEntries))
+	if err != nil {
+		return nil, err
+	}
+	// Read a batch of ids a statement, then put the rows back in rank order:
+	// one statement an id costs more in round trips than the rows do.
+	out := make([]dict.Result, 0, min(len(ids), limit))
+	const batch = 64
+	byID := make(map[int64]dict.Result, batch)
+	args := make([]any, 0, batch)
+	for start := 0; start < len(ids) && len(out) < limit; start += batch {
+		part := ids[start:min(start+batch, len(ids))]
+		args = args[:0]
+		for _, id := range part {
+			args = append(args, id)
+		}
+		rows, err := s.db.QueryContext(ctx,
+			"SELECT id, w, m FROM entry WHERE id IN (?"+strings.Repeat(",?", len(part)-1)+")", args...)
+		if err != nil {
+			return nil, err
+		}
+		clear(byID)
+		for rows.Next() {
+			var id int64
+			var r dict.Result
+			var body []byte
+			if err := rows.Scan(&id, &r.Headword, &body); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if !isSubEntry(r.Headword) {
+				r.Body = s.body.decode(body)
+				byID[id] = r
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		for _, id := range part {
+			if r, ok := byID[id]; ok {
+				if out = append(out, r); len(out) == limit {
+					break
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func queryIDs(rows *sql.Rows, err error) ([]int64, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// fullTextDB opens the paired index on first use. A failure is remembered:
+// the index was paired when this text.db was opened, so one that will not
+// open now is damaged, and is reported by every search rather than retried.
+func (s *Store) fullTextDB() (*sql.DB, error) {
+	s.ftMu.Lock()
+	defer s.ftMu.Unlock()
+	if s.ft == nil && !s.ftTried {
+		s.ftTried = true
+		db, err := openRO(s.ftPath)
+		if err != nil {
+			return nil, err
+		}
+		s.ft = db
+	}
+	if s.ft == nil {
+		return nil, fmt.Errorf("%s: the full-text index cannot be opened", s.ftPath)
+	}
+	return s.ft, nil
 }
 
 func (s *Store) Keywords(offset, n int) []string {

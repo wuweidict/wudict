@@ -9,12 +9,14 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/ftsq"
+	"github.com/wuweidict/wudict/internal/hilite"
 )
 
 // Mode selects the query type; dictionaries lacking the capability are
@@ -74,6 +76,19 @@ type Hit struct {
 	// DICTIONARY: one may answer the phrase while the next needs the words, so
 	// this belongs on the hit and not on the request.
 	Rung string
+
+	// Marks, when set, are the spans to mark in Results instead of the
+	// rung's own: an archive's index matches a word by its stem, and reports
+	// the forms it found (ftsq.Answer).
+	Marks []hilite.Phrase
+
+	// Partial says a reading stricter than Rung was given up on with
+	// candidates unread (ftsq.Answer).
+	Partial bool
+
+	// More says Rung was itself answered with candidates unread
+	// (ftsq.Answer).
+	More bool
 }
 
 // workers bounds how many dictionaries are queried at once. Eight is right for
@@ -298,7 +313,19 @@ func query(ctx context.Context, d dict.Dictionary, mode Mode, term string, plan 
 		}
 	case FullText:
 		if !indexed || !caps.FTS {
-			h.Skipped = true
+			// No full-text index of ours: an archive that carries its own
+			// answers the ladder itself (D194).
+			p, ok := d.(ftsq.Planner)
+			if !ok || len(plan) == 0 {
+				h.Skipped = true
+				return h
+			}
+			a, err := p.FullTextPlan(ctx, plan, perDict)
+			if errors.Is(err, dict.ErrUnsupported) {
+				h.Skipped = true
+				return h
+			}
+			h.Results, h.Rung, h.Marks, h.Partial, h.More, h.Err = a.Results, a.Rung, a.Marks, a.Partial, a.More, err
 			return h
 		}
 		if len(plan) > 0 && runPlan(ctx, s, plan, perDict, &h) {

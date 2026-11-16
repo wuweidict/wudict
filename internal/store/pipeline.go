@@ -169,10 +169,15 @@ type writer struct {
 	dictBytes            int // the dictionary's size, once cut
 }
 
-func newWriter(tx *sql.Tx, progress Progress, total int, src string, codec *bodyCodec, acct *sysmem.Account) *writer {
+func newWriter(tx *sql.Tx, progress Progress, total int, src string, codec *bodyCodec, acct *sysmem.Account, fullText bool) *writer {
+	// fts is the attached full-text index (ingestPlan), nil without one.
+	var fts *bulk
+	if fullText {
+		fts = newBulk(tx, "INSERT INTO ft.entry_fts(rowid, w, txt) VALUES", 3)
+	}
 	return &writer{
 		entry:    newBulk(tx, "INSERT INTO entry(id, w, m) VALUES", 3),
-		fts:      newBulk(tx, "INSERT INTO entry_fts(rowid, w, txt) VALUES", 3),
+		fts:      fts,
 		alias:    newBulk(tx, "INSERT INTO alias(w, entry_id) VALUES", 2),
 		link:     newBulk(tx, "INSERT INTO plink(w, target, lt) VALUES", 3),
 		progress: progress,
@@ -303,8 +308,10 @@ func (w *writer) put(rec record) error {
 	if err := w.entry.add(w.id, rec.hw, rec.body); err != nil {
 		return err
 	}
-	if err := w.fts.add(w.id, rec.hw, rec.txt); err != nil {
-		return err
+	if w.fts != nil {
+		if err := w.fts.add(w.id, rec.hw, rec.txt); err != nil {
+			return err
+		}
 	}
 	if isSubEntry(rec.hw) {
 		w.subEntries++
@@ -330,6 +337,9 @@ func (w *writer) flush() error {
 		}
 	}
 	for _, b := range []*bulk{w.entry, w.fts, w.alias, w.link} {
+		if b == nil {
+			continue
+		}
 		if err := b.flush(); err != nil {
 			return err
 		}
@@ -339,7 +349,9 @@ func (w *writer) flush() error {
 
 func (w *writer) close() {
 	for _, b := range []*bulk{w.entry, w.fts, w.alias, w.link} {
-		b.close()
+		if b != nil {
+			b.close()
+		}
 	}
 }
 

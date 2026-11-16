@@ -212,6 +212,13 @@ hit is final at once, and a miss is final only at `end`.
 so two slots in one response can answer on different rungs. Show it when it is
 not `phrase`: the phrase itself was not found there.
 
+A dictionary searched through a full-text index its own file carries (a ZIM
+archive; `ownText` in its `/api/dicts` row) can add two flags beside `rung`.
+That index does not record where words stand, so a phrase or a proximity is
+checked in the text of the best-ranked candidate articles only: `partial`
+says a stricter reading than `rung` was not found *among those*, and `more`
+says `rung` itself was answered from them, so there may be further results.
+
 `slots[].name` is **the id again, not the dictionary's name.** The real name
 arrives on the `hit`, because naming a dictionary means opening it and `begin`
 is emitted before any open. If you paint placeholder rows from `begin`, label

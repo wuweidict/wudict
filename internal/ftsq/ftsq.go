@@ -57,10 +57,12 @@
 package ftsq
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"unicode"
 
+	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/hilite"
 )
 
@@ -81,11 +83,57 @@ const (
 )
 
 // Rung is one attempt of the ladder: an FTS5 MATCH expression and the spans to
-// mark if it answers. Name is what the UI reports.
+// mark if it answers. Name is what the UI reports. Expr says what Match says,
+// as a tree.
 type Rung struct {
 	Name  string
 	Match string
 	Marks []hilite.Phrase
+	Expr  *Expr
+}
+
+// Answer is a ladder answered by a Planner.
+type Answer struct {
+	Results []dict.Result
+	// Rung names the reading that answered, as Rung.Name does.
+	Rung string
+	// Marks are the spans to mark in Results: the rung's own, and the forms
+	// the index matched that the query does not spell.
+	Marks []hilite.Phrase
+	// Partial says a reading stricter than Rung was given up on with
+	// candidates unread, so it may hold an answer this is not.
+	Partial bool
+	// More says Rung itself was answered with candidates unread: there may
+	// be results beyond these.
+	More bool
+}
+
+// Planner is a dictionary that answers a whole ladder itself, from a
+// full-text index its own file carries (D194). It returns dict.ErrUnsupported
+// when the file carries none it can read.
+type Planner interface {
+	FullTextPlan(ctx context.Context, plan []Rung, limit int) (Answer, error)
+}
+
+// Op is the kind of an Expr node.
+type Op uint8
+
+const (
+	OpPhrase Op = iota // Terms, adjacent and in order
+	OpNear             // Args, all phrases, within Near tokens of one another
+	OpAnd              // every one of Args
+	OpOr               // any of Args
+	OpNot              // Args[0] and not Args[1]
+)
+
+// Expr is a reading of a query as a tree: the same question Rung.Match asks
+// in FTS5, for a backend that answers from an index FTS5 does not read - an
+// archive's own (D194). In a phrase only the last term may be open.
+type Expr struct {
+	Op    Op
+	Terms []hilite.Term
+	Near  int
+	Args  []*Expr
 }
 
 // Query is one parsed input. The zero value is not useful; use Parse.
@@ -133,38 +181,44 @@ func (q *Query) Rungs() []Rung {
 		if m == "" {
 			return nil
 		}
-		return []Rung{{Name: "query", Match: m, Marks: q.node.marks()}}
+		return []Rung{{Name: "query", Match: m, Marks: q.node.marks(), Expr: q.node.expr()}}
 	}
 	switch len(q.words) {
 	case 0:
 		return nil
 	case 1:
 		r := Rung{Name: "words"}
-		r.Match, r.Marks = bag(q.words)
+		var each []*Expr
+		r.Match, r.Marks, each = bag(q.words)
+		r.Expr = each[0]
 		return []Rung{r}
 	}
 	ph := make(hilite.Phrase, len(q.words))
 	for i, w := range q.words {
 		ph[i] = hilite.Term{Text: w, Prefix: i == len(q.words)-1}
 	}
-	bagMatch, bagMarks := bag(q.words)
+	bagMatch, bagMarks, each := bag(q.words)
 	return []Rung{
-		{Name: "phrase", Match: quote(q.words) + "*", Marks: []hilite.Phrase{ph}},
-		{Name: "near", Match: "NEAR(" + bagMatch + ", " + strconv.Itoa(nearDefault) + ")", Marks: bagMarks},
-		{Name: "words", Match: bagMatch, Marks: bagMarks},
+		{Name: "phrase", Match: quote(q.words) + "*", Marks: []hilite.Phrase{ph},
+			Expr: &Expr{Op: OpPhrase, Terms: ph}},
+		{Name: "near", Match: "NEAR(" + bagMatch + ", " + strconv.Itoa(nearDefault) + ")", Marks: bagMarks,
+			Expr: &Expr{Op: OpNear, Near: nearDefault, Args: each}},
+		{Name: "words", Match: bagMatch, Marks: bagMarks, Expr: &Expr{Op: OpAnd, Args: each}},
 	}
 }
 
 // bag lowers words into independent prefix terms - FTS5 reads juxtaposition as
-// AND - and the matching one-token phrases.
-func bag(words []string) (string, []hilite.Phrase) {
+// AND - with the matching one-token phrases, as marks and as expressions.
+func bag(words []string) (string, []hilite.Phrase, []*Expr) {
 	parts := make([]string, len(words))
 	marks := make([]hilite.Phrase, len(words))
+	each := make([]*Expr, len(words))
 	for i, w := range words {
 		parts[i] = quote([]string{w}) + "*"
 		marks[i] = hilite.Phrase{{Text: w, Prefix: true}}
+		each[i] = &Expr{Op: OpPhrase, Terms: marks[i]}
 	}
-	return strings.Join(parts, " "), marks
+	return strings.Join(parts, " "), marks, each
 }
 
 // quote renders a phrase as an FTS5 string literal. FTS5 escapes an embedded

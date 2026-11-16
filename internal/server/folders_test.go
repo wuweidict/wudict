@@ -5,6 +5,7 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http/httptest"
@@ -352,8 +353,9 @@ func TestFeatureTogglesBothWays(t *testing.T) {
 		t.Fatalf("re-enabling full text: %+v", c)
 	}
 
-	// a prepared dictionary with no source refuses, rather than destroying the
-	// only copy of its own text
+	// A prepared dictionary with no source is the only copy of its text: its
+	// full-text index, which is made of that text, still goes and comes back,
+	// and nothing else about it changes (D195 Am. 1).
 	src := "/gone/orphan.mdx"
 	odir, err := store.ClaimDir(src)
 	if err != nil {
@@ -368,8 +370,24 @@ func TestFeatureTogglesBothWays(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := reg2.all()[0]
-	if err := e.setFeatures(features{}, nil); err == nil {
-		t.Error("a source-less dictionary must refuse to have its data stripped")
+	otext := store.TextDBPath(odir)
+	before, err := os.ReadFile(otext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, on := range []bool{false, true, false} {
+		if err := e.setFeatures(features{FullText: on}, nil); err != nil {
+			t.Fatalf("a source-less dictionary, full text %v: %v", on, err)
+		}
+		if got := store.Inspect(otext).Plan.FullText; got != on {
+			t.Errorf("full text %v asked, %v found", on, got)
+		}
+	}
+	if after, err := os.ReadFile(otext); err != nil || !bytes.Equal(before, after) {
+		t.Errorf("the only copy of the text was written to (%v)", err)
+	}
+	if err := e.setFeatures(features{Media: true}, nil); err == nil {
+		t.Error("a source-less dictionary must refuse to pack media")
 	}
 }
 

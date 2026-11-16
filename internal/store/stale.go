@@ -131,7 +131,7 @@ type Prepared struct {
 func Inspect(textDB string) Prepared {
 	p := Prepared{TextDB: textDB}
 	if m, schema, err := ReadMetaSchema(textDB); err == nil {
-		p.Meta, p.Schema, p.Plan = m, schema, PlanFromMeta(m)
+		p.Meta, p.Schema, p.Plan = m, schema, planOf(textDB, m)
 	}
 	if sib := MediaSibling(textDB); sib != "" && fsx.FileExists(sib) {
 		p.Media = true
@@ -222,18 +222,12 @@ func ReadMetaSchema(dbPath string) (map[string]string, int, error) {
 	return m, ver, nil
 }
 
-// PlanFromMeta is the Plan a prepared database was built with, read back from
-// its meta. The one reader of `ingest_level`.
+// PlanFromMeta is the Plan a meta table records: full text indexed inside the
+// text.db itself, as a database written before fulltext.db says in its
+// `ingest_level`. The one reader of that key; planOf is the Plan a prepared
+// database has.
 func PlanFromMeta(m map[string]string) Plan {
 	return Plan{FullText: m["ingest_level"] != levelHeadwords}
-}
-
-// ingestLevel is PlanFromMeta's inverse for `ingest_level`.
-func ingestLevel(p Plan) string {
-	if p.FullText {
-		return levelText
-	}
-	return levelHeadwords
 }
 
 // mediaStale reports that a media.db cannot serve the text.db stamped with

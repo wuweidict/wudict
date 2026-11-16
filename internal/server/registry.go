@@ -8,6 +8,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/wuweidict/wudict/internal/dict"
 	"github.com/wuweidict/wudict/internal/fsx"
+	"github.com/wuweidict/wudict/internal/ftsq"
 	"github.com/wuweidict/wudict/internal/htmlref"
 	"github.com/wuweidict/wudict/internal/logx"
 	"github.com/wuweidict/wudict/internal/resource"
@@ -52,6 +54,9 @@ type upgraded struct {
 	// it is a full direct backend, so it holds the same ~350 bytes per headword
 	// as any preview (docs.local/PERF.md §3.1). It is therefore evictable on the same
 	// terms: no sync.Once, a recorded weight and last-use, and a release path.
+	ownOnce sync.Once
+	own     bool
+
 	srcMu  sync.Mutex
 	src    dict.Dictionary
 	srcErr error
@@ -88,6 +93,31 @@ func (u *upgraded) source() (dict.Dictionary, error) {
 		u.srcW.Store(previewWeight(u.src, u.src.Meta()))
 	}
 	return u.src, u.srcErr
+}
+
+// ownText reports whether the source file carries a full-text index of its
+// own (dict.OwnText), asked once: it opens the file.
+func (u *upgraded) ownText() bool {
+	u.ownOnce.Do(func() { u.own = dict.OwnText(u.srcPath) })
+	return u.own
+}
+
+// FullTextPlan answers full text from the source's own index, for a
+// dictionary prepared without one of ours (ftsq.Planner, D194). The search
+// asks only when the prepared database has no full-text index.
+func (u *upgraded) FullTextPlan(ctx context.Context, plan []ftsq.Rung, limit int) (ftsq.Answer, error) {
+	if !u.ownText() {
+		return ftsq.Answer{}, dict.ErrUnsupported
+	}
+	src, err := u.source()
+	if err != nil {
+		return ftsq.Answer{}, err
+	}
+	p, ok := src.(ftsq.Planner)
+	if !ok {
+		return ftsq.Answer{}, dict.ErrUnsupported
+	}
+	return p.FullTextPlan(ctx, plan, limit)
 }
 
 // srcWeight, srcLastUse and releaseSource let the registry's janitor treat this
@@ -1856,6 +1886,12 @@ func (e *entry) reconcile(name string, t store.Target, progress store.Progress) 
 				logx.Dict(name), out.Report.UnresolvedLinks)
 		}
 	}
+	switch {
+	case out.FullTextBuilt:
+		logx.V("%sfull-text index built in %.1fs", logx.Dict(name), out.TextTime.Seconds())
+	case out.FullTextRemoved:
+		logx.V("%sfull-text index removed", logx.Dict(name))
+	}
 	if out.Beside > 0 {
 		logx.V("%s%d referenced files are not in the dictionary's own container - packed from beside it",
 			logx.Dict(name), out.Beside)
@@ -1941,7 +1977,13 @@ func (e *entry) setFeatures(want features, progress store.Progress) error {
 	defer HoldActiveProcs()()
 	name := e.probeName()
 	if store.IsTextDB(e.Path) {
-		return fmt.Errorf("%q is a prepared dictionary - its original files are gone, so its data cannot be rebuilt", name)
+		// Its original files are gone. The full-text index is built from the
+		// text and deleted as a file, so it alone can still change (D195 Am. 1).
+		if p, _ := preparedInfo(e.Path); want.Media != p.MediaPaired() {
+			return fmt.Errorf("%q is a prepared dictionary - its original files are gone, so its media cannot be changed", name)
+		}
+		_, err := e.reconcile(name, store.Target{FullText: &want.FullText}, progress)
+		return err
 	}
 	media := store.MediaOff
 	if want.Media {

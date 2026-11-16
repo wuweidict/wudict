@@ -308,3 +308,29 @@ func TestNeverTruncates(t *testing.T) {
 		}
 	}
 }
+
+// TextIn is handed each prose text node with the document after it: the two
+// together, read off the document, are where the tokenizer stands.
+func TestTextInRest(t *testing.T) {
+	for _, doc := range []string{
+		`plain`,
+		`<p>one <b>two</b> three</p>`,
+		`a<!-- c -->b<script>var s = "<i>x</i>";</script>c<style>p{}</style>d`,
+		`<a href="x>y" title='>'>один</a> &amp; <br/>два<img src=a.png>`,
+		"line\r\nbreaks <p\n class=x>and\x00nul</p> tail",
+		`unclosed <b title="`,
+	} {
+		at := 0
+		rw := Rewriter{TextIn: func(raw, rest string) string {
+			i := strings.Index(doc[at:], raw+rest)
+			if i < 0 || at+i+len(raw)+len(rest) != len(doc) {
+				t.Errorf("%q: text %q with rest %q is not a place in the document", doc, raw, rest)
+			}
+			at += i + len(raw)
+			return raw
+		}}
+		if got := rw.Rewrite(doc); got != doc {
+			t.Errorf("Rewrite(%q) = %q", doc, got)
+		}
+	}
+}

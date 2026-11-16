@@ -164,7 +164,11 @@ func RewriteEntryHTMLMarked(html, dictID string, hl *hilite.Terms) string {
 	if html == "" {
 		return html
 	}
-	return entryRewriter(dictID, hl.Mark).Rewrite(html)
+	// One marker an article: it carries a phrase across the markup that
+	// splits it (hilite.Marker).
+	rw := entryRewriter(dictID, nil)
+	rw.TextIn = hl.Marker().Mark
+	return rw.Rewrite(html)
 }
 
 // hasRewritableRef reports whether the article can contain a reference at

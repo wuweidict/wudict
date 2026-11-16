@@ -7,6 +7,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -52,10 +53,20 @@ func Fingerprint(textDB string) (string, error) {
 		}
 	}
 	sort.Strings(keys)
+	// Where the full-text index lies is layout: it is hashed as what the
+	// database has (planOf), in the words `ingest_level` has always used.
+	plan := planOf(textDB, m)
 	field("meta")
 	for _, k := range keys {
 		field(k)
-		field(m[k])
+		switch {
+		case k != "ingest_level":
+			field(m[k])
+		case plan.FullText:
+			field(levelText)
+		default:
+			field(levelHeadwords)
+		}
 	}
 
 	s, err := Open(textDB)
@@ -79,8 +90,16 @@ func Fingerprint(textDB string) (string, error) {
 	}
 
 	field("entry_fts")
-	if err := hashVocab(s, "entry_fts", field); err != nil {
-		return "", fmt.Errorf("%s: entry_fts: %w", textDB, err)
+	if plan.FullText {
+		ft := s.db
+		if s.ftPath != "" {
+			if ft, err = s.fullTextDB(); err != nil {
+				return "", err
+			}
+		}
+		if err := hashVocab(ft, "entry_fts", field); err != nil {
+			return "", fmt.Errorf("%s: entry_fts: %w", textDB, err)
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
@@ -104,9 +123,9 @@ func volatileMeta(k string) bool {
 // schema, so it is created on one pinned connection; the main database stays
 // read-only (mode=ro) - only the query_only guard is lifted, and only on this
 // connection of a handle Fingerprint closes when it returns.
-func hashVocab(s *Store, table string, field func(string)) error {
+func hashVocab(db *sql.DB, table string, field func(string)) error {
 	ctx := context.Background()
-	conn, err := s.db.Conn(ctx)
+	conn, err := db.Conn(ctx)
 	if err != nil {
 		return err
 	}
