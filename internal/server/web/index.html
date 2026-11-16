@@ -3876,6 +3876,13 @@ addEventListener("message",e=>{
       return;
     }
 
+    // Escape inside a frame: the same layers as on the page, outermost first
+    if(d.k==="Escape"){
+      if(!$("azAsk").hidden)askAZ(false);
+      else if($("panel").classList.contains("show"))hidePanel();
+      else if(!(window.wuSpeak&&wuSpeak.esc()))escPage();
+      return;
+    }
     const qi=$("q");
     if(qi.disabled)return;
     if(d.k==="/"){qi.focus();qi.select();return}
@@ -4594,16 +4601,34 @@ function typeTarget(){
   if(document.activeElement===$("q")||editable(document.activeElement))return null;
   return $("q").disabled?null:$("q");
 }
+/* Escape with no overlay to close: find in articles closes, and with nothing
+   left to put away the key is "/" - the search box, its text selected. A
+   focused field or <select> keeps the key: the box empties on it, an open
+   mode list closes on it. True when the key was spent. */
+function escPage(){
+  if(editable(document.activeElement))return false;
+  if(findDet){findClose();return true}
+  const q=typeTarget();if(!q)return false;
+  q.focus();q.select();
+  return true;
+}
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape"&&!$("azAsk").hidden){askAZ(false);$("azBtn").focus({preventScroll:true});return}
   if(e.key==="Escape"){
     // Focus return (D102 is about labels, this is the same courtesy for the
     // caret): dismissing an overlay from the keyboard must not drop focus
     // onto <body>, where the next keystroke has nowhere to go.
-    const inPanel=$("panel").classList.contains("show")&&
-      $("panel").contains(document.activeElement);
-    hidePanel();
-    if(inPanel&&!$("q").disabled)$("q").focus();
+    if($("panel").classList.contains("show")){
+      const inPanel=$("panel").contains(document.activeElement);
+      hidePanel();
+      if(inPanel&&!$("q").disabled)$("q").focus();
+      return;
+    }
+    // One press, one layer: read aloud (speak.js, pick.js) spends the key by
+    // preventing its default. Spent here too, so that a hardware Escape on
+    // Android is not also Back.
+    if(e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||e.shiftKey||e.isComposing)return;
+    if(escPage())e.preventDefault();
     return;
   }
   /* The same action as the two chevrons, for the hand already on the

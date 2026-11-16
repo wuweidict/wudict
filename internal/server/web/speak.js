@@ -1013,8 +1013,7 @@ function onSel() { schedule(ptr === "touch" ? 350 : 200) }
 function onKey(e) {
   const k = e.key;
   if (k === "Escape") {
-    if (menu && !menu.hidden) closeMenu();
-    else halt();
+    if (esc()) e.preventDefault();
     return;
   }
   const a = spaceIsOurs(e) ? "space" : stash ? MEDIA_KEYS[k] : "";
@@ -1102,8 +1101,11 @@ window.wuSpeak = {
   toggle,
   // The same, from an article frame: only for the stash that frame owns.
   frameToggle(f) { if (stash && stash.kind === "frame" && stash.frame === f) toggle() },
-  // Escape inside an article frame.
+  // Escape on a mark, or a tap on nothing (pick.js stop).
   hush() { halt() },
+  // Escape inside an article frame (frame.js hands it over): true when it
+  // was read aloud's to take.
+  esc,
   // Space inside an article frame (frame.js hands every one over): true when
   // it was read aloud's to take - something is read or paused - and the page
   // must not scroll for it.
@@ -1113,6 +1115,18 @@ window.wuSpeak = {
     return true;
   }
 };
+
+// Escape: an open menu closes; else the reading ends and the speaker goes,
+// with the mark a tap made - a selection of the reader's own stays selected.
+// True when there was something to put away: the key is then spent, and the
+// page does nothing more with it (index.html escPage).
+function esc() {
+  if (menu && !menu.hidden) { closeMenu(); return true }
+  if (!busy && (!ui || ui.hidden)) return false;
+  clearTimeout(settleT); // a selection still settling must not bring it back
+  dismiss();
+  return true;
+}
 
 function halt() {
   if (!busy) return;

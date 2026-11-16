@@ -702,6 +702,16 @@
 		if (t && (t.isContentEditable ||
 			/^(input|textarea|select)$/i.test(t.tagName || ""))) return;
 		var k = e.key || "";
+		// Escape is the app's: it puts away what is open there - read aloud,
+		// find in articles - and with nothing open goes to the search box.
+		// Not one already spent, on a mark (pick.js) or by the article's own
+		// script.
+		if (k === "Escape") {
+			if (e.defaultPrevented || e.shiftKey) return;
+			e.preventDefault();
+			try { HOST.postMessage({ t: "key", k: "Escape" }, "*"); } catch (err) { }
+			return;
+		}
 		// Space goes to the app (D192 Am. 4): it pauses and resumes read aloud
 		// while the app reads or is paused, and otherwise scrolls the page a
 		// screen, Shift+Space back. This frame is sized to its content and

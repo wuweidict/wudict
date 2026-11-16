@@ -717,8 +717,13 @@
 			if (e.key !== "Escape") return;
 			cancel(); // a mark still waiting out its window never appears
 			if (!unit) return;
+			// Spent on a mark that is still the selection: the page and the
+			// app do nothing more with the key.
+			var live = false;
+			try { live = selText(unit.root) === unit.sel; } catch (_) { }
 			clearMark();
 			opt.stop();
+			if (live) e.preventDefault();
 		}, true);
 
 		// Bubble phase, so the article's own handlers have had their say.
