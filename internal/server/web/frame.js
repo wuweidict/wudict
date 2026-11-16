@@ -643,7 +643,13 @@
 		if (u && sel.replace(/\s+/g, " ") === u.sel) sel = "";
 		// selected as a desktop browser selects it: the reader sees what was looked up
 		if (!sel) sel = selectWordAt ? selectWordAt(e, document.body) : wordAt ? wordAt(e, document.body) : "";
-		if (sel) HOST.postMessage({ t: "pick", w: sel }, "*");
+		if (!sel) return;
+		HOST.postMessage({ t: "pick", w: sel }, "*");
+		// The lookup replaces this frame. Android's selection toolbar outlives a
+		// frame removed with its selection still standing - a bar with nothing
+		// selected and no way to dismiss it - so a touch selection goes now,
+		// while the frame can still collapse it.
+		if (ptrType === "touch") try { document.getSelection().removeAllRanges(); } catch (_) { }
 	});
 
 	// A marked unit goes to the app at once, as the selection it is.
