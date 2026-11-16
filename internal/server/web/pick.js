@@ -76,12 +76,68 @@
 			p = root.nodeType === 11
 				? doc.caretPositionFromPoint(x, y, { shadowRoots: [root] })
 				: doc.caretPositionFromPoint(x, y);
-			if (p) return { node: p.offsetNode, offset: p.offset };
-		} else if (doc.caretRangeFromPoint) {
+			return p ? { node: p.offsetNode, offset: p.offset } : null;
+		}
+		// Chrome before 128 (Android System WebView included) has only
+		// caretRangeFromPoint, and it answers at the shadow host - never in a
+		// shadow-DOM article.
+		if (root.nodeType === 11) return caretInShadow(root, x, y);
+		if (doc.caretRangeFromPoint) {
 			p = doc.caretRangeFromPoint(x, y);
 			if (p) return { node: p.startContainer, offset: p.startOffset };
 		}
 		return null;
+	}
+
+	// The caret in a shadow root, found as the browser finds it: the character
+	// box nearest the point, line first, and the edge of it nearer the point.
+	// No caret beyond CARET_NEAR px - wider than overText's slack, so a tap it
+	// would accept is always found.
+	var CARET_NEAR = 24;
+	function caretInShadow(root, x, y) {
+		var el = root.elementFromPoint ? root.elementFromPoint(x, y) : null;
+		if (!el || !root.contains(el)) return null;
+		var doc = root.ownerDocument || document, r = doc.createRange();
+		var w = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+		var best = null, bdy = CARET_NEAR, bdx = CARET_NEAR;
+		// the box's distance from the point, vertical before horizontal
+		var closer = function (b) {
+			var dy = Math.max(b.top - y, y - b.bottom, 0), dx = Math.max(b.left - x, x - b.right, 0);
+			if (dy > bdy || dy === bdy && dx >= bdx) return false;
+			if (dx > CARET_NEAR) return false;
+			bdy = dy; bdx = dx;
+			return true;
+		};
+		for (var n = w.nextNode(), i = 0; n && i < LIMIT; n = w.nextNode(), i++) {
+			if (!/\S/.test(n.data)) continue;
+			r.selectNodeContents(n);
+			var lines = r.getClientRects(), near = false;
+			for (var j = 0; j < lines.length && !near; j++) {
+				var L = lines[j];
+				near = Math.max(L.top - y, y - L.bottom, 0) <= bdy &&
+					Math.max(L.left - x, x - L.right, 0) <= CARET_NEAR;
+			}
+			if (!near) continue;
+			for (var k = 0; k < n.length; k++) {
+				// a surrogate pair is one character, and half of one has no box
+				var c = n.data.charCodeAt(k), e = k + (c >= 0xD800 && c <= 0xDBFF && k + 1 < n.length ? 2 : 1);
+				r.setStart(n, k);
+				r.setEnd(n, e);
+				var rs = r.getClientRects();
+				for (var m = 0; m < rs.length; m++) {
+					var b = rs[m];
+					if (!b.width || !closer(b)) continue;
+					var past = x > (b.left + b.right) / 2;
+					best = { node: n, start: k, end: e, past: past };
+				}
+				k = e - 1;
+			}
+			if (best && !bdy && !bdx) break; // on the character itself
+		}
+		if (!best) return null;
+		var rtl = false;
+		try { rtl = (doc.defaultView || window).getComputedStyle(best.node.parentElement).direction === "rtl"; } catch (_) { }
+		return { node: best.node, offset: best.past !== rtl ? best.end : best.start };
 	}
 
 	// One per language and granularity: making one loads break rules, and
