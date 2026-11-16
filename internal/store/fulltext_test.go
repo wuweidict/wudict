@@ -269,8 +269,11 @@ func TestReconcileWithoutSource(t *testing.T) {
 		if err != nil || !out.FullTextRemoved || out.Rebuilt || out.Plan.FullText || fsx.FileExists(FullTextSibling(textDB)) {
 			t.Errorf("removing full text: %+v, %v", out, err)
 		}
-		if _, err := Open(textDB); err != nil {
+		s, err := Open(textDB)
+		if err != nil {
 			t.Errorf("the text afterwards: %v", err)
+		} else {
+			s.Close() // the TempDir cleanup cannot unlink an open file (Windows)
 		}
 	}
 	// An index inside the text can only go by writing the text again.
