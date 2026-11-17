@@ -138,7 +138,7 @@ final class ShellPrefs {
 
     // ── the access key ───────────────────────────────────────────────────────
     //
-    // Android has no per-app loopback: 127.0.0.1:6888 is reachable by every
+    // Android has no per-app loopback: the server's port is reachable by every
     // other app on the device that holds INTERNET, which is nearly all of
     // them. Nothing about the server's own defaults can fix that - it is a
     // property of the platform's network stack - so the shell generates a
@@ -501,8 +501,9 @@ final class ShellPrefs {
      * and with it every page preference stored against that origin - alone.
      */
     static final String DEFAULT_IP = "127.0.0.1";
-    /** D52: fixed, because localStorage is keyed by origin. */
-    static final int DEFAULT_PORT = 6888;
+    /** D52: fixed, because localStorage is keyed by origin. 6888; 6886 in a
+     *  debug build, which installs beside the release one (build.gradle). */
+    static final int DEFAULT_PORT = BuildConfig.DEFAULT_PORT;
 
     private static final int MIN_PORT = 1024, MAX_PORT = 65535;
 

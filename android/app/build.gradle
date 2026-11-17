@@ -53,6 +53,10 @@ android {
         versionName "3.7.10"
         if (project.hasProperty('versionCode')) versionCode = project.property('versionCode') as int
         if (project.hasProperty('versionName')) versionName = project.property('versionName') as String
+        // The server's default port (ShellPrefs.DEFAULT_PORT). Loopback is
+        // shared by every app on the device, so an install that shares the
+        // port with another cannot start while the other's server runs.
+        buildConfigField 'int', 'DEFAULT_PORT', '6888'
     }
 
     // Two distributions, one source tree (D62). `foss` is the GitHub/F-Droid
@@ -92,6 +96,8 @@ android {
         }
         debug {
             applicationIdSuffix = ".debug"
+            // its own port, so a debug build runs beside the release one
+            buildConfigField 'int', 'DEFAULT_PORT', '6886'
         }
     }
 

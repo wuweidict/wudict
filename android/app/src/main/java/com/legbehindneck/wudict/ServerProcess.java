@@ -54,7 +54,7 @@ class ServerProcess {
     // The port is fixed per install rather than per launch (D52: UI prefs live
     // in localStorage, which is keyed by origin, so a random port would forget
     // them every time), but it is not a constant: a device where
-    // something else already holds 6888 can override it (D101).
+    // something else already holds the default port can override it (D101).
     //
     // portCache exists for PowerSignal, which is entirely static and has no
     // Context to ask. Every path that can reach the server primes it first -
@@ -85,7 +85,7 @@ class ServerProcess {
 
     // ── the one child, and who is holding it ─────────────────────────────
     // One server per app process, shared across activity recreation: the child
-    // holds port 6888, so a second spawn would lose the port to it.
+    // holds the port, so a second spawn would lose the port to it.
     //
     // Not a static inside MainActivity read back as "non-null means ready": a
     // lookup popup must work with MainActivity dead (D67), and two activities
@@ -191,7 +191,7 @@ class ServerProcess {
     private void run(Listener listener) {
         // A previous run's child can outlive the app process: Android kills
         // the app, but an exec'd child is reparented to init and keeps
-        // running - still holding 6888, still serving the same library. Only
+        // running - still holding the port, still serving the same library. Only
         // a clean finish reaches onDestroy and stop(). Spawning a second
         // server then means a bind failure and a misleading wait, when a
         // perfectly good one is already there, so adopt it instead.

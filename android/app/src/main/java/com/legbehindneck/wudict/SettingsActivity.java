@@ -349,7 +349,7 @@ public class SettingsActivity extends Activity {
         boxes[i] = c;
         box.addView(c);
 
-        hints[i] = caption(getString(o.hint), 0, SP_4);
+        hints[i] = caption(getString(o.hint, ShellPrefs.DEFAULT_PORT), 0, SP_4);
         box.addView(hints[i]);
         return box;
     }
@@ -493,7 +493,7 @@ public class SettingsActivity extends Activity {
     private void paintHint(int i) {
         ShellPrefs.Override o = keys[i];
         String seen = effective[i];
-        StringBuilder b = new StringBuilder(getString(o.hint));
+        StringBuilder b = new StringBuilder(getString(o.hint, ShellPrefs.DEFAULT_PORT));
         if (o.kind == ShellPrefs.CHOICE) {
             // the caution, then what the option shown does
             int at = shown(i);
