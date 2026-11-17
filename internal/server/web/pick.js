@@ -639,7 +639,10 @@
 			if (!s) continue;
 			try {
 				s.setBaseAndExtent(r.startContainer, r.startOffset, r.endContainer, r.endOffset);
-				var t = !s.isCollapsed && norm(String(s));
+				// The text is the test, never isCollapsed: Chromium before 105
+				// (Bromite 104, an Android System WebView not updated) answers
+				// true from a shadow root's selection that holds a range.
+				var t = norm(String(s));
 				if (t) return t;
 			} catch (_) { /* this API would not take it; try the next */ }
 		}
@@ -704,10 +707,15 @@
 		}, true);
 
 		// A press on the mark keeps it: the selection is what read aloud shows
-		// and reads. Only a fresh press - the second of a double click is the
-		// browser's, to select the word as it always has.
+		// and reads. With a mouse only a fresh press - the second of a double
+		// click is the browser's, to select the word as it always has. A finger
+		// has no such second press: on Android a tap on selected text is the
+		// gesture that brings up the selection handles and the action bar, and
+		// a selection made by script afterwards inherits them - the word a
+		// double tap looks up would carry the bar into the next article. No
+		// touch press on the mark reaches the browser, whatever its count.
 		addEventListener("mousedown", function (e) {
-			if (down && down.inUnit && e.button === 0 && e.detail === 1) e.preventDefault();
+			if (down && down.inUnit && e.button === 0 && (down.touch || e.detail === 1)) e.preventDefault();
 		}, true);
 
 		// the second tap of a double tap is a lookup, never a confirmation
