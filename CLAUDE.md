@@ -10,6 +10,7 @@ Every doc below is long; read the section your change touches, never a whole fil
 - `docs/FORMATS.md` — per-format facts + exact reference-code pointers. Read the section for the format you touch, nothing more.
 - `docs/WUDICT-MARKDOWN.md` — normative spec of wudict markdown (reader + writer). Read only when touching that format or its export. `entry://` is the canonical lookup link; `bword://` is a legacy alias: parse, never emit.
 - `docs/STYLE.md` — terms and register for every text a user reads (manual, README, UI, `--help`, howto). Read before writing any of it.
+- `internal/server/web/index.html` is ~390 KB (the page's CSS, markup and main script): locate by `grep -n 'function <name>\|id="<id>"'` and read that range; never read it whole. Go symbols and callers: LSP (gopls) before grep.
 - `docs/OPEN.md` — researched but **unscheduled** items (O-numbers). Check before proposing morphology, stemming or Unicode-folding work; do not start anything in it without being asked.
 
 **D-, P- and C-numbers** cited throughout the code (`D15`, `docs.local/PERF.md §3.1`,
