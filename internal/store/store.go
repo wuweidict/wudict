@@ -438,81 +438,93 @@ func (s *Store) FullTextMatch(ctx context.Context, match string, limit int) ([]d
 			WHERE entry_fts MATCH ?1`+subEntryFilter("e.w")+`ORDER BY f.rank LIMIT ?2`, match, clamp(limit)))
 	}
 	// The index is another file: it ranks the entry ids, and the entries are
-	// read from this one in that order. A sub-entry is indexed and never
-	// returned (notSubEntry), so as many more ids are asked for as the
-	// dictionary has sub-entries: the limit is then met whenever it can be.
+	// read from this one in that order, a batch of ids at a time, straight off
+	// the index's cursor, until the limit is met. A sub-entry is indexed and
+	// never returned (notSubEntry), so the cursor may have to pass that many
+	// more ids; it is closed as soon as the limit is met.
 	ft, err := s.fullTextDB()
 	if err != nil {
 		return nil, err
 	}
 	limit = clamp(limit)
-	ids, err := queryIDs(ft.QueryContext(ctx,
-		"SELECT rowid FROM entry_fts WHERE entry_fts MATCH ?1 ORDER BY rank LIMIT ?2", match, limit+s.subEntries))
+	ranked, err := ft.QueryContext(ctx,
+		"SELECT rowid FROM entry_fts WHERE entry_fts MATCH ?1 ORDER BY rank LIMIT ?2", match, limit+s.subEntries)
 	if err != nil {
 		return nil, err
 	}
-	// Read a batch of ids a statement, then put the rows back in rank order:
-	// one statement an id costs more in round trips than the rows do.
-	out := make([]dict.Result, 0, min(len(ids), limit))
+	defer ranked.Close()
+	// One statement a batch, then the rows are put back in rank order: one
+	// statement an id costs more in round trips than the rows do.
 	const batch = 64
-	byID := make(map[int64]dict.Result, batch)
+	out := make([]dict.Result, 0, min(limit, batch))
+	part := make([]int64, 0, batch)
 	args := make([]any, 0, batch)
-	for start := 0; start < len(ids) && len(out) < limit; start += batch {
-		part := ids[start:min(start+batch, len(ids))]
-		args = args[:0]
-		for _, id := range part {
-			args = append(args, id)
-		}
-		rows, err := s.db.QueryContext(ctx,
-			"SELECT id, w, m FROM entry WHERE id IN (?"+strings.Repeat(",?", len(part)-1)+")", args...)
-		if err != nil {
-			return nil, err
-		}
-		clear(byID)
-		for rows.Next() {
+	byID := make(map[int64]storedEntry, batch)
+	for len(out) < limit {
+		part = part[:0]
+		for len(part) < batch && ranked.Next() {
 			var id int64
-			var r dict.Result
-			var body []byte
-			if err := rows.Scan(&id, &r.Headword, &body); err != nil {
-				rows.Close()
+			if err := ranked.Scan(&id); err != nil {
 				return nil, err
 			}
-			if !isSubEntry(r.Headword) {
-				r.Body = s.body.decode(body)
-				byID[id] = r
-			}
+			part = append(part, id)
 		}
-		if err := rows.Close(); err != nil {
+		if len(part) == 0 {
+			break
+		}
+		if out, err = s.appendEntries(ctx, out, part, limit, args, byID); err != nil {
 			return nil, err
 		}
-		if err := rows.Err(); err != nil {
-			return nil, err
+	}
+	if err := ranked.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// appendEntries appends to out, up to limit, the entries of ids that are not
+// sub-entries, in the order of ids. args and byID are scratch space the
+// caller reuses between batches.
+func (s *Store) appendEntries(ctx context.Context, out []dict.Result, ids []int64, limit int, args []any, byID map[int64]storedEntry) ([]dict.Result, error) {
+	args = args[:0]
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, w, m FROM entry WHERE id IN (?"+strings.Repeat(",?", len(ids)-1)+")", args...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	clear(byID)
+	for rows.Next() {
+		var id int64
+		var r storedEntry
+		if err := rows.Scan(&id, &r.w, &r.body); err != nil {
+			return out, err
 		}
-		for _, id := range part {
-			if r, ok := byID[id]; ok {
-				if out = append(out, r); len(out) == limit {
-					break
-				}
+		if !isSubEntry(r.w) {
+			byID[id] = r
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	// Decoded here, in rank order: an entry past the limit is never decoded.
+	for _, id := range ids {
+		if r, ok := byID[id]; ok {
+			if out = append(out, dict.Result{Headword: r.w, Body: s.body.decode(r.body)}); len(out) == limit {
+				break
 			}
 		}
 	}
 	return out, nil
 }
 
-func queryIDs(rows *sql.Rows, err error) ([]int64, error) {
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+// storedEntry is an entry row as stored: its article not yet decoded.
+type storedEntry struct {
+	w    string
+	body []byte
 }
 
 // fullTextDB opens the paired index on first use. A failure is remembered:

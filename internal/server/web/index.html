@@ -200,7 +200,7 @@ input[type=search]::placeholder{color:var(--fg-soft);opacity:1}
 .qstar[aria-pressed="true"] path{fill:currentColor}
 /* Under the EMPTY box, on a click or ↓: favourites, then history. Under a box
    with text: the headwords that match it (D199) - on ↓, or by itself while
-   typing when the reader chose "List headwords". An overlay: opening it moves
+   typing when the reader chose "Show headwords". An overlay: opening it moves
    nothing below. */
 #recall{position:absolute;top:calc(100% + 4px);left:0;right:0;min-width:12em;
   max-height:min(60vh,24em);overflow-y:auto;margin:0;padding:.25em 0;list-style:none;
@@ -1201,7 +1201,7 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
      submits under the HTML spec's no-submit-button clause and the submit
      listener below runs unchanged — and anything two characters or longer
      never waits for a keypress at all, because the input handler searches
-     as you type. Under "List headwords" (D199) a row of the list is the
+     as you type. Under "Show headwords" (D199) a row of the list is the
      click target. A button would be a magnifier next to a magnifier. -->
 <button type="button" class="btn tools themeBtn" title="Theme" aria-label="Toggle theme">◐</button>
 <button type="button" class="btn" id="wideBtn" title="Toggle wide layout" aria-label="Toggle wide layout">⇔</button>
@@ -1293,8 +1293,8 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
     <label class="seg">
       <span>While you type</span>
       <select id="typeSel" title="Search as you type, or list the matching headwords under the search box and search on Enter.">
-        <option value="live">Search</option>
-        <option value="list">List headwords</option>
+        <option value="live">Live search</option>
+        <option value="list">Show headwords</option>
       </select>
     </label>
     <label class="seg">
@@ -3584,7 +3584,8 @@ function runIngest(id,opts,label){
     setStatus('<span class="spin"></span>'+(opts.statusPrefix||"")+esc(name)+" — "+esc(long||t));
   };
   const removing=Object.values(opts).some(v=>v===0);
-  show(removing?"removing…":"indexing…");
+  const verb=removing?"removing":"indexing";
+  show(verb+"…");
   label.classList.remove("act");label.classList.add("busy");
   label.style.textDecoration="none";label.style.cursor="default";
   // A feature left out keeps its state; the index chip sends none, which
@@ -3775,6 +3776,15 @@ function renderFrame(dd,body,dictID,frag){
   dd.appendChild(ifr);
   return null; // no shadow root: nothing for the caller to anchor into
 }
+/* What frameDoc writes around the article, and frameBody cuts it out by: the
+   head ends before the article, and the sizing backstop below follows it. */
+const FRAME_OPEN="</head><body>",
+  FRAME_CLOSE="<style>:root,:root>body{height:auto!important;min-height:0!important;max-height:none!important}</style>";
+/* The article a frameDoc holds; null for a document frameDoc did not write. */
+function frameBody(doc){
+  const a=doc.indexOf(FRAME_OPEN),b=doc.lastIndexOf(FRAME_CLOSE);
+  return a<0||b<a?null:doc.slice(a+FRAME_OPEN.length,b);
+}
 function frameDoc(content,fid,dark,dictID,frag){
   return '<!DOCTYPE html><html class="'+(dark?'dark':'')+'"'+(dark?' data-dark':'')+'><head><meta charset="utf-8">'+
     /* Baked in, because a custom property cannot cross into another
@@ -3785,7 +3795,7 @@ function frameDoc(content,fid,dark,dictID,frag){
     'html.dark :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){filter:invert(1) hue-rotate(180deg)}'+
     ARTCSS+
     '</style><script src="/assets/pick.js?v={{PICKJS}}"><\/script><script src="/assets/frame.js?v={{FRAMEJS}}" data-fid="'+fid+'" data-dict="'+(dictID||"")+
-    '" data-speak="'+(speakOn?1:0)+'" data-frag="'+esc(frag||"").replace(/"/g,"&quot;")+'"><\/script></head><body>'+content+
+    '" data-speak="'+(speakOn?1:0)+'" data-frag="'+esc(frag||"").replace(/"/g,"&quot;")+'"><\/script>'+FRAME_OPEN+content+
     /* A stylesheet written for a full page sizes html and body from the
        VIEWPORT — LDOCE's ldoce.css opens with `html, body{height:100%}`. Here the
        viewport is a frame we sized from what the frame measured, so every
@@ -3798,7 +3808,7 @@ function frameDoc(content,fid,dark,dictID,frag){
        too. Nothing else is neutralised — an article may still make body a scroll
        container or paint it; only self-referential SIZING is refused.
        frame.js carries the matching backstop (D72). */
-    '<style>:root,:root>body{height:auto!important;min-height:0!important;max-height:none!important}</style>'+
+    FRAME_CLOSE+
     /* The user's own article stylesheet, last of all: after the backstop, and
        after the dictionary's <link>s, which live in the body. The element is
        always emitted even when empty — frame.js addresses it by id to carry
@@ -4568,7 +4578,7 @@ document.addEventListener("click",e=>{
   }).catch(()=>{more.textContent="more…"});
 });
 
-/* live search: debounce while typing. Not under "List headwords" (D199):
+/* live search: debounce while typing. Not under "Show headwords" (D199):
    there typing fills the list under the box, and Enter or a picked row
    searches. */
 let debounce=null;
@@ -5088,13 +5098,13 @@ function fullKey(){
    Hidden below two matches: with one there is nowhere to go, and a control
    that cannot act is furniture (D102). */
 let navEl=null,navDet=null,navList=null,navIdx=0,navTimer=0,markedAnswer=false;
-function markList(det,all){
+function markList(det){
   const out=[];
   for(const host of det.querySelectorAll(".article")){
     const root=host.shadowRoot||host.contentDocument;
     if(!root)continue;
     for(const m of root.querySelectorAll(".wu-hl"))
-      if(all||!m.checkVisibility||m.checkVisibility())out.push({host,el:m});
+      if(!m.checkVisibility||m.checkVisibility())out.push({host,el:m});
   }
   return out; // DOM order across articles is reading order
 }
@@ -5182,12 +5192,22 @@ function navGo(step){
    the first match, the blocks and zones that open around one, the cap. The
    words are one phrase, the last one open, whole words before it.
 
-   One repaint per Enter, none per keystroke: an article that came with
-   scripts is an iframe, and repainting it restarts them. Enter on words
-   already found is the walk's next step, Shift-Enter its previous one.
+   What comes back is not rendered (D198 Am. 1). Each article is parsed inert
+   (DOMParser: no script runs, no image loads), and where its text is the
+   text of the article on the page - the same server output through the same
+   parser, marks aside - the marks are copied in at the same offsets of that
+   text. Nothing is rendered again: no flicker, no frame restarts its
+   scripts, and the scroll position, the open blocks and the read-aloud mark
+   stay. An article whose text differs - a frame its own script has changed -
+   is rendered again with the marks, alone.
 
-   Closing takes the marks out of the articles in place - they are the only
-   thing the find added - so leaving costs no second repaint. */
+   One request per Enter, none per keystroke. Enter on words already found is
+   the walk's next step, Shift-Enter its previous one.
+
+   The search's own marks (full text) are switched off while a find shows its
+   own (wu-hl-off) and back on when it closes, so leaving asks for nothing. An
+   article that had to be rendered again gets its first form back, and is
+   rendered once more only when that form had marks. */
 const FIND_SVG='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.6 3.6"/></svg>';
 let findEl=null,findDet=null,findText="",findAC=null,findNoneT=0;
 function findButton(det){
@@ -5246,14 +5266,132 @@ function findOpen(det){
   sum.prepend(el);
   el.firstElementChild.focus({preventScroll:true});
 }
-/* The marks a find painted, taken out of the articles where they stand. */
-function findStrip(det){
-  for(const m of markList(det,true)){
-    const p=m.el.parentNode;
-    m.el.replaceWith(...m.el.childNodes);
-    if(p)p.normalize();
+/* The text of an article as it is read, node by node: what the server marks,
+   and what a find compares. Style and script text are not read, and a
+   sub-entry the page pulled in beside a link (wu-sub) is not the article's. */
+const TEXT_SKIP=/^(style|script|noscript|template)$/i;
+function textRuns(root){
+  const nodes=[];let text="";
+  const w=(root.ownerDocument||root).createTreeWalker(root,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT,{acceptNode:x=>
+    x.nodeType===3?NodeFilter.FILTER_ACCEPT:
+    TEXT_SKIP.test(x.localName)||x.classList.contains("wu-sub")?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_SKIP});
+  for(let t=w.nextNode();t;t=w.nextNode()){
+    if(!t.data)continue;
+    nodes.push({node:t,start:text.length,len:t.data.length});
+    text+=t.data;
   }
-  if(det===navDet)navDetach();
+  return{nodes,text};
+}
+/* The marks of a parsed answer, as [start,end) of its text. */
+function markRanges(runs){
+  const out=[];let last=null;
+  for(const r of runs.nodes){
+    const m=r.node.parentElement&&r.node.parentElement.closest("mark.wu-hl");
+    if(!m)continue;
+    if(last&&last.m===m&&last.end===r.start)last.end+=r.len;
+    else out.push(last={m,start:r.start,end:r.start+r.len});
+  }
+  return out;
+}
+/* Wraps those ranges of an article's text in find marks, one mark per text
+   node a range crosses. Last range first, so a split never moves an offset
+   still to come: a node split keeps its head, and its head's offsets. */
+function wrapRanges(runs,ranges){
+  const ns=runs.nodes;
+  let k=ns.length-1;
+  for(let i=ranges.length-1;i>=0;i--){
+    const a=ranges[i].start,b=ranges[i].end;
+    while(k>=0&&ns[k].start>=b)k--;
+    for(let j=k;j>=0&&ns[j].start+ns[j].len>a;j--){
+      const r=ns[j],lo=Math.max(a,r.start)-r.start,hi=Math.min(b,r.start+r.len)-r.start;
+      let t=r.node;
+      if(hi<t.data.length)t.splitText(hi);
+      if(lo>0)t=t.splitText(lo);
+      const m=t.ownerDocument.createElement("mark");
+      m.className="wu-hl wu-find";
+      t.parentNode.insertBefore(m,t);m.appendChild(t);
+      r.len=lo;
+    }
+  }
+}
+/* Takes marks out where they stand: the elements go, their text stays. */
+function unwrapMarks(root,sel){
+  const parents=new Set();
+  for(const m of root.querySelectorAll(sel)){
+    if(m.parentNode)parents.add(m.parentNode);
+    m.replaceWith(...m.childNodes);
+  }
+  for(const p of parents)p.normalize();
+}
+/* One article rendered again from `html`: a find's answer that could not be
+   copied in place, or (`back`) the form it had before the find. A shadow
+   root's form is its whole content; a frame's is its article, put back into
+   a frame document made now. */
+function findRender(host,html,back){
+  const root=host.shadowRoot;
+  if(!root){host.srcdoc=frameDoc(html,host.dataset.fid,themeIsDark(),host.dataset.dict||"","");return}
+  root.innerHTML=back?html:shadowBase+html;
+  if(back)for(const m of root.querySelectorAll(".wu-hl-off"))m.className="wu-hl";
+  hoistShadowFonts(root);
+}
+/* Copies a find's answer into the open section: each article's marks, by its
+   headword, in place where its text is the text on the page (textRuns), else
+   by rendering it again (findRender), its first form kept on the host
+   (wuPlain) for findUnpaint. The search's own marks give way first. */
+function findPaint(det,results){
+  const bodies=new Map();
+  for(const r of results){
+    const l=bodies.get(r.Headword);
+    if(l)l.push(r.Body);else bodies.set(r.Headword,[r.Body]);
+  }
+  const parser=new DOMParser();
+  for(const dd of det.querySelectorAll(":scope>dl>dd")){
+    const host=dd.querySelector(":scope>.article"),dt=dd.previousElementSibling;
+    const root=host&&(host.shadowRoot||host.contentDocument);
+    if(!root)continue;
+    // after findUnpaint, every mark left is the search's own
+    for(const m of root.querySelectorAll(".wu-hl"))m.className="wu-hl-off";
+    const body=dt?bodies.get(dt.textContent)?.shift():undefined;
+    if(body===undefined)continue;
+    const got=textRuns(parser.parseFromString("<!DOCTYPE html><body>"+body,"text/html").body);
+    const have=textRuns(root.body||root); // a frame's document, or a shadow root
+    if(got.text===have.text){wrapRanges(have,markRanges(got));continue}
+    if(host.wuPlain===undefined)host.wuPlain=host.shadowRoot?host.shadowRoot.innerHTML:frameBody(host.srcdoc);
+    findRender(host,body,false);
+  }
+}
+/* Takes a find's marks out of a section; with `restore` the section is
+   given back as the search left it: its own marks on again, and an article
+   rendered again for the find in its first form - rendered once more only
+   when that form had marks, unwrapped in place otherwise.
+
+   wuPlain stays until the article is rendered from it: unwrapped in place,
+   a frame's srcdoc is still the find's document, and a later find must not
+   take that for the first form. */
+function findUnpaint(det,restore){
+  for(const {host,root} of foldRoots(det)){
+    const plain=host.wuPlain;
+    if(plain===undefined){
+      unwrapMarks(root,".wu-find");
+      if(restore)for(const m of root.querySelectorAll(".wu-hl-off"))m.className="wu-hl";
+      continue;
+    }
+    // every mark here came with the find's answer
+    if(restore&&typeof plain==="string"&&/class="wu-hl/.test(plain)){
+      delete host.wuPlain;
+      findRender(host,plain,true);
+      continue;
+    }
+    unwrapMarks(root,".wu-hl");
+  }
+}
+/* The walk follows the marks the section has once a find is gone: a marked
+   full-text answer's own, else none. */
+function findAfter(det){
+  const a=det.wuAsk;
+  if(a&&a.mode==="fts"&&hlOn)navAttach(det);
+  else if(det===navDet)navDetach();
+  findNote();
 }
 function findClose(){
   const det=findDet,found=findText;
@@ -5263,7 +5401,7 @@ function findClose(){
   if(findEl){findEl.remove();findEl.classList.remove("none");findEl.firstElementChild.value=""}
   if(!det||!det.isConnected)return; // a new answer took the section with it
   det.classList.remove("finding");
-  if(found)findStrip(det);
+  if(found){findUnpaint(det,true);fullInit(det);findAfter(det)}
   if(det.open)det.querySelector(":scope>summary .sbtn")?.focus({preventScroll:true});
 }
 /* "Nothing found", said by the field. Late, because an article in a frame has
@@ -5286,34 +5424,29 @@ function findRun(step){
   }
   if(findAC){findAC.abort();findAC=null}
   if(!text){ // the field was emptied: the marks go, the field stays
-    findText="";findStrip(det);findNote();
+    if(findText){findText="";findUnpaint(det,true);fullInit(det);findAfter(det)}
     return;
   }
-  const ask=det.wuAsk,box=det.parentElement;
-  if(!ask||!box)return;
+  const ask=det.wuAsk;
+  if(!ask)return;
   const ac=findAC=new AbortController();
+  let done=false;
   fetchStream("/api/search?q="+encodeURIComponent(ask.q)+"&mode="+ask.mode+
       "&dict="+encodeURIComponent(ask.dict)+"&n="+Math.min(ask.per,100)+"&mark="+encodeURIComponent(text),msg=>{
     // An empty hit is the first wave of an answer the lemma wave gave: it is
-    // not this section. And only the section still being searched is repainted.
-    if(msg.t!=="hit"||!msg.results?.length||findDet!==det||!box.isConnected)return;
-    const typing=document.activeElement===input;
-    // The page keeps its length while the section is rebuilt; without the
-    // floor the document would shrink under the reader and the scroll
-    // position would be clamped to somewhere they never were.
-    box.style.minHeight=box.offsetHeight+"px";
-    setTimeout(()=>{box.style.minHeight=""},1500);
-    renderSlot(box,msg,ask.mode,ask.q,ask.per);
-    const nd=box.querySelector("details.dict");
-    if(!nd){findClose();return}
-    nd.open=true;fillSection(nd);
-    findDet=nd;findText=text;nd.classList.add("finding");
-    nd.querySelector(":scope>summary").prepend(findEl);
+    // not this section. And only the section still being searched is marked.
+    if(done||msg.t!=="hit"||!msg.results?.length||findDet!==det||!det.isConnected)return;
+    done=true;
+    det.open=true;fillSection(det);
+    findUnpaint(det,false);
+    findPaint(det,msg.results);
+    findText=text;
+    fullInit(det); // a block in an article rendered again takes the section's state
     // On a touch screen the keyboard has done its work and covers half of
     // what was found; with a real one the next Enter belongs to the field.
-    if(typing&&!TAPS)input.focus({preventScroll:true});
-    navAttach(nd);
-    revealFirstMark(nd);
+    if(TAPS&&document.activeElement===input)input.blur();
+    navAttach(det);
+    revealFirstMark(det);
   },ac.signal).catch(()=>{}).finally(()=>{if(findAC===ac)findAC=null});
 }
 let markSettle=null;
@@ -5857,7 +5990,7 @@ $("qstar").addEventListener("click",toggleFav);
    and thrown away when it closes; nothing about it runs while it is shut.
    Under the empty box it is the favourites and the history. Under a box with
    text it is the headwords that match the text (D199, /api/suggest): by
-   itself while typing under "List headwords", and on ↓ otherwise. `sug` says
+   itself while typing under "Show headwords", and on ↓ otherwise. `sug` says
    which of the two is open: a headword row is picked like any row, and is
    never forgotten like a history row. */
 const recall=$("recall");
@@ -5962,14 +6095,14 @@ function pickRecall(w){
   searchFor(w,{keepMode});
 }
 /* A click in the box opens the list the box has: the favourites and history
-   when it is empty, and under "List headwords" the headwords for its text. */
+   when it is empty, and under "Show headwords" the headwords for its text. */
 $("q").addEventListener("click",()=>{
   if(!recall.hidden)return;
   if(!$("q").value.trim())openRecall();
   else if(listWords)sugFetch();
 });
 $("q").addEventListener("blur",closeRecall);
-/* Typing. Under "List headwords" the list follows the text: the favourites
+/* Typing. Under "Show headwords" the list follows the text: the favourites
    and history go at the first character, and headword rows stay, with nothing
    highlighted, until the next ones replace them - so the list does not blink
    between two keys. Otherwise typing closes the list, since the search

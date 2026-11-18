@@ -60,6 +60,9 @@
 //	wu-sub   an article section pulled in beside a link (written by the UI)
 //	wu-hl    a full-text match, marked at response time (internal/hilite)
 //	wu-cur   the one match being walked to (written by the UI, not ingested)
+//	wu-hl-off  a full-text match switched off while a find in the articles
+//	         shows its own (written by the UI, not ingested)
+//	wu-find  a find's match, copied into the article (written by the UI)
 //
 // DefaultCSS is served once per page into both article surfaces (the shadow
 // root and the sandboxed iframe), so an article carries none of it: a role
@@ -128,6 +131,11 @@ const DefaultCSS = `
 	// the current one is for. Written by the UI, never ingested, so no Version
 	// bump: an article already in a library folder is unaffected.
 	`.wu-hl.wu-hl.wu-cur{background:var(--wd-hl-cur,#ffab40)!important;box-shadow:0 0 0 2px var(--wd-hl-cur,#ffab40)}
+` +
+	// A match switched off stays a <mark> element, which the browser and a
+	// dictionary's own sheet may paint; it is drawn as the text around it, as
+	// strongly as a match is drawn, for the same reason.
+	`.wu-hl-off.wu-hl-off{background:none!important;color:inherit!important}
 `
 
 // IsColor accepts the two forms a DSL [c] argument may legally take - a

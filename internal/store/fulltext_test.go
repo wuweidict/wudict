@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/wuweidict/wudict/internal/dict"
@@ -281,5 +282,79 @@ func TestReconcileWithoutSource(t *testing.T) {
 	setMeta(t, inside, "ingest_level", levelText)
 	if _, err := Reconcile(inside, Target{FullText: &no}, Hooks{}); !errors.Is(err, ErrNoSource) {
 		t.Errorf("removing an index that is inside the text: %v", err)
+	}
+}
+
+// Results come in the index's rank order, across batches, past more
+// sub-entries than one batch holds, and stop at the limit.
+func TestFullTextRankOrder(t *testing.T) {
+	var es []dict.Entry
+	for i := 0; i < 300; i++ {
+		// the repeats vary the rank; every third entry is a sub-entry
+		body := "<p>" + strings.Repeat("kappa ", 1+i%7) + fmt.Sprint(i) + "</p>"
+		w := fmt.Sprintf("k%03d", i)
+		if i%3 == 0 {
+			w = "@" + w
+		}
+		es = append(es, h(w, body))
+	}
+	textDB := ingestTo(t, es, Plan{FullText: true})
+
+	ft, err := sql.Open(driverName, dsnRO(FullTextSibling(textDB)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ft.Close()
+	text, err := sql.Open(driverName, dsnRO(textDB))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer text.Close()
+	rows, err := ft.Query(`SELECT rowid FROM entry_fts WHERE entry_fts MATCH '"kappa"' ORDER BY rank`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ranked []string
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		var w string
+		if err := text.QueryRow("SELECT w FROM entry WHERE id = ?", id).Scan(&w); err != nil {
+			t.Fatal(err)
+		}
+		if !isSubEntry(w) {
+			ranked = append(ranked, w)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	rows.Close()
+	if len(ranked) != 200 {
+		t.Fatalf("%d entries ranked, want 200", len(ranked))
+	}
+
+	s, err := Open(textDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, limit := range []int{1, 63, 64, 65, 150, 200, 500} {
+		res, err := s.FullTextMatch(context.Background(), `"kappa"`, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make([]string, len(res))
+		for i, r := range res {
+			got[i] = r.Headword
+			if r.Body == "" {
+				t.Errorf("limit %d: %s has no article", limit, r.Headword)
+			}
+		}
+		if want := ranked[:min(limit, len(ranked))]; !slices.Equal(got, want) {
+			t.Errorf("limit %d: %d results, first %v, want %d, first %v", limit, len(got), got[:min(3, len(got))], len(want), want[:min(3, len(want))])
+		}
 	}
 }

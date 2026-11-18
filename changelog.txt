@@ -3,9 +3,18 @@ v3.7.11
 🚀 Features
 (config) COMPRESSION = "zstd" | "deflate" | "none", optionally with a level ("zstd-3", "deflate-6"); --compression on serve. NO_COMPRESS and "fast"/"small" are still read and reported with the new spelling
 (android) Settings → Advanced: Article compression (zstd, DEFLATE or none) replaces the "uncompressed" switch; a ticked switch becomes "none"
+(speak) With read aloud on, a tap or click on a sentence, an example or a headword selects it; a second tap reads it. ⏭ goes to the next one, ✕ clears the selection, and ▾ → Keep reading goes on by itself to the end of the article
+(speak) Space pauses and resumes read aloud; headset, keyboard and Bluetooth media buttons play, pause, skip and restart it; abbreviations are read in full and pronunciations are skipped
+(search) Find in these articles: the magnifier on a result section marks a word or phrase in the articles shown; Enter and Shift+Enter go to the next and previous match
+(search) Optional headword list under the search box: set While you type to Show headwords, or press ↓ in the search box; pick a word with the arrow keys and Enter
+(articles) The brief/full switch (Ctrl+*) also opens and closes an article's folded blocks; a match or link target inside a closed block opens it
+(zim) Full-text search in a ZIM file uses the archive's own search index: nothing to build, nothing extra on disk
+(full text) The full-text index is a file of its own (fulltext.db): adding or removing full text no longer rebuilds the dictionary, and works for a dictionary whose original files are gone. The size full text will add is shown before you add it
+(full text) A phrase is marked as one even where formatting splits it, e.g. a word in bold inside it
+(keys) Esc closes what is open one step at a time (menu, read aloud, find, list); with nothing open it goes to the search box, like /
 
 ⚡ Performance
-(index) Article text is stored with zstd with custom trained dict build from articles: indexed dictionaries are about 28% smaller than with DEFLATE, articles decompress about 4 times faster, and compressing uses less CPU. Earlier dictionaries keep working and are shown as outdated: Rebuild (or wudict reindex) converts them. A dictionary indexed this way does not open in earlier wudict versions: COMPRESSION = "deflate" keeps the old form
+(index) Article text is stored with zstd and a compression dictionary sampled from each dictionary's own articles: indexed dictionaries are about 28% smaller than with DEFLATE, articles decompress about 4 times faster, and compressing uses less CPU. Earlier dictionaries keep working and are shown as outdated: Rebuild (or wudict reindex) converts them. A dictionary indexed this way does not open in earlier wudict versions: COMPRESSION = "deflate" keeps the old form
 
 v3.7.10
 

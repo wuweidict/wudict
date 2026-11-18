@@ -301,13 +301,13 @@ Every search has its own address, so you can bookmark it: `/?q=word&mode=exact`.
 ## wudict autocomplete
 ## wudict while you type
 
-**wudict searches as you type; it can list the matching headwords first**: set <kbd>While you type</kbd> to <kbd>List headwords</kbd> in <kbd>☰</kbd> → ![](cog.svg). The headwords of all the dictionaries in your search then show in one list under the search box, and the results change only when you select one.
+**wudict searches as you type; it can list the matching headwords first**: set <kbd>While you type</kbd> to <kbd>Show headwords</kbd> in <kbd>☰</kbd> → ![](cog.svg). The headwords of all the dictionaries in your search then show in one list under the search box, and the results change only when you select one.
 
 - 💻 <kbd>↓</kbd> and <kbd>↑</kbd> move through the list; <kbd>Enter</kbd> looks up the highlighted headword. 📱 Tap a headword.
 - <kbd>Enter</kbd> with no headword highlighted searches for your text as you typed it.
 - <kbd>Esc</kbd> closes the list.
 
-💻 With <kbd>While you type</kbd> set to <kbd>Search</kbd>, the default, <kbd>↓</kbd> opens the same list for the text in the search box.
+💻 With <kbd>While you type</kbd> set to <kbd>Live search</kbd>, the default, <kbd>↓</kbd> opens the same list for the text in the search box.
 
 The list starts at 2 characters and shows at most 20 headwords: type more letters to narrow it. In wildcard mode it lists the headwords that fit your pattern. Full-text mode has no list: press <kbd>Enter</kbd> to search.
 
@@ -346,7 +346,7 @@ In other dictionaries the same button opens every collapsed block of the article
 ## wudict find in page
 ## wudict find in article
 
-**Press ![](find.svg) in the header of an open dictionary to find a word in its articles**. Type a word or a phrase and press <kbd>Enter</kbd>: every match is marked and the first one comes into view. Step through the matches with the chevrons or with <kbd>Enter</kbd> again (💻 <kbd>Shift</kbd>+<kbd>Enter</kbd> steps back; <kbd>←</kbd> <kbd>→</kbd> and <kbd>F3</kbd> work too). <kbd>✕</kbd> or 💻 <kbd>Esc</kbd> closes the field and removes the marks.
+**Press ![](find.svg) in the header of an open dictionary to find a word in its articles**. Type a word or a phrase and press <kbd>Enter</kbd>: every match is marked and the first one comes into view. Step through the matches with the chevrons or with <kbd>Enter</kbd> again (💻 <kbd>Shift</kbd>+<kbd>Enter</kbd> steps back; <kbd>←</kbd> <kbd>→</kbd> and <kbd>F3</kbd> work too). <kbd>✕</kbd> or 💻 <kbd>Esc</kbd> closes the field and removes the marks; the marks of a full-text search come back.
 
 A word matches from its start: `gate` finds *gate* and *gateway*, not *navigate*. Several words are a phrase, found only side by side and in that sequence. Capitals and accents make no difference. The field turns red when nothing matches.
 
