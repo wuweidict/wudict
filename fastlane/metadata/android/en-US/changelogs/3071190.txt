@@ -1,3 +1,7 @@
-🚀 Features
-(config) COMPRESSION = "zstd" | "deflate" | "none", optionally with a level ("zstd-3", "deflate-6"); --compression on serve. NO_COMPRESS and "fast"/"small" are still read and reported with the new spelling
-(android) Settings → Advanced: Article compression (zstd, DEFLATE or none) replaces the "uncompressed" switch; a ticked switch becomes "none"
+• Dictionaries ~28% smaller, articles open faster (Rebuild to convert)
+• Random word under the empty search box, or touch and hold the app icon
+• NEW: Read aloud by tapping: tap a sentence, example or headword, tap again to hear it; ⏭ next, Keep reading to the end
+• Headset and Bluetooth buttons play, pause and skip
+• Find in articles: mark a word in the results, jump between matches
+• browse: Optional headword list while you type
+• ZIM full-text search with nothing extra to build
