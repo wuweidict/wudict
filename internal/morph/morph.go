@@ -4,10 +4,11 @@
 
 // Package morph turns an inflected word into its dictionary form (O3).
 //
-// It is used on one path only: a search that found nothing anywhere. That is
-// what makes it cheap to be wrong - a candidate is never shown, it is looked up
-// in the real headword index first, so a bad lemma costs one B-tree probe on a
-// query that had already failed.
+// Lemma data is loaded on one path only: a search that found nothing anywhere.
+// That is what makes it cheap to be wrong - a candidate is never shown, it is
+// looked up in the real headword index first, so a bad lemma costs one B-tree
+// probe on a query that had already failed. The random word (D202) also asks,
+// through LemmaLoaded, which answers only from a pack already in memory.
 //
 // # What is built in, and what is not
 //
@@ -88,6 +89,7 @@ type entry struct {
 	once sync.Once
 	lem  *golem.Lemmatizer
 	err  error
+	done atomic.Bool // set after lem and err, so a reader that sees it sees them
 }
 
 // load is the expensive part, and runs OUTSIDE Cache.mu - a 157 ms decompress
@@ -102,8 +104,18 @@ func (e *entry) load(open func() golem.LanguagePack) (*golem.Lemmatizer, error) 
 			return
 		}
 		e.lem, e.err = golem.New(p)
+		e.done.Store(true)
 	})
 	return e.lem, e.err
+}
+
+// loaded is the lemmatizer when its load has finished well, without waiting
+// for or starting one.
+func (e *entry) loaded() *golem.Lemmatizer {
+	if !e.done.Load() || e.err != nil {
+		return nil
+	}
+	return e.lem
 }
 
 // Cache holds up to max lemmatizers, evicting least-recently-used.
@@ -225,6 +237,37 @@ func (c *Cache) Lemma(code, word string) (string, bool) {
 	if err != nil || lem == nil {
 		return "", false
 	}
+	return lemmaOf(lem, code, w)
+}
+
+// LemmaLoaded is Lemma answered only from a pack already in memory: it loads
+// nothing, and leaves the LRU order as it is. The random word (D202) vets the
+// words it draws with it - a word nobody asked about must not cost a 65 MB
+// pack, nor evict the one the reader's searches are using. With the pack not
+// loaded it reports false, as for a word that is its own lemma.
+func (c *Cache) LemmaLoaded(code, word string) (string, bool) {
+	if !c.Enabled() {
+		return "", false
+	}
+	w := strings.ToLower(strings.TrimSpace(word))
+	if w == "" {
+		return "", false
+	}
+	c.mu.Lock()
+	e := c.kept[code]
+	c.mu.Unlock()
+	if e == nil {
+		return "", false
+	}
+	lem := e.loaded()
+	if lem == nil {
+		return "", false
+	}
+	return lemmaOf(lem, code, w)
+}
+
+// lemmaOf is the lookup both share, on a lower-cased, trimmed word.
+func lemmaOf(lem *golem.Lemmatizer, code, w string) (string, bool) {
 	if out := lem.LemmaLower(w); out != w {
 		return out, true
 	}

@@ -40,6 +40,10 @@ public class MainActivity extends Activity {
     static final String EXTRA_QUERY = "com.legbehindneck.wudict.QUERY";
     static final String EXTRA_MODE = "com.legbehindneck.wudict.MODE";
     static final String EXTRA_DICT = "com.legbehindneck.wudict.DICT";
+    // The launcher shortcut "Random word" (D202, res/xml/shortcuts.xml): its
+    // presence alone asks for a random word, opened. A literal there, so the
+    // name is spelled out rather than built from the package.
+    static final String EXTRA_RANDOM = "com.legbehindneck.wudict.RANDOM";
 
     private FrameLayout root;
     private TextView status;
@@ -52,6 +56,7 @@ public class MainActivity extends Activity {
     private String pendingQuery;     // arrived from LookupActivity (D67, D100)
     private String pendingMode;
     private String pendingDict;
+    private boolean pendingRandom;   // arrived from the "Random word" shortcut (D202)
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -114,7 +119,11 @@ public class MainActivity extends Activity {
         boolean fresh = savedInstanceState == null && launch != null
                 && (launch.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0;
         if (fresh && !Intake.onNewIntent(this, launch)) Storage.onNewIntent(this, launch);
-        takeQuery(launch);
+        // A query is taken again on a recreation, as it always was; a random
+        // word only on a real launch: a recreated activity (a theme, locale
+        // or font-scale change) or a relaunch from Recents would otherwise
+        // open a new word over the one being read.
+        if (!takeQuery(launch) && fresh) takeRandom(launch);
 
         ServerProcess.retain();
         ServerProcess.ensure(this, new ServerProcess.Listener() {
@@ -586,7 +595,9 @@ public class MainActivity extends Activity {
             }
             String q = pendingQuery;
             String m = pendingMode, d = pendingDict;
+            boolean random = pendingRandom;
             pendingQuery = pendingMode = pendingDict = null;
+            pendingRandom = false;
             // Nothing was forwarded, so this is a cold start onto an empty
             // screen: a search field and no content at all, which is the one
             // state where typing is unambiguously the task. A forwarded query
@@ -602,9 +613,22 @@ public class MainActivity extends Activity {
             // Reached only from onReady, which runs once per activity, so a
             // resume onto whatever the user was reading never arrives here and
             // needs no lifecycle test of its own.
-            wantAutoFocus = q == null;
-            web.loadUrl(q == null ? Shell.pageUrl(this) : Shell.searchUrl(this, q, m, d));
+            // A random word is the same: its article is on its way.
+            wantAutoFocus = q == null && !random;
+            web.loadUrl(q != null ? Shell.searchUrl(this, q, m, d)
+                    : random ? Shell.randomUrl(this) : Shell.pageUrl(this));
         });
+    }
+
+    /**
+     * Reads the "Random word" shortcut off an intent (D202). Its presence is
+     * the request: launchers deliver a shortcut's extra with the type they
+     * parsed, and what it holds says nothing more.
+     */
+    private boolean takeRandom(Intent intent) {
+        if (intent == null || !intent.hasExtra(EXTRA_RANDOM)) return false;
+        pendingRandom = true;
+        return true;
     }
 
     /**
@@ -650,6 +674,11 @@ public class MainActivity extends Activity {
             String m = pendingMode, d = pendingDict;
             pendingQuery = pendingMode = pendingDict = null;
             web.loadUrl(Shell.searchUrl(this, q, m, d));
+        } else if (takeRandom(intent) && !gone && web.getParent() != null) {
+            // The shortcut, with the app already up: a word over whatever is
+            // on screen, as a forwarded query is.
+            pendingRandom = false;
+            web.loadUrl(Shell.randomUrl(this));
         }
     }
 

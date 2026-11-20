@@ -85,8 +85,9 @@ func previewMemoryDefault() int64 {
 // (es + ru) is 125 MB against a 1 GB preview budget. 1 on Android, where the
 // whole preview budget is 64-128 MB and a single Russian pack is 65 MB of it -
 // the pack is loaded, used and dropped as soon as another language needs the
-// slot. Raising it there would spend the ceiling on data consulted only by
-// searches that FAILED, at the expense of the dictionaries that answer.
+// slot. Raising it there would spend the ceiling on data loaded only by
+// searches that FAILED, at the expense of the dictionaries that answer. (The
+// random word reads a pack only while one is loaded, D202.)
 // MORPH_CACHE=0 turns lemmatization off entirely and loads nothing, ever.
 func morphCacheDefault() int {
 	if runtime.GOOS == "android" {

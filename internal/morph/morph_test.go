@@ -96,6 +96,40 @@ func TestEviction(t *testing.T) {
 	}
 }
 
+// LemmaLoaded answers only from a pack in memory: it loads nothing, and does
+// not move the pack it reads in the LRU.
+func TestLemmaLoaded(t *testing.T) {
+	c := New(1, installed(t, ruFixture))
+	if _, ok := c.LemmaLoaded("en", "knew"); ok {
+		t.Fatal("answered with no pack loaded")
+	}
+	c.mu.Lock()
+	n := len(c.kept)
+	c.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("LemmaLoaded loaded a pack: %d kept", n)
+	}
+	if _, ok := c.Lemma("en", "knew"); !ok {
+		t.Fatal("en")
+	}
+	if got, ok := c.LemmaLoaded("en", "Knew "); !ok || got != "know" {
+		t.Errorf("LemmaLoaded(en, Knew) = %q, %v; want know", got, ok)
+	}
+	if _, ok := c.LemmaLoaded("es", "fuiste"); ok {
+		t.Error("answered for a language not loaded")
+	}
+	if _, ok := c.LemmaLoaded("en", "know"); ok {
+		t.Error("a lemma is its own lemma: want false")
+	}
+	if _, ok := New(0, "").LemmaLoaded("en", "knew"); ok {
+		t.Error("disabled cache answered")
+	}
+	var nilCache *Cache
+	if _, ok := nilCache.LemmaLoaded("en", "knew"); ok {
+		t.Error("nil cache answered")
+	}
+}
+
 func TestConcurrent(t *testing.T) {
 	c := New(2, installed(t, ruFixture))
 	var wg sync.WaitGroup

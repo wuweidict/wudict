@@ -94,6 +94,20 @@ header{position:sticky;top:0;z-index:5;background:var(--bar);
   border-radius:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;break-inside:avoid}
 .words a:hover{background:var(--line-soft);color:var(--fg)}
 .words a:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+/* the word a link opened the page at (?at=, the random word's dictionary) */
+.words a[aria-current=true]{background:var(--accent);color:#fff}
+/* Where a jump landed (D203), in three strengths: the word itself, filled
+   (above); the word that starts with what was typed, outlined, the typed part
+   in bold - why it landed there; no such word, a line where it would stand,
+   so no other word passes for the one asked for. Until the next jump or page. */
+/* the frame IS the focus ring here: the landed row takes the focus, and the
+   blue ring drawn over an accent frame read as focus alone (seen on Android) */
+.words a.near,.words a.near:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;color:var(--fg)}
+.words a.near b{color:var(--accent)}
+.words .gap{display:flex;align-items:center;gap:.4rem;padding:.16rem .3rem;break-inside:avoid;
+  color:var(--soft);font-size:13px}
+.words .gap::before,.words .gap::after{content:"";flex:1;min-width:.6rem;border-top:2px solid var(--accent)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 
 footer{display:flex;justify-content:center;padding:0 1rem 2.2rem}
 footer .nav button{height:2.3rem;padding:0 1rem}
@@ -132,6 +146,7 @@ footer .nav button{height:2.3rem;padding:0 1rem}
 <main>
   <div class="msg" id="msg" hidden></div>
   <div class="words" id="list"></div>
+  <div class="sr" id="said" aria-live="polite"></div>
 </main>
 <footer id="foot" hidden>
   <div class="nav">
@@ -212,6 +227,48 @@ async function show(opts,record){
      does. Without this the reader lands in the middle of the new page at
      whatever depth they had scrolled the old one. */
   if(record!=="none")scrollTo(0,0);
+  /* Opened at a word by a link (`?at=`, the random word's dictionary,
+     D202): the word is marked and brought into view, a dictionary opened at
+     that page with the finger on it. A typed jump only lands on the page. */
+  if(opts.at)land(opts.at);
+}
+
+/* Marks where a jump landed (D203), from what the server says it matched:
+   the headword filled (exact), the headword outlined with the typed part in
+   bold (prefix), or a line where the typed word would stand (none). The mark
+   is brought to the middle of the screen, the landed word takes the focus -
+   Enter opens it, Tab walks on from it - and a screen reader hears one line. */
+function land(typed){
+  const d=state,list=$("list"),rows=[...list.querySelectorAll("a")];
+  const w=unesc(d.word||"");
+  const row=w&&(rows.find(a=>a.textContent===w)||rows.find(a=>a.textContent.toLowerCase()===w.toLowerCase()));
+  let at=row,said;
+  if(d.match==="exact"&&row){
+    row.setAttribute("aria-current","true");
+    said="Jumped to "+row.textContent;
+  }else if(d.match==="prefix"&&row){
+    // One character of the headword per character typed: search folds
+    // character by character (wildcard.Fold), so the counts agree.
+    const cs=[...row.textContent],n=Math.min([...typed].length,cs.length);
+    row.classList.add("near");
+    row.innerHTML="<b>"+esc(cs.slice(0,n).join(""))+"</b>"+esc(cs.slice(n).join(""));
+    said="Nearest: "+row.textContent;
+  }else if(d.match!=="none"){
+    return; // the word is not on the page served (a clamped address): no mark
+  }else{
+    const gap=document.createElement("div");
+    gap.className="gap";
+    gap.innerHTML="<span>"+esc(typed)+" is not listed</span>";
+    list.insertBefore(gap,row||null);
+    const prev=gap.previousElementSibling;
+    said=typed+" is not listed"+(prev||row?": between "+(prev?prev.textContent:"the start")+" and "+(row?row.textContent:"the end"):"");
+    at=gap;
+  }
+  at.scrollIntoView({block:"center"});
+  if(row)row.focus({preventScroll:true});
+  // emptied first, so the same jump twice is announced twice
+  $("said").textContent="";
+  setTimeout(()=>{$("said").textContent=said},50);
 }
 
 function render(){
@@ -405,6 +462,7 @@ addEventListener("popstate",()=>{
   const p=new URLSearchParams(location.search);
   dictId=p.get("dict")||"";
   if(!dictId)return chooser();
-  show({p:Number(p.get("p"))||1},"replace");
+  const at=p.get("at");
+  show(at?{at}:{p:Number(p.get("p"))||1},"replace");
 })();
 </script>

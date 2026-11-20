@@ -117,6 +117,9 @@ func (s *Server) routes() []route {
 		// Never CORS, as browse: the grant is lookup, and this lists what a
 		// dictionary holds.
 		{"GET", "/api/suggest", s.handleSuggest, "/api/suggest", false},
+		// one headword drawn at random (random.go, D202). Never CORS, as
+		// browse: the grant is lookup.
+		{"GET", "/api/random", s.handleRandom, "/api/random", false},
 		// what the platform is doing to us (D64) - the Android shell's channel
 		// for onStop / onTrimMemory / thermal / battery-saver, which the
 		// exec'd server has no other way of learning.

@@ -18,4 +18,19 @@
             android:targetClass="com.legbehindneck.wudict.SettingsActivity"
             android:targetPackage="com.legbehindneck.wudict.debug" />
     </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_random"
+        android:shortcutId="random"
+        android:shortcutLongLabel="@string/random_long_label"
+        android:shortcutShortLabel="@string/random_short_label">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetClass="com.legbehindneck.wudict.MainActivity"
+            android:targetPackage="com.legbehindneck.wudict.debug">
+            <extra
+                android:name="com.legbehindneck.wudict.RANDOM"
+                android:value="true" />
+        </intent>
+    </shortcut>
 </shortcuts>

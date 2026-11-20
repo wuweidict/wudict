@@ -12,6 +12,9 @@ v3.7.11
 (full text) The full-text index is a file of its own (fulltext.db): adding or removing full text no longer rebuilds the dictionary, and works for a dictionary whose original files are gone. The size full text will add is shown before you add it
 (full text) A phrase is marked as one even where formatting splits it, e.g. a word in bold inside it
 (keys) Esc closes what is open one step at a time (menu, read aloud, find, list); with nothing open it goes to the search box, like /
+(search) A random word under the empty search box: tap it to read it in the dictionary shown, tap the die for another, tap the dictionary name to browse that dictionary at the word. ☰ → ⚙: Show random word, and Random word from: Enabled dictionaries, Pinned dictionaries, or All dictionaries, enabled or not
+(android) Touch and hold the wuDict icon → Random word opens a random word
+(browse) Jump to… marks where it landed: the word you typed is filled in colour, a word that starts with it is framed with the typed part in bold, and a line shows where a word not in the dictionary would be. Accents and capitals no longer matter ("arger" finds Ärger)
 
 ⚡ Performance
 (index) Article text is stored with zstd and a compression dictionary sampled from each dictionary's own articles: indexed dictionaries are about 28% smaller than with DEFLATE, articles decompress about 4 times faster, and compressing uses less CPU. Earlier dictionaries keep working and are shown as outdated: Rebuild (or wudict reindex) converts them. A dictionary indexed this way does not open in earlier wudict versions: COMPRESSION = "deflate" keeps the old form

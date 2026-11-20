@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 glowinthedark -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- The die of the random word (D202), the page's DIE_SVG on the canvas of
+     ic_settings_foreground: a 24-unit glyph scaled ×2.5 = 60dp of ink, centred
+     by (108−60)/2 = 24, inside the 66dp safe zone. A stroked tile and five
+     filled pips, white like the launcher mark. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2.5"
+        android:scaleY="2.5"
+        android:translateX="24"
+        android:translateY="24">
+        <path
+            android:pathData="M7,3.5 L17,3.5 A3.5,3.5 0 0 1 20.5,7 L20.5,17 A3.5,3.5 0 0 1 17,20.5 L7,20.5 A3.5,3.5 0 0 1 3.5,17 L3.5,7 A3.5,3.5 0 0 1 7,3.5 Z"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="2"
+            android:fillColor="#00000000" />
+        <path
+            android:pathData="M8.1,8.1 m-1.6,0 a1.6,1.6 0 1 0 3.2,0 a1.6,1.6 0 1 0 -3.2,0 M15.9,8.1 m-1.6,0 a1.6,1.6 0 1 0 3.2,0 a1.6,1.6 0 1 0 -3.2,0 M12,12 m-1.6,0 a1.6,1.6 0 1 0 3.2,0 a1.6,1.6 0 1 0 -3.2,0 M8.1,15.9 m-1.6,0 a1.6,1.6 0 1 0 3.2,0 a1.6,1.6 0 1 0 -3.2,0 M15.9,15.9 m-1.6,0 a1.6,1.6 0 1 0 3.2,0 a1.6,1.6 0 1 0 -3.2,0"
+            android:fillColor="#FFFFFF" />
+    </group>
+</vector>

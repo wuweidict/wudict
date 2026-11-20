@@ -195,6 +195,11 @@ type Server struct {
 	// every call site goes through Cache.Enabled.
 	Morph *morph.Cache
 
+	// random remembers what the random word learns about each dictionary -
+	// whether it files its headwords in capitals, and their language - so a
+	// request does not learn it again (random.go). The zero value is ready.
+	random randomMemo
+
 	// WebOrigins lists http(s) page origins allowed to read the same three
 	// endpoints cross-origin (config WEB_ORIGINS). Empty - the default - means
 	// none: a web page gets nothing here. A single "*" allows any origin. See

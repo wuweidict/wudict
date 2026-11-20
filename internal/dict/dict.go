@@ -258,6 +258,42 @@ type Browser interface {
 	// Alphabet returns every initial present, in browse order. Cheap to call
 	// repeatedly: the backend computes it once per open.
 	Alphabet() ([]Letter, error)
+
+	// Jump says where Browse puts the reader down for a typed word (D203):
+	// on the headword it spells, accents and case aside; else on the first
+	// headword it starts; else at the place it would have, before Word.
+	Jump(ctx context.Context, word string) (Landing, error)
+}
+
+// How a typed word matched where Browse landed (Landing.Match).
+const (
+	JumpExact  = "exact"  // the headword, accents and case aside
+	JumpPrefix = "prefix" // the first headword it starts
+	JumpNone   = "none"   // no headword: Offset is where it would be
+)
+
+// Landing is a Jump's answer: the browse offset, the headword there ("" past
+// the last one), and how the typed word matched it.
+type Landing struct {
+	Offset int
+	Word   string
+	Match  string
+}
+
+// Sampler draws entries at random: the random word under the empty search box
+// (D202). Only the prepared backend implements it, for the reason Browser
+// gives: a draw is a seek in the entry table, where a direct backend would
+// have to count its headwords first.
+type Sampler interface {
+	// Sample returns the headword of an entry drawn from u, uniform over the
+	// uint64 range: the randomness is the caller's, so a test can name the
+	// entry it wants. Every entry is about equally likely; sub-entries (`@_…`)
+	// are never returned. No article is read. ErrNotFound when the dictionary
+	// holds no entry.
+	Sample(ctx context.Context, u uint64) (string, error)
+	// Has reports whether an exact search for word finds an entry, by its
+	// headword or an alias, reading the headword index only.
+	Has(ctx context.Context, word string) (bool, error)
 }
 
 // Entry is one dictionary article as produced by a format Reader during

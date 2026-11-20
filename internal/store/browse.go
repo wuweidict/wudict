@@ -5,11 +5,14 @@
 package store
 
 import (
+	"context"
 	"database/sql"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/wuweidict/wudict/internal/dict"
+	"github.com/wuweidict/wudict/internal/wildcard"
 )
 
 // browseWhere hides the internal entries from every browse read. `@_%` is an
@@ -61,6 +64,70 @@ func (s *Store) Locate(word string) (int, error) {
 	var n int
 	err := s.db.QueryRow("SELECT COUNT(*) FROM entry WHERE "+browseWhere+" AND w < ? COLLATE NOCASE", word).Scan(&n)
 	return n, err
+}
+
+// Jump implements dict.Browser. A headword the typed word spells, accents and
+// case aside, is found where prefix search would list it first (rank, D181),
+// wherever browse order files it: "corazon" lands on corazón and "arger" on
+// Ärger, which comes after zebra. A prefix lands on the run it begins as
+// typed, else on the first headword it starts, accents aside. Headwords only:
+// an alias is not a row of the list. With neither, the place is the typed
+// word's own, and Word the row after it.
+func (s *Store) Jump(ctx context.Context, word string) (dict.Landing, error) {
+	word = strings.TrimSpace(word)
+	if word == "" { // a prefix of everything: the list's own start, matching nothing
+		return dict.Landing{Match: dict.JumpNone}, nil
+	}
+	keys, err := s.keys(ctx, wildcard.Literal(word, true), 1, scope{})
+	if err != nil {
+		return dict.Landing{}, err
+	}
+	if len(keys) > 0 && foldEqual(keys[0], word) {
+		at, err := s.Locate(keys[0])
+		if err != nil {
+			return dict.Landing{}, err
+		}
+		return dict.Landing{Offset: at, Word: keys[0], Match: dict.JumpExact}, nil
+	}
+	// No headword spelled so: the typed word's own place. The row there wins
+	// when it starts with the typed text, so a prefix stays in the run it
+	// begins - "e" on eagle, not on éa, which browse order files after zebra.
+	// Only when it does not is the first headword the prefix starts, accents
+	// aside, taken from wherever it is filed ("eta" → état).
+	at, err := s.Locate(word)
+	if err != nil {
+		return dict.Landing{}, err
+	}
+	var next string
+	if row, err := s.Page(at, 1); err == nil && len(row) > 0 {
+		next = row[0]
+	}
+	if next != "" && strings.HasPrefix(strings.ToLower(next), strings.ToLower(word)) {
+		return dict.Landing{Offset: at, Word: next, Match: dict.JumpPrefix}, nil
+	}
+	if len(keys) > 0 {
+		at, err := s.Locate(keys[0])
+		if err != nil {
+			return dict.Landing{}, err
+		}
+		return dict.Landing{Offset: at, Word: keys[0], Match: dict.JumpPrefix}, nil
+	}
+	return dict.Landing{Offset: at, Word: next, Match: dict.JumpNone}, nil
+}
+
+// foldEqual compares two words character by character as search does
+// (wildcard.Fold): accents and case aside.
+func foldEqual(a, b string) bool {
+	ra, rb := []rune(a), []rune(b)
+	if len(ra) != len(rb) {
+		return false
+	}
+	for i := range ra {
+		if wildcard.Fold(ra[i]) != wildcard.Fold(rb[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // Alphabet implements dict.Browser, once per open. A text.db is immutable

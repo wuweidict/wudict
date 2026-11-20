@@ -869,6 +869,35 @@ func TestPrefsMode(t *testing.T) {
 	}
 }
 
+// randomFrom is where the random word is drawn from under "All
+// dictionaries" (D202). The enabled dictionaries are the default and are
+// stored as absent; a value the page does not offer is dropped.
+func TestPrefsRandomFrom(t *testing.T) {
+	s, state := newPrefsServer(t)
+	for _, tc := range []struct {
+		name, body, want string
+		off              bool
+	}{
+		{"absent is the enabled ones", `{"ui":{"fontSize":24}}`, "", false},
+		{"pinned", `{"ui":{"randomFrom":"pinned"}}`, "pinned", false},
+		{"a patch without it keeps it", `{"ui":{"randomOff":true}}`, "pinned", true},
+		{"all", `{"ui":{"randomFrom":"all"}}`, "all", true},
+		{"unknown is dropped", `{"ui":{"randomFrom":"favourites"}}`, "", true},
+		{"shown again", `{"ui":{"randomOff":false}}`, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			putPrefs(t, s, tc.body)
+			ui := LoadPrefs(state).UI()
+			if ui == nil || ui.RandomFrom != tc.want || ui.RandomOff != tc.off {
+				t.Fatalf("ui = %+v, want randomFrom %q, randomOff %v", ui, tc.want, tc.off)
+			}
+		})
+	}
+	if raw, _ := os.ReadFile(state); strings.Contains(string(raw), `"randomFrom"`) {
+		t.Fatalf("the default was written to the file:\n%s", raw)
+	}
+}
+
 // openN and openAll set how many sections open by themselves. One is the
 // default and is stored as absent; there is no ceiling.
 func TestPrefsOpenCount(t *testing.T) {

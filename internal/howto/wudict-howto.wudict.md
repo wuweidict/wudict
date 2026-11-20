@@ -30,6 +30,7 @@ Type `wudict help` in the search box for quick access, and [browse](/browse?dict
 - Double-tap any word in a wudict dictionary article to instantly look up its definition
 - [List the headwords](<entry://wudict headword list>) that match what you type, and pick one
 - [Find a word](<entry://wudict find>) inside the articles you have open: ![](find.svg) in the dictionary's header
+- A [random word](<entry://wudict random word>) under the empty search box: tap it to read it, ![](die.svg) for another
 - Adjust the font size via the <kbd>☰</kbd> → <kbd>−</kbd> <kbd>+</kbd> widget
 - [Lemmatization](<entry://wudict lemmatization>) for 24 languages: <kbd>☰</kbd> → ![](cog.svg) → <kbd>Lemmatization…</kbd>; English is built in
 - Android: full screen, hiding the system bars while you read and drawing content edge-to-edge, into the camera cutout: long-tap the wudict icon in the launcher → **Settings** → **Screen**
@@ -277,7 +278,7 @@ Article text is stored with zstd. To store it with DEFLATE instead, for a progra
 
 **Read a dictionary word by word, A to Z**: ![](browse.svg) <kbd>Browse</kbd> on a dictionary in <kbd>☰</kbd>, or ![](browse.svg) <kbd>Browse A–Z…</kbd> in the ![](cog.svg) row. [Try it on this guide](/browse?dict=wudict-howto).
 
-Tap a letter to jump; type the start of a word to go there; tap a headword to read it. 💻 The <kbd>←</kbd> <kbd>→</kbd> keys turn pages, <kbd>Home</kbd> <kbd>End</kbd> jump to the first and last page.
+Tap a letter to jump; type a word, or its start, in <kbd>Jump to…</kbd> to go there; tap a headword to read it. After a jump, the headword you typed is filled in colour. A headword that starts with what you typed has a frame, with the typed part in bold. When no headword matches, a line shows where your word would be. Accents and capitals do not matter. 💻 The <kbd>←</kbd> <kbd>→</kbd> keys turn pages, <kbd>Home</kbd> <kbd>End</kbd> jump to the first and last page.
 
 ***
 
@@ -324,6 +325,28 @@ The list starts at 2 characters and shows at most 20 headwords: type more letter
 A word goes into your history when you press Enter, follow a link to it, pick it from a list, or keep it in the box with its article open. History keeps the latest 500 words. With <kbd>Keep history</kbd> off, no words are added and your history is not shown; it is not deleted, and it shows again when you turn the switch back on. <kbd>Clear history</kbd> deletes it. Both are in <kbd>☰</kbd> → ![](cog.svg).
 
 Both lists are text files next to `wudict.toml`, one word per line: `history.txt` and `favourites.txt`. Every device that uses this wudict sees the same lists.
+
+***
+
+- [index](/browse?dict=wudict-howto)
+
+## wudict random word
+## wudict random
+
+**A random word shows under the empty search box**: tap the word to read it in the dictionary named after it. The search mode changes to exact. Tap ![](die.svg) to show another word. The dictionary name after the word opens that dictionary in Browse, at the word. Back returns to the same word.
+
+- 💻 With favourites or history, press <kbd>↑</kbd> in the empty search box, then <kbd>Enter</kbd>, to read a random word at once. The last row of the list does the same.
+- 📱 Touch and hold the wudict icon and tap <kbd>Random word</kbd>.
+
+The word comes from the dictionaries in the dictionary picker. While the picker shows <kbd>All dictionaries</kbd>, <kbd>Random word from</kbd> in <kbd>☰</kbd> → ![](cog.svg) sets the dictionaries:
+
+- <kbd>Enabled dictionaries</kbd>: the default.
+- <kbd>Pinned dictionaries</kbd>: the pinned dictionaries that are enabled. With no pinned dictionary, the enabled dictionaries.
+- <kbd>All dictionaries, enabled or not</kbd>.
+
+Only indexed dictionaries give words. A random word is one word of 4 to 18 letters (1 to 8 in Chinese, Japanese and Korean). wudict skips words that look like names, abbreviations, phrases or inflected forms.
+
+A random word goes into your history only when its article stays open for 2 seconds. <kbd>Show random word</kbd> in <kbd>☰</kbd> → ![](cog.svg) turns the word off.
 
 ***
 

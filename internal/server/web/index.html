@@ -434,6 +434,28 @@ iframe.article{width:100%;border:0;display:block;background:var(--wd-article-bg,
   background:var(--accent-soft);color:var(--fg)}
 #welcome a{color:var(--link);font-weight:600}
 .empty svg path{fill:var(--line)}
+/* The random word (D202): one line in the empty page. The word is the
+   content and the one thing in the reading colour; the die and the
+   dictionary's name speak in the faint voice of .empty. Aligned at the
+   start, not centred: the die keeps its place from one word to the next, so
+   a thumb that rerolls does not have to chase it. */
+#rand{display:flex;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:.15em .5em;
+  padding-top:var(--sp-5);color:var(--fg-faint)}
+#rand .rword{color:var(--fg);font-size:1.25em;font-weight:500;text-decoration:none}
+#rand .rdict{color:inherit;font-size:.9em;text-decoration:none}
+#rand .rdie{display:inline-flex;padding:.4em;margin:0;border:0;border-radius:6px;
+  background:none;color:inherit;font:inherit;cursor:pointer}
+/* pointers only: a touch leaves :hover set, and the die would stay lit */
+@media (hover:hover){
+  #rand .rword:hover,#rand .rdict:hover{text-decoration:underline;text-underline-offset:3px}
+  #rand .rdict:hover{color:var(--link)}
+  #rand .rdie:hover{color:var(--accent)}
+}
+#rand .rdie svg{width:1.15em;height:1.15em;display:block}
+#rand[aria-busy="true"] .rdie{opacity:.5}
+#recall li.rnd{display:flex;align-items:center;gap:.45em;color:var(--fg-soft);font-style:italic;
+  border-top:1px solid var(--line);margin-top:.25em;padding-top:.45em}
+#recall li.rnd svg{width:.95em;height:.95em;flex:none}
 /* the search bar is inert until at least one dictionary is usable */
 input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
 
@@ -1273,6 +1295,19 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
          away, next to the other reading habits. -->
     <button type="button" class="act" id="histBtn" aria-pressed="true" title="Keep the words you look up and show them under the empty search box"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.6V8l2.3 1.6"/></svg>Keep history</button>
     <button type="button" class="act" id="histClear" title="Delete all the words in your history">Clear history</button>
+    <!-- The random word under the empty search box (D202), shown unless the
+         reader says otherwise, and where it is drawn from while the picker
+         says "All dictionaries". "All" there means the enabled ones, so the
+         widest choice here names itself "enabled or not". -->
+    <button type="button" class="act" id="randBtn" aria-pressed="true" title="Show a random word when the search box is empty"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><g fill="currentColor"><circle cx="5.4" cy="5.4" r="1.1"/><circle cx="10.6" cy="5.4" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="5.4" cy="10.6" r="1.1"/><circle cx="10.6" cy="10.6" r="1.1"/></g></svg>Show random word</button>
+    <label class="seg">
+      <span>Random word from</span>
+      <select id="randSel" title="The random word comes from these dictionaries while the dictionary picker shows All dictionaries.">
+        <option value="">Enabled dictionaries</option>
+        <option value="pinned">Pinned dictionaries</option>
+        <option value="all">All dictionaries, enabled or not</option>
+      </select>
+    </label>
     <!-- Which sections unfold themselves once the answers start arriving
          (D142). One question - what opens? - so one control. The count is of
          dictionaries that HAVE a result, taken from the top of the list the
@@ -1504,7 +1539,7 @@ async function loadPrefs(){
     const st=await r.json(),rows=st.dicts||[];
     // Read before the exists branch below returns: on a first run there is no
     // ui record, but there is also nothing here that can go wrong.
-    if(st.ui){applyFS(st.ui.fontSize,false);applyHL(!st.ui.hlOff,false);applySpeak(!st.ui.speakOff,false);applyOpen(st.ui.fastFirst?"fast":st.ui.openAll?"all":String(st.ui.openN||1),false);applyGroupsOff(st.ui.groupsOff,false);fullOn=!!st.ui.full;modePref=st.ui.mode||"prefix";setMode(modePref);applyHist(!st.ui.historyOff,false);applyType(st.ui.listWords,false)}
+    if(st.ui){applyFS(st.ui.fontSize,false);applyHL(!st.ui.hlOff,false);applySpeak(!st.ui.speakOff,false);applyOpen(st.ui.fastFirst?"fast":st.ui.openAll?"all":String(st.ui.openN||1),false);applyGroupsOff(st.ui.groupsOff,false);fullOn=!!st.ui.full;modePref=st.ui.mode||"prefix";setMode(modePref);applyHist(!st.ui.historyOff,false);applyType(st.ui.listWords,false);applyRand(!st.ui.randomOff,st.ui.randomFrom||"",false)}
     uiBase=uiNow();
     dictsBase=rows.map(prefRow);
     // Last, so that a page whose baselines are not both in hand never saves:
@@ -1536,7 +1571,7 @@ let uiBase=null;
    drive) and this page cannot speak for them. */
 let dictsBase=null;
 function uiNow(){
-  return{fontSize:articleFS,hlOff:!hlOn,speakOff:!speakOn,fastFirst:!orderFirst,openN:openN>1?openN:0,openAll,groupsOff:[...groupsOff].sort(),full:fullOn,mode:modePref==="prefix"?"":modePref,historyOff:!histOn,listWords};
+  return{fontSize:articleFS,hlOff:!hlOn,speakOff:!speakOn,fastFirst:!orderFirst,openN:openN>1?openN:0,openAll,groupsOff:[...groupsOff].sort(),full:fullOn,mode:modePref==="prefix"?"":modePref,historyOff:!histOn,listWords,randomOff:!randOn,randomFrom:randFrom};
 }
 /* One dictionary's record as it is sent and compared: pin only when set, as
    the server stores it. The title always, "" for none: a record without the
@@ -1886,6 +1921,26 @@ function applyType(on,save){
   $("typeSel").value=v?"list":"live";
   if(save&&moved)savePrefs();
 }
+/* The random word under the empty search box (D202), and where it is drawn
+   from while the picker says "All dictionaries": "" the enabled dictionaries,
+   "pinned", or "all". Server state, as the switches above. The rest of the
+   random word's state is declared here too, so nothing reads it before it
+   exists: randWord is the word on show ({word, dict}), randSeq orders the
+   draws, randAC cancels the one in flight, randPending holds the line back
+   while a draw that opens its word is on its way. */
+let randOn=true,randFrom="",randWord=null,randSeq=0,randAC=null,randPending=false;
+function applyRand(on,from,save){
+  const v=!!on,f=from==="pinned"||from==="all"?from:"";
+  const moved=v!==randOn||f!==randFrom;
+  randOn=v;randFrom=f;
+  const b=$("randBtn");
+  b.setAttribute("aria-pressed",v?"true":"false");
+  b.style.color=v?"var(--accent)":"";
+  $("randSel").value=f;
+  $("randSel").disabled=!v;
+  if(moved)randChanged();
+  if(save&&moved)savePrefs();
+}
 /* Which picker sections are hidden, by facet id (D149). Server state like the
    pins, because it describes how this person reads the library, not the
    device. Hiding never drops the group in force: that one option stays in the
@@ -1909,6 +1964,9 @@ function applyGroupsOff(ids,save){
    pointer would drop keyboard focus. */
 let groupSegKey="";
 const CHECK_SVG='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path class="tick" d="M5.2 8.3l1.9 1.9 3.7-4.2"/></svg>';
+/* The random word's die (D202): five pips, drawn, never the ⚄ character,
+   whose glyph not every system font has. */
+const DIE_SVG='<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><g fill="currentColor"><circle cx="5.4" cy="5.4" r="1.1"/><circle cx="10.6" cy="5.4" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="5.4" cy="10.6" r="1.1"/><circle cx="10.6" cy="10.6" r="1.1"/></g></svg>';
 function renderGroupSeg(fs){
   const seg=$("groupSeg"),box=seg.querySelector(".chips"),key=fs.map(f=>f.id+"\t"+f.label).join("\n");
   if(key!==groupSegKey){
@@ -1940,6 +1998,9 @@ $("openSel").addEventListener("change",e=>{
 });
 applyOpen("1",false);
 $("typeSel").addEventListener("change",e=>applyType(e.target.value==="list",true));
+$("randBtn").addEventListener("click",()=>applyRand(!randOn,randFrom,true));
+$("randSel").addEventListener("change",e=>applyRand(randOn,e.target.value,true));
+applyRand(true,"",false); // drawn on: a library with no stored ui record shows the word
 for(const [id,step] of [["fsDown",-1],["fsUp",1],["fsVal",0]])
   $(id).addEventListener("click",()=>applyFS(step?articleFS+step:FS_DEF,true));
 applyFS(FS_DEF,false);   // paints --wd-fs and the .lim state before any load
@@ -4713,6 +4774,7 @@ function searchFor(term,opts){
   anchorOnce=frag&&scope?{dict:scope,frag}:null;
   navRecord=opts?.record||"push"; // following a reference IS navigation
   commitOnce=true;                // …and navigation may move the page
+  dwellOnce=!!opts?.dwell;        // a word wudict chose is history once read (noteLookup)
   doSearch();
 }
 /* Prose the user selected: first run before punctuation or space, minus a
@@ -5772,6 +5834,10 @@ let scopeOnce=null,anchorOnce=null,lastScope=null,widenedFrom=null;
    one tap away rather than one yank away. Same one-shot idiom as navRecord:
    set by the act, consumed by the next doSearch. */
 let commitOnce=false;
+/* dwellOnce: the word was chosen by wudict, not by the reader (the random
+   word, D202), so history takes it only once it has been read (noteLookup).
+   Set by searchFor, consumed by the next doSearch. */
+let dwellOnce=false;
 /* A link can name a dictionary the <select> has no option for yet: the page
    answers it before the list is in (bootEarly), or from a kept list that
    predates it (bootFromCache). A <select> cannot hold a value it has no
@@ -5812,14 +5878,16 @@ function applyURL(){
   if(p.get("dict"))selectDict(p.get("dict"));
   syncChips();
   if(p.get("q")){$("q").value=p.get("q");scopeOnce=p.get("from")||null;commitOnce=true;doSearch()}
+  else if(p.has("random"))randomNow("replace"); // the Android shortcut "Random word" (D202)
 }
 const _doSearch=doSearch;
 doSearch=function(ev){
-  const record=navRecord,commit=commitOnce;
+  const record=navRecord,commit=commitOnce,dwell=dwellOnce;
   navRecord="replace"; // one-shot: only the action that asked for it pushes
+  dwellOnce=false;
   const r=_doSearch(ev);
   const q=$("q").value.trim();
-  noteLookup(q,record,commit);
+  noteLookup(q,record,commit,dwell);
   if(q&&record!=="none"){
     const params={q,mode:$("mode").value};
     // The picker, once it is known. Before the list (bootEarly) it holds only
@@ -5852,6 +5920,7 @@ window.addEventListener("popstate",()=>{
     lastQuery="";
     setStatus("");
     syncStar();
+    showRandom(false); // the word that was there, not a new one
     return;
   }
   navRecord="none";
@@ -5950,14 +6019,16 @@ function recordWord(w){
    picking it from this list is an act, and counts at once. A typed word
    counts only once it has stayed in the box for HIST_DWELL with an open
    section whose headword IS the word: prefix search answers "seren" too,
-   and the reader who paused there was not looking it up. Back/Forward
+   and the reader who paused there was not looking it up. A random word
+   (dwell) is the same: wudict chose it, so it counts once it was read, and
+   a reader who opens one and moves on leaves no trace (D202). Back/Forward
    records nothing, as it records nothing in the browser's own history;
    full-text and wildcard queries are not words. */
-function noteLookup(q,record,commit){
+function noteLookup(q,record,commit,dwell){
   clearTimeout(histTimer);
   syncStar();
   if(!q||!histOn||record==="none"||notForWords($("mode").value)||!boxWord())return;
-  if(commit||record==="push"){recordWord(q);return}
+  if((commit||record==="push")&&!dwell){recordWord(q);return}
   histTimer=setTimeout(()=>{
     if($("q").value.trim()!==q)return;
     const k=wordKey(q);
@@ -6006,6 +6077,8 @@ function fillRecall(rows,isSug){
     li.id="rc"+n;li.dataset.w=w;li.textContent=w;
     li.setAttribute("role","option");
     if(cls)li.className=cls;
+    // the random word's row: no word of its own (pickRecall reads "" as it)
+    if(cls==="rnd"){li.innerHTML=DIE_SVG;li.append("Random word")}
     f.appendChild(li);
   });
   recall.replaceChildren(f);
@@ -6023,7 +6096,12 @@ function openRecall(){
   // it back on brings them back; Clear history is the deletion.
   const rest=histOn?hist.filter(w=>!favSet.has(wordKey(w))).slice(0,RECALL_MAX):[];
   if(!favs.length&&!rest.length)return;
-  fillRecall([...favs.slice(0,RECALL_MAX).map(w=>[w,"fav"]),...rest.map(w=>[w,""])],false);
+  // The random word ends the list (D202), and only a list that opens anyway:
+  // a list of one row would open on every tap into an empty box, a popup at
+  // the moment the reader is about to type. Last, so ↓ Enter still opens the
+  // latest word, and ↑ from the box reaches it.
+  const rnd=randOn&&randomPool().length?[["","rnd"]]:[];
+  fillRecall([...favs.slice(0,RECALL_MAX).map(w=>[w,"fav"]),...rest.map(w=>[w,""]),...rnd],false);
 }
 function closeRecall(){
   sugCancel(); // also a list that is still on its way
@@ -6092,6 +6170,7 @@ function pickRecall(w){
   const keepMode=sug&&$("mode").value==="wildcard"&&!/[*?]/.test(w);
   closeRecall();
   if(!matchMedia("(hover:hover)").matches)$("q").blur();
+  if(!w){randomNow();return} // the random word's row
   searchFor(w,{keepMode});
 }
 /* A click in the box opens the list the box has: the favourites and history
@@ -6118,7 +6197,13 @@ $("q").addEventListener("input",()=>{
 $("q").addEventListener("keydown",e=>{
   if(e.isComposing||e.ctrlKey||e.metaKey||e.altKey)return;
   if(recall.hidden){
-    // ↓ opens the list the box has; with text, in either typing mode
+    // ↓ opens the list the box has; with text, in either typing mode. ↑ on
+    // the empty box opens it at its last row: the random word, when shown.
+    if(e.key==="ArrowUp"&&!$("q").value){
+      e.preventDefault();openRecall();
+      if(!recall.hidden)moveRecall(-1);
+      return;
+    }
     if(e.key!=="ArrowDown")return;
     if(!$("q").value){e.preventDefault();openRecall()}
     else if(sugMode($("q").value.trim())){e.preventDefault();sugFetch()}
@@ -6136,7 +6221,7 @@ $("q").addEventListener("keydown",e=>{
   case "Delete":
     // Shift+Delete forgets the selected history word, as a browser's own
     // address-bar suggestions do; a favourite is unstarred with the star.
-    if(e.shiftKey&&!sug&&recallSel>=0&&!rows[recallSel].classList.contains("fav")){
+    if(e.shiftKey&&!sug&&recallSel>=0&&!rows[recallSel].matches(".fav,.rnd")){
       e.preventDefault();
       const w=rows[recallSel].dataset.w;
       const at=recallSel;
@@ -6167,7 +6252,7 @@ recall.addEventListener("pointerdown",e=>{
   e.preventDefault();
   held=false;
   dropHold();
-  const li=!sug&&e.pointerType!=="mouse"&&e.target.closest("li[data-w]:not(.fav)");
+  const li=!sug&&e.pointerType!=="mouse"&&e.target.closest("li[data-w]:not(.fav):not(.rnd)");
   if(!li)return;
   holdAt={x:e.clientX,y:e.clientY};
   holdTimer=setTimeout(()=>{
@@ -6196,6 +6281,152 @@ document.addEventListener("keydown",e=>{
 // another tab or device may have changed them while this one was away
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)loadWords()});
 loadWords();
+
+/* ── the random word (D202) ───────────────────────────────────────────
+   One headword in the empty page under the search box, drawn by the server
+   (/api/random). The word comes before its articles: a word the reader does
+   not know is a question, and a tap answers it. The die draws another in
+   place, and Back from a word's articles finds the same word there. It is
+   shown only while the page is otherwise empty, so it never stands between
+   the reader and an answer: the first search replaces it. */
+
+/* The dictionaries a word is drawn from: what the picker names, and under
+   "All dictionaries" what "Random word from" says - the pinned ones that are
+   enabled (the enabled ones while none is pinned), the enabled ones, or every
+   one. Never the wudict howto: its headwords are phrases. */
+function randomPool(){
+  const v=$("dict").value||"all";
+  let ids;
+  if(v!=="all")ids=v.startsWith("g:")?groupIds(v):[v];
+  else if(randFrom==="all")ids=orderedIds();
+  else{
+    ids=enabledOrderedIds();
+    if(randFrom==="pinned"&&ids.some(id=>pinned.has(id)))ids=ids.filter(id=>pinned.has(id));
+  }
+  const own=new Set(dicts.filter(d=>d.builtin).map(d=>d.id));
+  return ids.filter(id=>!own.has(id));
+}
+/* A word from the pool: {word, dict}; null when there is none to draw (an
+   empty pool, or the server's 204); undefined when the draw failed or a newer
+   one cancelled it. */
+async function drawRandom(){
+  const pool=randomPool();
+  if(!pool.length)return null;
+  if(randAC)randAC.abort();
+  const ac=randAC=new AbortController();
+  try{
+    const r=await fetch("/api/random?dict="+encodeURIComponent(pool.join(",")),{signal:ac.signal});
+    if(r.status===204)return null;
+    if(!r.ok)return undefined;
+    const j=await r.json();
+    return j&&j.word&&j.dict?{word:j.word,dict:j.dict}:undefined;
+  }catch(_){return undefined}
+  finally{if(randAC===ac)randAC=null}
+}
+/* The page is empty: the list is in, the box is empty, and #out holds
+   nothing but the line itself. */
+function randIdle(){
+  if(!randOn||!dictsSettled||$("q").disabled||$("q").value.trim())return false;
+  for(const c of $("out").children)if(c.id!=="rand")return false;
+  return true;
+}
+/* Shows the random word in the empty page: the one on show, or a new one when
+   `fresh` or when there is none yet. A page that is not empty is left alone;
+   a pool with no word to give removes the line. While a draw is on its way
+   the old word stays, so the line never blinks. */
+async function showRandom(fresh){
+  if(!randOn){randSeq++;$("rand")?.remove();return}
+  if(randPending||!randIdle())return;
+  // A page loaded again on this entry (Back from Browse, where the browser
+  // keeps no live page) finds the word it showed in the entry's state.
+  if(!randWord&&!fresh){
+    const s=history.state?.rand;
+    if(s&&typeof s.word==="string"&&typeof s.dict==="string"&&randomPool().includes(s.dict))randWord={word:s.word,dict:s.dict};
+  }
+  if(randWord&&!fresh){paintRandom();return}
+  const seq=++randSeq;
+  $("rand")?.setAttribute("aria-busy","true");
+  const w=await drawRandom();
+  if(seq!==randSeq)return; // a newer draw owns the line
+  $("rand")?.removeAttribute("aria-busy");
+  if(w!==undefined)randWord=w;
+  paintRandom();
+}
+function paintRandom(){
+  let el=$("rand");
+  if(!randWord){el?.remove();return}
+  if(!randIdle())return;
+  // kept on the empty start's own entry, for a page loaded again there
+  if(!location.search)history.replaceState({rand:randWord},"");
+  if(el)el.removeAttribute("aria-busy"); // whichever draw painted, it is done
+  else{
+    el=document.createElement("div");
+    el.id="rand";
+    el.setAttribute("role","group");
+    el.setAttribute("aria-label","Random word");
+    el.setAttribute("aria-live","polite");
+    el.innerHTML=`<button type="button" class="rdie" aria-label="Another word" title="Show another random word">${DIE_SVG}</button>`+
+      '<a class="rword"></a><span class="rsep" aria-hidden="true">·</span><a class="rdict"></a>';
+    el.querySelector(".rdie").addEventListener("click",()=>showRandom(true));
+    el.querySelector(".rword").addEventListener("click",e=>{
+      if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return; // a new tab keeps the link
+      e.preventDefault();openRandom(randWord,"push");
+    });
+    $("out").prepend(el);
+  }
+  const {word,dict}=randWord,d=dicts.find(x=>x.id===dict),name=d?dictLabel(d):"";
+  const a=el.querySelector(".rword"),b=el.querySelector(".rdict");
+  a.textContent=word;
+  // Rooted at "/": the document's link handler reads any other relative href
+  // as a dictionary's bare-word reference and would look the address up.
+  a.href="/?"+new URLSearchParams({q:word,dict,mode:"exact"});
+  a.title="Look up "+word;
+  b.textContent=name;
+  b.href="/browse?"+new URLSearchParams({dict,at:word});
+  b.title=`Browse ${name} from ${word}`;
+  b.hidden=el.querySelector(".rsep").hidden=!name;
+}
+/* Opens a random word as the line names it: that headword, exactly, in that
+   dictionary and no other. A search of the picker's dictionaries would break
+   the line's promise - a pinned dictionary that also lists the word opens
+   first. Exact, as a word picked in Browse opens, so the mode stays exact for
+   the next search too. History takes the word once it has been read (dwell). */
+function openRandom(w,record){
+  if(!w)return;
+  setMode("exact");syncChips();
+  searchFor(w.word,{scope:w.dict,record,dwell:true});
+}
+/* Draws a word and opens it at once: the list's "Random word" row and the
+   Android shortcut ask for a word to read, not for the line. The shortcut's
+   address is replaced by the word's (record), so Back leaves the app rather
+   than drawing again. A reader who starts typing meanwhile keeps the box. */
+async function randomNow(record){
+  randPending=true;
+  const seq=++randSeq;
+  const w=await drawRandom();
+  randPending=false;
+  if(seq!==randSeq||$("q").value.trim()){
+    // the shortcut's address must not draw again on a reload
+    if(record==="replace"&&new URLSearchParams(location.search).has("random"))history.replaceState(null,"",location.pathname);
+    return;
+  }
+  if(w){randWord=w;openRandom(w,record||"push");return}
+  if(record==="replace")history.replaceState(null,"",location.pathname);
+  if(w===null)setStatus("⚠ Could not show a random word: no word found in these dictionaries");
+  showRandom(false);
+}
+/* Where the word is drawn from follows the picker. A word on show that the new
+   choice still holds stays; any other is replaced. */
+function randChanged(){
+  if(!randOn){showRandom(false);return}
+  if(randWord&&!randomPool().includes(randWord.dict))randWord=null;
+  showRandom(false);
+}
+$("dict").addEventListener("change",randChanged);
+/* The word belongs to the empty page: the first character takes it away -
+   also where typing does not search (under "Show headwords", or one
+   character) - and emptying the box brings the same word back. */
+$("q").addEventListener("input",()=>{if($("q").value.trim())$("rand")?.remove();else showRandom(false)});
 
 /* ── the custom-styles editor ────────────────────────────────────────
    Two boxes over one textarea. The split is not bureaucracy: `body{}`,
@@ -7061,9 +7292,9 @@ function bootEarly(){
 }
 Promise.all([loadPrefs(),loadConfig(),loadUserCSS()]).then(()=>{
   const c=readDictCache();
-  if(c)return bootFromCache(c).then(ok=>{if(ok)welcome()});
+  if(c)return bootFromCache(c).then(ok=>{if(ok){welcome();showRandom(false)}});
   if(linkNamesOne())return bootEarly();
-  return loadDicts().then(()=>{applyURL();welcome()});
+  return loadDicts().then(()=>{applyURL();welcome();showRandom(false)});
 });
 </script>
 </body>

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/wuweidict/wudict/internal/dict"
 )
@@ -37,7 +38,13 @@ type browseResp struct {
 	// at: a jump snaps down to the page grid, so a page reached by asking for
 	// K usually opens in the tail of J. The client highlights the strip by
 	// this, or clicking K lights up J.
-	At       int           `json:"at"`
+	At int `json:"at"`
+	// Word and Match say where a jump (`at`) landed, so the page can mark it
+	// (D203): the headword the typed word spells (match "exact", accents and
+	// case aside) or starts ("prefix"), or with "none" the row the typed word
+	// would stand before ("" past the last). Absent for a page turn.
+	Word     string        `json:"word,omitempty"`
+	Match    string        `json:"match,omitempty"`
 	Words    []string      `json:"words"`
 	Alphabet []dict.Letter `json:"alphabet"`
 }
@@ -98,14 +105,17 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	offset, mark := 0, -1
-	if at := q.Get("at"); at != "" {
+	var land dict.Landing
+	if at := strings.TrimSpace(q.Get("at")); at != "" {
 		// A jump lands on the PAGE holding the word, not on the word: the
 		// reader asked to be put down in the list there, and a page that
-		// started mid-letter every time would have no stable address.
-		if mark, err = b.Locate(at); err != nil {
+		// started mid-letter every time would have no stable address. The
+		// word itself is named in the answer, and the page marks it.
+		if land, err = b.Jump(r.Context(), at); err != nil {
 			httpErr(w, 500, "browsing %s: %v", e.ID, err)
 			return
 		}
+		mark = land.Offset
 		offset = mark - mark%browsePageSize
 	} else if p, _ := strconv.Atoi(q.Get("p")); p > 1 {
 		offset = (p - 1) * browsePageSize
@@ -139,6 +149,8 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		Pages:    (total + browsePageSize - 1) / browsePageSize,
 		Size:     browsePageSize,
 		At:       mark,
+		Word:     land.Word,
+		Match:    land.Match,
 		Words:    words,
 		Alphabet: alphabet,
 	})

@@ -1914,9 +1914,12 @@ paths:
         - name: at
           in: query
           description: >
-            Jump to the page holding this word, or the first one after it.
-            Overrides `p`. The reader lands on a page boundary, not on the word:
-            a page that started mid-letter would have no stable address.
+            Jump to the page holding the headword this word spells, accents
+            and case aside; else the first headword that starts with it as
+            typed (case aside), else the first it starts with accents aside;
+            else the place the word would have. Overrides `p`. The reader lands on a page
+            boundary, not on the word: a page that started mid-letter would
+            have no stable address. `word` and `match` name the headword.
           schema: { type: string }
       x-codeSamples:
         - lang: Shell
@@ -1953,6 +1956,20 @@ paths:
                       of J. The client highlights the strip by this, and falls
                       back to the page's own start when it is a plain page
                       turn.
+                  word:
+                    type: string
+                    description: >
+                      With `at` only: the headword the jump landed on (match
+                      `exact` or `prefix`), or with `none` the headword the
+                      typed word would stand before; empty past the last.
+                  match:
+                    type: string
+                    enum: [exact, prefix, none]
+                    description: >
+                      With `at` only: `exact` when the typed word is the
+                      headword (accents and case aside), `prefix` when it is
+                      the start of it, `none` when no headword is or starts
+                      with it.
                   words:
                     type: array
                     description: The headwords on this page. Homographs appear once.
@@ -2060,6 +2077,74 @@ paths:
                 words: [banana, banana boat, banana republic, bananas]
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/random:
+    get:
+      tags: [internal]
+      operationId: random
+      x-internal: true
+      summary: One headword drawn at random
+      description: >
+        What wudict's own page shows under the empty search box: a headword
+        drawn from the indexed dictionaries `dict` names. Each dictionary is
+        as likely as any other; within it, each entry (sub-entries aside). A
+        dictionary that is not indexed is not opened and not drawn from, the
+        wudict howto is never drawn from, and of the openZIM archives only a
+        Wiktionary is.
+
+
+        A drawn word is shown only when all of these are true:
+          - It is one word: 4 to 18 letters (1 to 8 in Han, kana and Hangul),
+            with a hyphen or an apostrophe only between two letters.
+          - It is in lower case; with a capital initial only in a language
+            that capitalises nouns (German, Luxembourgish); in capitals only
+            in a dictionary whose headwords are mostly in capitals.
+          - It is not an inflected form whose lemma the same dictionary lists,
+            found by lemma data already loaded (none is loaded for this) or
+            by an English or Romance ending.
+
+
+        Only headwords are read, never an article. A word that a second
+        dictionary in `dict`, of the same language, also lists is preferred;
+        the dictionaries open already are asked first, one that is not
+        enabled is not opened for this, and at most 8 are opened for it.
+        After 12 draws the first word that passed is taken, and with none,
+        the answer is 204.
+
+
+        Same-origin only, as `/api/browse`: it is not part of the client API a
+        browser extension reaches (D69).
+      parameters:
+        - name: dict
+          in: query
+          description: >
+            `all`, one dictionary id, or a comma-separated list of ids, as in
+            `/api/search`. `all` includes the dictionaries that are not
+            enabled. A list where no id resolves is a 404.
+          schema: { type: string, default: all }
+      x-codeSamples:
+        - lang: Shell
+          label: curl
+          source: |
+            curl -s 'http://127.0.0.1:6888/api/random'
+      responses:
+        '200':
+          description: The word, and the dictionary it was drawn from.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [word, dict, name]
+                properties:
+                  word: { type: string, description: The headword as the dictionary spells it. }
+                  dict: { type: string, description: The id of the dictionary it was drawn from. }
+                  name: { type: string, description: That dictionary's own title. }
+              example:
+                word: psychopomp
+                dict: 3f9a1c27b0de
+                name: Collins English Dictionary
+        '204': { description: No word could be drawn from these dictionaries. }
         '404':
           $ref: '#/components/responses/NotFound'
   /api/reveal:
@@ -2891,6 +2976,21 @@ components:
             from that list. Absent is the default: a search of what is typed,
             as it is typed. Remembered state for wudict's own UI - the search
             endpoint never reads it.
+        randomOff:
+          type: boolean
+          description: >
+            Hides the random word under the empty search box (`/api/random`).
+            Absent is the default: the word is shown. Remembered state for
+            wudict's own UI.
+        randomFrom:
+          type: string
+          enum: [pinned, all]
+          description: >
+            The dictionaries the random word is drawn from while the
+            dictionary picker says "All dictionaries": `pinned` is the pinned
+            dictionaries that are enabled, `all` every dictionary, enabled or
+            not. Absent is the default: the enabled dictionaries. Any other
+            value is dropped. Remembered state for wudict's own UI.
 
     Words:
       type: object

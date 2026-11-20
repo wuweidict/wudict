@@ -95,6 +95,13 @@ type Store struct {
 	marksStmt *sql.Stmt
 	marksErr  error
 	scanStmts sync.Map // query text → *sql.Stmt
+
+	// The id range Sample draws from (random.go), read on the first draw of
+	// this handle and kept for its life, for the same reason as the strip. A
+	// read that failed is not kept: the next draw asks again.
+	spanMu         sync.Mutex
+	spanOK         bool
+	spanLo, spanHi int64
 }
 
 // markupVersionOf reads the article-markup version a database records. Absent

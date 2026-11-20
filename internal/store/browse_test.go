@@ -5,6 +5,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -143,6 +144,65 @@ func TestBrowseChipCut(t *testing.T) {
 		}
 		if len(w) != 1 || w[0] != l.Letter {
 			t.Errorf("chip %q opens on %v", l.Letter, w)
+		}
+	}
+}
+
+// TestJump pins the three landings (D203): the headword spelled, accents and
+// case aside - wherever browse order files it - else the first it starts,
+// else the place the word would have, before the row it names.
+// A prefix stays in the run it begins as typed; only a prefix that begins no
+// such run is followed into the accented words browse order files after z.
+func TestJumpPrefixRun(t *testing.T) {
+	s := browseStore(t, []string{"eagle", "ebony", "éa", "écart", "état", "zebra"})
+	for _, tc := range []struct{ typed, word, match string }{
+		{"e", "eagle", dict.JumpPrefix},  // not éa, filed after zebra
+		{"E", "eagle", dict.JumpPrefix},  // case aside
+		{"eb", "ebony", dict.JumpPrefix}, //
+		{"eta", "état", dict.JumpPrefix}, // no "eta…" run: accents aside
+		{"ea", "éa", dict.JumpExact},     // a whole word wins wherever it is
+		{"ez", "zebra", dict.JumpNone},
+	} {
+		got, err := s.Jump(context.Background(), tc.typed)
+		if err != nil || got.Word != tc.word || got.Match != tc.match {
+			t.Errorf("Jump(%q) = %+v, %v; want %q %s", tc.typed, got, err, tc.word, tc.match)
+			continue
+		}
+		if row, _ := s.Page(got.Offset, 1); len(row) != 1 || row[0] != tc.word {
+			t.Errorf("Jump(%q) offset %d holds %v, want %q", tc.typed, got.Offset, row, tc.word)
+		}
+	}
+}
+
+func TestJump(t *testing.T) {
+	s := browseStore(t, []string{"casa", "corazón", "corazonada", "elan", "serene", "serf", "zebra", "Ärger", "@_sub"})
+	for _, tc := range []struct {
+		typed, word, match string
+	}{
+		{"casa", "casa", dict.JumpExact},
+		{"CASA", "casa", dict.JumpExact},
+		{"corazon", "corazón", dict.JumpExact},   // accent typed or not
+		{"élan", "elan", dict.JumpExact},         // and the other way round
+		{"arger", "Ärger", dict.JumpExact},       // filed after zebra in browse order
+		{"coraz", "corazonada", dict.JumpPrefix}, // the first of its run as typed (n < ó)
+		{"corazona", "corazonada", dict.JumpPrefix},
+		{"seren", "serene", dict.JumpPrefix},
+		{"serendipx", "serene", dict.JumpNone}, // would stand before serene (d < e)
+		{"zz", "Ärger", dict.JumpNone},         // NOCASE order: Ä sorts after z
+		{"\U0010FFFF", "", dict.JumpNone},      // past the last row
+		{"  ", "", dict.JumpNone},              // blank: the start, matching nothing
+		{"@_s", "casa", dict.JumpNone},         // a sub-entry is not a row; "@" sorts first
+	} {
+		got, err := s.Jump(context.Background(), tc.typed)
+		if err != nil || got.Word != tc.word || got.Match != tc.match {
+			t.Errorf("Jump(%q) = %+v, %v; want %q %s", tc.typed, got, err, tc.word, tc.match)
+			continue
+		}
+		// The offset is the row Page shows for the word.
+		if tc.word != "" {
+			if row, _ := s.Page(got.Offset, 1); len(row) != 1 || row[0] != tc.word {
+				t.Errorf("Jump(%q) offset %d holds %v, want %q", tc.typed, got.Offset, row, tc.word)
+			}
 		}
 	}
 }

@@ -28,4 +28,22 @@
             android:targetClass="com.legbehindneck.wudict.SettingsActivity"
             android:targetPackage="com.legbehindneck.wudict" />
     </shortcut>
+    <!-- A random word, opened (D202). MAIN, the launcher's own action, so no
+         intake or share handler mistakes it for something to import; the extra
+         is all MainActivity reads, and only its presence. -->
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_random"
+        android:shortcutId="random"
+        android:shortcutLongLabel="@string/random_long_label"
+        android:shortcutShortLabel="@string/random_short_label">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetClass="com.legbehindneck.wudict.MainActivity"
+            android:targetPackage="com.legbehindneck.wudict">
+            <extra
+                android:name="com.legbehindneck.wudict.RANDOM"
+                android:value="true" />
+        </intent>
+    </shortcut>
 </shortcuts>

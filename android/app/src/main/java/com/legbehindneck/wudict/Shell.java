@@ -87,6 +87,15 @@ final class Shell {
         return b.toString();
     }
 
+    /**
+     * A random word the page will draw and open on load (D202): `?random=1`,
+     * the SPA's own address for it (web/index.html, applyURL).
+     */
+    static String randomUrl(Context c) {
+        String k = key(c);
+        return origin(c) + "/?random=1" + (k.isEmpty() ? "" : "&" + k);
+    }
+
     // URLEncoder writes ' ' as '+', which URLSearchParams reads back as ' ' -
     // the same pair the page already uses for its own links.
     private static String enc(String s) {

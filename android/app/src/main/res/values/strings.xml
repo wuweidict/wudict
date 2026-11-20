@@ -39,6 +39,10 @@
           not which intent filter it arrived through. -->
      <string name="settings_short_label">Settings</string>
      <string name="settings_title">wuDict settings</string>
+     <!-- The launcher shortcut that opens a random word (D202). The short
+          label stays within the 10 characters launchers show in full. -->
+     <string name="random_short_label">Random</string>
+     <string name="random_long_label">Random word</string>
      <string name="settings_lookup_head">Look up in the full app</string>
      <string name="settings_lookup_hint">Otherwise a lookup floats over the app you were reading.</string>
      <string name="settings_lookup_toolbar">From the text selection menu</string>

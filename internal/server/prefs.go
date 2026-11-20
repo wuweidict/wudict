@@ -191,6 +191,19 @@ type UIPrefs struct {
 	// typed as it is typed. Remembered state for the UI; the server never
 	// reads it.
 	ListWords bool `json:"listWords,omitempty"`
+
+	// RandomOff hides the random word under the empty search box (D202).
+	// Negated like HLOff: shown is the default. Remembered state for the UI;
+	// the server never reads it.
+	RandomOff bool `json:"randomOff,omitempty"`
+
+	// RandomFrom is where the random word is drawn from while the picker
+	// says "All dictionaries": "pinned" (the pinned ones that are enabled)
+	// or "all" (every dictionary, enabled or not). Empty is the enabled
+	// dictionaries, the default. A dictionary or a group chosen in the
+	// picker is drawn from as it is. Remembered state for the UI; the server
+	// never reads it.
+	RandomFrom string `json:"randomFrom,omitempty"`
 }
 
 // Article text-size bounds. The ceiling is deliberately past what the layout
@@ -220,6 +233,11 @@ func (u *UIPrefs) normalize() {
 	case "exact", "fts", "wildcard":
 	default: // prefix, and a retired mode ("fuzzy", D16; "contains", D170)
 		u.Mode = ""
+	}
+	switch u.RandomFrom {
+	case "pinned", "all":
+	default: // the enabled dictionaries
+		u.RandomFrom = ""
 	}
 }
 
