@@ -147,6 +147,12 @@ type Rewriter struct {
 	// internal/hilite marks a phrase that markup splits with it.
 	TextIn func(raw, rest string) string
 
+	// LightScheme passes the CSS of <style>, the code of <script> and every
+	// media attribute through LightScheme, so the article always sees a light
+	// colour scheme. Prose is never touched: a dictionary that documents CSS
+	// (devdocs) keeps its text.
+	LightScheme bool
+
 	// PlayLinks turns a speaker icon only GoldenDict can show into one a
 	// browser can. LDOCE6 (StarDict) writes every pronunciation as
 	//
@@ -446,10 +452,19 @@ func (rw Rewriter) Rewrite(doc string) string {
 			// wants, so the two hooks are mutually exclusive by construction:
 			// raw == "" IS the definition of prose here.
 			switch {
-			case raw == "style" && rw.URL != nil:
-				out.WriteString(rewriteCSS(string(z.Raw()), func(u string) string {
-					return rw.URL(Ref{Site: SiteCSS, Tag: "style", URL: u})
-				}))
+			case raw == "style" && (rw.URL != nil || rw.LightScheme):
+				css := string(z.Raw())
+				if rw.LightScheme {
+					css = LightScheme(css)
+				}
+				if rw.URL != nil {
+					css = rewriteCSS(css, func(u string) string {
+						return rw.URL(Ref{Site: SiteCSS, Tag: "style", URL: u})
+					})
+				}
+				out.WriteString(css)
+			case raw == "script" && rw.LightScheme:
+				out.WriteString(LightScheme(string(z.Raw())))
 			case raw == "" && rw.TextIn != nil:
 				// The tokenizer yields the document's bytes in order, each
 				// token its own, so what it has yielded is where it stands.
@@ -478,10 +493,10 @@ func writeTag(w *strings.Builder, t *html.Token, changed bool, z *html.Tokenizer
 	}
 }
 
-// rewriteAttrs applies URL to every reference-bearing attribute of t,
-// reporting whether anything changed.
+// rewriteAttrs applies URL to every reference-bearing attribute of t, and
+// LightScheme to its media attribute, reporting whether anything changed.
 func (rw Rewriter) rewriteAttrs(t *html.Token) bool {
-	if rw.URL == nil {
+	if rw.URL == nil && !rw.LightScheme {
 		return false
 	}
 	changed := false
@@ -490,6 +505,10 @@ func (rw Rewriter) rewriteAttrs(t *html.Token) bool {
 		name := strings.ToLower(a.Key)
 		var out string
 		switch {
+		case name == "media" && rw.LightScheme:
+			out = LightScheme(a.Val)
+		case rw.URL == nil:
+			continue
 		case name == "style":
 			out = rewriteCSS(a.Val, func(u string) string {
 				return rw.URL(Ref{Site: SiteCSS, Tag: t.Data, Attr: name, URL: Clean(u)})

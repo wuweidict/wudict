@@ -2590,6 +2590,7 @@ function syncAZ(){
   if(off)askAZ(false);
 }
 function askAZ(open){
+  layersChanged();
   const box=$("azAsk"),btn=$("azBtn");
   btn.setAttribute("aria-expanded",open?"true":"false");
   const p=open?pinnedShown():[];
@@ -3068,7 +3069,7 @@ $("panelFind").addEventListener("keydown",e=>{
    searchable corpus changes under a live query, re-issue the query. */
 let panelSnap=null;
 function panelState(){return enabledOrderedIds().join("\u0000")}
-function showPanel(){panelSnap=panelState();
+function showPanel(){layersChanged();panelSnap=panelState();
   // Asked here, not at load: the Android shell installs its speech engine
   // after the page has loaded (D148).
   $("speakBtn").hidden=!speakCan();
@@ -3083,6 +3084,7 @@ function showPanel(){panelSnap=panelState();
   if(!TAPS)$("panelFind").focus()}
 function hidePanel(){
   if(!$("panel").classList.contains("show"))return;
+  layersChanged();
   $("panel").classList.remove("show");
   askAZ(false);
   const was=panelSnap;panelSnap=null;
@@ -5320,6 +5322,7 @@ function findBuild(){
   return findEl;
 }
 function findOpen(det){
+  layersChanged();
   if(findDet&&findDet!==det)findClose(); // one field: it follows the section being read
   const sum=det&&det.isConnected&&det.querySelector(":scope>summary");
   if(!sum)return;
@@ -5456,6 +5459,7 @@ function findAfter(det){
   findNote();
 }
 function findClose(){
+  layersChanged();
   const det=findDet,found=findText;
   if(findAC){findAC.abort();findAC=null}
   clearTimeout(findNoneT);
@@ -5899,15 +5903,82 @@ doSearch=function(ev){
     if(lastScope)params.from=lastScope;
     const url="?"+new URLSearchParams(params).toString();
     // clicking the same word twice must not stack identical entries
-    if(record==="push"&&url!==location.search)history.pushState(null,"",url);
-    else history.replaceState(null,"",url);
+    histWrite(record==="push"&&url!==location.search,null,url);
   }
   return r;
 };
 
+/* Back closes what is open, one press each, in the order Escape spends itself
+   (D200): the A–Z prompt, the panel, the styler, read aloud where it is docked
+   (a touch screen; with a mouse it is a passing button by the selection, not
+   a place), find in articles. An Android shell walks the WebView's history on
+   Back, and so does a browser, so the page puts ONE entry of its own (LAYER)
+   on top of the stack while anything is open:
+     first layer opens          → push LAYER (same URL, same state + wdLayer)
+     Back with LAYER on top     → close the top layer; push again if more are open
+     last layer closed by hand  → history.back(), and history waits for it
+   A search started while LAYER is on top (a title in the panel, a new query
+   with find open) is HELD and written to the entry under LAYER once LAYER is
+   gone, in order - a write landing on LAYER itself would be popped with it,
+   and one made while our own back() is in flight would be undone by it.
+   A Back that finds nothing to close (the section find was in is gone) is
+   passed on as an ordinary Back, never swallowed. */
+const LAYERS=[
+  [()=>!$("azAsk").hidden,()=>askAZ(false)],
+  [()=>$("panel").classList.contains("show"),()=>hidePanel()],
+  [()=>$("styler").classList.contains("show"),()=>stylerCloseSheet()],
+  [()=>!!(window.wuSpeak&&window.wuSpeak.docked&&window.wuSpeak.docked()),()=>window.wuSpeak.esc()],
+  [()=>!!(findDet&&findDet.isConnected),()=>findClose()],
+];
+// var and function declarations: hoisted, so a layer that opens or closes
+// while the script is still starting up schedules a sync instead of throwing.
+var onLayer=false,layerPopping=false,layerHeld=null,layerQueued=false;
+function withLayer(s){return Object.assign({},s,{wdLayer:1})}
+function layersChanged(){if(!layerQueued){layerQueued=true;queueMicrotask(layerSync)}}
+function layerSync(){
+  layerQueued=false;
+  if(layerPopping)return; // settled when that popstate arrives
+  const any=LAYERS.some(([open])=>open());
+  if(any&&!onLayer){history.pushState(withLayer(history.state),"",location.href);onLayer=true}
+  else if(!any&&onLayer){onLayer=false;layerPopping=true;history.back()}
+}
+/* Every history write of the page goes through here. url undefined keeps the
+   current address. A held push stays a push when a replace follows it. */
+function histWrite(push,state,url){
+  if(onLayer||layerPopping){
+    layerHeld={push:push||!!(layerHeld&&layerHeld.push),state,url:url??layerHeld?.url};
+    if(onLayer)history.replaceState(withLayer(state),"",url); // the address bar shows the page
+    return;
+  }
+  if(push)history.pushState(state,"",url);else history.replaceState(state,"",url);
+}
+function layerFlush(){const h=layerHeld;layerHeld=null;if(h)histWrite(h.push,h.state,h.url)}
+// true when the popstate was a layer's and is spent
+function layerPop(){
+  if(layerPopping){layerPopping=false;layerFlush();layerSync();return true}
+  if(onLayer){
+    onLayer=false;
+    layerFlush();
+    const top=LAYERS.find(([open])=>open());
+    if(top){top[1]();layersChanged()}
+    else history.back();
+    return true;
+  }
+  // an entry of ours reached by Forward: step off it, back onto the page as it is
+  if(history.state&&history.state.wdLayer){layerPopping=true;history.back();return true}
+  return false;
+}
+// A reload with a layer entry current: the layers are gone, so is the entry.
+if(history.state&&history.state.wdLayer){
+  const s={...history.state};delete s.wdLayer;
+  history.replaceState(Object.keys(s).length?s:null,"",location.href);
+}
+document.addEventListener("wu:layer",layersChanged); // speak.js: the speaker came or went
+
 /* Back/Forward: put the state the URL describes back on screen. Nothing is
    recorded — the browser already moved the cursor within the stack. */
 window.addEventListener("popstate",()=>{
+  if(layerPop())return;
   const p=new URLSearchParams(location.search);
   if(p.get("mode"))setMode(p.get("mode"));
   if(p.get("dict"))selectDict(p.get("dict"));
@@ -6357,7 +6428,7 @@ function paintRandom(){
   if(!randWord){el?.remove();return}
   if(!randIdle())return;
   // kept on the empty start's own entry, for a page loaded again there
-  if(!location.search)history.replaceState({rand:randWord},"");
+  if(!location.search)histWrite(false,{rand:randWord});
   if(el)el.removeAttribute("aria-busy"); // whichever draw painted, it is done
   else{
     el=document.createElement("div");
@@ -6407,11 +6478,11 @@ async function randomNow(record){
   randPending=false;
   if(seq!==randSeq||$("q").value.trim()){
     // the shortcut's address must not draw again on a reload
-    if(record==="replace"&&new URLSearchParams(location.search).has("random"))history.replaceState(null,"",location.pathname);
+    if(record==="replace"&&new URLSearchParams(location.search).has("random"))histWrite(false,null,location.pathname);
     return;
   }
   if(w){randWord=w;openRandom(w,record||"push");return}
-  if(record==="replace")history.replaceState(null,"",location.pathname);
+  if(record==="replace")histWrite(false,null,location.pathname);
   if(w===null)setStatus("⚠ Could not show a random word: no word found in these dictionaries");
   showRandom(false);
 }
@@ -7110,6 +7181,7 @@ function stylerApplyPreset(p){
   setTimeout(stylerNote,2600);
 }
 async function stylerOpen(){
+  layersChanged();
   hidePanel();
   $("styler").classList.add("show");
   stylerFillPresets();
@@ -7143,6 +7215,7 @@ async function stylerOpen(){
   if(stylerView==="css")$("stylerCSS").focus();
 }
 function stylerCloseSheet(){
+  layersChanged();
   $("styler").classList.remove("show");
   document.body.classList.remove("styling");
   // Unsaved text is kept — it is still in the box when you come back — but it
@@ -7249,6 +7322,10 @@ function welcome(){
     w.innerHTML='No dictionaries found. <a href="/setup">Add dictionaries</a>, or read the wudict howto below.';
     $("out").before(w);
   }
+  /* The empty field was focused when the boot phase ended (D114 C), and a
+     host shell raised its keyboard for it; what comes now is an article to
+     read, so on touch the field lets go - the rule a submit follows (D114 E). */
+  if(!matchMedia("(hover:hover)").matches)$("q").blur();
   searchFor("wudict welcome",{scope:guide.id,record:"replace"});
 }
 /* Three ways to start, chosen by what is at hand when the settings are in.

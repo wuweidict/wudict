@@ -1869,7 +1869,21 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 		http.ServeContent(w, r, name, time.Time{}, rs)
 		return
 	}
-	watch := &nulWatcher{r: rc, text: isTextResource(name)}
+	var src io.Reader = rc
+	if schemeResource(name) {
+		// Read whole, up to a bound, so the colour-scheme rewrite sees the
+		// stylesheet or script entire; anything larger streams as it is.
+		body, err := io.ReadAll(io.LimitReader(rc, maxSchemeRewrite+1))
+		if err != nil {
+			httpErr(w, 500, "%v", err)
+			return
+		}
+		if len(body) <= maxSchemeRewrite {
+			body = lightSchemeBytes(body)
+		}
+		src = io.MultiReader(bytes.NewReader(body), rc)
+	}
+	watch := &nulWatcher{r: src, text: isTextResource(name)}
 	_, _ = io.Copy(w, watch)
 	if watch.seen {
 		if _, dup := s.nulSeen.LoadOrStore(id+"\x00"+name, true); !dup {
@@ -1879,6 +1893,33 @@ func (s *Server) handleResource(w http.ResponseWriter, r *http.Request) {
 				logx.Dict(e.Path), name, name)
 		}
 	}
+}
+
+// maxSchemeRewrite bounds what a resource request reads into memory for the
+// colour-scheme rewrite. The largest stylesheet in a 190-dictionary library is
+// ~200 kB (LDOCE); past this bound a file streams unchanged.
+const maxSchemeRewrite = 4 << 20
+
+// schemeResource reports whether a resource can carry a colour-scheme query
+// the article must not see (htmlref.LightScheme): a stylesheet, a script's
+// matchMedia call, an SVG's <style>. HTML is not rewritten as text - prose
+// that documents CSS would change - and articles get the structural rewrite
+// (entryRewriter) instead.
+func schemeResource(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".css", ".js", ".mjs", ".svg":
+		return true
+	}
+	return false
+}
+
+// lightSchemeBytes is htmlref.LightScheme for a resource body, converting
+// only when the feature is there to rewrite.
+func lightSchemeBytes(b []byte) []byte {
+	if !htmlref.NeedsLightScheme(b) {
+		return b
+	}
+	return []byte(htmlref.LightScheme(string(b)))
 }
 
 // isTextResource reports whether a NUL byte in this resource would be proof of
@@ -1960,6 +2001,17 @@ func (s *Server) serveOverride(w http.ResponseWriter, r *http.Request, e *entry,
 	// editing, and a day-long cache would hide their next attempt. ServeContent
 	// supplies Last-Modified, so revalidation stays cheap.
 	w.Header().Set("Cache-Control", "no-cache")
+	if schemeResource(name) && fi.Size() <= maxSchemeRewrite {
+		// An override renders in the same article as the file it replaces,
+		// so it gets the same light colour scheme.
+		body, err := io.ReadAll(f)
+		if err != nil {
+			httpErr(w, 500, "%v", err)
+			return true
+		}
+		http.ServeContent(w, r, name, fi.ModTime(), bytes.NewReader(lightSchemeBytes(body)))
+		return true
+	}
 	http.ServeContent(w, r, name, fi.ModTime(), f)
 	return true
 }

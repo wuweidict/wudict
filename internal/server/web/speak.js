@@ -654,6 +654,11 @@ function build() {
   // article; the action happens on click, which is the gesture Safari and
   // Chrome require before they will speak.
   for (const el of [ui, menu]) el.addEventListener("pointerdown", e => e.preventDefault());
+  // Docked, the speaker is a layer Back closes (index.html, LAYERS): the page
+  // hears when it comes or goes, from every path that shows or hides it.
+  const said = new MutationObserver(() => document.dispatchEvent(new Event("wu:layer")));
+  said.observe(ui, { attributes: true, attributeFilter: ["hidden", "class"] });
+  said.observe(menu, { attributes: true, attributeFilter: ["hidden"] });
   mainBtn.addEventListener("click", toggle);
   nextBtn.addEventListener("click", skip);
   closeBtn.addEventListener("click", dismiss);
@@ -1106,6 +1111,9 @@ window.wuSpeak = {
   // Escape inside an article frame (frame.js hands it over): true when it
   // was read aloud's to take.
   esc,
+  // The speaker docked on a touch screen is on show: a layer Back closes
+  // with esc. With a mouse it sits by the selection and is not a place.
+  docked() { return !!ui && touch && (!ui.hidden || (!!menu && !menu.hidden)) },
   // Space inside an article frame (frame.js hands every one over): true when
   // it was read aloud's to take - something is read or paused - and the page
   // must not scroll for it.

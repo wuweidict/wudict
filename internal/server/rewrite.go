@@ -172,9 +172,9 @@ func RewriteEntryHTMLMarked(html, dictID string, hl *hilite.Terms) string {
 }
 
 // hasRewritableRef reports whether the article can contain a reference at
-// all, or a <base> to drop.
+// all, a <base> to drop, or a colour-scheme query to neutralise.
 func hasRewritableRef(html string) bool {
-	return htmlref.MayRef(html) || strings.Contains(html, "<base")
+	return htmlref.MayRef(html) || strings.Contains(html, "<base") || htmlref.NeedsLightScheme(html)
 }
 
 // entryRewriter builds the article rewriter for one dictionary, optionally
@@ -182,9 +182,10 @@ func hasRewritableRef(html string) bool {
 // URL policy below is long, exact, and must never exist in two copies that
 // can drift apart. A dictID of "" leaves URL and Drop nil, which htmlref
 // treats as "emit the original bytes" - so a caller that only wants marking
-// gets marking and nothing else.
+// gets marking, plus the light colour scheme every article gets
+// (htmlref.LightScheme: the app makes dark mode by inverting the article).
 func entryRewriter(dictID string, text func(string) string) htmlref.Rewriter {
-	rw := htmlref.Rewriter{Text: text}
+	rw := htmlref.Rewriter{Text: text, LightScheme: true}
 	if dictID == "" {
 		return rw
 	}
