@@ -49,8 +49,8 @@ android {
         // vector adaptive icon needs no PNG fallbacks at 26+.
         minSdk 26
         targetSdk 36
-        versionCode 3071090
-        versionName "3.7.10"
+        versionCode 3071190
+        versionName "3.7.11"
         if (project.hasProperty('versionCode')) versionCode = project.property('versionCode') as int
         if (project.hasProperty('versionName')) versionName = project.property('versionName') as String
         // The server's default port (ShellPrefs.DEFAULT_PORT). Loopback is

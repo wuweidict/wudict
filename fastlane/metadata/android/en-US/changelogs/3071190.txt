@@ -1,0 +1,3 @@
+🚀 Features
+(config) COMPRESSION = "zstd" | "deflate" | "none", optionally with a level ("zstd-3", "deflate-6"); --compression on serve. NO_COMPRESS and "fast"/"small" are still read and reported with the new spelling
+(android) Settings → Advanced: Article compression (zstd, DEFLATE or none) replaces the "uncompressed" switch; a ticked switch becomes "none"
