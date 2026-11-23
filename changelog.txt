@@ -1,3 +1,14 @@
+v3.7.12
+
+🚀 Features
+(favourites) The star is now on each article's headword: a word is starred in the dictionary you read it in, and opens there again from the list, which names that dictionary. A word starred in several dictionaries opens in all of them; a favourite whose dictionary was removed is looked up like a word you type. Ctrl+D (⌘+D) stars the article you are reading
+(favourites) Shift+Delete or touch and hold removes a word from your favourites, with Undo in its place for a few seconds (also Ctrl+Z / ⌘+Z)
+
+🐛 Bug Fixes
+(touch) The clear button in the search box, the star, the mode and dictionary buttons, ☰, the rows of the favourites and history list, the result headers and "Search all dictionaries" are easier to hit on a phone; the clear button and the star are easier to see
+(favourites) The star saved the text in the search box, so a few letters, a wildcard pattern or a full-text phrase could become a favourite
+(search) A random word no longer says "Followed a link inside" under its article
+
 v3.7.11
 
 🚀 Features

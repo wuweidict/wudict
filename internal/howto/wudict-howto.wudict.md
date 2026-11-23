@@ -320,11 +320,11 @@ The list starts at 2 characters and shows at most 20 headwords: type more letter
 ## wudict favourites
 ## wudict star
 
-**Click the empty search box (💻 or press <kbd>↓</kbd>) to see your favourites and the words you looked up**, latest first; pick one to look it up again. **Press ☆ at the end of the search box to add the word to your favourites**; press ★ to remove it. 💻 <kbd>Ctrl</kbd>+<kbd>D</kbd> (<kbd>⌘</kbd>+<kbd>D</kbd> on a Mac) does the same, and <kbd>Shift</kbd>+<kbd>Delete</kbd> removes the selected word from your history. 📱 Touch and hold a word in the list to remove it from your history.
+**Click the empty search box (💻 or press <kbd>↓</kbd>) to see your favourites and the words you looked up**, latest first; pick one to look it up again. **Press ☆ after a headword to add it to your favourites**; press ★ to remove it. A favourite opens in the dictionaries you starred it in, named after the word in the list, also when they are switched off. If they were removed, the favourite is looked up like a word you type. 💻 <kbd>Ctrl</kbd>+<kbd>D</kbd> (<kbd>⌘</kbd>+<kbd>D</kbd> on a Mac) stars the article you are reading, and <kbd>Shift</kbd>+<kbd>Delete</kbd> removes the selected word from the list. 📱 Touch and hold a word in the list to remove it. A removed favourite can be put back for a few seconds: press <kbd>Undo</kbd> in its place (💻 or <kbd>Ctrl</kbd>+<kbd>Z</kbd>).
 
 A word goes into your history when you press Enter, follow a link to it, pick it from a list, or keep it in the box with its article open. History keeps the latest 500 words. With <kbd>Keep history</kbd> off, no words are added and your history is not shown; it is not deleted, and it shows again when you turn the switch back on. <kbd>Clear history</kbd> deletes it. Both are in <kbd>☰</kbd> → ![](cog.svg).
 
-Both lists are text files next to `wudict.toml`, one word per line: `history.txt` and `favourites.txt`. Every device that uses this wudict sees the same lists.
+Both lists are text files next to `wudict.toml`, one word per line: `history.txt` and `favourites.txt`. In `favourites.txt` a tab after the word is followed by the dictionary; a word without one is looked up like a word you type. Every device that uses this wudict sees the same lists.
 
 ***
 

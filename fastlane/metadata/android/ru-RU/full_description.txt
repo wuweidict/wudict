@@ -1,4 +1,4 @@
-wuDict — офлайн-словарь для всех ваших словарях: MDict (.mdx/.mdd), StarDict, Lingvo DSL, Babylon BGL, Aard 2 (.slob), Kiwix ZIM (Википедия, Викисловарь) и wudict markdown. Выделите слово в читалке, браузере или любом другом приложении — и мгновенно получите статьи из всех словарей на устройстве.
+wuDict — офлайн-словарь для всех ваших словарей: MDict (.mdx/.mdd), StarDict, Lingvo DSL, Babylon BGL, Aard 2 (.slob), Kiwix ZIM (Википедия, Викисловарь) и wudict markdown. Выделите слово в читалке, браузере или любом другом приложении — и мгновенно получите статьи из всех словарей на устройстве.
 
 <h2>РАБОТАЕТ ИЗ ЧИТАЛКИ</h2>
 - Выберите wuDict словарём в Moon+ Reader, ReadEra, Librera, FBReader, KnownReader, KOReader

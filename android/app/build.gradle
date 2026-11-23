@@ -20,7 +20,9 @@ plugins {
 // File-name form: no leading "v" (v3.7.5 -> 3.7.5, as the Windows installer
 // already does) and no "/" (legal in a tag, a directory in a path). The
 // Makefile's APK_VERSION applies the same two rules - change both or neither.
-def apkVersion = { (project.findProperty('versionName') ?: android.defaultConfig.versionName).toString().replaceFirst(/^v/, '').replace('/', '_') }
+// The property name is split so fdroid checkupdates, which takes the first
+// quoted string after "versionName" in this file, reads defaultConfig's literal.
+def apkVersion = { (project.findProperty('version' + 'Name') ?: android.defaultConfig.versionName).toString().replaceFirst(/^v/, '').replace('/', '_') }
 
 android {
     namespace = 'com.legbehindneck.wudict'

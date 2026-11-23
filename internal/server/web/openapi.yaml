@@ -1381,8 +1381,10 @@ paths:
       summary: The reader's favourites and history
       description: >
         Both lists, most recent first: history.txt and favourites.txt beside
-        wudict.toml, one headword per line. A word is a headword, not one
-        dictionary's article.
+        wudict.toml, one headword per line. A history word is a headword. A
+        favourite is a headword and the id of the dictionary it was starred
+        in (`word<TAB>dict` in the file); one without `dict` is the word
+        alone.
       x-codeSamples:
         - lang: Shell
           label: curl
@@ -1404,6 +1406,11 @@ paths:
         it. History keeps the latest 500 words; while `historyOff` is set in
         the preferences, adding to history does nothing. Line breaks and tabs
         become spaces and the ends are trimmed. Body is capped at 4 KiB.
+
+        A favourite with `dict` is that word in that dictionary: adding it
+        replaces the word alone, removing it leaves the word's other
+        favourites. Removing a favourite without `dict` removes every
+        favourite of the word.
       requestBody:
         required: true
         content:
@@ -1414,6 +1421,7 @@ paths:
               properties:
                 list: { type: string, enum: [history, favourites] }
                 word: { type: string, description: 'A headword, at most 256 characters.' }
+                dict: { type: string, maxLength: 64, description: 'Favourites only: the id of the dictionary the word was starred in (`/api/dicts`). No spaces or control characters.' }
                 on: { type: boolean, description: 'true adds or moves to the front; false removes.' }
       x-codeSamples:
         - lang: Shell
@@ -1421,7 +1429,7 @@ paths:
           source: |
             curl -s -X POST 'http://127.0.0.1:6888/api/words' \
               -H 'content-type: application/json' \
-              -d '{"list":"favourites","word":"serendipity","on":true}'
+              -d '{"list":"favourites","word":"serendipity","dict":"3f2a9c01b7e4","on":true}'
       responses:
         '200':
           description: Both lists as they now stand.
@@ -2996,7 +3004,15 @@ components:
       type: object
       required: [favourites, history]
       properties:
-        favourites: { type: array, items: { type: string }, description: 'Most recent first.' }
+        favourites:
+          type: array
+          description: Most recent first.
+          items:
+            type: object
+            required: [word]
+            properties:
+              word: { type: string }
+              dict: { type: string, description: 'The dictionary it was starred in; absent for the word alone.' }
         history: { type: array, items: { type: string }, description: 'Most recent first; at most 500.' }
 
     Groups:

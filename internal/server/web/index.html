@@ -185,19 +185,58 @@ input[type=search]::placeholder{color:var(--fg-soft);opacity:1}
   border-top-color:var(--fg-soft);animation-duration:var(--t-6);opacity:0}
 .qbox.busy .mag{opacity:0}
 .qbox.busy .spin{opacity:1}
-/* The favourite star (words.go): one, for the word in the box, at the field's
-   trailing edge - the place a browser puts its bookmark star. Always laid out
-   and only shown while there is a word, so typing, starring and clearing are
-   paint changes, never layout. The field keeps the room for it at all times;
-   the native ✕ sits just inside it. */
+/* ✕ empties the box: the field's one trailing control, the app's own rather
+   than the browser's, whose cancel button is ~11px at this font size and
+   cannot be given a larger target. Always laid out and only shown while
+   there is text, so typing and clearing are paint changes, never layout; the
+   field keeps the room for it at all times. Shown by the field's own state,
+   so every way a value arrives (typing, a link, Back) shows it with no
+   script, and not on a field still disabled at boot; a sibling selector, as
+   :has() is newer than an Android WebView wudict runs in (Chromium 104).
+   --fg-soft, as every icon control in a result header: --fg-faint is the
+   decorative ⌕'s, and under the 3:1 a control needs (2.6:1 light, 2.4:1
+   dark, measured). On a touch screen the target is
+   44px: as wide as the room the field keeps, and taller than the field - the
+   overflow lands on the bar's own padding, where nothing else is pressed. */
 #q{padding-right:1.9em}
-.qstar{position:absolute;right:.3em;top:50%;margin-top:-11px;width:22px;height:22px;
-  padding:4px;border:0;background:none;color:var(--fg-faint);cursor:pointer;
-  visibility:hidden}
-.qstar svg{display:block;width:14px;height:14px}
-.qbox.hasq .qstar{visibility:visible}
-.qstar:hover,.qstar[aria-pressed="true"]{color:var(--accent)}
-.qstar[aria-pressed="true"] path{fill:currentColor}
+#q::-webkit-search-cancel-button{-webkit-appearance:none;display:none}
+.qclr{position:absolute;right:.3em;top:50%;margin-top:-11px;width:22px;height:22px;
+  padding:4px;border:0;background:none;color:var(--fg-soft);cursor:pointer;
+  visibility:hidden;-webkit-tap-highlight-color:transparent}
+.qclr svg{display:block;width:14px;height:14px}
+#q:not(:placeholder-shown):not(:disabled)+.qclr{visibility:visible}
+.qclr:hover{color:var(--fg)}
+.qclr:focus-visible{outline:2px solid var(--focus);outline-offset:-2px;border-radius:5px}
+@media (pointer:coarse){
+  #q{padding-right:44px}
+  .qclr{right:0;width:44px;height:44px;margin-top:-22px;padding:15px}
+}
+/* The favourite star (words.go, D180 Am. 3): on each article's headword, for
+   that headword in that dictionary - what is starred is what is read, never
+   the text in the box, which in prefix, wildcard and full-text modes is not
+   the word on screen. Trailing, where a right thumb reaches it; outlined
+   until starred. The headword row stays one text run plus a button with no
+   text, so its textContent is still the headword (noteLookup, findPaint). A
+   tap on the headword marks the whole row (pick.js headUnit), so the star
+   opts out of the selection's paint. */
+details.dict>dl>dt{display:flex;align-items:flex-start;gap:var(--sp-1)}
+/* Centred on the headword's FIRST line (a long one wraps): font:inherit makes
+   1em the headword's size, so the line is var(--fi) em; the vertical margins
+   are (line - box)/2 each, which centres the box and, negative, gives back
+   whatever it is taller than the line. */
+.astar{flex:none;--box:24px;width:var(--box);height:var(--box);padding:4px;
+  margin:calc((var(--fi)*1em - var(--box))/2) -4px calc((var(--fi)*1em - var(--box))/2) auto;
+  font:inherit;border:0;background:none;color:var(--fg-soft);cursor:pointer;
+  -webkit-user-select:none;user-select:none;
+  -webkit-tap-highlight-color:transparent}
+.astar svg{display:block;width:16px;height:16px}
+.astar[aria-pressed="true"]{color:var(--accent)}
+.astar[aria-pressed="true"] path{fill:currentColor}
+.astar:focus-visible{outline:2px solid var(--focus);outline-offset:-2px;border-radius:5px}
+@media (hover:hover){.astar:hover{color:var(--accent)}}
+/* the 44px target without a taller row: the padding is the target, the
+   negative margin gives the height back (as summary .fbtn) */
+@media (pointer:coarse){.astar{--box:44px;padding:14px;margin-right:-14px}}
 /* Under the EMPTY box, on a click or ↓: favourites, then history. Under a box
    with text: the headwords that match it (D199) - on ↓, or by itself while
    typing when the reader chose "Show headwords". An overlay: opening it moves
@@ -210,6 +249,16 @@ input[type=search]::placeholder{color:var(--fg-soft);opacity:1}
   user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 #recall li{padding:.3em .8em;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #recall li.fav::before{content:"★";color:var(--accent);margin-right:.45em;font-size:.85em}
+/* where it was starred, after the word: the row's ellipsis cuts this first */
+#recall .rdict{color:var(--fg-soft);font-size:.8em;margin-left:.6em}
+/* a removed favourite on offer (forgetRow): the row is the Undo target */
+#recall li.undo{color:var(--fg-soft);font-style:italic}
+#recall li.undo::before{content:none}
+#recall li.undo .ulink{color:var(--link);font-style:normal;text-decoration:underline;text-underline-offset:2px}
+/* A row is a fingertip's height on a touch screen (D180 Am. 3): line-height
+   rather than padding, so a row is 44px whatever its font, and the ellipsis
+   still applies (a flex row would lose it). */
+@media (pointer:coarse){#recall li{line-height:44px;padding-top:0;padding-bottom:0}}
 /* the line between the two lists is the first history row's border: a
    listbox may hold options only */
 #recall li.fav+li:not(.fav){border-top:1px solid var(--line);margin-top:.25em;padding-top:.45em}
@@ -239,6 +288,13 @@ select{font-size:13px;color:var(--fg-soft);background:var(--bg-card);
 .btn{font-size:15px;background:var(--bg-card);color:var(--fg-soft);
   border:1px solid var(--line);border-radius:8px;padding:.3em .55em;cursor:pointer;line-height:1.2}
 .btn:hover{color:var(--fg);border-color:var(--fg-faint)}
+/* ☰ is drawn 32×29; on a touch screen it is hit at 44: an invisible box
+   around it, into the bar's padding and up to the pill's border, never over
+   the dictionary chip's own target (D180 Am. 3). */
+@media (pointer:coarse){
+  #panelBtn{position:relative}
+  #panelBtn::after{content:"";position:absolute;inset:-9px -7px} /* from the padding box: 44×45 */
+}
 .btn:focus-visible,select:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
 
 /* ── results ───────────────────────────────────────────────────────── */
@@ -301,6 +357,9 @@ details.dict>summary{position:sticky;top:var(--stick);z-index:2;
 details.dict[open]>summary{font-size:.8125rem;line-height:1.25;
   padding-top:.25rem;padding-bottom:.25rem}
 details.dict[open]>summary .count{font-size:11px}
+/* On a touch screen the header is also the collapse control a thumb aims at:
+   44px open or closed (D180 Am. 3). The open one's smaller type stays. */
+@media (pointer:coarse){details.dict>summary{min-height:44px;box-sizing:border-box}}
 details.dict>summary::-webkit-details-marker{display:none}
 details.dict>summary::before{content:"›";color:var(--fg-faint);
   transition:transform .18s ease;font-weight:400}
@@ -425,6 +484,9 @@ iframe.article{width:100%;border:0;display:block;background:var(--wd-article-bg,
 .scopenote .widen{color:var(--link);cursor:pointer;text-decoration:underline;
   text-underline-offset:2px}
 .scopenote .widen:hover{color:var(--link-hover)}
+/* 44px tall on a touch screen without moving the line: the padding is the
+   target, the negative margin gives the height back */
+@media (pointer:coarse){.scopenote .widen{display:inline-block;padding:15px 4px;margin:-15px -4px}}
 /* Same voice as .scopenote, but above the results: it says what was actually
    searched for, and that has to be read BEFORE the articles it explains. */
 .morphnote{margin-top:0;margin-bottom:var(--sp-1)}
@@ -619,8 +681,8 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
 .panel-head{flex:none;background:var(--bg);padding:var(--sp-3) 0 0}
 /* Finding one dictionary among a hundred. In the row that never scrolls, so
    the field stays where it was typed into while the list under it shrinks.
-   Same field as the search box: the global input[type=search] rule, its ⌕ in
-   the left padding, and the native ✕ at the trailing edge. */
+   Same field as the search box: the global input[type=search] rule and its ⌕
+   in the left padding; the ✕ at the trailing edge is the browser's own. */
 .pfrow{display:flex;gap:var(--sp-1);margin:0 0 var(--sp-2)}
 .pfind{position:relative;display:flex;flex:1;min-width:0}
 .pfind svg{position:absolute;left:.62em;top:50%;margin-top:-7px;width:14px;height:14px;
@@ -1111,15 +1173,16 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
   /* flush with the pill's own left padding: inside the pill the field has no
      border of its own for the glyph to sit within */
   .pill .qled{left:0}
-  .pill .qstar{right:0}
+  .pill .qclr{right:0}
 
   /* A scope control is a chip with its real <select> laid transparently over
      it. The select keeps the native full-screen picker, the keyboard, the
      aria-label and its .value, so every call site that reads $("dict").value
      is untouched — only the rendering is replaced. */
-  /* align-self:stretch and a min-width so the transparent select covers a
-     whole 44px-tall target rather than just the 22px the chip's own text
-     occupies — the chip is what you see, the seg is what you hit. */
+  /* align-self:stretch and a min-width so the transparent select covers the
+     pill's whole height (31px, measured) rather than just the 22px the
+     chip's own text occupies — the chip is what you see, the seg is what you
+     hit. On a touch screen the select reaches past the seg (below). */
   .bar .seg{display:flex;position:relative;flex:none;align-self:stretch;
     align-items:center;justify-content:center;min-width:40px}
   .bar .seg select{position:absolute;inset:0;width:100%;height:100%;margin:0;
@@ -1127,6 +1190,12 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
     appearance:none}
   .bar .seg:has(select:focus-visible) .chip{outline:2px solid var(--focus);outline-offset:1px}
   .bar .seg:has(select:disabled){opacity:.55}
+  /* 44px on a touch screen with no layout change (D180 Am. 3): up and down
+     into the bar's own padding, sideways half of the 4px gap to each
+     neighbour, so two segs meet and never overlap - 53×45 and 44×45. */
+  @media (pointer:coarse){
+    .bar .seg select{top:-7px;left:-2px;width:calc(100% + 4px);height:calc(100% + 14px)}
+  }
   .chip{display:flex;align-items:center;gap:.3em;max-width:11ch;
     white-space:nowrap;font-size:11.5px;line-height:1;color:var(--fg);
     background:var(--accent-soft);border-radius:7px;padding:.45em .3em .45em .45em}
@@ -1187,7 +1256,7 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
 <span class="pill">
 <!-- The field's leading glyph is the search indicator: ⌕ at rest, spinner in
      flight, one box, crossfaded. Nothing appears and nothing moves, so a
-     search causes no layout event at all — and the native ✕ at the trailing
+     search causes no layout event at all — and the ✕ at the trailing
      edge keeps its pixels, which matters because it is present for EVERY
      search (an empty query never runs one) and it is a control the user has
      a motor habit for. .qbox is a real element at both widths; .pill is
@@ -1201,7 +1270,7 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
      soft key "Search" on most Android builds, but that is a browser default
      and not a contract. -->
 <input type="search" id="q" placeholder="→ start…" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="search" autofocus aria-label="Search term" aria-autocomplete="list" aria-controls="recall" aria-expanded="false" disabled>
-<button type="button" class="qstar" id="qstar" aria-pressed="false" aria-label="Favourite"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.6l1.95 4 4.35.63-3.15 3.07.74 4.33L8 11.58l-3.89 2.05.74-4.33L1.7 6.23l4.35-.63z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
+<button type="button" class="qclr" id="qclr" aria-label="Clear" title="Clear"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3.5 3.5l9 9m0-9l-9 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
 <ul id="recall" role="listbox" aria-label="Favourites and history" hidden></ul>
 </span>
 <span class="seg">
@@ -2158,8 +2227,9 @@ let phase="boot",dictTotal=0,staleSearch=false;
    a list still loading, or wrong by a list that has changed since. */
 let lastFromList=false;
 /* The widening a search deferred for the list (doSearch), handed to its re-run
-   by loadDicts and to nothing else: a query typed in between drops it. */
-let staleWidened=null;
+   by loadDicts and to nothing else: a query typed in between drops it. With
+   the reason the search had been scoped (scopeNote). */
+let staleWidened=null,staleWidenWhy="";
 function setPhase(p){
   if(phase===p)return;
   const wasBoot=phase==="boot";
@@ -2531,7 +2601,7 @@ async function loadDicts(rescan,opts={}){
   setPhase("ready");
   clearStatus("load");clearStatus("dicts");
   // a search run against a half-loaded list is now answerable in full
-  if(staleSearch&&lastQuery){staleSearch=false;widenedFrom=staleWidened;doSearch()}
+  if(staleSearch&&lastQuery){staleSearch=false;widenedFrom=staleWidened;widenedWhy=staleWidenWhy;doSearch()}
   // and one run against the kept list, if the list it searched has changed
   else if(quiet&&lastFromList&&lastQuery&&listShape()!==shape)doSearch();
   return true;
@@ -4093,21 +4163,31 @@ function dictName(id){
 /* Says what was searched and offers the way out, placed under the results
    rather than in the status line: the scope is a property of what is on
    screen, so it should live and die with it instead of fading on a timer. */
-function scopeNote(id){
+/* `why` is what scoped the search (scopeWhyOnce): "" a followed link, "fav" a
+   favourite opened where it was starred, "random" the random word. A scope is
+   one id, or for a favourite starred in several dictionaries a list of them. */
+function scopeNames(scope){
+  const n=String(scope).split(",").map(id=>`<b>${esc(dictName(id))}</b>`);
+  return n.length<2?n[0]:n.slice(0,-1).join(", ")+" and "+n[n.length-1];
+}
+function scopeNote(id,why){
   const div=document.createElement("div");
   div.className="scopenote";
-  div.innerHTML=`Followed a link inside <b>${esc(dictName(id))}</b> — only this dictionary was searched. `+
-    `<span class="widen">Search all dictionaries</span>`;
+  const name=scopeNames(id),one=!String(id).includes(",");
+  div.innerHTML=(why==="fav"?`Your favourite in ${name}`:why==="random"?`A random word from ${name}`:`Followed a link inside ${name}`)+
+    ` — only ${one?"this dictionary was":"these dictionaries were"} searched. <span class="widen">Search all dictionaries</span>`;
   return div;
 }
 /* Said once, after the automatic widening, so the user learns what the link
    claimed and what actually happened — silently searching everything would
    look identical to the link having been global all along. */
-function widenNote(id,q){
+function widenNote(id,q,why){
   const div=document.createElement("div");
   div.className="scopenote";
-  div.innerHTML=`“${esc(q)}” is not in <b>${esc(dictName(id))}</b>, `+
-    `where the link came from — all dictionaries were searched instead.`;
+  const name=scopeNames(id);
+  div.innerHTML=`“${esc(q)}” is ${why==="fav"?"no longer":"not"} in ${name}`+
+    (why==="fav"?", where you starred it":why==="random"?"":", where the link came from")+
+    ` — all dictionaries were searched instead.`;
   return div;
 }
 $("out").addEventListener("click",e=>{
@@ -4322,6 +4402,7 @@ function renderSlot(box,h,mode,q,perDict,group){
     det.appendChild(dl); // connected before rendering: see hoistShadowFonts
     for(const r of h.results){
       const dt=document.createElement("dt");dt.textContent=r.Headword;
+      dt.appendChild(starButton(r.Headword,h.dict));
       const dd=document.createElement("dd");dd.dataset.dict=h.dict;
       dl.appendChild(dt);dl.appendChild(dd);
       roots.push(renderArticle(dd,r.Body,h.dict,anchor&&r===h.results[0]?anchor.frag:""));
@@ -4382,8 +4463,10 @@ async function doSearch(ev){
   // consumed before the first await, so the history wrapper below can still
   // read which scope was used
   const scope=scopeOnce;scopeOnce=null;lastScope=scope;
+  const why=scope?scopeWhyOnce:"";scopeWhyOnce="";lastScopeWhy=why;
   const commit=commitOnce;commitOnce=false; // this query was asked for, not typed
   const widened=widenedFrom;widenedFrom=null; // set by the fallback below
+  const widenWhy=widenedWhy;widenedWhy="";
   staleWidened=null; // any search but the deferred re-run (loadDicts) drops it
   // ||"all" is the floor under a selection that no longer exists: assigning
   // an id the <select> does not have leaves .value empty, and a saved id or a
@@ -4421,7 +4504,7 @@ async function doSearch(ev){
              :"⚠ All dictionaries are disabled — enable some in the ☰ panel")
         :'<span class="spin"></span>'+esc(readyCount()));
       // the re-run is still the widening this search was, and says so
-      if(!settled){staleSearch=true;staleWidened=widened}
+      if(!settled){staleSearch=true;staleWidened=widened;staleWidenWhy=widenWhy}
       return;
     }
     dictParam=ids.join(",");
@@ -4581,7 +4664,7 @@ async function doSearch(ev){
         // widening would throw away its "enable substring search" offer.
         if(scope&&!anyShown){
           anchorOnce=null;   // the fragment addressed an article we did not find
-          widenedFrom=scope; // reported on the next search's end, not here:
+          widenedFrom=scope;widenedWhy=why; // reported on the next search's end, not here:
           navRecord="replace";// the re-run's own "Searching…" would overwrite it
           doSearch();         // and the URL must lose its now-false `from`
           return;                 // NOT swapped: the old answer holds the
@@ -4596,8 +4679,8 @@ async function doSearch(ev){
           out.innerHTML=`<div class="empty">${noResultsSVG}<p>No results for “${esc(q)}”</p></div>`;
           if(noIdx)out.appendChild(noIdx);
         }
-        if(scope&&anyShown)out.appendChild(scopeNote(scope));
-        else if(widened)out.appendChild(widenNote(widened,q));
+        if(scope&&anyShown)out.appendChild(scopeNote(scope,why));
+        else if(widened)out.appendChild(widenNote(widened,q,widenWhy));
         // Searched a list that is still filling up: say so rather than let an
         // incomplete answer look complete, and re-run when the rest lands.
         // Not a search of one named dictionary, which is complete already -
@@ -4770,7 +4853,7 @@ function searchFor(term,opts){
   $("q").value=t;                       // verbatim: no trimming, ever
   if(!opts?.keepMode&&notForWords($("mode").value))$("mode").value="prefix";
   const scope=opts?.scope||null,frag=opts?.frag||"";
-  scopeOnce=scope;
+  scopeOnce=scope;scopeWhyOnce=scope?scopeWhy(opts?.why):"";
   // the fragment addresses a place in the SCOPED article; renderSlot matches
   // on the dictionary id, so without a scope there is nothing to match
   anchorOnce=frag&&scope?{dict:scope,frag}:null;
@@ -5828,6 +5911,10 @@ let navRecord="replace"; // how the NEXT doSearch should record itself
    anchorOnce is the #fragment such a link carried, revealed once the target
    article is on screen. */
 let scopeOnce=null,anchorOnce=null,lastScope=null,widenedFrom=null;
+/* What scoped it (scopeNote): "" a followed link, "fav", "random". Kept in
+   the address as `via`, so Back says the same as the search did. */
+let scopeWhyOnce="",lastScopeWhy="",widenedWhy="";
+const scopeWhy=v=>v==="fav"||v==="random"?v:"";
 /* commitOnce is "I have finished the word". Live search runs 300 ms after
    every keystroke pause, so without this flag `revealFirstMark` would treat
    "прео" as a finished query and throw the page at a match while the user is
@@ -5881,7 +5968,7 @@ function applyURL(){
   if(!setMode(p.get("mode"))&&p.get("q")&&notForWords($("mode").value))setMode("prefix");
   if(p.get("dict"))selectDict(p.get("dict"));
   syncChips();
-  if(p.get("q")){$("q").value=p.get("q");scopeOnce=p.get("from")||null;commitOnce=true;doSearch()}
+  if(p.get("q")){$("q").value=p.get("q");scopeOnce=p.get("from")||null;scopeWhyOnce=scopeWhy(p.get("via"));commitOnce=true;doSearch()}
   else if(p.has("random"))randomNow("replace"); // the Android shortcut "Random word" (D202)
 }
 const _doSearch=doSearch;
@@ -5901,6 +5988,7 @@ doSearch=function(ev){
     // `from` is the one-shot cross-reference scope; `dict` stays the user's
     // own selector, so restoring a link-followed view never rewrites it
     if(lastScope)params.from=lastScope;
+    if(lastScope&&lastScopeWhy)params.via=lastScopeWhy;
     const url="?"+new URLSearchParams(params).toString();
     // clicking the same word twice must not stack identical entries
     histWrite(record==="push"&&url!==location.search,null,url);
@@ -5990,12 +6078,12 @@ window.addEventListener("popstate",()=>{
     $("out").innerHTML="";
     lastQuery="";
     setStatus("");
-    syncStar();
     showRandom(false); // the word that was there, not a new one
     return;
   }
   navRecord="none";
   scopeOnce=p.get("from")||null; // a link-followed view was scoped; restore that
+  scopeWhyOnce=scopeWhy(p.get("via"));
   commitOnce=true;               // Back/Forward restores a view, it does not type
   doSearch();
 });
@@ -6030,21 +6118,29 @@ $("frm").addEventListener("submit",e=>{
   return doSearch(e);
 });
 
-/* Favourites and history (words.go): headwords the reader starred, and the
-   ones they looked up, latest first. The server keeps both, so they follow the
-   reader to another device; this page holds a copy, changes it at once, and
-   sends the server one word per change. */
-let favs=[],hist=[],favSet=new Set(),histOn=true,wordsSeq=0,histTimer=0;
+/* Favourites and history (words.go): the headwords the reader starred, each
+   in the dictionary it was starred in ({word, dict}; no dict is the word
+   alone, D180 Am. 3), and the ones they looked up, latest first. The server
+   keeps both, so they follow the reader to another device; this page holds a
+   copy, changes it at once, and sends the server one change at a time. */
+let favs=[],hist=[],favSet=new Set(),favPairs=new Set(),histOn=true,wordsSeq=0,histTimer=0;
 /* Words compare without case, as the search they open does and as the server
-   does (words.go, sameWord): "CASA" is the entry "casa", in its new spelling. */
+   does (words.go, sameWord): "CASA" is the entry "casa", in its new spelling.
+   A favourite is its word without case and its dictionary exactly (favKey). */
 const wordKey=w=>w.toLowerCase();
+const favKey=(w,d)=>wordKey(w)+"\t"+(d||"");
 const without=(list,w)=>list.filter(x=>wordKey(x)!==wordKey(w));
 const HIST_DWELL=2000,RECALL_MAX=50;
 const MAC=/Mac|iP(hone|ad|od)/.test(navigator.platform);
+function favsChanged(){
+  favSet=new Set(favs.map(f=>wordKey(f.word)));
+  favPairs=new Set(favs.map(f=>favKey(f.word,f.dict)));
+  syncStars();
+}
 function adoptWords(r){
-  favs=r.favourites||[];hist=r.history||[];favSet=new Set(favs.map(wordKey));
+  favs=(r.favourites||[]).filter(f=>f&&typeof f.word==="string");hist=r.history||[];
   $("histClear").disabled=!hist.length;
-  syncStar();
+  favsChanged();
 }
 /* Every answer carries both lists as they stand; only the answer to the
    latest request is adopted, so a slow older one cannot undo a newer change. */
@@ -6063,22 +6159,78 @@ function boxWord(){
   const w=$("q").value.trim();
   return [...w].length>256?"":w;
 }
-function syncStar(){
-  const w=boxWord(),on=!!w&&favSet.has(wordKey(w)),b=$("qstar");
-  $("qbox").classList.toggle("hasq",!!w);
+/* The star on an article's headword row (renderSlot): that headword in that
+   dictionary. No text of its own, so the row's textContent stays the
+   headword. */
+const STAR_SVG='<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.6l1.95 4 4.35.63-3.15 3.07.74 4.33L8 11.58l-3.89 2.05.74-4.33L1.7 6.23l4.35-.63z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+function starButton(word,dict){
+  const b=document.createElement("button");
+  b.type="button";b.className="astar";b.innerHTML=STAR_SVG;
+  b.dataset.w=word;b.dataset.d=dict;
+  paintStar(b);
+  return b;
+}
+function paintStar(b){
+  const on=favPairs.has(favKey(b.dataset.w,b.dataset.d));
   b.setAttribute("aria-pressed",on?"true":"false");
   b.setAttribute("aria-label",on?"Remove from favourites":"Add to favourites");
-  b.title=`${on?"Remove the word from":"Add the word to"} your favourites (${MAC?"⌘D":"Ctrl+D"})`;
+  b.title=on?"Remove from favourites":"Add to favourites";
 }
-function toggleFav(){
-  const w=boxWord();
-  if(!w)return;
-  const on=!favSet.has(wordKey(w));
-  favs=on?[w,...without(favs,w)]:without(favs,w);
-  favSet=new Set(favs.map(wordKey));
-  syncStar();
-  wordsCall("POST","/api/words",{list:"favourites",word:w,on});
+function syncStars(){
+  for(const b of $("out").querySelectorAll(".astar"))paintStar(b);
 }
+/* Starring a word in a dictionary replaces the word alone, as the server
+   does (putFavourite): the precise favourite says all the other did. */
+function toggleFav(word,dict){
+  if(!word||!dict)return;
+  const k=favKey(word,dict),on=!favPairs.has(k),wk=wordKey(word);
+  favs=favs.filter(f=>favKey(f.word,f.dict)!==k&&!(on&&!f.dict&&wordKey(f.word)===wk));
+  if(on)favs.unshift({word,dict});
+  favsChanged();
+  wordsCall("POST","/api/words",{list:"favourites",word,dict,on});
+}
+$("out").addEventListener("click",e=>{
+  const b=e.target.closest(".astar");
+  if(!b)return;
+  e.preventDefault(); // also tells the tap-to-mark handler (pick.js) the click is taken
+  // a finger covers the star it presses, so the fill is not seen as it
+  // happens: a tick says it took. A no-op where vibration is not allowed.
+  if(e.pointerType==="touch"&&navigator.vibrate)navigator.vibrate(10);
+  toggleFav(b.dataset.w,b.dataset.d);
+});
+/* The star Ctrl/⌘+D presses: the article being read, which is the first one
+   in an open section whose text has not yet scrolled up under the bar. */
+function starInView(){
+  const top=$("bar").getBoundingClientRect().bottom;
+  for(const b of $("out").querySelectorAll("details.dict[open]>dl>dt>.astar")){
+    const r=(b.parentElement.nextElementSibling||b).getBoundingClientRect();
+    if(r.height&&r.bottom>top+1)return r.top<innerHeight?b:null;
+  }
+  return null;
+}
+/* A favourite picked from the list opens where it was starred: in the
+   dictionaries the library still has, switched on or off - a favourite
+   addresses its dictionary as a random word drawn from "All dictionaries,
+   enabled or not" does, and "off" means "not in my searches" - in the
+   reader's own order, so the first of theirs opens first (D142). A favourite
+   of the word alone, and one whose dictionaries have all been removed or
+   moved, opens as any word does. */
+function openFav(w){
+  const k=wordKey(w);
+  const starred=new Set(favs.filter(f=>f.dict&&wordKey(f.word)===k).map(f=>f.dict));
+  const ids=orderedIds().filter(id=>starred.has(id));
+  searchFor(w,ids.length?{scope:ids.join(","),why:"fav"}:undefined);
+}
+/* The clear button. pointerdown keeps the focus where it is, so the box does
+   not blur and close what its blur closes; the click then empties it and
+   gives it the caret for the next word, as the browser's own ✕ does. */
+$("qclr").addEventListener("pointerdown",e=>e.preventDefault());
+$("qclr").addEventListener("click",()=>{
+  const q=$("q");
+  q.value="";
+  q.focus();
+  q.dispatchEvent(new Event("input",{bubbles:true}));
+});
 function recordWord(w){
   if(!histOn||hist[0]===w)return; // already first, same spelling: nothing would change
   hist=[w,...without(hist,w)];
@@ -6097,7 +6249,6 @@ function recordWord(w){
    full-text and wildcard queries are not words. */
 function noteLookup(q,record,commit,dwell){
   clearTimeout(histTimer);
-  syncStar();
   if(!q||!histOn||record==="none"||notForWords($("mode").value)||!boxWord())return;
   if((commit||record==="push")&&!dwell){recordWord(q);return}
   histTimer=setTimeout(()=>{
@@ -6126,7 +6277,6 @@ $("histClear").addEventListener("click",()=>{
   hist=[];$("histClear").disabled=true;
   wordsCall("DELETE","/api/words?list=history");
 });
-$("qstar").addEventListener("click",toggleFav);
 
 /* The list under the box. Built when it opens - at most 2×RECALL_MAX rows -
    and thrown away when it closes; nothing about it runs while it is shut.
@@ -6138,16 +6288,27 @@ $("qstar").addEventListener("click",toggleFav);
 const recall=$("recall");
 let recallSel=-1,sug=false;
 const recallRows=()=>recall.querySelectorAll("li[data-w]");
-/* rows: [word, class] pairs. None closes the list: "no headword starts like
-   this" is not "nothing will be found", since the search also lemmatizes. */
+/* rows: [word, class, note] triples; the note is a favourite's dictionary.
+   None closes the list: "no headword starts like this" is not "nothing will
+   be found", since the search also lemmatizes. */
 function fillRecall(rows,isSug){
   if(!rows.length){closeRecall();return}
   const f=document.createDocumentFragment();
-  rows.forEach(([w,cls],n)=>{
+  rows.forEach(([w,cls,note],n)=>{
     const li=document.createElement("li");
-    li.id="rc"+n;li.dataset.w=w;li.textContent=w;
+    li.id="rc"+n;
     li.setAttribute("role","option");
     if(cls)li.className=cls;
+    // a removed favourite's row while it can be put back (forgetRow): no
+    // data-w, so no pick, hold or arrow key ever lands on it as a word
+    if(cls==="fav undo"){
+      const u=document.createElement("span");u.className="ulink";u.textContent="Undo";
+      li.append(`Removed “${w}” · `,u);
+      f.appendChild(li);
+      return;
+    }
+    li.dataset.w=w;li.textContent=w;
+    if(note){const s=document.createElement("span");s.className="rdict";s.textContent=note;li.append(s)}
     // the random word's row: no word of its own (pickRecall reads "" as it)
     if(cls==="rnd"){li.innerHTML=DIE_SVG;li.append("Random word")}
     f.appendChild(li);
@@ -6166,13 +6327,32 @@ function openRecall(){
   // shows yesterday's words reads as broken. Hidden, not deleted - turning
   // it back on brings them back; Clear history is the deletion.
   const rest=histOn?hist.filter(w=>!favSet.has(wordKey(w))).slice(0,RECALL_MAX):[];
-  if(!favs.length&&!rest.length)return;
+  const starred=favRows();
+  if(favUndo)starred.splice(Math.min(favUndo.at,starred.length),0,[favUndo.word,"fav undo"]);
+  if(!starred.length&&!rest.length)return;
   // The random word ends the list (D202), and only a list that opens anyway:
   // a list of one row would open on every tap into an empty box, a popup at
   // the moment the reader is about to type. Last, so ↓ Enter still opens the
   // latest word, and ↑ from the box reaches it.
   const rnd=randOn&&randomPool().length?[["","rnd"]]:[];
-  fillRecall([...favs.slice(0,RECALL_MAX).map(w=>[w,"fav"]),...rest.map(w=>[w,""]),...rnd],false);
+  fillRecall([...starred,...rest.map(w=>[w,""]),...rnd],false);
+}
+/* One row per starred word, latest first, in its latest spelling, noting the
+   dictionaries it was starred in that the library still has - in the
+   reader's order, the order its search opens them in (openFav). */
+function favRows(){
+  const by=new Map(),rank=new Map(orderedIds().map((id,i)=>[id,i]));
+  for(const f of favs){
+    const k=wordKey(f.word);
+    let row=by.get(k);
+    if(!row){
+      if(by.size>=RECALL_MAX)continue;
+      by.set(k,row={w:f.word,ids:new Set()});
+    }
+    if(f.dict&&rank.has(f.dict))row.ids.add(f.dict);
+  }
+  return [...by.values()].map(r=>[r.w,"fav",
+    [...r.ids].sort((a,b)=>rank.get(a)-rank.get(b)).map(dictName).join(", ")]);
 }
 function closeRecall(){
   sugCancel(); // also a list that is still on its way
@@ -6239,9 +6419,11 @@ async function sugFetch(){
    character, which that mode would read as a pattern. */
 function pickRecall(w){
   const keepMode=sug&&$("mode").value==="wildcard"&&!/[*?]/.test(w);
+  const fav=!sug&&favSet.has(wordKey(w));
   closeRecall();
   if(!matchMedia("(hover:hover)").matches)$("q").blur();
   if(!w){randomNow();return} // the random word's row
+  if(fav){openFav(w);return}
   searchFor(w,{keepMode});
 }
 /* A click in the box opens the list the box has: the favourites and history
@@ -6263,9 +6445,13 @@ $("q").addEventListener("input",()=>{
     else if(!sug)closeRecall();
     sugSoon();
   }else if($("q").value||sug)closeRecall();
-  syncStar();
 });
 $("q").addEventListener("keydown",e=>{
+  // Ctrl/⌘+Z puts back a favourite just removed, while its Undo row is on
+  // offer; an empty box has no typing of its own to undo
+  if(favUndo&&!$("q").value&&(MAC?e.metaKey:e.ctrlKey)&&!e.shiftKey&&!e.altKey&&(e.key==="z"||e.key==="Z")){
+    e.preventDefault();undoFav();return;
+  }
   if(e.isComposing||e.ctrlKey||e.metaKey||e.altKey)return;
   if(recall.hidden){
     // ↓ opens the list the box has; with text, in either typing mode. ↑ on
@@ -6290,15 +6476,16 @@ $("q").addEventListener("keydown",e=>{
   case "Escape":
     e.preventDefault();e.stopPropagation();closeRecall();break;
   case "Delete":
-    // Shift+Delete forgets the selected history word, as a browser's own
-    // address-bar suggestions do; a favourite is unstarred with the star.
-    if(e.shiftKey&&!sug&&recallSel>=0&&!rows[recallSel].matches(".fav,.rnd")){
+    // Shift+Delete forgets the selected row, as a browser's own address-bar
+    // suggestions do: a history word, or a favourite in every dictionary it
+    // was starred in (its stars are on the articles, not here).
+    if(e.shiftKey&&!sug&&recallSel>=0&&!rows[recallSel].matches(".rnd")){
       e.preventDefault();
-      const w=rows[recallSel].dataset.w;
+      const li=rows[recallSel];
       const at=recallSel;
       // the row after it takes its place, so a run of deletions is a run of
       // key presses
-      forgetHistory(w);
+      forgetRow(li);
       const n=recallRows().length;
       if(n)moveRecall(Math.min(at,n-1)+1);
     }
@@ -6309,7 +6496,41 @@ function forgetHistory(w){
   wordsCall("POST","/api/words",{list:"history",word:w,on:false});
   closeRecall();openRecall();
 }
-/* Touch and hold a history row to forget it: Shift+Delete for a hand with no
+/* A favourite row is the word: without a dictionary, the server takes out
+   every favourite of it (putFavourite). A favourite was starred on purpose,
+   perhaps in several dictionaries, and one hold too long takes it, so its row
+   becomes "Removed … · Undo" in place for FAV_UNDO_MS - where the finger and
+   the eye already are; the status line is under the open list. Another
+   removal replaces the offer; the one before it stands. */
+const FAV_UNDO_MS=5000;
+let favUndo=null; // {word, gone: its favourites as they were, at: its row, timer}
+function forgetRow(li){
+  const w=li.dataset.w,k=wordKey(w);
+  if(!li.classList.contains("fav")){forgetHistory(w);return}
+  if(favUndo)clearTimeout(favUndo.timer);
+  favUndo={word:w,gone:favs.filter(f=>wordKey(f.word)===k),
+    at:favRows().findIndex(r=>wordKey(r[0])===k),
+    timer:setTimeout(()=>{favUndo=null;recall.querySelector("li.undo")?.remove()},FAV_UNDO_MS)};
+  favs=favs.filter(f=>wordKey(f.word)!==k);
+  favsChanged();
+  wordsCall("POST","/api/words",{list:"favourites",word:w,on:false});
+  closeRecall();openRecall();
+}
+/* Puts them back first, latest first among themselves, as the server
+   places what it is given (putFavourite); one request at a time, so they
+   arrive in that order. */
+async function undoFav(){
+  const u=favUndo;
+  if(!u)return;
+  clearTimeout(u.timer);favUndo=null;
+  const keys=new Set(u.gone.map(f=>favKey(f.word,f.dict)));
+  favs=[...u.gone,...favs.filter(f=>!keys.has(favKey(f.word,f.dict)))];
+  favsChanged();
+  if(!recall.hidden){closeRecall();openRecall()}
+  for(const f of [...u.gone].reverse())
+    await wordsCall("POST","/api/words",{list:"favourites",word:f.word,dict:f.dict||"",on:true});
+}
+/* Touch and hold a row to forget it: Shift+Delete for a hand with no
    keyboard. Touch and pen only - a mouse has the key. A finger that moves
    further than a tap's wobble is scrolling the list, and the browser's
    pointercancel says the same; either drops the hold. The click that ends a
@@ -6323,13 +6544,13 @@ recall.addEventListener("pointerdown",e=>{
   e.preventDefault();
   held=false;
   dropHold();
-  const li=!sug&&e.pointerType!=="mouse"&&e.target.closest("li[data-w]:not(.fav):not(.rnd)");
+  const li=!sug&&e.pointerType!=="mouse"&&e.target.closest("li[data-w]:not(.rnd)");
   if(!li)return;
   holdAt={x:e.clientX,y:e.clientY};
   holdTimer=setTimeout(()=>{
     holdAt=null;held=true;
     if(navigator.vibrate)navigator.vibrate(15);
-    forgetHistory(li.dataset.w);
+    forgetRow(li);
   },HOLD_MS);
 });
 recall.addEventListener("pointermove",e=>{
@@ -6339,6 +6560,7 @@ for(const t of ["pointerup","pointercancel","pointerleave"])recall.addEventListe
 recall.addEventListener("contextmenu",e=>e.preventDefault());
 recall.addEventListener("click",e=>{
   if(held){held=false;return}
+  if(e.target.closest("li.undo")){undoFav();return}
   const li=e.target.closest("li[data-w]");
   if(li)pickRecall(li.dataset.w);
 });
@@ -6346,8 +6568,10 @@ document.addEventListener("keydown",e=>{
   if(e.altKey||e.shiftKey||!(MAC?e.metaKey:e.ctrlKey)||(e.key!=="d"&&e.key!=="D"))return;
   const a=document.activeElement;
   if(a!==$("q")&&editable(a))return;
-  if(!boxWord()||$("styler").classList.contains("show"))return;
-  e.preventDefault();toggleFav();
+  if($("styler").classList.contains("show"))return;
+  const b=starInView();
+  if(!b)return;
+  e.preventDefault();toggleFav(b.dataset.w,b.dataset.d);
 });
 // another tab or device may have changed them while this one was away
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)loadWords()});
@@ -6465,7 +6689,7 @@ function paintRandom(){
 function openRandom(w,record){
   if(!w)return;
   setMode("exact");syncChips();
-  searchFor(w.word,{scope:w.dict,record,dwell:true});
+  searchFor(w.word,{scope:w.dict,record,dwell:true,why:"random"});
 }
 /* Draws a word and opens it at once: the list's "Random word" row and the
    Android shortcut ask for a word to read, not for the line. The shortcut's
