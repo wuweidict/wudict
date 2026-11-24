@@ -23,7 +23,7 @@ import (
 // change to dictInfoFor alters what a row says for the same files, so a
 // client holding the previous derivation refetches it even from a build whose
 // executable stat happens to match.
-const dictRowsVersion = "1"
+const dictRowsVersion = "2"
 
 // rowCache keeps each dictionary's /api/dicts row under the key of what it was
 // derived from (rowKey). A row costs a SQLite meta read, a header probe or a
@@ -131,11 +131,24 @@ func (s *Server) rowsGlobal(st fileState[*facet.Rules]) string {
 // from (revalidate).
 func rowKey(e *entry, global string) string {
 	var b strings.Builder
-	sig := func(p string) { b.WriteString("|" + p + "=" + sourceSig(p)) }
+	sig := func(p string) string {
+		s := sourceSig(p)
+		b.WriteByte('|')
+		b.WriteString(p)
+		b.WriteByte('=')
+		b.WriteString(s)
+		return s
+	}
 	fmt.Fprintf(&b, "%s|%d", global, e.gen.Load())
 	sig(e.Path)
-	sig(filepath.Dir(e.Path))
+	dirSig := sig(filepath.Dir(e.Path))
 	if p, ok := dict.AbbrevCompanion(e.Path); ok {
+		sig(p)
+	}
+	// A font added or removed moves the folder's time, and fontPath resolves
+	// again under the new one; a font replaced in place keeps it, so the file
+	// is signed itself.
+	if p := e.fontPath(dirSig); p != "" {
 		sig(p)
 	}
 	textDB := e.Path

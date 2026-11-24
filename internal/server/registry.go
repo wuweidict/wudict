@@ -423,6 +423,10 @@ type entry struct {
 	styleDone bool
 	style     htmlref.Styles
 
+	// font is the font file beside the source this dictionary is shown in
+	// (font.go); nil until first asked.
+	font atomic.Pointer[fontFile]
+
 	ingestMu  sync.Mutex  // one ingest at a time per dictionary
 	autoTried atomic.Bool // first-search auto-index, attempted once
 	demanded  atomic.Bool // a user-demanded index is queued or running (demandIndex)

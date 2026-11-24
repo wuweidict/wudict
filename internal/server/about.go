@@ -103,7 +103,20 @@ func (s *Server) aboutSourceFor(e *entry) aboutSource {
 // an abbreviation is baked into article bytes and so must make a stale library
 // detectable, while an annotation is display text that touches no article and
 // must never cost a re-ingest.
+//
+// A font file beside the dictionary that cannot be used (font.go) is told
+// here, the one place a person looks for what a dictionary is made of; it
+// makes the disclosure render even for a dictionary that says nothing else.
 func (s *Server) aboutOf(e *entry, base string) (aboutInfo, bool) {
+	info, ok := s.aboutText(e, base)
+	if f := e.font.Load(); f != nil && f.bad {
+		info.HTML += "<p>" + html.EscapeString(fontUnusable(f.path)) + "</p>"
+		ok = true
+	}
+	return info, ok
+}
+
+func (s *Server) aboutText(e *entry, base string) (aboutInfo, bool) {
 	src := s.aboutSourceFor(e)
 	info := aboutInfo{
 		ID: e.ID, Name: src.name, Format: src.format,

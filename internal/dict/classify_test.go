@@ -60,6 +60,11 @@ func TestClassifyName(t *testing.T) {
 		{"res.zip", KindCompanion},
 		{"RES.ZIP", KindCompanion},
 		{"sd/res.zip", KindCompanion},
+		// fonts: a dictionary's own, and the folder's
+		{"Oxford.ttf", KindCompanion},
+		{"Oxford.woff2", KindCompanion},
+		{"font.otf", KindCompanion},
+		{"Oxford.ttc", KindOther},
 
 		// DSL: the abbreviation glossary is part of its parent, and the media
 		// zip must not read as the ordinary archive it technically is
@@ -179,8 +184,14 @@ func TestCompanionStem(t *testing.T) {
 		{"ru-en.dsl.files.zip", "ru-en"},
 		{"ru-en.dsl.dz.files.zip", "ru-en"},
 		{"ru-en.dsl.ann", "ru-en"},
+		// a dictionary's own font, under every format's stem
+		{"Oxford.ttf", "Oxford"},
+		{"Oxford.WOFF2", "Oxford"},
+		{"notes.wudict.otf", "notes.wudict"},
 		// belongs to the folder, not to a stem
 		{"res.zip", ""},
+		{"font.ttf", ""},
+		{"FONT.woff", ""},
 		// not companions at all
 		{"Oxford.mdx", ""},
 		{"readme.txt", ""},

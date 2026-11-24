@@ -280,6 +280,79 @@ func MediaSuffixes(mainExt string) []string {
 	return nil
 }
 
+// fontExts are the font files a dictionary can be given (D204), in the order
+// CompanionFont tries them: the four kinds a browser loads with @font-face.
+// Collections (.ttc/.otc) are not among them - @font-face has no way to say
+// which face of a collection it means.
+//
+// Not in CompanionSuffixes: that table is also intake's list of names to ask a
+// download server about (intake/probe.go), and a font is never worth four more
+// requests per import. The name-only vocabulary (classify.go) lists them
+// itself.
+var fontExts = []string{".ttf", ".otf", ".woff2", ".woff"}
+
+// folderFontStem is the name of a font that serves every dictionary in its
+// folder: "font.ttf". Named for the folder, like StarDict's res.zip, so it
+// belongs to no one dictionary.
+const folderFontStem = "font"
+
+// CompanionFont is the font a dictionary whose main file is src is shown in:
+// the file named after its stem ("oxford.ttf" beside "oxford.mdx" or
+// "oxford.dsl.dz"), else the folder's "font.ttf". folder reports the second.
+// "" when there is neither.
+//
+// Each extension is tried in lower case and then upper case, first hit wins, so
+// a dictionary with no font costs 16 stats. Callers ask when a dictionary's
+// row is derived, not per request (server/dictrows.go).
+func CompanionFont(src string) (path string, folder bool) {
+	if src == "" {
+		return "", false
+	}
+	stem := Stem(src)
+	// A dictionary that is itself called "font" has the folder's font as its
+	// own name; it is still the folder's, and shared.
+	shared := strings.EqualFold(filepath.Base(stem), folderFontStem)
+	if p := firstFont(stem); p != "" {
+		return p, shared
+	}
+	if shared {
+		return "", false
+	}
+	if p := firstFont(filepath.Join(filepath.Dir(src), folderFontStem)); p != "" {
+		return p, true
+	}
+	return "", false
+}
+
+// fontSpellings is fontExts as firstFont tries them: each in lower case, then
+// upper case. Built once, so a probe allocates only its path.
+var fontSpellings = func() []string {
+	out := make([]string, 0, 2*len(fontExts))
+	for _, e := range fontExts {
+		out = append(out, e, strings.ToUpper(e))
+	}
+	return out
+}()
+
+func firstFont(base string) string {
+	for _, e := range fontSpellings {
+		if p := base + e; fsx.FileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// fontExtLen is the length of the font extension lower ends with, 0 for none.
+func fontExtLen(lower string) int {
+	for _, e := range fontExts {
+		if strings.HasSuffix(lower, e) {
+			return len(e)
+		}
+	}
+	return 0
+}
+
 // RequiredCompanions are the companions without which a main file is not a
 // working dictionary, as groups of alternative spellings: each group must be
 // satisfied by at least one member. A StarDict .ifo is a text header naming an
@@ -397,6 +470,11 @@ func SourceFiles(src string) []string {
 		}
 	}
 	for _, p := range CompanionMedia(src) {
+		add(p)
+	}
+	// The dictionary's own font only. A folder's "font.ttf" is every
+	// dictionary's there, and removing one must not take it from the rest.
+	if p, folder := CompanionFont(src); p != "" && !folder {
 		add(p)
 	}
 	return out

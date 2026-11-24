@@ -400,7 +400,24 @@ To see it in action, click the text below, then click it again:
 
 **Use custom display styles**: ![](styles.svg) <kbd>Custom styles…</kbd> in <kbd>☰</kbd>. <kbd>App</kbd> styles the page, <kbd>Article</kbd> every dictionary article, use <kbd>Files</kbd> to add fonts and images and then <kbd>Insert</kbd> to add them into the CSS. Pick a preset, edit, <kbd>Save</kbd> — you can see a live preview of the changes as you type.
 
-<kbd>◐</kbd> switches light, dark and automatic theme. <kbd>Clear</kbd> then <kbd>Save</kbd> removes a style. If a custom style caused the entire page to disappear, append `?style=off` to the URL (💻 desktop only).
+<kbd>◐</kbd> switches light, dark and automatic theme. <kbd>Clear</kbd> then <kbd>Save</kbd> removes a style. If a custom style caused the entire page to disappear, append `?style=off` to the URL (💻 desktop only). A font for one dictionary: [wudict fonts](<entry://wudict fonts>).
+
+***
+
+- [index](/browse?dict=wudict-howto)
+
+## wudict fonts
+## wudict dictionary font
+
+**Give a dictionary its own font**: put a font file beside the dictionary file, with the same name.
+
+- `oxford.ttf` beside `oxford.mdx`, `oxford.dsl.dz` or `oxford.ifo`. For `notes.wudict.md`, the name is `notes.wudict.ttf`.
+- `font.ttf` is for every dictionary in its folder that has no font of its own.
+- `.ttf`, `.otf`, `.woff` and `.woff2` files can be used.
+
+All text in the dictionary's articles is shown in that font, also where the dictionary's own style sets a different font. ❗️ A symbol or phonetic font that the dictionary supplies is replaced too: if phonetic signs show as boxes, remove the file. Custom styles still change the font.
+
+Reload the page after you add, replace or delete the file. If wudict cannot use the file, **About this dictionary** says so. To set one font for all articles, use [custom styles](<entry://wudict styles>).
 
 ***
 

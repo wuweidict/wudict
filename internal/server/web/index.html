@@ -3783,9 +3783,12 @@ function resURL(dictID,ref){
    can share these bytes, and a role that renders differently in the two would
    be a bug nobody would think to look for. */
 const ARTCSS=`{{ARTCSS}}`;
+/* The articles' default font, on both surfaces, and behind a dictionary's own
+   font file when it has one (dictFont). */
+const ARTICLE_FONT_STACK="-apple-system,Helvetica,Arial,sans-serif";
 
 const shadowBase=`<style>
-:host{all:initial;display:block;font-family:${"-apple-system,Helvetica,Arial,sans-serif"};
+:host{all:initial;display:block;font-family:${ARTICLE_FONT_STACK};
   font-size:var(--wd-fs,15px);line-height:1.618;color:var(--wd-article-fg,#1a1a1a);word-break:break-word}
 img,video,svg{max-width:100%;height:auto}
 a{color:#5b7a99;cursor:pointer}
@@ -3822,9 +3825,12 @@ let fontSink=null;
 /* Families the chrome itself resolves against. @font-face has no scope to
    hide behind, so a dictionary that redefined one of these would restyle the
    whole app around it. Dropping a dictionary's "Arial" costs nothing: the
-   system face takes over, which is what it wanted anyway. */
+   system face takes over, which is what it wanted anyway. The CSS generic
+   names are here for the same reason: a face called "serif" would replace
+   every generic serif on the page. */
 const uiFamilies=new Set(["-apple-system","system-ui","blinkmacsystemfont","helvetica",
-  "helvetica neue","arial","sans-serif","serif","monospace","ui-monospace","menlo","consolas"]);
+  "helvetica neue","arial","sans-serif","serif","monospace","ui-monospace","menlo","consolas",
+  "cursive","fantasy","math","emoji","fangsong","ui-serif","ui-sans-serif","ui-rounded"]);
 
 function faceFamily(rule){
   const f=(rule.style&&rule.style.getPropertyValue("font-family"))||"";
@@ -3852,6 +3858,10 @@ function hoistFaces(sheet){
   if(!sheet)return;
   const out=[];
   collectFaces(sheet,out);
+  sinkFaces(out);
+}
+/* Declares faces in the document, where every shadow root sees them. */
+function sinkFaces(out){
   if(!out.length)return;
   if(!fontSink){
     fontSink=document.createElement("style");
@@ -3859,6 +3869,39 @@ function hoistFaces(sheet){
     document.head.appendChild(fontSink);
   }
   fontSink.appendChild(document.createTextNode(out.join("\n")));
+}
+
+/* A dictionary's own font (Go: server/font.go, D204 Am. 1, 2): a file beside
+   its source, which its row serves (font). It is the font of every element
+   of the dictionary's articles, over the dictionary's own stylesheet: a
+   person who put it there wants to see it, and stylesheets commonly name a
+   generic stack on the article's outermost element, which a mere default
+   would lose to. The price is named in the howto: a symbol or phonetic face
+   the dictionary ships is replaced too. Custom styles come later in the
+   cascade and still win. `rule` is one selector list for both surfaces -
+   :host in a shadow root, :root>body in a frame; each matches nothing in the
+   other.
+   The face is named after the URL, which is the FILE and its version, so the
+   dictionaries sharing a folder's font.ttf share one face, one download and
+   one decoded copy, and a replaced file is a new face rather than a second
+   rule for the old name. Null for a dictionary without one. */
+const dictFonts=new WeakMap(); // row → its dictFont, built once per row
+function dictFont(id){
+  const d=id&&dicts.find(x=>x.id===id);
+  if(!d||!d.font)return null;
+  let f=dictFonts.get(d);
+  if(f)return f;
+  const fam=cssStr("wudict-font-"+d.font.slice(d.font.lastIndexOf("/")+1));
+  f={face:"@font-face{font-family:"+fam+";src:url("+cssStr(d.font)+");font-display:swap}",
+    rule:":host,:host *,:root>body,:root>body *{font-family:"+fam+","+ARTICLE_FONT_STACK+"!important}"};
+  dictFonts.set(d,f);
+  return f;
+}
+/* A dictionary's font face, declared in the document once. */
+function sinkDictFace(f){
+  if(fontFacesSeen.has(f.face))return;
+  fontFacesSeen.add(f.face);
+  sinkFaces([f.face]);
 }
 /* A <link> in a shadow root loads asynchronously — .sheet is null until it
    has, so hoist on load as well as immediately (a warm sheet is already
@@ -3875,6 +3918,15 @@ function hoistShadowFonts(root){
   }
 }
 
+/* What a shadow-root article of dictID opens with: shadowBase, then the
+   dictionary's own font when it has one (dictFont). */
+function articleBase(dictID){
+  const font=dictFont(dictID);
+  if(!font)return shadowBase;
+  sinkDictFace(font);
+  return shadowBase+"<style>"+font.rule+"</style>";
+}
+
 function renderArticle(dd,body,dictID,frag){
   // Script-bearing articles (custom tooltips, MathJax, …) need a real
   // document scope: shadow roots neither execute <script> nor let
@@ -3884,7 +3936,7 @@ function renderArticle(dd,body,dictID,frag){
   const host=document.createElement("div");
   host.className="article";host.dataset.dict=dictID;
   const root=host.attachShadow({mode:"open"});
-  root.innerHTML=shadowBase+body;
+  root.innerHTML=articleBase(dictID)+body;
   // After innerHTML, and last in the cascade: adopted sheets order after the
   // root's own, so the user's rules win ties against the dictionary's.
   if(userSheet)root.adoptedStyleSheets=[userSheet];
@@ -3919,10 +3971,14 @@ function frameBody(doc){
   return a<0||b<a?null:doc.slice(a+FRAME_OPEN.length,b);
 }
 function frameDoc(content,fid,dark,dictID,frag){
+  // A frame is a document of its own: the page's faces do not reach it, so
+  // the dictionary's font is declared here as well as used.
+  const font=dictFont(dictID);
   return '<!DOCTYPE html><html class="'+(dark?'dark':'')+'"'+(dark?' data-dark':'')+'><head><meta charset="utf-8">'+
     /* Baked in, because a custom property cannot cross into another
        document; changes AFTER creation arrive by postMessage instead. */
-    '<style>html{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:'+articleFS+'px;line-height:1.618;color:var(--wd-article-fg,#1a1a1a);background:var(--wd-article-bg,#fff);overflow-y:hidden}'+
+    '<style>'+(font?font.face+font.rule:"")+
+    'html{font-family:'+ARTICLE_FONT_STACK+';font-size:'+articleFS+'px;line-height:1.618;color:var(--wd-article-fg,#1a1a1a);background:var(--wd-article-bg,#fff);overflow-y:hidden}'+
     'body{margin:8px}img,video,svg{max-width:100%;height:auto}'+
     'html.dark{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.92)}'+
     'html.dark :is(img,picture,video,svg,canvas,iframe,embed,object,[data-noinvert]){filter:invert(1) hue-rotate(180deg)}'+
@@ -5478,7 +5534,7 @@ function unwrapMarks(root,sel){
 function findRender(host,html,back){
   const root=host.shadowRoot;
   if(!root){host.srcdoc=frameDoc(html,host.dataset.fid,themeIsDark(),host.dataset.dict||"","");return}
-  root.innerHTML=back?html:shadowBase+html;
+  root.innerHTML=back?html:articleBase(host.dataset.dict||"")+html;
   if(back)for(const m of root.querySelectorAll(".wu-hl-off"))m.className="wu-hl";
   hoistShadowFonts(root);
 }

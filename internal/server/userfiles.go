@@ -153,17 +153,12 @@ func (s *Server) handleUserFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	f, err := os.Open(p)
-	if err != nil {
+	f, fi, ok := openRegular(p)
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil || fi.IsDir() {
-		http.NotFound(w, r)
-		return
-	}
 	w.Header().Set("Content-Type", resolveMIME(name, "application/octet-stream"))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-cache")

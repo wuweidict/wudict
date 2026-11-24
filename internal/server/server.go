@@ -746,6 +746,14 @@ type dictInfo struct {
 	FTSSize  int64    `json:"ftsSize,omitempty"`   // bytes of fulltext.db; absent when the index is inside text.db
 	HasMedia bool     `json:"hasMedia,omitempty"`  // packable binary resources exist (drives "pack media")
 
+	// Font: the font file beside the source this dictionary is shown in
+	// (dict.CompanionFont), as the URL that serves it - one per file, shared
+	// by the dictionaries that share it, versioned so a replaced file is
+	// fetched again. FontError: why a file named like a font cannot be used,
+	// the one part of this a person has to act on.
+	Font      string `json:"font,omitempty"`
+	FontError string `json:"fontError,omitempty"`
+
 	// Builtin: shipped with the app (the wudict howto), not added by the user.
 	// It cannot be removed, and a library of builtins alone is an empty one.
 	Builtin bool `json:"builtin,omitempty"`
@@ -975,6 +983,7 @@ func (s *Server) diskDictInfo(e *entry) dictInfo {
 		}
 	}
 	addProvenance(&info, e.Path)
+	e.deriveFont(&info)
 	return info
 }
 
@@ -1985,15 +1994,11 @@ func (s *Server) serveOverride(w http.ResponseWriter, r *http.Request, e *entry,
 	if !within(dir, full) {
 		return false
 	}
-	f, err := os.Open(full)
-	if err != nil {
+	f, fi, ok := openRegular(full)
+	if !ok {
 		return false // the ordinary case: no override for this resource
 	}
 	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil || fi.IsDir() {
-		return false
-	}
 	if m := resolveMIME(name, ""); m != "" {
 		w.Header().Set("Content-Type", m)
 	}

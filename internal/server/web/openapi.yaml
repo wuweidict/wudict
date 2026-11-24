@@ -2733,6 +2733,17 @@ components:
         dbSize: { type: integer, description: Bytes of text.db. }
         mediaSize: { type: integer, description: Bytes of media.db. }
         hasMedia: { type: boolean, description: 'Packable media exists, so "pack media" is offered.' }
+        font:
+          type: string
+          description: >
+            Where the dictionary's own font is served (`/font/{key}?v=…`, a page
+            asset with the session, not an extension route): a `.ttf`, `.otf`,
+            `.woff` or `.woff2` beside the source, named after it, or the
+            folder's `font.ttf`. One URL per file: dictionaries sharing a font
+            share it. Absent when there is none.
+        fontError:
+          type: string
+          description: Set instead of `font` when the file named like a font cannot be used.
         builtin: { type: boolean, description: 'Shipped with the app (the wudict howto, id `wudict-howto`), not added by the user; it cannot be removed.' }
         groups:
           type: array

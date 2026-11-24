@@ -4,6 +4,10 @@ Read only the section you are working on.
 
 The reference projects cited below (`pyglossary/…`, `mdict-go-web/…`, `draego/…`) are **no longer on disk** — they were removed once the formats were implemented. Their file and function names are kept as provenance: they say where a parsing rule came from and what to search for upstream if a format ever misbehaves, not paths to open.
 
+## Every format: a dictionary's own font
+
+A `.ttf`, `.otf`, `.woff` or `.woff2` beside the main file and named after its stem (`dict.Stem`: `x.ttf` for `x.mdx`, `x.dsl.dz`, `x.ifo`, `x.zimaa`; `x.wudict.ttf` for `x.wudict.md`), else the folder's `font.ttf`, is the font the dictionary's articles are shown in (`dict.CompanionFont`, `server/font.go`). An override (D204 Am. 1): `font-family … !important` on every article element, over the dictionary's own stylesheet, which commonly names a generic stack on the article's outer element (`cat-cat_Tot-en-un`: `.e{font:… -apple-system,system-ui,sans-serif}`); a symbol or phonetic face the dictionary ships is replaced too. Custom styles still win. Checked by its first eight bytes only (`dict.CheckFont`); served by file (`/font/<key>`, D204 Am. 2), so dictionaries sharing a `font.ttf` share one URL and one face. Read live from the source folder only; nothing is copied into the library folder. A collection (`.ttc`) is refused: `@font-face` cannot say which face it means. Not a format rule anywhere: BlueDict's `NAME.ttf` (MDX only) is the precedent.
+
 ## MDX / MDD (Octopus MDict)
 - **Reference: [`docs/mdict/`](mdict/README.md)**: byte layout (`FORMAT.md`), engine semantics (`SEMANTICS.md`) and wudict's conformance (`CONFORMANCE.md`), read from MDict's own engine. Where this section and `docs/mdict/` disagree, `docs/mdict/` is right.
 - Binary, block-compressed (zlib/LZO), optionally encrypted (Salsa20/8 variant), v1.2–v3.0. Has built-in **headword index** (key blocks) — no full-text index. MDD = same container holding resources keyed by `\path\name`.

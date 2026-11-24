@@ -26,7 +26,7 @@ type Kind int
 
 const (
 	// KindOther is anything a dictionary folder may legitimately contain and
-	// intake has no use for: a readme, a licence, a font, an archive.
+	// intake has no use for: a readme, a licence, an archive.
 	KindOther Kind = iota
 	// KindMain is a file this build can open as a dictionary in its own right.
 	KindMain
@@ -43,10 +43,21 @@ const (
 )
 
 // stardictResZip is StarDict's shared resource archive: a fixed NAME rather
-// than a suffix of the dictionary's own stem, and the one companion that
-// cannot be recognised by the stem rule. Its sibling "res/" folder is a
+// than a suffix of the dictionary's own stem, so the stem rule cannot
+// recognise it (folderNamed). Its sibling "res/" folder is a
 // directory and is matched as a path prefix by the caller, not here.
 const stardictResZip = "res.zip"
+
+// folderNamed reports the companions named for their folder rather than for a
+// dictionary: StarDict's res.zip and the folder font ("font.ttf",
+// CompanionFont). They belong to whatever dictionary is in the folder.
+func folderNamed(lower string) bool {
+	if lower == stardictResZip {
+		return true
+	}
+	n := fontExtLen(lower)
+	return n > 0 && lower[:len(lower)-n] == folderFontStem
+}
 
 // ClassifyName reports what name looks like, reading no bytes and touching no
 // filesystem. Accepts a bare name or a path in either separator; only the last
@@ -75,7 +86,7 @@ func ClassifyName(name string) Kind {
 		// zip built on macOS carries beside every real entry - a 4 KiB
 		// resource fork that classifies as a perfectly good MDX on its name.
 		return KindOther
-	case base == stardictResZip:
+	case folderNamed(base):
 		return KindCompanion
 	}
 
@@ -120,6 +131,10 @@ var companionSuffixes = func() map[string]bool {
 		for _, s := range MediaSuffixes(ext) {
 			m[s] = true
 		}
+	}
+	// A dictionary's own font, whatever its format (CompanionFont).
+	for _, s := range fontExts {
+		m[s] = true
 	}
 	return m
 }()
@@ -180,7 +195,7 @@ func entryBase(name string) string {
 func CompanionStem(name string) string {
 	base := entryBase(name)
 	lower := strings.ToLower(base)
-	if lower == stardictResZip {
+	if folderNamed(lower) {
 		return ""
 	}
 	if n := abbrevSuffixLen(lower); n > 0 && len(base) > n {
