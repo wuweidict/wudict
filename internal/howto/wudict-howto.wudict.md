@@ -302,13 +302,13 @@ Every search has its own address, so you can bookmark it: `/?q=word&mode=exact`.
 ## wudict autocomplete
 ## wudict while you type
 
-**wudict searches as you type; it can list the matching headwords first**: set <kbd>While you type</kbd> to <kbd>Show headwords</kbd> in <kbd>☰</kbd> → ![](cog.svg). The headwords of all the dictionaries in your search then show in one list under the search box, and the results change only when you select one.
+**As you type, wudict lists the matching headwords under the search box**: the headwords of all the dictionaries in your search show in one list, and the results change only when you select one.
 
 - 💻 <kbd>↓</kbd> and <kbd>↑</kbd> move through the list; <kbd>Enter</kbd> looks up the highlighted headword. 📱 Tap a headword.
 - <kbd>Enter</kbd> with no headword highlighted searches for your text as you typed it.
 - <kbd>Esc</kbd> closes the list.
 
-💻 With <kbd>While you type</kbd> set to <kbd>Live search</kbd>, the default, <kbd>↓</kbd> opens the same list for the text in the search box.
+To search as you type instead, set <kbd>While you type</kbd> to <kbd>Live search</kbd> in <kbd>☰</kbd> → ![](cog.svg). 💻 <kbd>↓</kbd> then opens the same list for the text in the search box.
 
 The list starts at 2 characters and shows at most 20 headwords: type more letters to narrow it. In wildcard mode it lists the headwords that fit your pattern. Full-text mode has no list: press <kbd>Enter</kbd> to search.
 

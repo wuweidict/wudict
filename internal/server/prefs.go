@@ -185,12 +185,13 @@ type UIPrefs struct {
 	// cannot go on recording.
 	HistoryOff bool `json:"historyOff,omitempty"`
 
-	// ListWords makes typing in the search box list the matching headwords
-	// under it, and the search wait for Enter or a word picked from that list
-	// (D199). Spelled positively: absent is the default, a search of what is
-	// typed as it is typed. Remembered state for the UI; the server never
-	// reads it.
-	ListWords bool `json:"listWords,omitempty"`
+	// LiveSearch makes typing in the search box search what is typed as it
+	// is typed (D199 Am. 2). Absent is the default: typing lists the matching
+	// headwords under the box, and the search waits for Enter or a word picked
+	// from that list. Remembered state for the UI; the server never reads it.
+	// The former key `listWords` is ignored: its only stored value, true, is
+	// the default now.
+	LiveSearch bool `json:"liveSearch,omitempty"`
 
 	// RandomOff hides the random word under the empty search box (D202).
 	// Negated like HLOff: shown is the default. Remembered state for the UI;

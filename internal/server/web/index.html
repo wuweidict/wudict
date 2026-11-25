@@ -239,7 +239,7 @@ details.dict>dl>dt{display:flex;align-items:flex-start;gap:var(--sp-1)}
 @media (pointer:coarse){.astar{--box:44px;padding:14px;margin-right:-14px}}
 /* Under the EMPTY box, on a click or ↓: favourites, then history. Under a box
    with text: the headwords that match it (D199) - on ↓, or by itself while
-   typing when the reader chose "Show headwords". An overlay: opening it moves
+   typing under "Show headwords", the default. An overlay: opening it moves
    nothing below. */
 #recall{position:absolute;top:calc(100% + 4px);left:0;right:0;min-width:12em;
   max-height:min(60vh,24em);overflow-y:auto;margin:0;padding:.25em 0;list-style:none;
@@ -1308,9 +1308,9 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
      blocks implicit submission (#q; <select> does not count), so Enter
      submits under the HTML spec's no-submit-button clause and the submit
      listener below runs unchanged — and anything two characters or longer
-     never waits for a keypress at all, because the input handler searches
-     as you type. Under "Show headwords" (D199) a row of the list is the
-     click target. A button would be a magnifier next to a magnifier. -->
+     never waits for a keypress under "Live search", because the input
+     handler searches as you type. Under "Show headwords" (D199, the default)
+     a row of the list is the click target. A button would be a magnifier next to a magnifier. -->
 <button type="button" class="btn tools themeBtn" title="Theme" aria-label="Toggle theme">◐</button>
 <button type="button" class="btn" id="wideBtn" title="Toggle wide layout" aria-label="Toggle wide layout">⇔</button>
 <button type="button" class="btn" id="expandBtn" title="Open all results" aria-label="Open all results" aria-pressed="false">⊞</button>
@@ -1407,15 +1407,15 @@ html:has(#panel.show) .bar{padding-right:var(--wd-sbw,0px)}
          All, with no limit: the reader may trade speed for it. A larger number
          set by hand in state.json is shown as its own choice. Wording in
          ASD-STE100. -->
-    <!-- What typing does (D199). A closed set of two, so a native <select>
-         like "Open" below: the default searches what is typed, the other
-         lists the headwords that match and leaves the search to Enter or a
-         picked row. -->
+    <!-- What typing does (D199 Am. 2). A closed set of two, so a native
+         <select> like "Open" below: the default lists the headwords that
+         match and leaves the search to Enter or a picked row, the other
+         searches what is typed. -->
     <label class="seg">
       <span>While you type</span>
-      <select id="typeSel" title="Search as you type, or list the matching headwords under the search box and search on Enter.">
+      <select id="typeSel" title="List the matching headwords under the search box and search on Enter, or search as you type.">
+        <option value="list" selected>Show headwords</option>
         <option value="live">Live search</option>
-        <option value="list">Show headwords</option>
       </select>
     </label>
     <label class="seg">
@@ -1625,7 +1625,7 @@ async function loadPrefs(){
     const st=await r.json(),rows=st.dicts||[];
     // Read before the exists branch below returns: on a first run there is no
     // ui record, but there is also nothing here that can go wrong.
-    if(st.ui){applyFS(st.ui.fontSize,false);applyHL(!st.ui.hlOff,false);applySpeak(!st.ui.speakOff,false);applyOpen(st.ui.fastFirst?"fast":st.ui.openAll?"all":String(st.ui.openN||1),false);applyGroupsOff(st.ui.groupsOff,false);fullOn=!!st.ui.full;modePref=st.ui.mode||"prefix";setMode(modePref);applyHist(!st.ui.historyOff,false);applyType(st.ui.listWords,false);applyRand(!st.ui.randomOff,st.ui.randomFrom||"",false)}
+    if(st.ui){applyFS(st.ui.fontSize,false);applyHL(!st.ui.hlOff,false);applySpeak(!st.ui.speakOff,false);applyOpen(st.ui.fastFirst?"fast":st.ui.openAll?"all":String(st.ui.openN||1),false);applyGroupsOff(st.ui.groupsOff,false);fullOn=!!st.ui.full;modePref=st.ui.mode||"prefix";setMode(modePref);applyHist(!st.ui.historyOff,false);applyType(!st.ui.liveSearch,false);applyRand(!st.ui.randomOff,st.ui.randomFrom||"",false)}
     uiBase=uiNow();
     dictsBase=rows.map(prefRow);
     // Last, so that a page whose baselines are not both in hand never saves:
@@ -1657,7 +1657,7 @@ let uiBase=null;
    drive) and this page cannot speak for them. */
 let dictsBase=null;
 function uiNow(){
-  return{fontSize:articleFS,hlOff:!hlOn,speakOff:!speakOn,fastFirst:!orderFirst,openN:openN>1?openN:0,openAll,groupsOff:[...groupsOff].sort(),full:fullOn,mode:modePref==="prefix"?"":modePref,historyOff:!histOn,listWords,randomOff:!randOn,randomFrom:randFrom};
+  return{fontSize:articleFS,hlOff:!hlOn,speakOff:!speakOn,fastFirst:!orderFirst,openN:openN>1?openN:0,openAll,groupsOff:[...groupsOff].sort(),full:fullOn,mode:modePref==="prefix"?"":modePref,historyOff:!histOn,liveSearch:!listWords,randomOff:!randOn,randomFrom:randFrom};
 }
 /* One dictionary's record as it is sent and compared: pin only when set, as
    the server stores it. The title always, "" for none: a record without the
@@ -1996,11 +1996,11 @@ function applyOpen(v,save){
   if(save&&moved)savePrefs();
   return moved;
 }
-/* What typing in the search box does (D199): a search of what is typed, the
-   default, or the list of headwords that match it under the box, with the
-   search left to Enter or a row of that list. Server state like the ones
+/* What typing in the search box does (D199 Am. 2): the list of headwords
+   that match it under the box, the default, with the search left to Enter or
+   a row of that list; or a search of what is typed. Server state like the ones
    above: a habit of the person, not a property of this browser. */
-let listWords=false;
+let listWords=true;
 function applyType(on,save){
   const v=!!on,moved=v!==listWords;
   listWords=v;

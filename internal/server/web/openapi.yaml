@@ -2995,14 +2995,14 @@ components:
             Stops recording looked-up words in history.txt. Absent keeps
             history. The server reads it too: while it is set, adding to
             history through /api/words does nothing.
-        listWords:
+        liveSearch:
           type: boolean
           description: >
-            Typing in the search box lists the matching headwords under it
-            (`/api/suggest`), and the search waits for Enter or a word picked
-            from that list. Absent is the default: a search of what is typed,
-            as it is typed. Remembered state for wudict's own UI - the search
-            endpoint never reads it.
+            Typing in the search box searches what is typed, as it is typed.
+            Absent is the default: typing lists the matching headwords under
+            the box (`/api/suggest`), and the search waits for Enter or a word
+            picked from that list. Remembered state for wudict's own UI - the
+            search endpoint never reads it.
         randomOff:
           type: boolean
           description: >
