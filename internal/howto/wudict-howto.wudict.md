@@ -346,7 +346,7 @@ The word comes from the dictionaries in the dictionary picker. While the picker 
 
 Only indexed dictionaries give words. A random word is one word of 4 to 18 letters (1 to 8 in Chinese, Japanese and Korean). wudict skips words that look like names, abbreviations, phrases or inflected forms.
 
-A random word goes into your history only when its article stays open for 2 seconds. <kbd>Show random word</kbd> in <kbd>☰</kbd> → ![](cog.svg) turns the word off.
+A random word goes into your history only when its article stays open for 2 seconds. To turn the word off, tap <kbd>✕</kbd> at the end of its line, or <kbd>Show random word</kbd> in <kbd>☰</kbd> → ![](cog.svg). <kbd>Undo</kbd> in its place (💻 or <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>⌘</kbd>+<kbd>Z</kbd> in the empty search box) brings back the same word; <kbd>Show random word</kbd> turns it on again later.
 
 ***
 

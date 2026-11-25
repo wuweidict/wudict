@@ -505,16 +505,33 @@ iframe.article{width:100%;border:0;display:block;background:var(--wd-article-bg,
   padding-top:var(--sp-5);color:var(--fg-faint)}
 #rand .rword{color:var(--fg);font-size:1.25em;font-weight:500;text-decoration:none}
 #rand .rdict{color:inherit;font-size:.9em;text-decoration:none}
-#rand .rdie{display:inline-flex;padding:.4em;margin:0;border:0;border-radius:6px;
+#rand .rdie,#rand .rclose{display:inline-flex;padding:.4em;margin:0;border:0;border-radius:6px;
   background:none;color:inherit;font:inherit;cursor:pointer}
+/* The off switch at the far end of the line: as far from the die, the
+   control a thumb presses again and again, as the line allows. */
+#rand .rclose{margin-left:auto;position:relative}
+/* 44×45 to a finger, grown inwards only: the line's end is the page's
+   gutter, and nothing near it takes a tap */
+#rand .rclose::after{content:"";position:absolute;inset:-7px 0 -7px -13px}
 /* pointers only: a touch leaves :hover set, and the die would stay lit */
 @media (hover:hover){
   #rand .rword:hover,#rand .rdict:hover{text-decoration:underline;text-underline-offset:3px}
   #rand .rdict:hover{color:var(--link)}
-  #rand .rdie:hover{color:var(--accent)}
+  #rand .rdie:hover,#rand .rclose:hover{color:var(--accent)}
 }
-#rand .rdie svg{width:1.15em;height:1.15em;display:block}
+#rand .rdie svg,#rand .rclose svg{width:1.15em;height:1.15em;display:block}
 #rand[aria-busy="true"] .rdie{opacity:.5}
+/* The line once switched off: "Random word off · Undo" in its place, and
+   the way back to the switch under it. Instructions to read, so in the soft
+   voice, not the faint one. */
+#rand.off{padding-left:.4em;color:var(--fg-soft)}
+#rand .rundo{padding:.4em 0;margin:0;border:0;background:none;font:inherit;cursor:pointer;
+  color:var(--link);text-decoration:underline;text-underline-offset:2px}
+#rand .rtip{flex-basis:100%;font-size:.85em;line-height:1.9}
+/* one height for a word and for the cog alone, which has no line of text */
+#rand kbd{display:inline-flex;align-items:center;gap:.25em;height:1.75em;box-sizing:border-box;padding:0 .35em;
+  border:1px solid var(--line);border-radius:4px;font:inherit;color:var(--fg-soft)}
+#rand kbd svg{width:1em;height:1em}
 #recall li.rnd{display:flex;align-items:center;gap:.45em;color:var(--fg-soft);font-style:italic;
   border-top:1px solid var(--line);margin-top:.25em;padding-top:.45em}
 #recall li.rnd svg{width:.95em;height:.95em;flex:none}
@@ -2036,6 +2053,8 @@ const CHECK_SVG='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stro
 /* The random word's die (D202): five pips, drawn, never the ⚄ character,
    whose glyph not every system font has. */
 const DIE_SVG='<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><g fill="currentColor"><circle cx="5.4" cy="5.4" r="1.1"/><circle cx="10.6" cy="5.4" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="5.4" cy="10.6" r="1.1"/><circle cx="10.6" cy="10.6" r="1.1"/></g></svg>';
+/* Its off switch: a cross in the die's stroke and size. */
+const CROSS_SVG='<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.8 4.8l6.4 6.4M11.2 4.8l-6.4 6.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
 function renderGroupSeg(fs){
   const seg=$("groupSeg"),box=seg.querySelector(".chips"),key=fs.map(f=>f.id+"\t"+f.label).join("\n");
   if(key!==groupSegKey){
@@ -6515,9 +6534,11 @@ $("q").addEventListener("input",()=>{
 });
 $("q").addEventListener("keydown",e=>{
   // Ctrl/⌘+Z puts back a favourite just removed, while its Undo row is on
-  // offer; an empty box has no typing of its own to undo
-  if(favUndo&&!$("q").value&&(MAC?e.metaKey:e.ctrlKey)&&!e.shiftKey&&!e.altKey&&(e.key==="z"||e.key==="Z")){
-    e.preventDefault();undoFav();return;
+  // offer, else the random word just switched off; an empty box has no
+  // typing of its own to undo
+  if(!$("q").value&&(MAC?e.metaKey:e.ctrlKey)&&!e.shiftKey&&!e.altKey&&(e.key==="z"||e.key==="Z")){
+    if(favUndo){e.preventDefault();undoFav();return}
+    if($("rand")?.classList.contains("off")){e.preventDefault();randomUndo();return}
   }
   if(e.isComposing||e.ctrlKey||e.metaKey||e.altKey)return;
   if(recall.hidden){
@@ -6718,6 +6739,8 @@ function paintRandom(){
   let el=$("rand");
   if(!randWord){el?.remove();return}
   if(!randIdle())return;
+  // switched back on while "Random word off" is on show: a line of words again
+  if(el?.classList.contains("off")){el.remove();el=null}
   // kept on the empty start's own entry, for a page loaded again there
   if(!location.search)histWrite(false,{rand:randWord});
   if(el)el.removeAttribute("aria-busy"); // whichever draw painted, it is done
@@ -6728,8 +6751,10 @@ function paintRandom(){
     el.setAttribute("aria-label","Random word");
     el.setAttribute("aria-live","polite");
     el.innerHTML=`<button type="button" class="rdie" aria-label="Another word" title="Show another random word">${DIE_SVG}</button>`+
-      '<a class="rword"></a><span class="rsep" aria-hidden="true">·</span><a class="rdict"></a>';
+      '<a class="rword"></a><span class="rsep" aria-hidden="true">·</span><a class="rdict"></a>'+
+      `<button type="button" class="rclose" aria-label="Never show again" title="Never show again">${CROSS_SVG}</button>`;
     el.querySelector(".rdie").addEventListener("click",()=>showRandom(true));
+    el.querySelector(".rclose").addEventListener("click",randomOff);
     el.querySelector(".rword").addEventListener("click",e=>{
       if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return; // a new tab keeps the link
       e.preventDefault();openRandom(randWord,"push");
@@ -6776,6 +6801,36 @@ async function randomNow(record){
   if(record==="replace")histWrite(false,null,location.pathname);
   if(w===null)setStatus("⚠ Could not show a random word: no word found in these dictionaries");
   showRandom(false);
+}
+/* The line's cross is the "Show random word" switch, pressed where the word
+   is (D202 Am. 2): off for good, as the switch is - the first typed character
+   already takes the line away for now. The line becomes "Random word off ·
+   Undo" in place, with the way to the switch under it, and stays as long as
+   the page is empty: no timer, the page has nothing else to show. The word
+   stays in randWord, so Undo brings back the same word. */
+function randomOff(){
+  const had=$("rand")?.contains(document.activeElement);
+  applyRand(false,randFrom,true); // takes the line away
+  const el=document.createElement("div");
+  el.id="rand";el.className="off";
+  el.setAttribute("role","group");
+  el.setAttribute("aria-label","Random word off");
+  el.innerHTML='<span>Random word off</span><span class="rsep" aria-hidden="true">·</span>'+
+    '<button type="button" class="rundo">Undo</button>'+
+    '<span class="rtip">To show it again: <kbd>☰</kbd> → <kbd class="rcog"></kbd> → <kbd>Show random word</kbd></span>';
+  // the folder summary's own cog, so the tip shows what the panel shows
+  const cog=$("folders").querySelector(".cog").cloneNode(true);
+  cog.removeAttribute("class");cog.removeAttribute("aria-hidden");
+  cog.setAttribute("role","img");cog.setAttribute("aria-label","Settings");
+  el.querySelector(".rcog").append(cog);
+  el.querySelector(".rundo").addEventListener("click",randomUndo);
+  $("out").prepend(el);
+  if(had)el.querySelector(".rundo").focus();
+}
+function randomUndo(){
+  const had=$("rand")?.contains(document.activeElement);
+  applyRand(true,randFrom,true); // paints randWord over "Random word off"
+  if(had)$("rand")?.querySelector(".rdie")?.focus();
 }
 /* Where the word is drawn from follows the picker. A word on show that the new
    choice still holds stays; any other is replaced. */

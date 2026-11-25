@@ -4,7 +4,8 @@ v3.7.12
 (favourites) The star is now on each article's headword: a word is starred in the dictionary you read it in, and opens there again from the list, which names that dictionary. A word starred in several dictionaries opens in all of them; a favourite whose dictionary was removed is looked up like a word you type. Ctrl+D (⌘+D) stars the article you are reading
 (favourites) Shift+Delete or touch and hold removes a word from your favourites, with Undo in its place for a few seconds (also Ctrl+Z / ⌘+Z)
 (fonts) A font file beside a dictionary, with the same name (oxford.ttf beside oxford.mdx, oxford.dsl.dz, oxford.ifo …), is the font of all text in its articles, in every format; font.ttf is for every dictionary in its folder. .ttf, .otf, .woff and .woff2
-(css) A stylesheet beside a dictionary, with the same name (oxford.css beside oxford.dsl, oxford.ifo, oxford.slob …), applies to its articles; custom.css applies to every dictionary in its folder, MDict dictionaries too
+(css) A stylesheet beside a dictionary, with the same name (oxford.css beside oxford.dsl, oxford.ifo, oxford.slob …), applies to its articles; custom.css applies to every dictionary in its folder, MDict dictionaries too. Importing a bundle gives each of its dictionaries a copy of the bundle's custom.css and font.ttf
+(random word) ✕ at the end of the random word's line turns it off for good, with Undo in its place (also Ctrl+Z / ⌘+Z) and where to turn it on again
 
 🐛 Bug Fixes
 (security) A DSL or wudict markdown dictionary could be made to serve any file in its folder or below it; like an MDict dictionary, it now serves only the kinds of file a dictionary bundles (stylesheets, scripts, images, sound, video, fonts)
