@@ -29,6 +29,7 @@ func TestCompanionFont(t *testing.T) {
 		{"fixed order, ttf first", []string{"Oxford.mdx", "Oxford.woff", "Oxford.ttf"}, "Oxford.ttf", false},
 		{"stem font beats the folder's", []string{"Oxford.mdx", "font.ttf", "Oxford.otf"}, "Oxford.otf", false},
 		{"folder font", []string{"Oxford.mdx", "font.woff2"}, "font.woff2", true},
+		{"folder font, upper case", []string{"Oxford.mdx", "FONT.TTF"}, "FONT.TTF", true},
 		{"a dictionary called font shares it", []string{"font.mdx", "font.ttf"}, "font.ttf", true},
 		{"a neighbour's font is not ours", []string{"Oxford.mdx", "Collins.ttf"}, "", false},
 		{"collections are not used", []string{"Oxford.mdx", "Oxford.ttc"}, "", false},

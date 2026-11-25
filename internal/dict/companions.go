@@ -301,8 +301,9 @@ const folderFontStem = "font"
 // "oxford.dsl.dz"), else the folder's "font.ttf". folder reports the second.
 // "" when there is neither.
 //
-// Each extension is tried in lower case and then upper case, first hit wins, so
-// a dictionary with no font costs 16 stats. Callers ask when a dictionary's
+// Each extension is tried in lower case and then upper case, and the folder's
+// name as "font" and "FONT", first hit wins, so a dictionary with no font
+// costs 24 stats. Callers ask when a dictionary's
 // row is derived, not per request (server/dictrows.go).
 func CompanionFont(src string) (path string, folder bool) {
 	if src == "" {
@@ -318,10 +319,22 @@ func CompanionFont(src string) (path string, folder bool) {
 	if shared {
 		return "", false
 	}
-	if p := firstOf(filepath.Join(filepath.Dir(src), folderFontStem), fontSpellings); p != "" {
+	if p := folderFile(src, folderFontStem, fontSpellings); p != "" {
 		return p, true
 	}
 	return "", false
+}
+
+// folderFile is the folder file stem+spelling beside src, the stem in lower
+// case and then upper case ("custom.css", "CUSTOM.CSS"): the name-only
+// vocabulary (classify.go folderNamed) takes it in any case, and a
+// case-sensitive filesystem finds only the spelling on disk.
+func folderFile(src, stem string, spellings []string) string {
+	dir := filepath.Dir(src)
+	if p := firstOf(filepath.Join(dir, stem), spellings); p != "" {
+		return p
+	}
+	return firstOf(filepath.Join(dir, strings.ToUpper(stem)), spellings)
 }
 
 // folderCSSStem names the stylesheet every dictionary in its folder is shown
@@ -335,13 +348,13 @@ const folderCSSStem = "custom"
 // after its stem ("oxford.css" beside "oxford.dsl"). An .mdx gets the folder's
 // only: a stylesheet named after it already has MDict's meaning, a loose
 // replacement for one its articles link (mdx.Dict.looseFile). own reports
-// the stem one, the one removal may take. At most 4 stats; callers ask when a
+// the stem one, the one removal may take. At most 6 stats; callers ask when a
 // row is derived (server/companion.go).
 func CompanionCSS(src string) (css []string, own string) {
 	if src == "" {
 		return nil, ""
 	}
-	if p := firstOf(filepath.Join(filepath.Dir(src), folderCSSStem), cssSpellings); p != "" {
+	if p := folderFile(src, folderCSSStem, cssSpellings); p != "" {
 		css = append(css, p)
 	}
 	stem := Stem(src)
