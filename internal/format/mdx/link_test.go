@@ -42,7 +42,7 @@ func TestLinkSize(t *testing.T) {
 // other dictionary, so it answers for assets and nothing else.
 func TestMediaSourcesAllowlist(t *testing.T) {
 	dir := t.TempDir()
-	for _, n := range []string{"style.css", "secrets.env", "pic.png", "notes.md"} {
+	for _, n := range []string{"style.css", "private.dat", "pic.png", "notes.md"} {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte(n), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -57,9 +57,9 @@ func TestMediaSourcesAllowlist(t *testing.T) {
 	}{
 		{"style.css", true},
 		{"pic.png", true},
-		{"secrets.env", false}, // present, but not on the asset allowlist
+		{"private.dat", false}, // present, but not on the asset allowlist
 		{"notes.md", false},
-		{"../secrets.env", false}, // still not an asset after the climb is folded
+		{"../private.dat", false}, // still not an asset after the climb is folded
 		{"no-such.png", false},
 	} {
 		rc, err := srcs[0].Open(tc.name)

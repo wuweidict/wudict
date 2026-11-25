@@ -49,7 +49,7 @@ func TestRevealAuthorization(t *testing.T) {
 			t.Errorf("should be revealable: %s", p)
 		}
 	}
-	denied := []string{"/etc/passwd", "/", filepath.Dir(dicts), dicts + "-sibling", ""}
+	denied := []string{"/outside/escape", "/", filepath.Dir(dicts), dicts + "-sibling", ""}
 	for _, p := range denied {
 		if s.revealAllowed(p) {
 			t.Errorf("must NOT be revealable: %s", p)
@@ -65,7 +65,7 @@ func TestRevealAuthorization(t *testing.T) {
 		t.Errorf("remote reveal: got %d, want 403", rec.Code)
 	}
 	// and an unknown path from localhost is refused too (no shell-out)
-	req = newRequest("GET", "/api/reveal?path=/etc/passwd", nil)
+	req = newRequest("GET", "/api/reveal?path=/outside/escape", nil)
 	req.RemoteAddr = "127.0.0.1:5555"
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, req)

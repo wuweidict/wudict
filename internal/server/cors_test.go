@@ -223,7 +223,7 @@ func TestWebOrigin(t *testing.T) {
 
 		{"", "", "", false},
 		{"null", "", "", false}, // sandboxed iframe / file: page
-		{"file:///etc/passwd", "", "", false},
+		{"file:///outside/escape", "", "", false},
 		{"*", "", "", false}, // handled by the caller, never parsed
 		{"http://", "", "", false},
 		{"ftp://x.example", "", "", false},

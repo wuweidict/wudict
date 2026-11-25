@@ -81,7 +81,7 @@ func TestWriteAtomic(t *testing.T) {
 		t.Errorf("a replaced mode-000 file is not readable by its owner: %v", mode(t, p))
 	}
 	os.Chmod(p, 0o644)
-	if err := WriteAtomicExact(p, []byte("secret"), 0o600); err != nil || mode(t, p) != 0o600 {
+	if err := WriteAtomicExact(p, []byte("data"), 0o600); err != nil || mode(t, p) != 0o600 {
 		t.Errorf("Exact did not force the mode: %v %v", mode(t, p), err)
 	}
 	// a symlink is written through, not replaced

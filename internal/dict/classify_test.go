@@ -64,6 +64,7 @@ func TestClassifyName(t *testing.T) {
 		{"Oxford.ttf", KindCompanion},
 		{"Oxford.woff2", KindCompanion},
 		{"font.otf", KindCompanion},
+		{"custom.css", KindCompanion},
 		{"Oxford.ttc", KindOther},
 
 		// DSL: the abbreviation glossary is part of its parent, and the media
@@ -192,6 +193,9 @@ func TestCompanionStem(t *testing.T) {
 		{"res.zip", ""},
 		{"font.ttf", ""},
 		{"FONT.woff", ""},
+		{"custom.css", ""},
+		{"Custom.CSS", ""},
+		{"ru-en.css", "ru-en"},
 		// not companions at all
 		{"Oxford.mdx", ""},
 		{"readme.txt", ""},

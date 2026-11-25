@@ -11,8 +11,9 @@ import (
 
 // assetExt is what a dictionary may legitimately bundle and a browser may
 // legitimately fetch from it. It is deliberately an allowlist, not a denylist:
-// an article is third-party HTML, and this is what stops a stray
-// `href="secrets.env"` from turning a resource route into a file browser.
+// an article is third-party HTML, and this is what stops a stray href naming
+// any other kind of file (`href="private.dat"`) from turning a resource route
+// into a file browser.
 var assetExt = map[string]bool{
 	".css": true, ".js": true, ".html": true, ".htm": true,
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,

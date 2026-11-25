@@ -3784,7 +3784,7 @@ function resURL(dictID,ref){
    be a bug nobody would think to look for. */
 const ARTCSS=`{{ARTCSS}}`;
 /* The articles' default font, on both surfaces, and behind a dictionary's own
-   font file when it has one (dictFont). */
+   font file when it has one (dictSide). */
 const ARTICLE_FONT_STACK="-apple-system,Helvetica,Arial,sans-serif";
 
 const shadowBase=`<style>
@@ -3871,37 +3871,44 @@ function sinkFaces(out){
   fontSink.appendChild(document.createTextNode(out.join("\n")));
 }
 
-/* A dictionary's own font (Go: server/font.go, D204 Am. 1, 2): a file beside
-   its source, which its row serves (font). It is the font of every element
-   of the dictionary's articles, over the dictionary's own stylesheet: a
-   person who put it there wants to see it, and stylesheets commonly name a
-   generic stack on the article's outermost element, which a mere default
-   would lose to. The price is named in the howto: a symbol or phonetic face
-   the dictionary ships is replaced too. Custom styles come later in the
-   cascade and still win. `rule` is one selector list for both surfaces -
-   :host in a shadow root, :root>body in a frame; each matches nothing in the
-   other.
-   The face is named after the URL, which is the FILE and its version, so the
-   dictionaries sharing a folder's font.ttf share one face, one download and
-   one decoded copy, and a replaced file is a new face rather than a second
-   rule for the old name. Null for a dictionary without one. */
-const dictFonts=new WeakMap(); // row → its dictFont, built once per row
-function dictFont(id){
+/* A dictionary's companion files (Go: server/companion.go, D204, D205): the
+   font and the stylesheets beside its source, which its row serves (font,
+   css). Null for a dictionary with neither.
+   - The font (`face`, `rule`) is the font of every element of the articles,
+     over the dictionary's own stylesheet: a person who put it there wants to
+     see it, and stylesheets commonly name a generic stack on the article's
+     outermost element, which a mere default would lose to. The price is named
+     in the howto: a symbol or phonetic face the dictionary ships is replaced
+     too. `rule` is one selector list for both surfaces - :host in a shadow
+     root, :root>body in a frame; each matches nothing in the other. The face
+     is named after the URL, which is the FILE and its version, so the
+     dictionaries sharing a folder's font.ttf share one face, one download and
+     one decoded copy, and a replaced file is a new face rather than a second
+     rule for the old name.
+   - The stylesheets (`links`: custom.css, then the dictionary's own) come
+     after the article, so they win ties against the dictionary's stylesheet;
+     Custom styles come later still and win against all of them. */
+const dictSides=new WeakMap(); // row → its dictSide, built once per row
+function dictSide(id){
   const d=id&&dicts.find(x=>x.id===id);
-  if(!d||!d.font)return null;
-  let f=dictFonts.get(d);
-  if(f)return f;
-  const fam=cssStr("wudict-font-"+d.font.slice(d.font.lastIndexOf("/")+1));
-  f={face:"@font-face{font-family:"+fam+";src:url("+cssStr(d.font)+");font-display:swap}",
-    rule:":host,:host *,:root>body,:root>body *{font-family:"+fam+","+ARTICLE_FONT_STACK+"!important}"};
-  dictFonts.set(d,f);
-  return f;
+  if(!d||!d.font&&!d.css)return null;
+  let s=dictSides.get(d);
+  if(s)return s;
+  s={face:"",rule:"",links:""};
+  if(d.font){
+    const fam=cssStr("wudict-font-"+d.font.slice(d.font.lastIndexOf("/")+1));
+    s.face="@font-face{font-family:"+fam+";src:url("+cssStr(d.font)+");font-display:swap}";
+    s.rule=":host,:host *,:root>body,:root>body *{font-family:"+fam+","+ARTICLE_FONT_STACK+"!important}";
+  }
+  for(const u of d.css||[])s.links+='<link rel="stylesheet" href="'+esc(u).replace(/"/g,"&quot;")+'">';
+  dictSides.set(d,s);
+  return s;
 }
 /* A dictionary's font face, declared in the document once. */
-function sinkDictFace(f){
-  if(fontFacesSeen.has(f.face))return;
-  fontFacesSeen.add(f.face);
-  sinkFaces([f.face]);
+function sinkDictFace(s){
+  if(!s.face||fontFacesSeen.has(s.face))return;
+  fontFacesSeen.add(s.face);
+  sinkFaces([s.face]);
 }
 /* A <link> in a shadow root loads asynchronously — .sheet is null until it
    has, so hoist on load as well as immediately (a warm sheet is already
@@ -3918,13 +3925,13 @@ function hoistShadowFonts(root){
   }
 }
 
-/* What a shadow-root article of dictID opens with: shadowBase, then the
-   dictionary's own font when it has one (dictFont). */
-function articleBase(dictID){
-  const font=dictFont(dictID);
-  if(!font)return shadowBase;
-  sinkDictFace(font);
-  return shadowBase+"<style>"+font.rule+"</style>";
+/* A shadow-root article of dictID: shadowBase, the dictionary's font rule,
+   the article, then its companion stylesheets (dictSide). */
+function articleWrap(dictID,body){
+  const s=dictSide(dictID);
+  if(!s)return shadowBase+body;
+  sinkDictFace(s);
+  return shadowBase+(s.rule&&"<style>"+s.rule+"</style>")+body+s.links;
 }
 
 function renderArticle(dd,body,dictID,frag){
@@ -3936,7 +3943,7 @@ function renderArticle(dd,body,dictID,frag){
   const host=document.createElement("div");
   host.className="article";host.dataset.dict=dictID;
   const root=host.attachShadow({mode:"open"});
-  root.innerHTML=articleBase(dictID)+body;
+  root.innerHTML=articleWrap(dictID,body);
   // After innerHTML, and last in the cascade: adopted sheets order after the
   // root's own, so the user's rules win ties against the dictionary's.
   if(userSheet)root.adoptedStyleSheets=[userSheet];
@@ -3973,11 +3980,11 @@ function frameBody(doc){
 function frameDoc(content,fid,dark,dictID,frag){
   // A frame is a document of its own: the page's faces do not reach it, so
   // the dictionary's font is declared here as well as used.
-  const font=dictFont(dictID);
+  const side=dictSide(dictID);
   return '<!DOCTYPE html><html class="'+(dark?'dark':'')+'"'+(dark?' data-dark':'')+'><head><meta charset="utf-8">'+
     /* Baked in, because a custom property cannot cross into another
        document; changes AFTER creation arrive by postMessage instead. */
-    '<style>'+(font?font.face+font.rule:"")+
+    '<style>'+(side?side.face+side.rule:"")+
     'html{font-family:'+ARTICLE_FONT_STACK+';font-size:'+articleFS+'px;line-height:1.618;color:var(--wd-article-fg,#1a1a1a);background:var(--wd-article-bg,#fff);overflow-y:hidden}'+
     'body{margin:8px}img,video,svg{max-width:100%;height:auto}'+
     'html.dark{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.92)}'+
@@ -3998,6 +4005,10 @@ function frameDoc(content,fid,dark,dictID,frag){
        container or paint it; only self-referential SIZING is refused.
        frame.js carries the matching backstop (D72). */
     FRAME_CLOSE+
+    /* The companion stylesheets (dictSide): after the article's own <link>s,
+       and after FRAME_CLOSE, so frameBody never carries them into a frame
+       made again from this one. */
+    (side?side.links:"")+
     /* The user's own article stylesheet, last of all: after the backstop, and
        after the dictionary's <link>s, which live in the body. The element is
        always emitted even when empty — frame.js addresses it by id to carry
@@ -5534,7 +5545,7 @@ function unwrapMarks(root,sel){
 function findRender(host,html,back){
   const root=host.shadowRoot;
   if(!root){host.srcdoc=frameDoc(html,host.dataset.fid,themeIsDark(),host.dataset.dict||"","");return}
-  root.innerHTML=back?html:articleBase(host.dataset.dict||"")+html;
+  root.innerHTML=back?html:articleWrap(host.dataset.dict||"",html);
   if(back)for(const m of root.querySelectorAll(".wu-hl-off"))m.className="wu-hl";
   hoistShadowFonts(root);
 }

@@ -236,7 +236,7 @@ func TestWordsAPI(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("PUT /api/prefs: %d %s", rec.Code, rec.Body)
 	}
-	if r = put("history", "secret", true); slices.Contains(r.History, "secret") {
+	if r = put("history", "unrecorded", true); slices.Contains(r.History, "unrecorded") {
 		t.Fatalf("recorded while off: %q", r.History)
 	}
 	if r = put("history", "lucid", false); !slices.Equal(r.History, []string{"casa"}) {

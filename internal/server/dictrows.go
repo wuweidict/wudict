@@ -23,7 +23,7 @@ import (
 // change to dictInfoFor alters what a row says for the same files, so a
 // client holding the previous derivation refetches it even from a build whose
 // executable stat happens to match.
-const dictRowsVersion = "2"
+const dictRowsVersion = "3"
 
 // rowCache keeps each dictionary's /api/dicts row under the key of what it was
 // derived from (rowKey). A row costs a SQLite meta read, a header probe or a
@@ -145,10 +145,14 @@ func rowKey(e *entry, global string) string {
 	if p, ok := dict.AbbrevCompanion(e.Path); ok {
 		sig(p)
 	}
-	// A font added or removed moves the folder's time, and fontPath resolves
-	// again under the new one; a font replaced in place keeps it, so the file
-	// is signed itself.
-	if p := e.fontPath(dirSig); p != "" {
+	// A companion file added or removed moves the folder's time, and
+	// companionPaths resolves again under the new one; a file edited in place
+	// keeps it, so each one there is signed itself.
+	c := e.companionPaths(dirSig)
+	if c.font != "" {
+		sig(c.font)
+	}
+	for _, p := range c.css {
 		sig(p)
 	}
 	textDB := e.Path

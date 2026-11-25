@@ -87,7 +87,9 @@ func OpenPlain(path string) (Archive, error) {
 	stardict := false
 	for _, e := range ents {
 		name := e.Name()
-		if e.IsDir() || !belongsTo(dir, name, stem) {
+		// The dictionary's own files, and the folder's custom.css and font.ttf,
+		// which it is shown with where it lies now (dict.AppliesToFolder).
+		if e.IsDir() || !belongsTo(dir, name, stem) && !dict.AppliesToFolder(name) {
 			continue
 		}
 		info, err := e.Info()

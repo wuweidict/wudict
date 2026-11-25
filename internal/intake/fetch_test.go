@@ -42,7 +42,7 @@ func TestFetcherCheck(t *testing.T) {
 		{"suffix lookalike", "https://notfreemdict.com/a.zip", false},
 		{"unlisted", "https://example.com/a.zip", false},
 		{"http refused", "http://freemdict.com/a.zip", false},
-		{"other scheme", "file:///etc/passwd", false},
+		{"other scheme", "file:///outside/escape", false},
 		{"not a url", "freemdict.com/a.zip", false},
 	}
 	for _, c := range cases {

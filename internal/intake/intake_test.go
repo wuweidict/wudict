@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -148,6 +149,40 @@ func TestSniffSharedResourcesWithTwoDictionaries(t *testing.T) {
 			if strings.Contains(f, "/res/") {
 				t.Errorf("%s claimed the shared res/ folder: %v", c.Name, c.Files)
 			}
+		}
+	}
+}
+
+// The folder's custom.css and font.ttf are every dictionary's there (D205):
+// each dictionary installs into a folder of its own, so each one carries a
+// copy - unlike res/, which stays with no one when two could claim it.
+func TestSniffFolderFilesGoWithEveryDictionary(t *testing.T) {
+	got, a := sniffZip(t,
+		member{"lib/oxford.mdx", "x"}, member{"lib/cambridge.bgl", "x"}, member{"lib/dahl.dsl", "x"},
+		member{"lib/wiktionary.ifo", "x"}, member{"lib/wiktionary.idx", "x"}, member{"lib/wiktionary.dict", "x"},
+		member{"lib/custom.css", ".a{}"}, member{"lib/font.ttf", "OTTO"}, member{"lib/res.zip", "x"},
+		member{"other/custom.css", ".b{}"},
+	)
+	if len(got) != 4 {
+		t.Fatalf("want four dictionaries, got %+v", got)
+	}
+	for _, c := range got {
+		fs := names(c)
+		if !slices.Contains(fs, "lib/custom.css") || !slices.Contains(fs, "lib/font.ttf") {
+			t.Errorf("%s lacks the folder's files: %v", c.Name, fs)
+		}
+		if slices.Contains(fs, "lib/res.zip") || slices.Contains(fs, "other/custom.css") {
+			t.Errorf("%s took a file that is not its folder's to give: %v", c.Name, fs)
+		}
+	}
+	// and each install folder really receives its own copy
+	for _, c := range got[:2] {
+		dest := t.TempDir()
+		if err := Extract(context.Background(), a, c, dest, nil); err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		if b, err := os.ReadFile(filepath.Join(dest, "custom.css")); err != nil || string(b) != ".a{}" {
+			t.Errorf("%s: custom.css = %q, %v", c.Name, b, err)
 		}
 	}
 }

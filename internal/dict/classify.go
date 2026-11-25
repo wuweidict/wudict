@@ -49,10 +49,22 @@ const (
 const stardictResZip = "res.zip"
 
 // folderNamed reports the companions named for their folder rather than for a
-// dictionary: StarDict's res.zip and the folder font ("font.ttf",
-// CompanionFont). They belong to whatever dictionary is in the folder.
+// dictionary: StarDict's res.zip, the folder font ("font.ttf", CompanionFont)
+// and the folder stylesheet ("custom.css", CompanionCSS). They belong to
+// whatever dictionary is in the folder.
 func folderNamed(lower string) bool {
-	if lower == stardictResZip {
+	return lower == stardictResZip || folderWide(lower)
+}
+
+// AppliesToFolder reports whether name is a companion every dictionary in its
+// folder uses: the folder's stylesheet and font ("custom.css", "font.ttf" …;
+// CompanionCSS, CompanionFont). Intake gives each dictionary it installs from
+// that folder its own copy, since each one lands in a folder of its own (D205).
+// Not StarDict's res.zip, which is one dictionary's media, not everyone's.
+func AppliesToFolder(name string) bool { return folderWide(strings.ToLower(entryBase(name))) }
+
+func folderWide(lower string) bool {
+	if lower == folderCSSStem+".css" {
 		return true
 	}
 	n := fontExtLen(lower)

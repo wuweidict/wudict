@@ -75,7 +75,7 @@ func TestUserFileNameGrammar(t *testing.T) {
 		{strings.Repeat("x", 65), false},
 		{".hidden", false},        // a leading dot hides the file from its own manager
 		{"..", false},             // and is the traversal token besides
-		{"../etc/passwd", false},  // separators, both kinds
+		{"../outside/escape", false},  // separators, both kinds
 		{"..\\windows\\x", false}, //
 		{"a/b", false},            //
 		{"-lead.css", false},      // must start with a letter or digit
@@ -305,8 +305,8 @@ func TestUserFileServing(t *testing.T) {
 		"/files/",
 		"/files/sub/a.png",
 		"/files/.hidden",
-		"/files/%2e%2e/%2e%2e/etc/passwd",
-		"/files/..%2f..%2fetc%2fpasswd",
+		"/files/%2e%2e/%2e%2e/outside/escape",
+		"/files/..%2f..%2foutside%2fescape",
 	} {
 		if code := getJSON(t, s, p, nil).Code; code != 404 {
 			t.Errorf("GET %s: status %d, want 404", p, code)

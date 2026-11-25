@@ -31,6 +31,12 @@ const maxScan = 200000
 type Dir struct {
 	root    string
 	indexed bool
+	// assetsOnly: the folder is shared, so it answers only for names a
+	// dictionary may legitimately bundle (dict.IsAssetName). Article HTML is
+	// third-party input, and without this any href naming a file that is not
+	// an asset - in the folder, or in a folder below it - turns /res/{id}/
+	// into a browser of the folder and everything below it.
+	assetsOnly bool
 
 	once sync.Once
 	ix   Index
@@ -40,8 +46,9 @@ type Dir struct {
 // NewDir is a folder owned by the dictionary: indexed on a miss.
 func NewDir(root string) *Dir { return &Dir{root: root, indexed: true} }
 
-// NewDirExact is a folder the dictionary shares with others: exact paths only.
-func NewDirExact(root string) *Dir { return &Dir{root: root} }
+// NewDirExact is a folder the dictionary shares with others - the one its
+// source file sits in: exact paths only, and asset names only.
+func NewDirExact(root string) *Dir { return &Dir{root: root, assetsOnly: true} }
 
 // IsDir reports whether path is an existing directory.
 func IsDir(path string) bool {
@@ -63,9 +70,27 @@ func (d *Dir) open(rel string) (io.ReadCloser, bool) {
 	return f, true
 }
 
-func (d *Dir) Open(name string) (io.ReadCloser, error) {
+// ExactPath is the file name stands for in the folder, before it is opened,
+// or "" when the folder refuses the name: empty, or not an asset name in a
+// shared folder. Always inside the folder (Clean roots the name). For a caller
+// that serves the file itself (server/companion.go).
+func (d *Dir) ExactPath(name string) string {
+	rel, ok := d.allowed(name)
+	if !ok {
+		return ""
+	}
+	return filepath.Join(d.root, filepath.FromSlash(rel))
+}
+
+// allowed is name cleaned, and whether this folder answers for it at all.
+func (d *Dir) allowed(name string) (string, bool) {
 	rel := Clean(name)
-	if rel == "" {
+	return rel, rel != "" && (!d.assetsOnly || dict.IsAssetName(rel))
+}
+
+func (d *Dir) Open(name string) (io.ReadCloser, error) {
+	rel, ok := d.allowed(name)
+	if !ok {
 		return nil, dict.ErrNotFound
 	}
 	// The original spelling, not the lower-cased key: on a case-sensitive

@@ -180,9 +180,10 @@ func (s *Server) routes() []route {
 		// reasoning, and not under /assets/ for the same reason: /assets/ is
 		// the binary's own embedded, immutably cached content.
 		{"GET", "/files/", s.handleUserFile, "", false},
-		// A dictionary's own font, the file beside its source (font.go). A
-		// page asset by dictionary id; the path is never the client's to name.
-		{"GET", fontURL, s.handleFont, "", false},
+		// A dictionary's companion files - font, stylesheets - from the
+		// folder its source sits in (companion.go). A page asset by folder
+		// key; the folder is never the client's to name.
+		{"GET", folderURL, s.handleFolder, "", false},
 		{"GET", "/assets/frame.js", serveAsset("application/javascript; charset=utf-8", frameJS), "", false},
 		{"GET", "/assets/pick.js", serveAsset("application/javascript; charset=utf-8", pickJS), "", false},
 		{"GET", "/assets/speak.js", serveAsset("application/javascript; charset=utf-8", speakJS), "", false},

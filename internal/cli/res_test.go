@@ -33,9 +33,9 @@ func TestResBasename(t *testing.T) {
 		{"posix path", "audio/word.mp3", "word.mp3"},
 		{"mdx backslash", `\audio\word.spx`, "word.spx"},
 		{"mixed separators", `audio\sub/word.png`, "word.png"},
-		{"leading slash", "/etc/passwd", "passwd"},
-		{"traversal", "../../../../etc/passwd", "passwd"},
-		{"traversal backslash", `..\..\windows\system32\x.dll`, "x.dll"},
+		{"leading slash", "/outside/escape", "escape"},
+		{"traversal", "../../../../outside/escape", "escape"},
+		{"traversal backslash", `..\..\outside\dir\x.png`, "x.png"},
 		{"bare dotdot", "..", ""},
 		{"bare dot", ".", ""},
 		{"dotdot with separators", "../..", ""},
@@ -316,7 +316,7 @@ func TestPlanRes(t *testing.T) {
 		problems int
 	}{
 		{name: "tree kept", names: []string{"audio/US/ab/1.ogg", `\audio\x.spx`}, want: []string{"audio/US/ab/1.ogg", "audio/x.spx"}},
-		{name: "climbing removed", names: []string{"../../etc/passwd", "/abs/x.png", `C:\w\x.png`}, want: []string{"etc/passwd", "abs/x.png", "C-/w/x.png"}},
+		{name: "climbing removed", names: []string{"../../outside/escape", "/abs/x.png", `C:\w\x.png`}, want: []string{"outside/escape", "abs/x.png", "C-/w/x.png"}},
 		{name: "no usable name", names: []string{"..", "/", "ok.png"}, want: []string{"ok.png"}, problems: 2},
 		{name: "same file after sanitizing", names: []string{"a:b.png", "a-b.png"}, want: []string{"a-b.png"}, problems: 1},
 		{name: "same file but for case", names: []string{"Img/A.png", "img/a.png"}, want: []string{"Img/A.png"}, problems: 1},

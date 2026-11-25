@@ -312,30 +312,68 @@ func CompanionFont(src string) (path string, folder bool) {
 	// A dictionary that is itself called "font" has the folder's font as its
 	// own name; it is still the folder's, and shared.
 	shared := strings.EqualFold(filepath.Base(stem), folderFontStem)
-	if p := firstFont(stem); p != "" {
+	if p := firstOf(stem, fontSpellings); p != "" {
 		return p, shared
 	}
 	if shared {
 		return "", false
 	}
-	if p := firstFont(filepath.Join(filepath.Dir(src), folderFontStem)); p != "" {
+	if p := firstOf(filepath.Join(filepath.Dir(src), folderFontStem), fontSpellings); p != "" {
 		return p, true
 	}
 	return "", false
 }
 
-// fontSpellings is fontExts as firstFont tries them: each in lower case, then
-// upper case. Built once, so a probe allocates only its path.
-var fontSpellings = func() []string {
-	out := make([]string, 0, 2*len(fontExts))
-	for _, e := range fontExts {
+// folderCSSStem names the stylesheet every dictionary in its folder is shown
+// with: "custom.css" (D205). Named for the folder like font.ttf, so it belongs
+// to no one dictionary; "style.css" would not do, because MDX repacks ship and
+// link one of their own.
+const folderCSSStem = "custom"
+
+// CompanionCSS lists the stylesheets a dictionary whose main file is src is
+// shown with, in cascade order: the folder's "custom.css", then the one named
+// after its stem ("oxford.css" beside "oxford.dsl"). An .mdx gets the folder's
+// only: a stylesheet named after it already has MDict's meaning, a loose
+// replacement for one its articles link (mdx.Dict.looseFile). own reports
+// the stem one, the one removal may take. At most 4 stats; callers ask when a
+// row is derived (server/companion.go).
+func CompanionCSS(src string) (css []string, own string) {
+	if src == "" {
+		return nil, ""
+	}
+	if p := firstOf(filepath.Join(filepath.Dir(src), folderCSSStem), cssSpellings); p != "" {
+		css = append(css, p)
+	}
+	stem := Stem(src)
+	// A dictionary called "custom" names the folder's own file: listed once.
+	if MainExt(src) == ".mdx" || strings.EqualFold(filepath.Base(stem), folderCSSStem) {
+		return css, ""
+	}
+	if p := firstOf(stem, cssSpellings); p != "" {
+		css = append(css, p)
+		own = p
+	}
+	return css, own
+}
+
+// fontSpellings and cssSpellings are the extensions firstOf tries: each in
+// lower case, then upper case. Built once, so a probe allocates only its path.
+var (
+	fontSpellings = bothCases(fontExts)
+	cssSpellings  = bothCases([]string{".css"})
+)
+
+func bothCases(exts []string) []string {
+	out := make([]string, 0, 2*len(exts))
+	for _, e := range exts {
 		out = append(out, e, strings.ToUpper(e))
 	}
 	return out
-}()
+}
 
-func firstFont(base string) string {
-	for _, e := range fontSpellings {
+// firstOf is the first base+spelling that is a file, "" for none.
+func firstOf(base string, spellings []string) string {
+	for _, e := range spellings {
 		if p := base + e; fsx.FileExists(p) {
 			return p
 		}
@@ -472,12 +510,47 @@ func SourceFiles(src string) []string {
 	for _, p := range CompanionMedia(src) {
 		add(p)
 	}
-	// The dictionary's own font only. A folder's "font.ttf" is every
-	// dictionary's there, and removing one must not take it from the rest.
-	if p, folder := CompanionFont(src); p != "" && !folder {
-		add(p)
+	// The dictionary's own font and stylesheet; the folder's "font.ttf" and
+	// "custom.css" only when it is the folder's sole dictionary - the shape an
+	// import leaves, which gives every dictionary a folder and a copy of its own
+	// (AppliesToFolder). Elsewhere they are every dictionary's there, and
+	// removing one must not take them from the rest. Left behind, they would
+	// also keep an import's emptied folder from being pruned. (An .mdx's own
+	// stylesheet is already among its CompanionSuffixes.)
+	css, own := CompanionCSS(src)
+	font, folderFont := CompanionFont(src)
+	folderCSS := len(css) > 0 && css[0] != own // custom.css comes first when it is there
+	// The folder is read only when there is a folder file to decide about.
+	sole := (folderCSS || folderFont) && soleDictionaryInDir(src)
+	for _, p := range css {
+		if p == own || sole {
+			add(p)
+		}
+	}
+	if font != "" && (!folderFont || sole) {
+		add(font)
 	}
 	return out
+}
+
+// soleDictionaryInDir reports whether src is the only dictionary - or file
+// that may be one by its content - in its folder. An unreadable folder
+// answers false: the safe side of this question leaves the user's files alone.
+func soleDictionaryInDir(src string) bool {
+	ents, err := os.ReadDir(filepath.Dir(src))
+	if err != nil {
+		return false
+	}
+	self := filepath.Base(src)
+	for _, e := range ents {
+		if e.IsDir() || e.Name() == self {
+			continue
+		}
+		if k := ClassifyName(e.Name()); k == KindMain || k == KindCandidate {
+			return false
+		}
+	}
+	return true
 }
 
 // soleIfoInDir reports whether dir holds exactly one StarDict .ifo. An

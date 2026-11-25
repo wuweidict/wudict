@@ -2736,11 +2736,19 @@ components:
         font:
           type: string
           description: >
-            Where the dictionary's own font is served (`/font/{key}?v=…`, a page
-            asset with the session, not an extension route): a `.ttf`, `.otf`,
-            `.woff` or `.woff2` beside the source, named after it, or the
+            Where the dictionary's own font is served (`/folder/{key}/{name}?v=…`,
+            a page asset with the session, not an extension route): a `.ttf`,
+            `.otf`, `.woff` or `.woff2` beside the source, named after it, or the
             folder's `font.ttf`. One URL per file: dictionaries sharing a font
             share it. Absent when there is none.
+        css:
+          type: array
+          items: { type: string }
+          description: >
+            The stylesheets beside the source the page links after the article,
+            in cascade order: the folder's `custom.css`, then `<name>.css` (not
+            for MDict, whose `<name>.css` replaces a linked one instead). Served
+            like `font`. Absent when there are none.
         fontError:
           type: string
           description: Set instead of `font` when the file named like a font cannot be used.

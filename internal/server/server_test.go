@@ -1048,8 +1048,8 @@ func TestResourceOverrideRejectsEscapes(t *testing.T) {
 	lib := filepath.Dir(textDB)
 	// a real, readable file one level above the override dir - the exact
 	// thing a traversal would be reaching for
-	secret := filepath.Join(lib, "info.txt")
-	if err := os.WriteFile(secret, []byte("SECRET"), 0o644); err != nil {
+	outside := filepath.Join(lib, "info.txt")
+	if err := os.WriteFile(outside, []byte("OUTSIDE"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(lib, "res"), 0o755); err != nil {
@@ -1075,12 +1075,12 @@ func TestResourceOverrideRejectsEscapes(t *testing.T) {
 		"../../info.txt",
 		"a/../../info.txt",
 		"./../info.txt",
-		"/etc/passwd",
+		"/outside/escape",
 		"../res/../info.txt",
 	} {
 		rec := httptest.NewRecorder()
 		s.serveOverride(rec, newRequest("GET", "/res/"+id+"/x", nil), e, name)
-		if strings.Contains(rec.Body.String(), "SECRET") {
+		if strings.Contains(rec.Body.String(), "OUTSIDE") {
 			t.Errorf("%q reached outside the override directory: %q", name, rec.Body.String())
 		}
 	}

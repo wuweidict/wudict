@@ -59,6 +59,49 @@ func TestCompanionFont(t *testing.T) {
 	}
 }
 
+func TestCompanionCSS(t *testing.T) {
+	cases := []struct {
+		name  string
+		files []string // the first is the main file
+		want  []string // base names, cascade order
+		own   string
+	}{
+		{"dsl, both", []string{"ru-en.dsl.dz", "custom.css", "ru-en.css"}, []string{"custom.css", "ru-en.css"}, "ru-en.css"},
+		{"stardict own", []string{"star.ifo", "star.css"}, []string{"star.css"}, "star.css"},
+		{"slob folder only", []string{"x.slob", "custom.css"}, []string{"custom.css"}, ""},
+		{"wudict markdown keeps its stem", []string{"g.wudict.md", "g.wudict.css"}, []string{"g.wudict.css"}, "g.wudict.css"},
+		{"upper case", []string{"x.bgl", "CUSTOM.CSS", "x.CSS"}, []string{"CUSTOM.CSS", "x.CSS"}, "x.CSS"},
+		{"mdx: the folder's only", []string{"Oxford.mdx", "Oxford.css", "custom.css"}, []string{"custom.css"}, ""},
+		{"a dictionary called custom", []string{"custom.dsl", "custom.css"}, []string{"custom.css"}, ""},
+		{"a neighbour's is not ours", []string{"a.dsl", "b.css"}, nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, f := range tc.files {
+				touch(t, filepath.Join(dir, f))
+			}
+			css, own := CompanionCSS(filepath.Join(dir, tc.files[0]))
+			var got []string
+			for _, p := range css {
+				got = append(got, filepath.Base(p))
+			}
+			// a case-insensitive filesystem answers the lower-case probe first
+			if len(got) != len(tc.want) {
+				t.Fatalf("css = %q, want %q", got, tc.want)
+			}
+			for i := range got {
+				if !strings.EqualFold(got[i], tc.want[i]) {
+					t.Errorf("css = %q, want %q", got, tc.want)
+				}
+			}
+			if !strings.EqualFold(filepath.Base(own), tc.own) && !(own == "" && tc.own == "") {
+				t.Errorf("own = %q, want %q", own, tc.own)
+			}
+		})
+	}
+}
+
 // Removal lists the dictionary's own font and never the folder's, which every
 // other dictionary there is shown in too.
 func TestSourceFilesFont(t *testing.T) {
@@ -69,10 +112,35 @@ func TestSourceFilesFont(t *testing.T) {
 		t.Errorf("SourceFiles = %v, want it to list %s", got, own)
 	}
 
+	// the folder's, with a neighbour: never listed
 	dir = t.TempDir()
 	mdx = touch(t, filepath.Join(dir, "Oxford.mdx"))
+	touch(t, filepath.Join(dir, "cambridge.bgl"))
 	shared := touch(t, filepath.Join(dir, "font.ttf"))
 	if got := SourceFiles(mdx); slices.Contains(got, shared) {
 		t.Errorf("SourceFiles = %v, must not list the folder's %s", got, shared)
+	}
+
+	// the same for stylesheets, in a format whose own one is new
+	dir = t.TempDir()
+	dsl := touch(t, filepath.Join(dir, "ru-en.dsl"))
+	touch(t, filepath.Join(dir, "wiktionary.ifo"))
+	ownCSS := touch(t, filepath.Join(dir, "ru-en.css"))
+	folderCSS := touch(t, filepath.Join(dir, "custom.css"))
+	got := SourceFiles(dsl)
+	if !slices.Contains(got, ownCSS) || slices.Contains(got, folderCSS) {
+		t.Errorf("SourceFiles = %v, want %s and never %s", got, ownCSS, folderCSS)
+	}
+
+	// the sole dictionary of its folder - what an import leaves - takes the
+	// folder's files with it, so the emptied folder can go too
+	dir = t.TempDir()
+	dsl = touch(t, filepath.Join(dir, "dahl.dsl"))
+	touch(t, filepath.Join(dir, "readme.txt"))
+	soleCSS := touch(t, filepath.Join(dir, "custom.css"))
+	soleFont := touch(t, filepath.Join(dir, "font.woff2"))
+	got = SourceFiles(dsl)
+	if !slices.Contains(got, soleCSS) || !slices.Contains(got, soleFont) {
+		t.Errorf("SourceFiles = %v, want %s and %s", got, soleCSS, soleFont)
 	}
 }

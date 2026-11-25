@@ -423,9 +423,9 @@ type entry struct {
 	styleDone bool
 	style     htmlref.Styles
 
-	// font is the font file beside the source this dictionary is shown in
-	// (font.go); nil until first asked.
-	font atomic.Pointer[fontFile]
+	// companions are the files beside the source the page applies to this
+	// dictionary's articles (companion.go); nil until first asked.
+	companions atomic.Pointer[companionFiles]
 
 	ingestMu  sync.Mutex  // one ingest at a time per dictionary
 	autoTried atomic.Bool // first-search auto-index, attempted once

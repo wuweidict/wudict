@@ -57,7 +57,7 @@ func TestResFilePath(t *testing.T) {
 		{"subtree kept", "images/i/x.png", "/out/d.csv_res/images/i/x.png"},
 		{"backslashes", `images\x.png`, "/out/d.csv_res/images/x.png"},
 		{"leading slash", "/a.mp3", "/out/d.csv_res/a.mp3"},
-		{"climbing", "../../etc/passwd", "/out/d.csv_res/etc/passwd"},
+		{"climbing", "../../outside/escape", "/out/d.csv_res/outside/escape"},
 		{"climbing mid-path", "a/../../b.png", "/out/d.csv_res/b.png"},
 		{"dot components", "./a/./b.png", "/out/d.csv_res/a/b.png"},
 		{"control characters", "a\x00b\x1f.mp3", "/out/d.csv_res/ab.mp3"},

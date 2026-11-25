@@ -940,7 +940,7 @@ func TestReaderIncludeStaysInFolder(t *testing.T) {
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	outside := filepath.Join(root, "secret.dsl")
+	outside := filepath.Join(root, "outside.dsl")
 	if err := os.WriteFile(outside, []byte("leaked\n\t[m1]x[/m]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -951,7 +951,7 @@ func TestReaderIncludeStaysInFolder(t *testing.T) {
 	if err := os.WriteFile(main, []byte(
 		"#NAME\t\"D\"\n"+
 			"#INCLUDE\t\""+filepath.ToSlash(outside)+"\"\n"+
-			"#INCLUDE\t\"..\\\\secret.dsl\"\n"+
+			"#INCLUDE\t\"..\\\\outside.dsl\"\n"+
 			"#INCLUDE\t\"\\\\\\\\host\\\\share\\\\near.dsl\"\n"+
 			"alpha\n\t[m1]a[/m]\n"), 0o644); err != nil {
 		t.Fatal(err)

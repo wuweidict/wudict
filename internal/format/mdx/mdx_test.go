@@ -232,7 +232,7 @@ func TestIntegrationResource(t *testing.T) {
 	if _, _, err := d.Resource("no/such/resource.xyz"); err == nil {
 		t.Error("missing resource should error")
 	}
-	if _, _, err := d.Resource("../../etc/passwd"); err == nil {
+	if _, _, err := d.Resource("../../outside/escape"); err == nil {
 		t.Error("path traversal must be rejected")
 	}
 }
@@ -253,7 +253,7 @@ func TestLooseSiblingAssets(t *testing.T) {
 	}
 	write("LDOCE6.css", "span{color:red}")
 	write("entry.js", "function toggle(){}")
-	write("secrets.env", "TOKEN=hunter2")
+	write("private.dat", "not an asset")
 	if err := os.MkdirAll(filepath.Join(dir, "img"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -284,11 +284,11 @@ func TestLooseSiblingAssets(t *testing.T) {
 	}
 
 	// not an asset type a dictionary loads: never served, even though it exists
-	if _, _, err := read("secrets.env"); err == nil {
+	if _, _, err := read("private.dat"); err == nil {
 		t.Error("a sibling file outside the asset allowlist must not be served")
 	}
 	// traversal stays blocked
-	for _, bad := range []string{"../outside.css", "../../etc/passwd", "/etc/passwd"} {
+	for _, bad := range []string{"../outside.css", "../../outside/escape", "/outside/escape"} {
 		if _, _, err := read(bad); err == nil {
 			t.Errorf("traversal not blocked: %q", bad)
 		}

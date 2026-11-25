@@ -277,7 +277,7 @@ func TestProbeFindsNothingAndStaysBounded(t *testing.T) {
 // is not carried onto it.
 func TestSiblingURL(t *testing.T) {
 	f := loopback()
-	base, err := url.Parse("https://example.com/files/dicts/Oxford.mdx?token=secret#frag")
+	base, err := url.Parse("https://example.com/files/dicts/Oxford.mdx?sig=abc123#frag")
 	if err != nil {
 		t.Fatal(err)
 	}

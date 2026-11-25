@@ -175,6 +175,25 @@ func TestDir(t *testing.T) {
 	if e.List() != nil {
 		t.Errorf("DirExact.List() = %q, want nil", e.List())
 	}
+
+	// ...and asset names only: it is the folder the dictionary sits in, so a
+	// reference to anything else there is never served (every format's loose
+	// files go through this one check).
+	for _, n := range []string{"private.dat", "sub/private.dat", "notes"} {
+		p := filepath.Join(root, filepath.FromSlash(n))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("not an asset"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := read(t, e, n); got != "" {
+			t.Errorf("DirExact served %s: %q", n, got)
+		}
+		if got := read(t, d, n); got == "" {
+			t.Errorf("a dictionary's own folder refused %s", n)
+		}
+	}
 }
 
 func TestKey(t *testing.T) {

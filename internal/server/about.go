@@ -109,8 +109,8 @@ func (s *Server) aboutSourceFor(e *entry) aboutSource {
 // makes the disclosure render even for a dictionary that says nothing else.
 func (s *Server) aboutOf(e *entry, base string) (aboutInfo, bool) {
 	info, ok := s.aboutText(e, base)
-	if f := e.font.Load(); f != nil && f.bad {
-		info.HTML += "<p>" + html.EscapeString(fontUnusable(f.path)) + "</p>"
+	if c := e.companions.Load(); c != nil && c.fontBad {
+		info.HTML += "<p>" + html.EscapeString(fontUnusable(c.font)) + "</p>"
 		ok = true
 	}
 	return info, ok

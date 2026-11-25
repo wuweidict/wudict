@@ -417,7 +417,29 @@ To see it in action, click the text below, then click it again:
 
 All text in the dictionary's articles is shown in that font, also where the dictionary's own style sets a different font. ❗️ A symbol or phonetic font that the dictionary supplies is replaced too: if phonetic signs show as boxes, remove the file. Custom styles still change the font.
 
-Reload the page after you add, replace or delete the file. If wudict cannot use the file, **About this dictionary** says so. To set one font for all articles, use [custom styles](<entry://wudict styles>).
+Reload the page after you add, replace or delete the file. If wudict cannot use the file, **About this dictionary** says so. To set one font for all articles, use [custom styles](<entry://wudict styles>). A stylesheet for one dictionary: [wudict dictionary css](<entry://wudict dictionary css>).
+
+***
+
+- [index](/browse?dict=wudict-howto)
+
+## wudict dictionary css
+## wudict custom.css
+## wudict dictionary stylesheet
+
+**Give a dictionary its own stylesheet**: put a `.css` file beside the dictionary file, with the same name.
+
+- `oxford.css` beside `oxford.dsl`, `oxford.ifo`, `oxford.slob`, `oxford.bgl` or `oxford.zim`. For `notes.wudict.md`, the name is `notes.wudict.css`.
+- `custom.css` is for every dictionary in its folder, MDict dictionaries too.
+- When both are there, `custom.css` is applied first, then the dictionary's own file, which wins between equally specific rules.
+
+The stylesheets apply after the dictionary's own style: where a rule of yours and a rule of the dictionary are equally specific, yours wins. A `url()` in the file, for example `url(paper.png)`, finds the file in the same folder.
+
+For MDict, `oxford.css` beside `oxford.mdx` keeps its MDict meaning: it replaces a stylesheet of the same name that the dictionary uses. Only `custom.css` is added.
+
+When you [import](<entry://wudict import>) a bundle that has a `custom.css` or `font.ttf` beside several dictionaries, each dictionary gets its own copy. When you [remove](<entry://wudict remove>) a dictionary that is the only one in its folder, its copies go with it.
+
+Reload the page after you add, change or delete a file. These files are not the same as [custom styles](<entry://wudict styles>): custom styles are for all dictionaries, you edit them in the app, and they win over all of these files.
 
 ***
 

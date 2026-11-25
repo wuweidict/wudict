@@ -143,7 +143,7 @@ func TestStyleFilesAreServedUncached(t *testing.T) {
 
 	// Only the two names exist. Nothing else under /style/ is a file the user
 	// put there, so nothing else may be read out of that folder.
-	for _, p := range []string{"/style/", "/style/secret.txt", "/style/sub/app.css"} {
+	for _, p := range []string{"/style/", "/style/other.txt", "/style/sub/app.css"} {
 		rec := httptest.NewRecorder()
 		s.ServeHTTP(rec, newRequest("GET", p, nil))
 		if rec.Code != 404 {

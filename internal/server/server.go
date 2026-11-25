@@ -746,13 +746,16 @@ type dictInfo struct {
 	FTSSize  int64    `json:"ftsSize,omitempty"`   // bytes of fulltext.db; absent when the index is inside text.db
 	HasMedia bool     `json:"hasMedia,omitempty"`  // packable binary resources exist (drives "pack media")
 
-	// Font: the font file beside the source this dictionary is shown in
-	// (dict.CompanionFont), as the URL that serves it - one per file, shared
-	// by the dictionaries that share it, versioned so a replaced file is
-	// fetched again. FontError: why a file named like a font cannot be used,
-	// the one part of this a person has to act on.
-	Font      string `json:"font,omitempty"`
-	FontError string `json:"fontError,omitempty"`
+	// The companion files beside the source the page applies to this
+	// dictionary's articles (companion.go), as the URLs that serve them - one
+	// per file, shared by the dictionaries that share it, versioned so a
+	// replaced file is fetched again. Font: the font (dict.CompanionFont).
+	// CSS: the stylesheets, in cascade order (dict.CompanionCSS). FontError:
+	// why a file named like a font cannot be used, the one part of this a
+	// person has to act on.
+	Font      string   `json:"font,omitempty"`
+	CSS       []string `json:"css,omitempty"`
+	FontError string   `json:"fontError,omitempty"`
 
 	// Builtin: shipped with the app (the wudict howto), not added by the user.
 	// It cannot be removed, and a library of builtins alone is an empty one.
@@ -983,7 +986,7 @@ func (s *Server) diskDictInfo(e *entry) dictInfo {
 		}
 	}
 	addProvenance(&info, e.Path)
-	e.deriveFont(&info)
+	e.deriveCompanions(&info)
 	return info
 }
 
@@ -1979,7 +1982,7 @@ func (s *Server) serveOverride(w http.ResponseWriter, r *http.Request, e *entry,
 		return false // no library folder yet: nothing can have been put in one
 	}
 	dir := filepath.Join(filepath.Dir(textDB), "res")
-	// path.Clean on a rooted copy resolves "..", so /res/{id}/../../../etc/passwd
+	// path.Clean on a rooted copy resolves "..", so /res/{id}/../../../outside/escape
 	// folds to a name inside the directory rather than above it; `within` is a
 	// second, lexical check for anything that still lands outside. Both are
 	// verified by removing them: four traversal vectors leak without them.
@@ -1999,26 +2002,33 @@ func (s *Server) serveOverride(w http.ResponseWriter, r *http.Request, e *entry,
 		return false // the ordinary case: no override for this resource
 	}
 	defer f.Close()
-	if m := resolveMIME(name, ""); m != "" {
-		w.Header().Set("Content-Type", m)
-	}
 	// no-cache, not max-age: an override is something the user is actively
 	// editing, and a day-long cache would hide their next attempt. ServeContent
 	// supplies Last-Modified, so revalidation stays cheap.
-	w.Header().Set("Cache-Control", "no-cache")
+	serveLocalFile(w, r, name, f, fi, "no-cache")
+	return true
+}
+
+// serveLocalFile sends a file of the user's that renders inside articles - a
+// res/ override, a companion file beside a source (companion.go): its type by
+// name, and the light colour scheme the articles render in when it is a
+// stylesheet, script or SVG (schemeResource). ServeContent answers Range and
+// conditional requests.
+func serveLocalFile(w http.ResponseWriter, r *http.Request, name string, f *os.File, fi os.FileInfo, cacheControl string) {
+	if m := resolveMIME(name, ""); m != "" {
+		w.Header().Set("Content-Type", m)
+	}
+	w.Header().Set("Cache-Control", cacheControl)
 	if schemeResource(name) && fi.Size() <= maxSchemeRewrite {
-		// An override renders in the same article as the file it replaces,
-		// so it gets the same light colour scheme.
 		body, err := io.ReadAll(f)
 		if err != nil {
 			httpErr(w, 500, "%v", err)
-			return true
+			return
 		}
 		http.ServeContent(w, r, name, fi.ModTime(), bytes.NewReader(lightSchemeBytes(body)))
-		return true
+		return
 	}
 	http.ServeContent(w, r, name, fi.ModTime(), f)
-	return true
 }
 
 // canTranscodeSpx reports whether any Speex→WAV backend is available.

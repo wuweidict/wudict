@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"testing"
 )
@@ -177,14 +178,14 @@ func TestOpenPlainRefusesUnrelatedFile(t *testing.T) {
 func TestPlainOpenRefusesUnlistedName(t *testing.T) {
 	dir := writeFiles(t, map[string]string{
 		"Oxford.mdx": "main",
-		"secret.txt": "not yours",
+		"other.txt": "not yours",
 	})
 	a, err := OpenPlain(filepath.Join(dir, "Oxford.mdx"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	for _, name := range []string{"secret.txt", "../secret.txt", "./Oxford.mdx"} {
+	for _, name := range []string{"other.txt", "../other.txt", "./Oxford.mdx"} {
 		if rc, err := a.Open(name); err == nil {
 			rc.Close()
 			t.Errorf("Open(%q) succeeded", name)
@@ -241,6 +242,26 @@ func TestOpenPlainTakesLooseAssets(t *testing.T) {
 	}
 	cands := plainCandidates(t, filepath.Join(dir, "OED.mdx"))
 	if len(cands) != 1 || len(cands[0].Missing) != 0 {
+		t.Fatalf("candidates = %+v", cands)
+	}
+}
+
+// The folder's custom.css and font.ttf go with a dictionary imported from it:
+// it was shown with them there, and its own install folder is a new folder.
+func TestOpenPlainTakesFolderFiles(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"dahl.dsl":   "main",
+		"custom.css": "shared style",
+		"font.woff2": "shared font",
+		"other.css":  "a neighbour's",
+	})
+	got := plainNames(t, filepath.Join(dir, "dahl.dsl"))
+	want := []string{"custom.css", "dahl.dsl", "font.woff2"}
+	if !equal(got, want) {
+		t.Fatalf("entries = %v, want %v", got, want)
+	}
+	cands := plainCandidates(t, filepath.Join(dir, "dahl.dsl"))
+	if len(cands) != 1 || !slices.Contains(cands[0].Files, "custom.css") {
 		t.Fatalf("candidates = %+v", cands)
 	}
 }

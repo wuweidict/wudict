@@ -259,7 +259,7 @@ func TestLemmaInstallRejectsBadCodes(t *testing.T) {
 	site := newCatalogSite(t, "", nil)
 	s, _ := lemmaServer(t, site.url, 2)
 
-	for _, q := range []string{"", "zzz", "../../etc/passwd", "pl%20ru"} {
+	for _, q := range []string{"", "zzz", "../../outside/escape", "pl%20ru"} {
 		if rec := do(t, s, "POST", "/api/lemmas?code="+q); rec.Code != 400 {
 			t.Fatalf("POST code=%q: status %d, want 400", q, rec.Code)
 		}

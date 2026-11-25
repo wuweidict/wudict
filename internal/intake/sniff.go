@@ -58,6 +58,11 @@ func Sniff(a Archive) ([]Candidate, error) {
 	// same reason: resources that belong to two dictionaries belong to
 	// neither, and guessing costs the user the media of whichever it guessed.
 	shared := map[string][]Entry{}
+	// custom.css and font.ttf are the folder's on purpose: every dictionary
+	// there is shown with them (dict.AppliesToFolder). Each dictionary is
+	// installed into a folder of its own, so each one gets a copy - the one
+	// way they keep looking as they did in the bundle.
+	folderWide := map[string][]Entry{}
 
 	for _, e := range entries {
 		if !safeEntryName(e.Name) {
@@ -82,8 +87,13 @@ func Sniff(a Archive) ([]Candidate, error) {
 		case dict.KindCompanion:
 			stem := dict.CompanionStem(e.Base)
 			if stem == "" {
-				// res.zip: named for its folder
-				shared[e.Dir] = append(shared[e.Dir], e)
+				// named for its folder: custom.css and font.ttf are every
+				// dictionary's there; res.zip is the one StarDict's
+				if dict.AppliesToFolder(e.Base) {
+					folderWide[e.Dir] = append(folderWide[e.Dir], e)
+				} else {
+					shared[e.Dir] = append(shared[e.Dir], e)
+				}
 				continue
 			}
 			k := key(e.Dir, stem)
@@ -120,6 +130,11 @@ func Sniff(a Archive) ([]Candidate, error) {
 			continue
 		}
 		c := buildCandidate(*g.main, g.companions)
+		for _, e := range folderWide[g.main.Dir] {
+			c.Files = append(c.Files, e.Name)
+			c.sizes = append(c.sizes, e.Size)
+			c.Size += e.Size
+		}
 		if perDir[g.main.Dir] == 1 {
 			for _, e := range shared[g.main.Dir] {
 				c.Files = append(c.Files, e.Name)

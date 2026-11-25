@@ -23,7 +23,7 @@ func legacyTree(t *testing.T) string {
 	files := map[string]string{
 		"wudict.toml":                    `SERVER_PORT = "7000"`,
 		"state.json":                     `{"version":3,"dicts":[]}`,
-		"token":                          "secret",
+		"token":                          "abc123",
 		"history.txt":                    "word",
 		"favourites.txt":                 "fav",
 		"groups.ini":                     "G = x",
@@ -70,7 +70,7 @@ func wantMoved(t *testing.T, x Dirs) {
 		filepath.Join(x.Data, "favourites.txt"):                    "fav",
 		filepath.Join(x.Data, "builtin", "wudict-howto.wudict.md"): "# howto",
 		filepath.Join(x.State, "state.json"):                       `{"version":3,"dicts":[]}`,
-		filepath.Join(x.State, "token"):                            "secret",
+		filepath.Join(x.State, "token"):                            "abc123",
 		filepath.Join(x.State, "history.txt"):                      "word",
 	} {
 		if got := read(t, p); got != want {

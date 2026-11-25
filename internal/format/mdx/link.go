@@ -7,12 +7,10 @@ package mdx
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
 
-	"github.com/wuweidict/wudict/internal/dict"
 	gomdict "github.com/wuweidict/wudict/internal/gomdict"
 	"github.com/wuweidict/wudict/internal/resource"
 )
@@ -32,20 +30,10 @@ func init() {
 // MediaSources is the loose-file half: MDict serves files sitting NEXT TO the
 // .mdx (LDOCE6 ships LDOCE6.css and entry.js that way), and those need no
 // dictionary and no locator. The folder is shared with every other dictionary
-// in it, so it is exact-path only and gated by the same allowlist looseFile
-// uses - dict.IsAssetName, one copy, because it is a security boundary.
+// in it, so it is exact-path and asset-name only (resource.NewDirExact, the
+// allowlist looseFile uses too: dict.IsAssetName).
 func MediaSources(srcPath string) []resource.Source {
-	return []resource.Source{&assetDir{Dir: resource.NewDirExact(filepath.Dir(srcPath))}}
-}
-
-// assetDir is a folder that only answers for names that are assets.
-type assetDir struct{ *resource.Dir }
-
-func (a *assetDir) Open(name string) (io.ReadCloser, error) {
-	if !dict.IsAssetName(resource.Clean(name)) {
-		return nil, dict.ErrNotFound
-	}
-	return a.Dir.Open(name)
+	return []resource.Source{resource.NewDirExact(filepath.Dir(srcPath))}
 }
 
 // MediaLinks enumerates every resource of every companion .mdd as a location.
