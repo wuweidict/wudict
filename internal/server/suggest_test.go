@@ -56,21 +56,54 @@ func TestMergeWords(t *testing.T) {
 		want  []string
 	}{
 		{"nothing", "a", nil, 5, []string{}},
-		{"the word typed in full leads the words it starts", "banana",
-			[]string{"bananas", "banana boat", "banana"}, 5, []string{"banana", "banana boat", "bananas"}},
+		{"the word typed, then the words it starts, then the phrases", "banana",
+			[]string{"bananas", "banana boat", "banana"}, 5, []string{"banana", "bananas", "banana boat"}},
 		{"one row for a word, whatever its capitals", "ban",
 			[]string{"BANANA", "banana", "Banana", "BANANA BOAT"}, 5, []string{"banana", "BANANA BOAT"}},
 		{"the spelling typed is the one kept", "Banana",
 			[]string{"banana", "BANANA", "Banana"}, 5, []string{"Banana"}},
-		{"also when it sorts past the cut", "March",
-			[]string{"mar", "march", "March"}, 2, []string{"mar", "March"}},
-		{"an accent is another word", "cafe",
-			[]string{"café", "cafe"}, 5, []string{"cafe", "café"}},
+		{"and leads the list", "March",
+			[]string{"mar", "march", "March"}, 2, []string{"March", "mar"}},
+		{"otherwise the lowercase spelling, wherever it arrives", "mar",
+			[]string{"MARCH", "March", "march"}, 5, []string{"march"}},
+		{"an accent is another word, after the one typed", "cafe",
+			[]string{"café", "cafe", "cafes"}, 5, []string{"cafe", "café", "cafes"}},
+		{"the word typed with an accent leads its other spellings", "côte",
+			[]string{"cote", "coté", "côte", "côté", "coteau"}, 5, []string{"côte", "cote", "coté", "côté", "coteau"}},
+		{"shortest first: a run of phrases hides no word (issue #45)", "genehmig",
+			[]string{"genehmigen Ausgabe", "genehmigen Bank", "genehmigen", "genehmige", "genehmigt", "genehmigte", "genehmigungsfähig"}, 5,
+			[]string{"genehmige", "genehmigt", "genehmigen", "genehmigte", "genehmigungsfähig"}},
+		{"the words that start as typed lead the ones reached by folding (D181)", "inform",
+			[]string{"informà", "înforma", "informal", "informe", "inform about", "înform asupra"}, 6,
+			[]string{"informà", "informe", "informal", "înforma", "inform about", "înform asupra"}},
+		{"as typed whichever the normalization form", "café",
+			[]string{"cafeina", "café au lait", "cafés"}, 5, []string{"cafés", "cafeina", "café au lait"}},
+		{"phrases shortest first too", "take",
+			[]string{"take a bow", "take on", "take a bath"}, 5, []string{"take on", "take a bow", "take a bath"}},
+		{"dictionary order between words of one length", "sa",
+			[]string{"säge", "Sage", "sage", "saga"}, 5, []string{"saga", "sage", "säge"}},
+		{"a combining accent adds no length", "caf",
+			[]string{"cafes", "café"}, 5, []string{"café", "cafes"}},
 		{"cut to n", "a", []string{"ac", "ab", "aa", "ad"}, 3, []string{"aa", "ab", "ac"}},
 		{"blank keys are dropped, and spaces around one", "a", []string{" ", "", " ab "}, 5, []string{"ab"}},
 	} {
 		if got := mergeWords(tc.q, tc.words, tc.n); got == nil || !slices.Equal(got, tc.want) {
 			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// Two characters the keys start with ask for fewer keys (D199 Am. 5); a
+// wildcard pattern counts what comes before its first wildcard.
+func TestSuggestKeysFor(t *testing.T) {
+	for q, want := range map[string]int{
+		"t": suggestKeysShort, "ta": suggestKeysShort, "tä": suggestKeysShort,
+		"tak": suggestKeys, "take a": suggestKeys,
+		"ta*": suggestKeysShort, "*abc": suggestKeysShort, "ab?cd": suggestKeysShort,
+		"tak*": suggestKeys, "tak?x": suggestKeys,
+	} {
+		if got := suggestKeysFor(q); got != want {
+			t.Errorf("suggestKeysFor(%q) = %d, want %d", q, got, want)
 		}
 	}
 }

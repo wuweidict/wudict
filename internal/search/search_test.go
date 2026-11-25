@@ -321,7 +321,8 @@ func (k *keyed) WildcardKeys(ctx context.Context, p string, n int) ([]string, er
 }
 
 // StreamKeys answers with headwords and no article: from the keys of a
-// backend that lists them, and from the ordinary query of one that does not.
+// backend that lists them, up to perKeyer (10), and from the ordinary query
+// of one that does not, up to perDict (1).
 func TestStreamKeys(t *testing.T) {
 	words := []string{"casa", "casar", "cosa"}
 	openers := []Opener{
@@ -334,12 +335,12 @@ func TestStreamKeys(t *testing.T) {
 		want [2][]string
 		skip bool // the second backend has no wildcard search
 	}{
-		{Prefix, "cas", [2][]string{{"casa!", "casar!"}, {"casa", "casar"}}, false},
+		{Prefix, "cas", [2][]string{{"casa!", "casar!"}, {"casa"}}, false},
 		{Wildcard, "c?sa", [2][]string{{"casa!", "cosa!"}, nil}, true},
 		{Exact, "cosa", [2][]string{{"cosa"}, {"cosa"}}, false},
 	} {
 		hits := make([]Hit, 2)
-		StreamKeys(context.Background(), openers, tc.mode, tc.term, 10, func(i int, h Hit) { hits[i] = h })
+		StreamKeys(context.Background(), openers, tc.mode, tc.term, 1, 10, func(i int, h Hit) { hits[i] = h })
 		for i, h := range hits {
 			var got []string
 			for _, r := range h.Results {

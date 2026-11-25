@@ -1197,6 +1197,10 @@ type streamMsg struct {
 	Skipped bool          `json:"skipped,omitempty"`
 	Error   string        `json:"error,omitempty"`
 
+	// Words, on "similar": the headwords spelled like a query that found
+	// nothing (D206), best first.
+	Words []string `json:"words,omitempty"`
+
 	// Rung says which reading of a full-text query this dictionary answered:
 	// "phrase" (the words adjacent, in order), "near" (within ten tokens, any
 	// order) or "words" (anywhere in the article). Absent in every other mode.
@@ -1510,17 +1514,26 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// MORPH_CACHE, and the retry still goes only to dictionaries that returned
 	// nothing.
 	missed := make([]bool, len(entries))
-	empty := 0
+	empty, found := 0, false
 	search.StreamOpen(ctx, openers, mode, q, n, func(i int, h search.Hit) {
 		metas[i] = h.Meta
 		// Callbacks are serialised by StreamOpen, so this needs no lock.
 		if h.Err == nil && !h.Skipped && len(h.Results) == 0 {
 			missed[i], empty = true, empty+1
 		}
+		found = found || len(h.Results) > 0
 		writeLine(renderHit(i, h))
 	})
-	if empty > 0 {
-		s.lemmaWave(ctx, writeLine, renderHit, entries, metas, missed, openers, mode, q, n)
+	if empty > 0 && s.lemmaWave(ctx, writeLine, renderHit, entries, metas, missed, openers, mode, q, n) {
+		found = true
+	}
+	// Nothing anywhere, lemmas included: the headwords spelled like it (D206).
+	// The list asked the same of the same dictionaries a moment ago, and each
+	// kept its answer (store.SimilarKeys).
+	if !found && mode != search.FullText && oneWord(q) && !(mode == search.Wildcard && wildcard.HasWildcards(q)) {
+		if ws := s.similarWords(ctx, openers, q); len(ws) > 0 {
+			writeLine(streamMsg{T: "similar", Words: ws})
+		}
 	}
 	writeLine(streamMsg{T: "end"})
 }
@@ -1613,6 +1626,8 @@ func (s *Server) searchOpeners(entries []*entry) []search.Opener {
 // Candidates are offered only to dictionaries of the matching language, which
 // is free - detection already produced that grouping - and is what stops
 // Spanish "sale" -> "salar" from being asked of an English dictionary.
+//
+// It reports whether it sent any result.
 func (s *Server) lemmaWave(
 	ctx context.Context,
 	writeLine func(streamMsg),
@@ -1624,44 +1639,18 @@ func (s *Server) lemmaWave(
 	mode search.Mode,
 	q string,
 	n int,
-) {
+) (sent bool) {
 	// One word only. A phrase has no single lemma, and lemmatizing a token of
 	// it would answer a question nobody asked.
-	if !s.Morph.Enabled() || strings.ContainsAny(q, " \t\r\n") {
-		return
+	if !s.Morph.Enabled() || !oneWord(q) {
+		return false
 	}
 	// A wildcard pattern names no word to lemmatize. A wildcard query without
 	// `*` or `?` is a word, and is lemmatized as in every other mode.
 	if mode == search.Wildcard && wildcard.HasWildcards(q) {
-		return
+		return false
 	}
-	byLang := map[string][]int{}
-	for i := range entries {
-		if !missed[i] {
-			continue
-		}
-		// What differs from the picker is only what is done with "",
-		// immediately below.
-		code := s.lemmaLangOf(metas[i].IndexLang, entries[i].Path, metas[i].Name)
-		if code == "" {
-			// The one language assumed without evidence. It is the smallest
-			// pack by a wide margin (7 MB against 65 for Russian), an
-			// unlabelled dictionary is more often English than anything else,
-			// and being wrong costs one probe on a search that already
-			// returned nothing. Every OTHER language must be stated.
-			code = "en"
-		}
-		if !s.Morph.Supports(code) {
-			continue
-		}
-		byLang[code] = append(byLang[code], i)
-	}
-	codes := make([]string, 0, len(byLang))
-	for c := range byLang {
-		codes = append(codes, c)
-	}
-	sort.Strings(codes) // map order is random; a response should not be
-
+	codes, byLang := s.lemmaLangs(entries, metas, func(i int) bool { return missed[i] })
 	for _, code := range codes {
 		lemma, ok := s.Morph.Lemma(code, q)
 		if !ok {
@@ -1690,7 +1679,46 @@ func (s *Server) lemmaWave(
 		for _, m := range out {
 			writeLine(m)
 		}
+		sent = true
 	}
+	return sent
+}
+
+// oneWord reports whether q is a single word: what has a lemma and a
+// spelling (lemmaWave, D206).
+func oneWord(q string) bool { return !strings.ContainsAny(q, " \t\r\n") }
+
+// lemmaLangs groups the dictionaries take accepts by the language whose
+// lemma data would serve them, for the languages the lemma data supports:
+// the codes in order, and the slots of each.
+func (s *Server) lemmaLangs(entries []*entry, metas []dict.Meta, take func(int) bool) ([]string, map[string][]int) {
+	byLang := map[string][]int{}
+	for i := range entries {
+		if !take(i) {
+			continue
+		}
+		// What differs from the picker is only what is done with "",
+		// immediately below.
+		code := s.lemmaLangOf(metas[i].IndexLang, entries[i].Path, metas[i].Name)
+		if code == "" {
+			// The one language assumed without evidence. It is the smallest
+			// pack by a wide margin (7 MB against 65 for Russian), an
+			// unlabelled dictionary is more often English than anything else,
+			// and being wrong costs one probe on a search that already
+			// returned nothing. Every OTHER language must be stated.
+			code = "en"
+		}
+		if !s.Morph.Supports(code) {
+			continue
+		}
+		byLang[code] = append(byLang[code], i)
+	}
+	codes := make([]string, 0, len(byLang))
+	for c := range byLang {
+		codes = append(codes, c)
+	}
+	sort.Strings(codes) // map order is random; a response should not be
+	return codes, byLang
 }
 
 // langPath is the path language detection should read for a registry entry.

@@ -100,6 +100,11 @@ paths:
         `hit` for each such slot, which replaces its miss. Not for a phrase,
         and not for a `wildcard` pattern containing `*` or `?`.
 
+        A one-word query that finds nothing in any dictionary, lemmas
+        included, ends with a `similar` line: the headwords spelled like it.
+        Not in `fts` mode, and not for a `wildcard` pattern containing `*` or
+        `?`.
+
         A search is cancelled after 30 seconds.
       parameters:
         - name: q
@@ -222,6 +227,7 @@ paths:
                   - $ref: '#/components/schemas/SearchBegin'
                   - $ref: '#/components/schemas/SearchHit'
                   - $ref: '#/components/schemas/SearchMorph'
+                  - $ref: '#/components/schemas/SearchSimilar'
                   - $ref: '#/components/schemas/StreamEnd'
                 discriminator: { propertyName: t }
               example: |
@@ -2030,10 +2036,13 @@ paths:
         its own format, as `/api/search` does.
 
 
-        The list is in dictionary order - case and accents ignored, the word
-        typed in full before the words it starts - and holds a word once
-        whatever its capitals. It is at most 20 words long. A dictionary that
-        has not answered within 2 seconds is left out of the list.
+        The list holds a word once whatever its capitals, and is at most 20
+        words long. The word typed comes first, then the single words it
+        starts, then the phrases it starts. Words that start as typed come
+        before words that match only with accents ignored. Within each of
+        these groups, shorter words come first; words of the same length are
+        in dictionary order (case and accents ignored). A dictionary that has
+        not answered within 2 seconds is left out of the list.
 
 
         Same-origin only, as `/api/browse`: it is not part of the client API a
@@ -2080,6 +2089,24 @@ paths:
                   words:
                     type: array
                     maxItems: 20
+                    items: { type: string }
+                  lemmas:
+                    type: array
+                    description: >
+                      In prefix mode, for one word no headword matches
+                      exactly: its lemmas that are headwords, in their
+                      spelling ("went" -> "go"). Only from lemma data already
+                      in memory: a list never loads it, a search does.
+                      Absent when there are none.
+                    items: { type: string }
+                  similar:
+                    type: array
+                    maxItems: 5
+                    description: >
+                      In prefix mode, when no headword starts with the word:
+                      the headwords spelled like it, as the search's
+                      `similar` line lists them, without the lemmas. Absent
+                      when there are none.
                     items: { type: string }
               example:
                 words: [banana, banana boat, banana republic, bananas]
@@ -2650,6 +2677,25 @@ components:
         to: { type: string, description: The lemma searched instead. }
         lang: { type: string, description: 'The language of the lemma data that produced it, as an ISO 639-1 code: `en`.' }
       required: [t, from, to, lang]
+
+    SearchSimilar:
+      type: object
+      description: >
+        Sent before `end` when no dictionary found anything, lemmas included:
+        the indexed dictionaries' headwords one character edit from the query
+        (inserted, deleted, replaced, or two neighbours swapped; case and
+        accents ignored), or two edits when none is one edit away and the
+        query has 5 characters or more. Fewest edits first, then the words
+        more dictionaries hold. A headword starts with the query's first
+        letter, or with its first two letters swapped.
+      properties:
+        t: { const: similar }
+        i: { type: integer, description: Always 0 here. }
+        words:
+          type: array
+          maxItems: 5
+          items: { type: string }
+      required: [t, words]
 
     DictsBegin:
       type: object

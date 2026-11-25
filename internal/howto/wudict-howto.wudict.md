@@ -144,6 +144,8 @@ Case and accents do not exclude a headword: `cafe` and `Cafe` both find *Café*.
 
 Each language is a small download (33 kB to 2.5 MB) and is used only for dictionaries in that language: Spanish *sale* → **salir** is never asked of an English dictionary. Untick a language to delete it.
 
+When a single word finds nothing in any dictionary, its lemma included, the results list the headwords spelled like it, under "No results": one letter added, left out, replaced or swapped with its neighbour.
+
 **IMPORTANT**
 
 > ❗️ For lemmatization to work, wuDict needs to know the dictionary language! Babylon (`.bgl`), Lingvo (`.dsl`), ZIM and wudict markdown declare the headword language. Dictionary formats like `.mdx` have no language metadata, and wuDict infers the language in this order of priority:
@@ -310,7 +312,11 @@ Every search has its own address, so you can bookmark it: `/?q=word&mode=exact`.
 
 To search as you type instead, set <kbd>While you type</kbd> to <kbd>Live search</kbd> in <kbd>☰</kbd> → ![](cog.svg). 💻 <kbd>↓</kbd> then opens the same list for the text in the search box.
 
-The list starts at 2 characters and shows at most 20 headwords: type more letters to narrow it. In wildcard mode it lists the headwords that fit your pattern. Full-text mode has no list: press <kbd>Enter</kbd> to search.
+The list starts at 2 characters and shows at most 20 headwords: type more letters to narrow it. The word you typed comes first, then the shortest headwords that start with it. Phrases come after single words.
+
+When no headword matches your text exactly, the list also shows, after a line, its lemma (when an earlier search loaded that language's lemma data) and, when no headword starts with your text, the headwords spelled like it: *recieve* → **receive**. Typing more letters cannot bring a headword back, so the list shows them at once.
+
+In wildcard mode it lists the headwords that fit your pattern. Full-text mode has no list: press <kbd>Enter</kbd> to search.
 
 ***
 

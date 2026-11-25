@@ -59,6 +59,8 @@ Full-text search ignores accents on Latin letters only: `елка` finds *ёлк
 in exact, prefix and wildcard search, not in full-text search.
 
 No mode corrects spelling: `*orre*` finds *correr*, `*corer*` finds nothing.
+When a one-word search finds nothing, wudict shows the headwords spelled like
+it under <kbd>No results</kbd>. See [Similar headwords](#similar-headwords).
 
 ## Index sizes
 
@@ -122,6 +124,24 @@ data for the dictionary's language: *sale* → **salir** is never searched in an
 English dictionary. How the language is detected:
 [Configuration → Lemmatization](../reference/configuration.md#lemmatization).
 
+## Similar headwords
+
+When a one-word search finds nothing, its lemma included, wudict lists the
+headwords spelled like the word: *recieve* → **receive**, *Haushlat* →
+**Haushalt**. Select one to look it up.
+
+- A similar headword differs from the word by one change: a letter added,
+  left out or replaced, or two neighbouring letters swapped. Capitals and
+  accents are ignored.
+- When no headword is one change away and the word has 5 letters or more,
+  wudict lists the headwords two changes away.
+- A similar headword starts with the same letter as the word, or with its
+  first two letters swapped.
+- The headwords that the most dictionaries hold come first, at most 5.
+
+Only indexed dictionaries supply similar headwords. Full-text mode and
+wildcard patterns that contain `*` or `?` get none.
+
 English lemma data is built in. To install another language:
 
 -   <kbd>☰</kbd> → folder summary → <kbd>Lemmatization…</kbd>, or
@@ -166,7 +186,18 @@ To search as you type instead, set <kbd>While you type</kbd> to
 same list for the text in the search box.
 
 The list starts at 2 characters and holds at most 20 headwords. A headword
-shows once, whatever its capitals. In wildcard mode the list holds the
+shows once, whatever its capitals. The word you typed comes first, then the
+shortest headwords that start with it. Phrases come after single words.
+
+When no headword matches your text exactly, the list also shows, after a line:
+
+- its lemma, when wudict already has the lemma data in memory from an
+  earlier search (marked *lemma*);
+- the similar headwords, when no headword starts with your text (marked
+  *similar spelling*). Typing more letters cannot bring a headword back, so
+  the list shows them at once.
+
+In wildcard mode the list holds the
 headwords that fit the pattern. Full-text mode has no list: <kbd>Enter</kbd>
 starts the search.
 

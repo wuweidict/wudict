@@ -53,6 +53,7 @@ package morph
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -264,6 +265,25 @@ func (c *Cache) LemmaLoaded(code, word string) (string, bool) {
 		return "", false
 	}
 	return lemmaOf(lem, code, w)
+}
+
+// Loaded is the languages whose lemma data is in memory, in code order: the
+// ones LemmaLoaded can answer for. The list under the search box (D206) asks
+// only those, and so pays nothing while none is loaded.
+func (c *Cache) Loaded() []string {
+	if !c.Enabled() {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []string
+	for code, e := range c.kept {
+		if e.loaded() != nil {
+			out = append(out, code)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // lemmaOf is the lookup both share, on a lower-cased, trimmed word.

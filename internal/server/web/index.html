@@ -262,6 +262,8 @@ details.dict>dl>dt{display:flex;align-items:flex-start;gap:var(--sp-1)}
 /* the line between the two lists is the first history row's border: a
    listbox may hold options only */
 #recall li.fav+li:not(.fav){border-top:1px solid var(--line);margin-top:.25em;padding-top:.45em}
+/* …and so is the line before a group of corrections (D206) */
+#recall li.grp{border-top:1px solid var(--line);margin-top:.25em;padding-top:.45em}
 #recall li[aria-selected="true"],#recall li[data-w]:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}
 /* φ² seconds per revolution is 360°/φ² = 137.5° per second — the GOLDEN ANGLE
    per second, the divergence angle phyllotaxis advances a sunflower's seeds
@@ -491,6 +493,11 @@ iframe.article{width:100%;border:0;display:block;background:var(--wd-article-bg,
    searched for, and that has to be read BEFORE the articles it explains. */
 .morphnote{margin-top:0;margin-bottom:var(--sp-1)}
 .empty{padding-top:var(--sp-5);text-align:center;color:var(--fg-faint)}
+.empty .similar{color:var(--fg-soft)}
+.simw{all:unset;color:var(--link);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.simw:hover{color:var(--link-hover)}
+.simw:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+@media (pointer:coarse){.simw{display:inline-block;padding:13px 4px;margin:-13px -4px}}
 /* The one line above the wudict howto while it is all there is (welcome). */
 #welcome{margin:.6em 0;padding:.55em .8em;border:1px solid var(--line);border-radius:6px;
   background:var(--accent-soft);color:var(--fg)}
@@ -4276,7 +4283,22 @@ function widenNote(id,q,why){
     ` — all dictionaries were searched instead.`;
   return div;
 }
+/* The headwords spelled like a query that found nothing (D206): each looks
+   itself up. Buttons, so the keyboard reaches them. */
+function similarLine(words){
+  const p=document.createElement("p");
+  p.className="similar";
+  p.append("Similar headwords: ");
+  words.forEach((w,i)=>{
+    if(i)p.append(" · ");
+    const b=document.createElement("button");
+    b.type="button";b.className="simw";b.dataset.w=w;b.textContent=w;
+    p.append(b);
+  });
+  return p;
+}
 $("out").addEventListener("click",e=>{
+  if(e.target.classList.contains("simw")){searchFor(e.target.dataset.w);return}
   if(!e.target.classList.contains("widen"))return;
   navRecord="push"; // widening is a state worth having a Back button for
   doSearch();       // no scopeOnce set: the search runs at the selector's scope
@@ -4613,7 +4635,7 @@ async function doSearch(ev){
      document, so rendering an article off-document would silently drop every
      inline @font-face it declares (hoistShadowFonts). The box a slot renders
      into is attached for its whole life here. */
-  let boxes=[],anyShown=false,anyResults=false,stale=null;
+  let boxes=[],anyShown=false,anyResults=false,stale=null,similarWords=[];
   /* The resolution frontier (D142). `resolved[i]` is set by the slot's wave-1
      hit whatever it said; `ready[i]` holds its <details> only if it actually
      produced RESULTS, so a deferred, errored or skipped section can never be
@@ -4712,6 +4734,10 @@ async function doSearch(ev){
         resolved[msg.i]=true;
         if(res.results&&!ready[msg.i])ready[msg.i]=box.querySelector("details.dict");
         settle();
+      }else if(msg.t==="similar"){
+        /* Sent only when nothing was found, lemmas included (D206): shown
+           under "No results" at the end. */
+        similarWords=msg.words||[];
       }else if(msg.t==="morph"){
         /* The server lemmatizes the dictionaries that came back empty, and
            sends this only when the retry actually found something — so the
@@ -4763,6 +4789,7 @@ async function doSearch(ev){
            under the empty state, which innerHTML would otherwise drop. */
         if(!anyShown&&noIdxCount<boxes.length){
           out.innerHTML=`<div class="empty">${noResultsSVG}<p>No results for “${esc(q)}”</p></div>`;
+          if(similarWords.length)out.firstChild.appendChild(similarLine(similarWords));
           if(noIdx)out.appendChild(noIdx);
         }
         if(scope&&anyShown)out.appendChild(scopeNote(scope,why));
@@ -6374,9 +6401,10 @@ $("histClear").addEventListener("click",()=>{
 const recall=$("recall");
 let recallSel=-1,sug=false;
 const recallRows=()=>recall.querySelectorAll("li[data-w]");
-/* rows: [word, class, note] triples; the note is a favourite's dictionary.
-   None closes the list: "no headword starts like this" is not "nothing will
-   be found", since the search also lemmatizes. */
+/* rows: [word, class, note] triples; the note is a favourite's dictionary, or
+   what a group of corrections is (D206). None closes the list: "no headword
+   starts like this" is not "nothing will be found", since the search also
+   lemmatizes. */
 function fillRecall(rows,isSug){
   if(!rows.length){closeRecall();return}
   const f=document.createDocumentFragment();
@@ -6490,13 +6518,19 @@ async function sugFetch(){
   // character lists what it starts: the pattern `text*`.
   const ask=m==="wildcard"&&!/[*?]/.test(v)?v+"*":v;
   const ac=sugAC=new AbortController();
-  let words=[];
+  let a={};
   try{
     const r=await fetch("/api/suggest?q="+encodeURIComponent(ask)+"&mode="+m+"&dict="+encodeURIComponent(ds),{signal:ac.signal});
-    if(r.ok)words=(await r.json()).words||[];
+    if(r.ok)a=await r.json();
   }catch(_){}
   if(seq!==sugSeq||document.activeElement!==$("q")||$("q").value.trim()!==v)return;
-  fillRecall(words.map(w=>[w,""]),true);
+  const rows=(a.words||[]).map(w=>[w,""]);
+  /* The corrections of a text no headword matches exactly (D206), each group
+     after a line, its first row saying what the group is. */
+  for(const [ws,note] of [[a.lemmas,"lemma"],[a.similar,"similar spelling"]]){
+    (ws||[]).forEach((w,i)=>rows.push([w,i||!rows.length?"fix":"fix grp",i?"":note]));
+  }
+  fillRecall(rows,true);
 }
 /* A pick is a submit: on a touch device the soft keyboard is standing over the
    answer, so the box lets go of it, as the form's submit does. A headword

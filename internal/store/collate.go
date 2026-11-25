@@ -238,10 +238,10 @@ func (s *Store) expand(ctx context.Context, q *pq, src source, lf leaf, m *wildc
 		k.lo = max(k.lo, lf.resume.h.key)
 	}
 	got := 0
-	err := s.readRange(ctx, src, k, size, func(h hit, w []byte) {
+	err := s.readRange(ctx, src, k, size, func(h hit, w []byte) bool {
 		got++
 		if r := lf.resume; r != nil && h.row <= r.h.row && lowerASCII(string(w)) == lowerASCII(r.h.key) {
-			return // read before, by the chunk that ended here
+			return true // read before, by the chunk that ended here
 		}
 		t := 0
 		if m != nil {
@@ -249,6 +249,7 @@ func (s *Store) expand(ctx context.Context, q *pq, src source, lf leaf, m *wildc
 		}
 		h.key = string(w)
 		rows = append(rows, crow{h, t})
+		return true
 	})
 	if err != nil {
 		return err
@@ -281,15 +282,16 @@ func (s *Store) expand(ctx context.Context, q *pq, src source, lf leaf, m *wildc
 			// The keys equal to the common bytes fill the chunk: read them
 			// all, then the rest after them.
 			eq := keyRange{lf.q, lf.q + "\x01"}
-			err := s.readRange(ctx, src, eq, -1, func(h hit, w []byte) {
+			err := s.readRange(ctx, src, eq, -1, func(h hit, w []byte) bool {
 				t := 0
 				if m != nil {
 					if t = m.Tier(w); t < 0 {
-						return
+						return true
 					}
 				}
 				h.key = string(w)
 				heap.Push(q, pqItem{lb: primary(h.key), h: h, tier: t})
+				return true
 			})
 			if err != nil {
 				return err
@@ -379,9 +381,9 @@ func blockOf(w []byte, q string) (b []byte, end bool) {
 }
 
 // readRange reads up to limit rows of one range in index order (all of them
-// for a negative limit) and hands each to fn. The key's bytes are valid only
-// during the call.
-func (s *Store) readRange(ctx context.Context, src source, k keyRange, limit int, fn func(h hit, w []byte)) error {
+// for a negative limit) and hands each to fn, until fn returns false. The
+// key's bytes are valid only during the call.
+func (s *Store) readRange(ctx context.Context, src source, k keyRange, limit int, fn func(h hit, w []byte) bool) error {
 	text, args := src.query(k)
 	st, err := s.scanStmt(text)
 	if err != nil {
@@ -406,7 +408,9 @@ func (s *Store) readRange(ctx context.Context, src source, k keyRange, limit int
 		if err != nil {
 			return err
 		}
-		fn(h, w)
+		if !fn(h, w) {
+			break
+		}
 	}
 	return rows.Err()
 }

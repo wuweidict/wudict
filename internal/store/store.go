@@ -96,6 +96,11 @@ type Store struct {
 	marksErr  error
 	scanStmts sync.Map // query text → *sql.Stmt
 
+	// The last answers of SimilarKeys (similar.go), kept for the life of the
+	// handle for the same reason: the list and the search that follows it ask
+	// for the same word.
+	similar similarMemo
+
 	// The id range Sample draws from (random.go), read on the first draw of
 	// this handle and kept for its life, for the same reason as the strip. A
 	// read that failed is not kept: the next draw asks again.

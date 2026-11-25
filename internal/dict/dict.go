@@ -218,6 +218,14 @@ type Keyer interface {
 	WildcardKeys(ctx context.Context, pattern string, limit int) ([]string, error)
 }
 
+// Speller lists the headwords spelled like a word that none matches (D206):
+// up to limit of those within maxDist edits of it - a character inserted,
+// deleted or replaced, or two neighbours swapped - case and accents ignored,
+// fewest edits first. It reads the headword index only.
+type Speller interface {
+	SimilarKeys(ctx context.Context, word string, maxDist, limit int) ([]string, error)
+}
+
 // Letter is one chip of the browse strip: a run of headwords sharing an
 // initial, and where that run begins in browse order.
 //
