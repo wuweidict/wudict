@@ -6784,7 +6784,7 @@ function paintRandom(){
     el.setAttribute("role","group");
     el.setAttribute("aria-label","Random word");
     el.setAttribute("aria-live","polite");
-    el.innerHTML=`<button type="button" class="rdie" aria-label="Another word" title="Show another random word">${DIE_SVG}</button>`+
+    el.innerHTML=`<button type="button" class="rdie" aria-label="Another word" aria-keyshortcuts="Space" title="Show another random word (Space)">${DIE_SVG}</button>`+
       '<a class="rword"></a><span class="rsep" aria-hidden="true">·</span><a class="rdict"></a>'+
       `<button type="button" class="rclose" aria-label="Never show again" title="Never show again">${CROSS_SVG}</button>`;
     el.querySelector(".rdie").addEventListener("click",()=>showRandom(true));
@@ -6866,6 +6866,19 @@ function randomUndo(){
   applyRand(true,randFrom,true); // paints randWord over "Random word off"
   if(had)$("rand")?.querySelector(".rdie")?.focus();
 }
+/* Space is the die while the line is on show. Space is the page's scroll key
+   (the printable-key rule keeps it for that), and an empty page has nothing to
+   scroll. A field, a <select> and a control keep it as their own: a focused
+   die or cross already clicks itself on Space, and must not draw twice. An
+   auto-repeating key draws once: each draw cancels the one before it. */
+document.addEventListener("keydown",e=>{
+  if(e.key!==" "||e.repeat||e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||e.shiftKey||e.isComposing)return;
+  const el=$("rand");
+  if(!el||el.classList.contains("off")||!randIdle()||!typeTarget()||!$("azAsk").hidden)return;
+  const a=document.activeElement;
+  if(a&&a!==document.body&&a.closest("button,summary,[role=button],[role=checkbox],[role=switch],[role=radio],[role=tab],[role=menuitem],[role=option]"))return;
+  e.preventDefault();showRandom(true);
+});
 /* Where the word is drawn from follows the picker. A word on show that the new
    choice still holds stays; any other is replaced. */
 function randChanged(){

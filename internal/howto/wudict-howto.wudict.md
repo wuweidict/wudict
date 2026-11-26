@@ -339,7 +339,7 @@ Both lists are text files next to `wudict.toml`, one word per line: `history.txt
 ## wudict random word
 ## wudict random
 
-**A random word shows under the empty search box**: tap the word to read it in the dictionary named after it. The search mode changes to exact. Tap ![](die.svg) to show another word. The dictionary name after the word opens that dictionary in Browse, at the word. Back returns to the same word.
+**A random word shows under the empty search box**: tap the word to read it in the dictionary named after it. The search mode changes to exact. Tap ![](die.svg) (💻 or press <kbd>Space</kbd> outside the search box) to show another word. The dictionary name after the word opens that dictionary in Browse, at the word. Back returns to the same word.
 
 - 💻 With favourites or history, press <kbd>↑</kbd> in the empty search box, then <kbd>Enter</kbd>, to read a random word at once. The last row of the list does the same.
 - 📱 Touch and hold the wudict icon and tap <kbd>Random word</kbd>.
@@ -489,6 +489,7 @@ To exclude a dictionary from *All dictionaries* searches, just untick its checkm
 | <kbd>/</kbd> | go to the search box; typing anywhere does too |
 | <kbd>Esc</kbd> | closes what is open, one press each: read aloud, find in articles; with nothing open, goes to the search box. In <kbd>☰</kbd>: the first press makes the find field empty, the next press closes the panel |
 | <kbd>←</kbd> <kbd>→</kbd> · <kbd>F3</kbd> · <kbd>Ctrl</kbd> <kbd>G</kbd> | step through [full-text](<entry://wudict full-text>) matches |
+| <kbd>Space</kbd> | another [random word](<entry://wudict random word>), while one shows and you are not typing in the search box |
 
 - **wuDict Hover** (Chrome, Firefox): hover a word on any web page (optionally holding <kbd>Alt</kbd>) to see its definition in a popup.
 - **Command line**: `wudict searchall word` searches from a terminal; `wudict dump -format md` writes any dictionary as [wudict markdown](<entry://wudict markdown>); `wudict help` lists the rest ([command line](<entry://wudict command line>)).
