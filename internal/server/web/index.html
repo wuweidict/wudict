@@ -2842,7 +2842,7 @@ $("dict").onchange=e=>{const v=e.target.value;lsSet("wudict_dict",v);syncChips()
 /* Mode re-runs the search on change, symmetric with #dict: the narrow bar has
    no submit button, so a mode that waited for the next submit would appear to
    do nothing at all. */
-$("mode").onchange=()=>{modePref=$("mode").value;savePrefs();syncChips();if($("q").value.trim())doSearch()};
+$("mode").onchange=()=>{modePref=$("mode").value;savePrefs();syncChips();pickOnce=false;if($("q").value.trim())doSearch()};
 syncChips(); // the markup ships empty chips; JS stays the single authority
 
 /* provenance: the collapsed line says where the dictionary came from (its
@@ -4299,7 +4299,7 @@ function similarLine(words){
   return p;
 }
 $("out").addEventListener("click",e=>{
-  if(e.target.classList.contains("simw")){searchFor(e.target.dataset.w);return}
+  if(e.target.classList.contains("simw")){searchFor(e.target.dataset.w,{pick:true});return}
   if(!e.target.classList.contains("widen"))return;
   navRecord="push"; // widening is a state worth having a Back button for
   doSearch();       // no scopeOnce set: the search runs at the selector's scope
@@ -4577,10 +4577,12 @@ async function doSearch(ev){
   const widened=widenedFrom;widenedFrom=null; // set by the fallback below
   const widenWhy=widenedWhy;widenedWhy="";
   staleWidened=null; // any search but the deferred re-run (loadDicts) drops it
+  const pick=ev?false:pickOnce!==null?pickOnce:lastPick&&q===lastQuery;
+  pickOnce=null;lastPick=pick;
   // ||"all" is the floor under a selection that no longer exists: assigning
   // an id the <select> does not have leaves .value empty, and a saved id or a
   // ?dict= from an older library can do exactly that.
-  const mode=$("mode").value,dictSel=scope||$("dict").value||"all",seq=++searchSeq;
+  const mode=pick?"exact":$("mode").value,dictSel=scope||$("dict").value||"all",seq=++searchSeq;
   // abort the previous in-flight search so the server stops streaming
   // results nobody will render (superseded typing / mode change).
   if(searchAC)searchAC.abort();
@@ -4831,10 +4833,11 @@ document.addEventListener("click",e=>{
   const more=e.target.closest("summary .more");
   if(!more)return;
   e.preventDefault();
-  const det=more.closest("details.dict"),box=det.parentElement,id=more.dataset.id,mode=$("mode").value;
+  // the section's own question: a picked word was asked exact, not in #mode
+  const det=more.closest("details.dict"),box=det.parentElement,id=more.dataset.id,{q,mode}=det.wuAsk;
   more.textContent="…";
-  fetchStream("/api/search?q="+encodeURIComponent(lastQuery)+"&mode="+mode+"&hl="+(hlOn?1:0)+"&dict="+id+"&n=100",msg=>{
-    if(msg.t==="hit"){renderSlot(box,msg,mode,lastQuery,1e9);const nd=box.querySelector("details.dict");if(nd){nd.open=true;fillSection(nd)}}
+  fetchStream("/api/search?q="+encodeURIComponent(q)+"&mode="+mode+"&hl="+(hlOn?1:0)+"&dict="+id+"&n=100",msg=>{
+    if(msg.t==="hit"){renderSlot(box,msg,mode,q,1e9);const nd=box.querySelector("details.dict");if(nd){nd.open=true;fillSection(nd)}}
   }).catch(()=>{more.textContent="more…"});
 });
 
@@ -4844,6 +4847,7 @@ document.addEventListener("click",e=>{
 let debounce=null;
 $("q").addEventListener("input",()=>{
   clearTimeout(debounce);
+  lastPick=false; // the box no longer holds the word picked
   if(listWords)return;
   const v=$("q").value.trim();
   if(v.length<2)return;
@@ -4966,6 +4970,7 @@ function searchFor(term,opts){
   if(!t)return;
   $("q").value=t;                       // verbatim: no trimming, ever
   if(!opts?.keepMode&&notForWords($("mode").value))$("mode").value="prefix";
+  pickOnce=!!opts?.pick;
   const scope=opts?.scope||null,frag=opts?.frag||"";
   scopeOnce=scope;scopeWhyOnce=scope?scopeWhy(opts?.why):"";
   // the fragment addresses a place in the SCOPED article; renderSlot matches
@@ -6025,6 +6030,16 @@ let navRecord="replace"; // how the NEXT doSearch should record itself
    anchorOnce is the #fragment such a link carried, revealed once the target
    article is on screen. */
 let scopeOnce=null,anchorOnce=null,lastScope=null,widenedFrom=null;
+/* pickOnce: the word is a headword the reader picked from a list (the
+   headword list, history, favourites, a lemma or similar-spelling row), so it
+   is looked up exact whatever #mode says: the list already showed the family,
+   and the answer is the word picked (GH #46). #mode is not moved - it says how
+   the text in the box is searched. null = not said: a re-run of the same
+   query keeps the answer's own `lastPick`, which typing in the box clears.
+   A submit (Enter, the soft keyboard's search key) is never a pick: it asks
+   for the text in #mode, which is how a reader gets the family of a word
+   just picked. Kept in the address as `pick`, so Back gives the same answer. */
+let pickOnce=null,lastPick=false;
 /* What scoped it (scopeNote): "" a followed link, "fav", "random". Kept in
    the address as `via`, so Back says the same as the search did. */
 let scopeWhyOnce="",lastScopeWhy="",widenedWhy="";
@@ -6082,7 +6097,7 @@ function applyURL(){
   if(!setMode(p.get("mode"))&&p.get("q")&&notForWords($("mode").value))setMode("prefix");
   if(p.get("dict"))selectDict(p.get("dict"));
   syncChips();
-  if(p.get("q")){$("q").value=p.get("q");scopeOnce=p.get("from")||null;scopeWhyOnce=scopeWhy(p.get("via"));commitOnce=true;doSearch()}
+  if(p.get("q")){$("q").value=p.get("q");scopeOnce=p.get("from")||null;scopeWhyOnce=scopeWhy(p.get("via"));pickOnce=p.get("pick")==="1";commitOnce=true;doSearch()}
   else if(p.has("random"))randomNow("replace"); // the Android shortcut "Random word" (D202)
 }
 const _doSearch=doSearch;
@@ -6103,6 +6118,7 @@ doSearch=function(ev){
     // own selector, so restoring a link-followed view never rewrites it
     if(lastScope)params.from=lastScope;
     if(lastScope&&lastScopeWhy)params.via=lastScopeWhy;
+    if(lastPick)params.pick="1";
     const url="?"+new URLSearchParams(params).toString();
     // clicking the same word twice must not stack identical entries
     histWrite(record==="push"&&url!==location.search,null,url);
@@ -6198,6 +6214,7 @@ window.addEventListener("popstate",()=>{
   navRecord="none";
   scopeOnce=p.get("from")||null; // a link-followed view was scoped; restore that
   scopeWhyOnce=scopeWhy(p.get("via"));
+  pickOnce=p.get("pick")==="1";
   commitOnce=true;               // Back/Forward restores a view, it does not type
   doSearch();
 });
@@ -6333,7 +6350,7 @@ function openFav(w){
   const k=wordKey(w);
   const starred=new Set(favs.filter(f=>f.dict&&wordKey(f.word)===k).map(f=>f.dict));
   const ids=orderedIds().filter(id=>starred.has(id));
-  searchFor(w,ids.length?{scope:ids.join(","),why:"fav"}:undefined);
+  searchFor(w,ids.length?{scope:ids.join(","),why:"fav",pick:true}:{pick:true});
 }
 /* The clear button. pointerdown keeps the focus where it is, so the box does
    not blur and close what its blur closes; the click then empties it and
@@ -6363,7 +6380,7 @@ function recordWord(w){
    full-text and wildcard queries are not words. */
 function noteLookup(q,record,commit,dwell){
   clearTimeout(histTimer);
-  if(!q||!histOn||record==="none"||notForWords($("mode").value)||!boxWord())return;
+  if(!q||!histOn||record==="none"||!lastPick&&notForWords($("mode").value)||!boxWord())return;
   if((commit||record==="push")&&!dwell){recordWord(q);return}
   histTimer=setTimeout(()=>{
     if($("q").value.trim()!==q)return;
@@ -6545,7 +6562,7 @@ function pickRecall(w){
   if(!matchMedia("(hover:hover)").matches)$("q").blur();
   if(!w){randomNow();return} // the random word's row
   if(fav){openFav(w);return}
-  searchFor(w,{keepMode});
+  searchFor(w,{keepMode,pick:true});
 }
 /* A click in the box opens the list the box has: the favourites and history
    when it is empty, and under "Show headwords" the headwords for its text. */

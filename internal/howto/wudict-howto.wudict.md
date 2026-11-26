@@ -310,6 +310,8 @@ Every search has its own address, so you can bookmark it: `/?q=word&mode=exact`.
 - <kbd>Enter</kbd> with no headword highlighted searches for your text as you typed it.
 - <kbd>Esc</kbd> closes the list.
 
+A headword you select shows only its own articles; the headwords that start with it are in the list. To see their articles too, click the search box and press <kbd>Enter</kbd> (📱 tap the search box, then the keyboard's search key).
+
 To search as you type instead, set <kbd>While you type</kbd> to <kbd>Live search</kbd> in <kbd>☰</kbd> → ![](cog.svg). 💻 <kbd>↓</kbd> then opens the same list for the text in the search box.
 
 The list starts at 2 characters and shows at most 100 headwords: scroll it, or type more letters to narrow it. The word you typed comes first, then the headwords and phrases that start with it, shortest first.

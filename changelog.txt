@@ -8,6 +8,7 @@ v3.7.12
 (search) Typing in the search box now lists the matching headwords under it; pick one, or press Enter to search your text. For results as you type, set ☰ → ⚙ → While you type to Live search
 (search) The headword list shows the word you typed first, then the shortest headwords and phrases that start with it, so a long run of phrases no longer hides a word such as "genehmigt"; it holds up to 100 headwords, so a word appears without typing it in full (#45)
 (search) A word that finds nothing lists the headwords spelled like it under "No results" (recieve → receive), one letter added, left out, replaced or swapped; the headword list shows them as soon as no headword starts with what you typed, and the lemma of a word form when its lemma data is loaded
+(search) A headword you pick from the list, your history or your favourites shows only its own articles, not every headword that starts with it; the list already shows those, and Enter (on a phone, the keyboard's search key) shows their articles too (#46)
 (random word) ✕ at the end of the random word's line turns it off for good, with Undo in its place (also Ctrl+Z / ⌘+Z) and where to turn it on again
 
 🐛 Bug Fixes

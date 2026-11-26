@@ -181,6 +181,11 @@ select one.
 - <kbd>Enter</kbd> with no headword highlighted searches for the text as typed.
 - <kbd>Esc</kbd> closes the list.
 
+A headword you select shows only its own articles; the headwords that start
+with it are in the list. To see their articles too, click the search box and
+press <kbd>Enter</kbd> (on a phone, tap the search box, then the keyboard's
+search key).
+
 To search as you type instead, set <kbd>While you type</kbd> to
 <kbd>Live search</kbd> in the dictionary panel. <kbd>↓</kbd> then opens the
 same list for the text in the search box.
