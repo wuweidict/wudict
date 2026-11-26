@@ -6,7 +6,7 @@ v3.7.12
 (fonts) A font file beside a dictionary, with the same name (oxford.ttf beside oxford.mdx, oxford.dsl.dz, oxford.ifo …), is the font of all text in its articles, in every format; font.ttf is for every dictionary in its folder. .ttf, .otf, .woff and .woff2
 (css) A stylesheet beside a dictionary, with the same name (oxford.css beside oxford.dsl, oxford.ifo, oxford.slob …), applies to its articles; custom.css applies to every dictionary in its folder, MDict dictionaries too. Importing a bundle gives each of its dictionaries a copy of the bundle's custom.css and font.ttf
 (search) Typing in the search box now lists the matching headwords under it; pick one, or press Enter to search your text. For results as you type, set ☰ → ⚙ → While you type to Live search
-(search) The headword list shows the word you typed first, then the shortest headwords that start with it; phrases come after single words, so a long run of phrases no longer hides a word such as "genehmigt" (#45)
+(search) The headword list shows the word you typed first, then the shortest headwords and phrases that start with it, so a long run of phrases no longer hides a word such as "genehmigt"; it holds up to 100 headwords, so a word appears without typing it in full (#45)
 (search) A word that finds nothing lists the headwords spelled like it under "No results" (recieve → receive), one letter added, left out, replaced or swapped; the headword list shows them as soon as no headword starts with what you typed, and the lemma of a word form when its lemma data is loaded
 (random word) ✕ at the end of the random word's line turns it off for good, with Undo in its place (also Ctrl+Z / ⌘+Z) and where to turn it on again
 

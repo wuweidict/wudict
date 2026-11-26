@@ -312,7 +312,7 @@ Every search has its own address, so you can bookmark it: `/?q=word&mode=exact`.
 
 To search as you type instead, set <kbd>While you type</kbd> to <kbd>Live search</kbd> in <kbd>☰</kbd> → ![](cog.svg). 💻 <kbd>↓</kbd> then opens the same list for the text in the search box.
 
-The list starts at 2 characters and shows at most 20 headwords: type more letters to narrow it. The word you typed comes first, then the shortest headwords that start with it. Phrases come after single words.
+The list starts at 2 characters and shows at most 100 headwords: scroll it, or type more letters to narrow it. The word you typed comes first, then the headwords and phrases that start with it, shortest first.
 
 When no headword matches your text exactly, the list also shows, after a line, its lemma (when an earlier search loaded that language's lemma data) and, when no headword starts with your text, the headwords spelled like it: *recieve* → **receive**. Typing more letters cannot bring a headword back, so the list shows them at once.
 

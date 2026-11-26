@@ -185,9 +185,10 @@ To search as you type instead, set <kbd>While you type</kbd> to
 <kbd>Live search</kbd> in the dictionary panel. <kbd>↓</kbd> then opens the
 same list for the text in the search box.
 
-The list starts at 2 characters and holds at most 20 headwords. A headword
-shows once, whatever its capitals. The word you typed comes first, then the
-shortest headwords that start with it. Phrases come after single words.
+The list starts at 2 characters and holds at most 100 headwords. Scroll it to
+see more. A headword shows once, whatever its capitals. The word you typed
+comes first, then the headwords and phrases that start with it, shortest
+first.
 
 When no headword matches your text exactly, the list also shows, after a line:
 

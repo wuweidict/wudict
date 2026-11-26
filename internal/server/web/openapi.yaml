@@ -2036,13 +2036,13 @@ paths:
         its own format, as `/api/search` does.
 
 
-        The list holds a word once whatever its capitals, and is at most 20
-        words long. The word typed comes first, then the single words it
-        starts, then the phrases it starts. Words that start as typed come
-        before words that match only with accents ignored. Within each of
-        these groups, shorter words come first; words of the same length are
-        in dictionary order (case and accents ignored). A dictionary that has
-        not answered within 2 seconds is left out of the list.
+        The list holds a word once whatever its capitals, and is at most 100
+        words long. The word typed comes first, then the words and phrases
+        it starts. Those that start as typed come before those that match
+        only with accents ignored. Within each of these groups, shorter ones
+        come first, a space counted as a character; those of the same length
+        are in dictionary order (case and accents ignored). A dictionary that
+        has not answered within 2 seconds is left out of the list.
 
 
         Same-origin only, as `/api/browse`: it is not part of the client API a
@@ -2088,7 +2088,7 @@ paths:
                 properties:
                   words:
                     type: array
-                    maxItems: 20
+                    maxItems: 100
                     items: { type: string }
                   lemmas:
                     type: array

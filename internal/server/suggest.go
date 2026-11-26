@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
@@ -23,21 +22,25 @@ import (
 )
 
 const (
-	// suggestMax is the length of the list, and what a dictionary without a
-	// headword index is asked for: it reads an article for every key.
-	suggestMax = 20
+	// suggestMax is the length of the list (D199 Am. 6): the list scrolls,
+	// and a word the reader has not finished typing is in it. GoldenDict
+	// shows 40 (Android) to 500 (goldendict-ng).
+	suggestMax = 100
+	// suggestDirect is what a dictionary without a headword index is asked
+	// for: it reads an article for every key.
+	suggestDirect = 20
 	// suggestKeys is what a prepared dictionary is asked for (dict.Keyer, the
 	// index only). Its keys arrive in dictionary order and the list ranks
-	// words by length (mergeWords), so its first suggestMax keys can be a run
-	// of phrases that hides a shorter word filed after them: `genehmigen
-	// Bank` before `genehmigt` (issue #45). The words a dictionary files
-	// after its first suggestKeys keys are still out of reach.
+	// words by length (mergeWords), so its first keys can be a run of phrases
+	// that hides a shorter word filed after them: `genehmigen Bank` before
+	// `genehmigt` (issue #45). The words a dictionary files after its first
+	// suggestKeys keys are still out of reach.
 	suggestKeys = 200
 	// suggestKeysShort is what it is asked for when the text has at most 2
-	// characters (suggestKeysFor). Those 20 rows are words of 2 to 4 letters,
-	// and the 200 keys cost about twice the read and the merge: ~26,000 keys
-	// across 160 dictionaries (D199 Am. 5).
-	suggestKeysShort = 50
+	// characters (suggestKeysFor): those rows are words of 2 to 4 letters, and
+	// 200 keys a dictionary double the read and the merge (D199 Am. 5). As
+	// many as the list holds, so that one dictionary searched alone fills it.
+	suggestKeysShort = suggestMax
 	// suggestBudget is how long the list waits for the dictionaries. One that
 	// has not answered by then is left out, and is open by the next keystroke.
 	suggestBudget = 2 * time.Second
@@ -107,7 +110,7 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 	)
 	go func() {
 		defer close(done)
-		search.StreamKeys(ctx, openers, mode, q, suggestMax, suggestKeysFor(q), func(i int, h search.Hit) {
+		search.StreamKeys(ctx, openers, mode, q, suggestDirect, suggestKeysFor(q), func(i int, h search.Hit) {
 			mu.Lock()
 			defer mu.Unlock()
 			metas[i] = h.Meta
@@ -156,10 +159,8 @@ func suggestKeysFor(q string) int {
 const (
 	rowAsTyped      = iota // the word typed, as typed
 	rowSameWord            // the word typed, with other capitals or accents
-	rowWord                // a word it starts as typed
-	rowWordFolded          // a word it starts folded
-	rowPhrase              // a key of several words it starts as typed
-	rowPhraseFolded        // a key of several words it starts folded
+	rowPrefix              // a key it starts as typed
+	rowPrefixFolded        // a key it starts folded
 )
 
 // suggestRow is one word of the list and what ranks it; keys is how many of
@@ -218,11 +219,13 @@ func topRows(rows []suggestRow, n int, rank func(a, b suggestRow) int) []string 
 // one row each (oneRowEach).
 //
 // The list ranks by class, then shortest first, then in dictionary order:
-// the word typed, then the single words it starts, then the phrases built on
-// them, which a reader looks up by their rarest word rather than their first
-// (issue #45; GoldenDict ranks prefix matches by length too). Within words
-// and within phrases, the ones that start as typed lead the ones reached by
-// folding: `inform` lists informal before înforma. Length counts the
+// the word typed, then the keys it starts - words and phrases alike, a space
+// counted as a character - so a run of phrases filed before a short word
+// cannot hide it (issue #45). This is goldendict-ng's order (wordfinder.cc
+// `computePrefixScore`, wordfinder.hh `SortByRankFeatures`: category, then
+// the length nearest the text) with Collate's tie-break for its code point
+// one (D199 Am. 6). The keys that start as typed lead the ones reached by
+// folding: `inform` lists informal before înforma (D181). Length counts the
 // characters Collate's first level reads: an accent written as a combining
 // mark adds nothing.
 func mergeWords(q string, words []string, n int) []string {
@@ -237,15 +240,10 @@ func mergeWords(q string, words []string, n int) []string {
 			r.class = rowAsTyped
 		case f == fq:
 			r.class = rowSameWord
+		case strings.HasPrefix(lowerNFC(r.w), lq):
+			r.class = rowPrefix
 		default:
-			if strings.ContainsFunc(r.w, unicode.IsSpace) {
-				r.class = rowPhrase
-			} else {
-				r.class = rowWord
-			}
-			if !strings.HasPrefix(lowerNFC(r.w), lq) {
-				r.class++ // the folded class follows its as-typed one
-			}
+			r.class = rowPrefixFolded
 		}
 	}
 	return topRows(rows, n, func(a, b suggestRow) int {
