@@ -217,8 +217,9 @@ input[type=search]::placeholder{color:var(--fg-soft);opacity:1}
    the word on screen. Trailing, where a right thumb reaches it; outlined
    until starred. The headword row stays one text run plus a button with no
    text, so its textContent is still the headword (noteLookup, findPaint). A
-   tap on the headword marks the whole row (pick.js headUnit), so the star
-   opts out of the selection's paint. */
+   tap on the headword marks its text and a triple click's selection is cut
+   there (pick.js headUnit, speak.js readHead), so read aloud sits after the
+   word, not after the star; the star opts out of the selection's paint. */
 details.dict>dl>dt{display:flex;align-items:flex-start;gap:var(--sp-1)}
 /* Centred on the headword's FIRST line (a long one wraps): font:inherit makes
    1em the headword's size, so the line is var(--fi) em; the vertical margins

@@ -916,10 +916,15 @@ function readHead() {
   const head = el && el.closest("details.dict>dl>dt");
   if (!head || sr.collapsed) return null;
   const range = sr.cloneRange(), dd = head.nextElementSibling;
-  if (!head.contains(range.endContainer)) {
-    if (!nothingPast(doc, sr, head, dd && dd.firstElementChild)) return null;
-    range.setEnd(head, head.childNodes.length);
-  }
+  if (!head.contains(range.endContainer) && !nothingPast(doc, sr, head, dd && dd.firstElementChild)) return null;
+  // It ends where the headword's text does: past it is the favourite star,
+  // whose box would be the range's last and so the button's anchor.
+  const w = document.createTreeWalker(head, NodeFilter.SHOW_TEXT);
+  let last = null;
+  for (let n = w.nextNode(); n; n = w.nextNode()) if (n.data.trim()) last = n;
+  if (!last) return null;
+  const end = last.data.replace(/\s+$/, "").length;
+  if (range.comparePoint(last, end) === 0) range.setEnd(last, end);
   const text = range.toString().trim();
   return text ? { kind: "head", text, range, dict: (dd && dd.dataset.dict) || "", ptr } : null;
 }

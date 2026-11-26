@@ -399,10 +399,16 @@
 		return [a, z];
 	}
 
+	// The headword's text, without the favourite star after it: the read-aloud
+	// button sits at the end of the range's last box, which is the star's when
+	// the range takes it in.
 	function headUnit(dt) {
-		if (!dt.textContent.trim()) return null;
+		var w = dt.ownerDocument.createTreeWalker(dt, NodeFilter.SHOW_TEXT), last = null;
+		for (var n = w.nextNode(); n; n = w.nextNode()) if (n.data.trim()) last = n;
+		if (!last) return null;
 		var r = dt.ownerDocument.createRange();
-		r.selectNodeContents(dt);
+		r.setStart(dt, 0);
+		r.setEnd(last, last.data.replace(/\s+$/, "").length);
 		return { range: r, kind: "head", lang: "" };
 	}
 
